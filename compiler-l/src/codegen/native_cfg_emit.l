@@ -1,3 +1,4 @@
+import native_cfg_defs
 import native_cfg_verify
 import x86_64
 import elf64
