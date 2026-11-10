@@ -28,10 +28,15 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Verify LIR protocol and native Stage 1 integration
+      - name: Verify platform-independent ELE-LIR protocol
+        run: cargo test -p project-l --test lir_payload_protocol -- --test-threads=1
+      # Stage 0's Cranelift builder currently targets only Windows x86-64.
+      # Keep these real Stage 1 / native ELF build tests on MSVC instead of
+      # treating unsupported Linux host compilation as a backend regression.
+      - name: Build Stage 1 and native ELE backend with Stage 0 (MSVC)
+        if: runner.os == 'Windows'
         run: >-
           cargo test -p project-l
-          --test lir_payload_protocol
           --test native_enum_stage1_l
           --test native_enum_stage1_payload_l
           --test native_enum_l
