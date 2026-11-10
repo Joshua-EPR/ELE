@@ -24,8 +24,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Check formatting
-        run: cargo fmt --all --check
       - name: Verify LIR protocol and native Stage 1 integration
         run: >-
           cargo test -p project-l
@@ -35,7 +33,11 @@ jobs:
           --test native_enum_l
           -- --test-threads=1
       - name: Run native backend contract tests
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && always()
         run: python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
       - name: Check Rust diagnostics
+        if: always()
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Check formatting
+        if: always()
+        run: cargo fmt --all --check
