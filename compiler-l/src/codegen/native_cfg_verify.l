@@ -183,7 +183,8 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
         var live: List<Bool> = List[]
         for v in 0..vars { live.push(inputs[b * vars + v]) }
         for i in block.first..(block.first + block.count) {
-            let error = cfgValidateInstruction(p, f, &p.insts[i], &mut live)
+            let inst = &p.insts[i]
+            let error = cfgValidateInstruction(p, f, &inst, &mut live)
             if error != 0 { return error }
         }
         if block.term == 1 || block.term == 3 {
