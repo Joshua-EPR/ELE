@@ -31,7 +31,7 @@ class PayloadContractTests(unittest.TestCase):
                         self.assertTrue(lines[i+1+count].startswith('t '))
 
     def test_backend_checks_tag_before_reading_payload(self):
-        ir = (ROOT/'compiler-l/src/codegen/native_cfg_ir.l').read_text()
+        ir = (ROOT/'compiler-l/src/codegen/native_cfg_inst.l').read_text()
         emit = (ROOT/'compiler-l/src/codegen/native_cfg_emit.l').read_text()
         verify = (ROOT/'compiler-l/src/codegen/native_cfg_verify.l').read_text()
         self.assertIn('nativeEquals(source, &kind, "payload")', ir)
