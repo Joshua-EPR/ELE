@@ -503,6 +503,15 @@ impl FnCtx<'_> {
             "disc" => {
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
+                // The ELE-native reader implements `disc` for direct enum
+                // values only. A reference or projected field must not be
+                // silently accepted by the Rust protocol consumer.
+                if !place.proj.is_empty()
+                    || !matches!(self.vars[place.var], VarTy::Value(Type::Enum(_)))
+                    || self.vars[d] != VarTy::Value(Type::Int)
+                {
+                    return line.fail("disc requiere un enum directo y un destino Int");
+                }
                 InstKind::Assign(d, Rvalue::Discriminant(place))
             }
             "payload" => {
