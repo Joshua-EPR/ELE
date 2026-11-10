@@ -1,0 +1,41 @@
+name: ELE native self-hosting validation
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-and-native-lir:
+    name: Stage 0 / Stage 1 / native ELF (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Verify LIR protocol and native Stage 1 integration
+        run: >-
+          cargo test -p project-l
+          --test lir_payload_protocol
+          --test native_enum_stage1_l
+          --test native_enum_stage1_payload_l
+          --test native_enum_l
+          -- --test-threads=1
+      - name: Run native backend contract tests
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
+      - name: Check Rust diagnostics
+        run: cargo clippy --workspace --all-targets -- -D warnings
