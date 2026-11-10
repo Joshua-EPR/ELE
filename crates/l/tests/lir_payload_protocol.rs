@@ -77,3 +77,23 @@ fn rejects_variant_constructor_with_mismatched_payload_arity() {
     let excess = base.replacen("i variant v0 e0 1 1 ci42", "i variant v0 e0 0 1 ci42", 1);
     assert!(lir_protocol::parse(&excess).is_err());
 }
+
+#[test]
+fn discriminant_requires_direct_enum_value_and_integer_destination() {
+    let source = fixture("native_cfg_enum_unit.lir");
+    assert!(source.contains("i disc v2 p1"));
+    assert!(source.contains("var v1 val e0"));
+
+    // All consumers of ELE-LIR must reject projecting a discriminant from a
+    // field or borrowing a root until the native backend supports those modes.
+    let projected = source.replacen("i disc v2 p1", "i disc v2 p1.0", 1);
+    assert!(lir_protocol::parse(&projected).is_err());
+
+    let borrowed = source.replacen("var v1 val e0", "var v1 ref e0", 1);
+    assert!(lir_protocol::parse(&borrowed).is_err());
+
+    // A discriminant is Int, never the enum value itself.
+    let wrong_destination = source.replacen("i disc v2 p1", "i disc v0 p1", 1);
+    assert!(lir_protocol::parse(&wrong_destination).is_err());
+    assert!(lir_protocol::parse(&source).is_ok());
+}
