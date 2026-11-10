@@ -289,7 +289,8 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
             block_at[index] = code.bytes.length
             let block = &p.blocks[index]
             for i in block.first..(block.first + block.count) {
-                cfgEmitInstruction(&mut code, p, f, &p.insts[i], &mut call_at, &mut call_to, &mut overflow_at, &mut bad_variant_at)
+                let inst = &p.insts[i]
+            cfgEmitInstruction(&mut code, p, f, &inst, &mut call_at, &mut call_to, &mut overflow_at, &mut bad_variant_at)
                 if code.error != 0 { break }
             }
             if code.error != 0 { break }
