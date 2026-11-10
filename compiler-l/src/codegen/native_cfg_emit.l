@@ -72,7 +72,7 @@ fn cfgLoadOperand(code: &mut X64Code, p: &CfgProgram, f: Int, op: &NativeOperand
 // each nested field is an already-declared struct, so recursion terminates.
 // Primitive fields are emitted with their exact declared width (Bool=1,
 // Int=8); fields of a nested struct are copied recursively by layout.
-fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_disp: Int, src_disp: Int) {
+fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_disp: Int, src_disp: Int) -> () {
     if ty == 0 {
         x64LoadMem64(&mut code, 0, 5, src_disp)
         x64StoreMem64(&mut code, 5, dst_disp, 0)
