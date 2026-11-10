@@ -765,6 +765,9 @@ pub fn parse(text: &str) -> Result<Module, ProtocolError> {
         let name = bytes_text(&mut e)?;
         e.expect("variants")?;
         let n = e.count(MAX_ITEMS)?;
+        if n == 0 {
+            return e.fail("un enum debe declarar al menos una variante");
+        }
         e.done()?;
         let mut variants = Vec::new();
         for _ in 0..n {
