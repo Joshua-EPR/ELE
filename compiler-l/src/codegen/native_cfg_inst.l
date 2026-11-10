@@ -46,13 +46,13 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     } else if nativeEquals(source, &kind, "read") {
         inst.kind = 5
         inst.dst = nativeId(source, &mut reader, 118)
-        let place = cfgReadPlace(p, f, source, &mut reader)
+        let place = cfgReadPlace(p, f, &source, &mut reader)
         inst.place_var = place.variable
         inst.place_field = place.field
         inst.place_subfield = place.subfield
     } else if nativeEquals(source, &kind, "store") {
         inst.kind = 6
-        let place = cfgReadPlace(p, f, source, &mut reader)
+        let place = cfgReadPlace(p, f, &source, &mut reader)
         inst.place_var = place.variable
         inst.place_field = place.field
         inst.place_subfield = place.subfield
