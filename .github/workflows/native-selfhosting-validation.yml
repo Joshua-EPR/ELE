@@ -34,7 +34,7 @@ jobs:
       # Keep these real Stage 1 / native ELF build tests on MSVC instead of
       # treating unsupported Linux host compilation as a backend regression.
       - name: Build Stage 1 and native ELE backend with Stage 0 (MSVC)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         run: >-
           cargo test -p project-l
           --test native_enum_stage1_l
