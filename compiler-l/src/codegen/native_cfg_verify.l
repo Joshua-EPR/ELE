@@ -1,3 +1,5 @@
+import native_cfg_types
+import native_cfg_defs
 import native_cfg_ir
 
 // Flow-sensitive definedness and whole-value move validation for the
