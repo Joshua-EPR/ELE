@@ -1,0 +1,15 @@
+ELE — Fase 8.7.4.1: incremento de lectura protegida de payloads.
+Base: ELE-fase8.7.4-incremento-enums-proyecto-completo.zip.
+
+Implementado en fuentes:
+- `i payload vD pN eK V` experimental en backend ELE, solo Int/Bool Copy.
+- Validación nominal y de inicialización; comparación x86-64 del tag antes de leer.
+- Variante incorrecta: ELF64 Linux termina con código 126.
+- Fixtures de ramas, lectura Int/Bool y formas equivalentes a Some/None/Ok/Err.
+- Pruebas Rust de integración y tests Python de contratos.
+
+Verificado en el entorno: 30/30 pruebas Python/contratos; auditoría estática de imports sin faltantes ni ciclos.
+NO verificado: compilación de los módulos .l con Stage 0, tests Cargo/MSVC, ejecución de ELF realmente generado por ELE.
+NO implementado: operación oficial e interoperable en ELE-LIR 1, serialización Stage 1, Option/Result genéricos completos, match fuente, ?, drops propietarios, Stage 2.
+
+Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_4_1.md para restricciones y comandos de prueba.

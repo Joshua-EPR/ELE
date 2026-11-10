@@ -1,0 +1,38 @@
+ELE — Phase 8.7.1 — MANIFIESTO DE ENTREGA
+
+Implementado: writeBytes(Text, List<Int>) -> Int como primitiva temporal de Stage 0;
+conexión en semántica, CFG, LIR, backends, runtime Win64; salida .elf binaria
+desde el backend ELE para el subconjunto actual; nuevas pruebas y herramientas.
+
+Verificado: 20/20 pruebas Python de herramientas. ELF64 de REFERENCIA (no emitido
+por código ELE) validado y ejecutado en Linux: exit=42.
+
+NO VERIFICADO: cargo/rustc/MSVC ausentes; ninguna prueba Rust nueva ejecutada;
+no se ha validado que el emisor .l guarde correctamente el ELF real;
+no existe Stage 2 ni Stage 3. Escribir bytes todavía usa runtime de bootstrap Rust.
+No se implementó readBytes, ni el formato Windows PE ni el enlazador.
+
+Documentación: docs/ELE_NATIVE_BACKEND_PHASE_8_7_1.md
+
+ARCHIVOS NUEVOS/MODIFICADOS:
+README.md
+bench/build-native-elf.ps1
+bench/verify-native-encoder.ps1
+compiler-l/src/lir_write.l
+compiler-l/src/native_binary_io.l
+compiler-l/src/native_elf_demo.l
+compiler-l/src/native_lir_demo.l
+crates/l/src/backend.rs
+crates/l/src/backend/platform_runtime.inc.rs
+crates/l/src/cfg.rs
+crates/l/src/effects.rs
+crates/l/src/lir.rs
+crates/l/src/lir_protocol.rs
+crates/l/src/native/platform.rs
+crates/l/src/native/platform_object.rs
+crates/l/src/sema.rs
+crates/l/tests/native_encoder_l.rs
+docs/AGENT_HANDOFF.md
+docs/ELE_NATIVE_BACKEND_PHASE_8_7_1.md
+tests/native_backend/test_native_elf_verifier.py
+tools/verify_elf64.py

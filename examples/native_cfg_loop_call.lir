@@ -1,0 +1,28 @@
+ELE-LIR 1
+module structs 0 funcs 2 main f0
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 3 blocks 4
+var v0 val i
+var v1 val b
+var v2 val i
+block 0 2
+i use v0 ci0
+i use v2 ci0
+t jump 1
+block 1 1
+i binary v1 lt v0 ci5
+t branch v1 2 3
+block 2 2
+i call v2 f1 1 val v0
+i binary v0 add v0 ci1
+t jump 1
+block 3 0
+t return v2
+endfunc
+func f1 6:100,111,117,98,108,101 params 1 result i 0 0 vars 2 blocks 1
+var v0 val i
+var v1 val i
+block 0 1
+i binary v1 mul v0 ci2
+t return v1
+endfunc
+end

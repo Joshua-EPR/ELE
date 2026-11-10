@@ -1,0 +1,25 @@
+ELE — revisión parcial de Self-Hosting Fase 8.5/8.6
+
+El proyecto conserva la extensión .l y la arquitectura original.
+
+Cambio de código: matriz de visibilidad transitiva de módulos escrita en ELE,
+detección de símbolos públicos ambiguos, resolución preferente de símbolos
+locales, registro adelantado de tipos nominales y tokenización por archivo.
+
+Pruebas de integración Rust añadidas: 5. No ejecutadas aquí: no hay Cargo,
+rustc, Stage 1 ni toolchain Windows/MSVC.
+
+Pruebas ejecutadas: 16/16 Python para el backend C experimental (12 ya
+existentes) y la herramienta de auditoría de fuentes (4 nuevas).
+
+Auditoría estática: 43 fuentes .l, 40 alcanzables desde main_sema.l,
+228 imports detectados, cero ciclos y cero imports faltantes.
+
+Limitaciones críticas: existe buffer combinado para spans/identificadores,
+ninguna fuente completa de Stage 1 ha sido comprobada como autocompilada en
+este entorno, y Stage 2/Stage 3 siguen sin verificarse. El backend Python/C11
+es una herramienta TRANSITORIA: el objetivo final es un backend, runtime y
+cadena de compilación escritos enteramente en ELE.
+
+Consultar docs/PHASE_8_5_WORK_IN_PROGRESS.md. Verificación Windows:
+.\bench\verify-stage1-modules.ps1 -FullSuite

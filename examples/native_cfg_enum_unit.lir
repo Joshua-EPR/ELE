@@ -1,0 +1,16 @@
+ELE-LIR 1
+module structs 0 enums 1 funcs 1 main f0
+enum e0 6:83,119,105,116,99,104 variants 2
+variant 3:79,102,102 types 0
+variant 2:79,110 types 0
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 3 blocks 1
+var v0 val e0
+var v1 val e0
+var v2 val i
+block 0 3
+i variant v0 e0 1 0
+i use v1 v0
+i disc v2 p1
+t return v2
+endfunc
+end

@@ -1,0 +1,27 @@
+ELE — Fase 8.7.2 (incremento no verificado por Stage 0)
+
+Origen: ELE-fix-10-pruebas-proyecto-completo.zip.
+Incluye correcciones previas de diez fallos, aún pendientes de retest MSVC.
+
+Nuevos componentes ELE:
+- codegen/native_cfg_ir.l: lector tipado LIR para Int/Bool, funciones y CFG.
+- codegen/native_cfg_verify.l: verificación de llamadas y definite initialization.
+- codegen/native_cfg_emit.l: lowering x86-64 con calls, stack y branch fixups.
+- native_cfg_demo.l: CLI que escribe ELF64 vía writeBytes del bootstrap.
+- x86_64.l: prologue, stack slots, call rel32, setcc/test.
+- lir_tokens.l: booleanos y sufijos de ubicaciones @line:col.
+- lir_subset.l: preserva el rechazo de booleanos en backend antiguo Int-only.
+
+Pruebas Rust (pendientes): crates/l/tests/native_cfg_l.rs,
+bench/verify-native-cfg.ps1, bench/build-native-cfg.ps1.
+Fixtures LIR: examples/native_cfg_*.lir.
+
+Pruebas realmente ejecutadas aquí: 20/20 en tests/native_backend (Python).
+Auditoría de imports: 7 módulos alcanzables, 0 imports faltantes,
+0 ciclos. Un ELF de referencia externo con la misma ABI retornó 8;
+NO es una ejecución del compilador escrito en ELE.
+
+LIMITACIONES: no hay cargo/rustc/Stage1 en el entorno; nuevas fuentes `.l`
+sin compilar; no hay Stage2/Stage3 ni autonomía completa de Rust/C/Python.
+
+Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_2.md para reproducción detallada.

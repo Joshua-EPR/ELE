@@ -1,0 +1,372 @@
+{
+  "entry": "main_sema.l",
+  "all_sources": 43,
+  "reachable": [
+    "lexer.l",
+    "tokens.l",
+    "cursor.l",
+    "ast.l",
+    "parse_util.l",
+    "expr.l",
+    "types.l",
+    "stmt.l",
+    "decl.l",
+    "parser.l",
+    "sema_types.l",
+    "symbols.l",
+    "scopes.l",
+    "flow_cfg.l",
+    "ownership_l.l",
+    "loans_l.l",
+    "lir_build.l",
+    "sema_context.l",
+    "sema_lower.l",
+    "sema_borrow.l",
+    "sema_drop.l",
+    "sema_ops.l",
+    "sema_collection_ops.l",
+    "stmt_lower.l",
+    "sema_expr.l",
+    "sema_stmt.l",
+    "loans_check.l",
+    "drops_plan.l",
+    "drops_verify.l",
+    "drops_dump.l",
+    "lir_finish.l",
+    "lir_verify_core.l",
+    "lir_verify.l",
+    "lir_emit.l",
+    "lir_write.l",
+    "lir_module.l",
+    "sema.l",
+    "module_graph_l.l",
+    "modules_l.l",
+    "main_sema.l"
+  ],
+  "unreachable": [
+    "flow_self_harness.l",
+    "main.l",
+    "main_parser.l"
+  ],
+  "dependencies": {
+    "ast.l": [],
+    "cursor.l": [],
+    "decl.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parse_util.l",
+      "expr.l",
+      "types.l",
+      "stmt.l"
+    ],
+    "drops_dump.l": [
+      "tokens.l",
+      "ast.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "drops_plan.l"
+    ],
+    "drops_plan.l": [
+      "tokens.l",
+      "flow_cfg.l",
+      "ownership_l.l",
+      "loans_l.l"
+    ],
+    "drops_verify.l": [
+      "tokens.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "drops_plan.l"
+    ],
+    "expr.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parse_util.l"
+    ],
+    "flow_cfg.l": [],
+    "flow_self_harness.l": [
+      "flow_cfg.l"
+    ],
+    "lexer.l": [],
+    "lir_build.l": [
+      "sema_types.l"
+    ],
+    "lir_emit.l": [
+      "tokens.l",
+      "sema_types.l",
+      "lir_build.l",
+      "lir_finish.l"
+    ],
+    "lir_finish.l": [
+      "tokens.l",
+      "flow_cfg.l",
+      "drops_plan.l",
+      "lir_build.l"
+    ],
+    "lir_module.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "flow_cfg.l",
+      "drops_plan.l",
+      "lir_build.l",
+      "lir_finish.l",
+      "lir_verify.l",
+      "lir_emit.l",
+      "lir_write.l",
+      "sema_context.l",
+      "sema_drop.l"
+    ],
+    "lir_verify.l": [
+      "tokens.l",
+      "sema_types.l",
+      "lir_build.l",
+      "lir_finish.l",
+      "lir_verify_core.l"
+    ],
+    "lir_verify_core.l": [
+      "sema_types.l",
+      "lir_build.l"
+    ],
+    "lir_write.l": [
+      "tokens.l",
+      "sema_types.l",
+      "lir_build.l",
+      "lir_finish.l",
+      "lir_emit.l"
+    ],
+    "loans_check.l": [
+      "tokens.l",
+      "flow_cfg.l",
+      "loans_l.l"
+    ],
+    "loans_l.l": [
+      "tokens.l",
+      "flow_cfg.l"
+    ],
+    "main.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l"
+    ],
+    "main_parser.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parser.l"
+    ],
+    "main_sema.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parser.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "ownership_l.l",
+      "sema_context.l",
+      "sema_expr.l",
+      "sema_stmt.l",
+      "sema.l",
+      "modules_l.l"
+    ],
+    "module_graph_l.l": [],
+    "modules_l.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parser.l",
+      "symbols.l",
+      "sema_types.l",
+      "sema_context.l",
+      "sema.l",
+      "module_graph_l.l"
+    ],
+    "ownership_l.l": [
+      "flow_cfg.l"
+    ],
+    "parse_util.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l"
+    ],
+    "parser.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parse_util.l",
+      "expr.l",
+      "types.l",
+      "stmt.l",
+      "decl.l"
+    ],
+    "scopes.l": [
+      "symbols.l"
+    ],
+    "sema.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "ownership_l.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "loans_check.l",
+      "sema_context.l",
+      "sema_borrow.l",
+      "sema_drop.l",
+      "drops_plan.l",
+      "drops_verify.l",
+      "drops_dump.l",
+      "lir_build.l",
+      "lir_module.l",
+      "sema_expr.l",
+      "sema_stmt.l"
+    ],
+    "sema_borrow.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "sema_context.l",
+      "lir_build.l",
+      "sema_lower.l"
+    ],
+    "sema_collection_ops.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "lir_build.l",
+      "sema_context.l",
+      "sema_lower.l"
+    ],
+    "sema_context.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "lir_build.l"
+    ],
+    "sema_drop.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "flow_cfg.l",
+      "sema_context.l",
+      "lir_build.l",
+      "sema_lower.l"
+    ],
+    "sema_expr.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "sema_context.l",
+      "sema_borrow.l",
+      "sema_drop.l",
+      "lir_build.l",
+      "sema_lower.l",
+      "sema_ops.l",
+      "sema_collection_ops.l",
+      "stmt_lower.l"
+    ],
+    "sema_lower.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "flow_cfg.l",
+      "lir_build.l",
+      "sema_context.l"
+    ],
+    "sema_ops.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "lir_build.l",
+      "sema_context.l",
+      "sema_drop.l",
+      "sema_lower.l"
+    ],
+    "sema_stmt.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "loans_l.l",
+      "sema_context.l",
+      "sema_borrow.l",
+      "sema_drop.l",
+      "lir_build.l",
+      "sema_lower.l",
+      "stmt_lower.l",
+      "sema_expr.l"
+    ],
+    "sema_types.l": [],
+    "stmt.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parse_util.l",
+      "expr.l",
+      "types.l"
+    ],
+    "stmt_lower.l": [
+      "tokens.l",
+      "ast.l",
+      "sema_types.l",
+      "symbols.l",
+      "scopes.l",
+      "flow_cfg.l",
+      "lir_build.l",
+      "sema_context.l",
+      "sema_drop.l",
+      "sema_lower.l"
+    ],
+    "symbols.l": [
+      "sema_types.l"
+    ],
+    "tokens.l": [],
+    "types.l": [
+      "lexer.l",
+      "tokens.l",
+      "cursor.l",
+      "ast.l",
+      "parse_util.l"
+    ]
+  },
+  "missing": [],
+  "cycles": [],
+  "duplicate_imports": []
+}

@@ -1,0 +1,384 @@
+import tokens
+import ast
+import sema_types
+import symbols
+import scopes
+import flow_cfg
+import lir_build
+import sema_context
+import sema_drop
+import sema_lower
+
+// Statement lowering helpers for the semantic pass (sema_stmt.l). They run
+// right after the statement's CFG events, so the instructions they emit sit
+// after those events and the drop plan can be spliced around them.
+
+// `let name = value` after FLOW_INIT: a reference binding names the
+// reference variable produced by the initializer; any other binding gets
+// its own variable assigned from the value.
+fn lirLetBind(ctx: &mut SemaContext, path: Int, ty: Int, reference: Bool) {
+    let value = lirTakeOperand(&mut ctx, ty)
+    if reference && lirIsVar(value) {
+        lirBindPath(&mut ctx.lir, path, value)
+        return
+    }
+    let slot = lirVar(&mut ctx.lir, ty, false)
+    lirBindPath(&mut ctx.lir, path, slot)
+    lirAt(&mut ctx, LIR_USE, slot, value, 0, 0)
+}
+
+// `target = value` / `target op= value` after FLOW_WRITE.
+fn lirAssign(ctx: &mut SemaContext, source: &Text, place: Int, value: Int, ty: Int, op_start: Int, op_end: Int) {
+    if place < 0 { return }
+    var result = value
+    if op_end - op_start > 1 {
+        ctx.lir.place = place
+        let current = lirTakeOperand(&mut ctx, ty)
+        let op = lirBinaryOp(source, op_start, op_start + 1)
+        result = lirNew(&mut ctx, ty, false, LIR_BINARY, op, current, value)
+    }
+    lirWrite(&mut ctx, place, result)
+}
+
+// Branch condition of the current block (if, while, for).
+fn lirCondition(ctx: &mut SemaContext) {
+    let operand = lirTakeOperand(&mut ctx, 4)
+    lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
+    ctx.lir.cond[ctx.flow.current] = operand
+}
+
+// Return value of the current block, recorded before it is detached.
+fn lirReturnAt(ctx: &mut SemaContext, value: Int, reference: Bool) {
+    lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
+    var operand = value
+    if operand == LIR_NONE { operand = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0) }
+    ctx.lir.ret[ctx.flow.current] = operand
+    ctx.lir.ret_ref[ctx.flow.current] = reference
+}
+
+// Forget whatever a discarded expression left in the value channel.
+fn lirDiscard(ctx: &mut SemaContext) {
+    ctx.lir.place = -1
+    ctx.lir.val = LIR_NONE
+}
+
+// `for i in start..end`: counter and limit are evaluated once; the header
+// tests `counter < limit`, the body binds `i`, and the step block (also the
+// target of `continue`) increments the counter.
+fn lirForInit(ctx: &mut SemaContext, start: Int, end: Int) -> Int {
+    // The limit variable is always the one right after the counter.
+    let counter = lirNew(&mut ctx, 1, false, LIR_USE, start, 0, 0)
+    lirNew(&mut ctx, 1, false, LIR_USE, end, 0, 0)
+    return counter
+}
+
+fn lirForTest(ctx: &mut SemaContext, counter: Int) {
+    ctx.lir.val = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_LT, counter, counter + 1)
+    ctx.lir.place = -1
+    lirCondition(&mut ctx)
+}
+
+fn lirForStep(ctx: &mut SemaContext, counter: Int) {
+    let one = lirConst(&mut ctx.lir, LIR_CONST_INT, 1, 0, 0)
+    let next = lirNew(&mut ctx, 1, false, LIR_BINARY, LIR_ADD, counter, one)
+    lirAt(&mut ctx, LIR_USE, counter, next, 0, 0)
+}
+
+fn lirMatchScrutVar(ctx: &mut SemaContext, scrut_t: Int) -> Int {
+    let scrut_op = lirTakeOperand(&mut ctx, scrut_t)
+    if lirIsVar(scrut_op) { return scrut_op }
+    let v = lirVar(&mut ctx.lir, scrut_t, false)
+    lirAt(&mut ctx, LIR_USE, v, scrut_op, 0, 0)
+    return v
+}
+
+fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) -> Bool {
+    // Only a genuine wildcard may skip the discriminant check. Treating the
+    // final named arm as a wildcard could read the wrong variant's payload.
+    if is_last || (p_end - p_start == 1 && source.byteAt(p_start) == 95) {
+        // `is_last` is set only after strict enum exhaustiveness validation;
+        // the enum value must have one of the declared discriminants.
+        flowLink(&mut ctx.flow, arm_body, -1)
+        return true
+    }
+    var enum_decl = -1
+    var elem_t = -1
+    var is_option = false
+    var is_result = false
+    if scrut_t >= 0 && scrut_t < ctx.types.types.length {
+        let st = &ctx.types.types[scrut_t]
+        match st.kind {
+            SemTypeKind.Enum => { enum_decl = st.nominal_id }
+            SemTypeKind.Option => {
+                is_option = true
+                elem_t = st.elem_type
+            }
+            SemTypeKind.Result => {
+                is_result = true
+                elem_t = st.elem_type
+            }
+            _ => {}
+        }
+    }
+    let name_none = "None"
+    if is_option || is_result {
+        // Stage 1 knows their types but has no tagged-union lowering or
+        // payload move paths yet. Keep semantic checking, reject LIR output.
+        lirMarkUnsupported(&mut ctx.lir, p_start)
+        var disc = -1
+        var payload_start = -1
+        var payload_end = -1
+        if is_option && symbolNameEqualsText(source, p_start, p_end, name_none) {
+            disc = 0
+        } else if is_option && (p_end - p_start > 5) && source.byteAt(p_start) == 83 && source.byteAt(p_start + 1) == 111 && source.byteAt(p_start + 2) == 109 && source.byteAt(p_start + 3) == 101 && source.byteAt(p_start + 4) == 40 {
+            disc = 1
+            payload_start = p_start + 5
+            payload_end = p_end - 1
+        } else if is_result && (p_end - p_start > 3) && source.byteAt(p_start) == 79 && source.byteAt(p_start + 1) == 107 && source.byteAt(p_start + 2) == 40 {
+            disc = 0
+            payload_start = p_start + 3
+            payload_end = p_end - 1
+        } else if is_result && (p_end - p_start > 4) && source.byteAt(p_start) == 69 && source.byteAt(p_start + 1) == 114 && source.byteAt(p_start + 2) == 114 && source.byteAt(p_start + 3) == 40 {
+            disc = 1
+            payload_start = p_start + 4
+            payload_end = p_end - 1
+            elem_t = ctx.types.types[scrut_t].nominal_id
+        }
+        if disc >= 0 {
+            let disc_const = lirConst(&mut ctx.lir, LIR_CONST_INT, disc, 0, 0)
+            let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, scrut_var, disc_const)
+            ctx.lir.val = cond
+            ctx.lir.place = -1
+            lirCondition(&mut ctx)
+            flowLink(&mut ctx.flow, arm_body, next_test)
+            if payload_start >= 0 {
+                let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, payload_start, payload_end, elem_t, ctx.scopes.current_scope, false, false, -1, payload_start, payload_end)
+                scopeAddSymbol(&mut ctx.scopes, sym_id)
+                semaInitPath(&mut ctx, sym_id, payload_start, payload_end)
+                ctx.lir.val = scrut_var
+                lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, elem_t, false)
+            }
+            return false
+        }
+    }
+    if enum_decl >= 0 && enum_decl < tree.declarations.length {
+        let decl = &tree.declarations[enum_decl]
+        var variant_idx = -1
+        var var_start = p_start
+        var var_end = p_end
+        for c in p_start..p_end {
+            if source.byteAt(c) == 40 && var_end == p_end { var_end = c }
+            if source.byteAt(c) == 46 && c < var_end { var_start = c + 1 }
+        }
+        for v in 0..decl.d {
+            let variant = &tree.variants[decl.c + v]
+            if symbolNamesEqual(source, variant.name_start, variant.name_end, var_start, var_end) {
+                variant_idx = v
+            }
+        }
+        if variant_idx >= 0 {
+            let variant = &tree.variants[decl.c + variant_idx]
+            if variant.payload_count > 1 { lirMarkUnsupported(&mut ctx.lir, p_start) }
+            let scrut_place = lirPlaceVar(&mut ctx.lir, scrut_var)
+            let disc_var = lirNew(&mut ctx, 1, false, LIR_DISC, scrut_place, 0, 0)
+            let disc_const = lirConst(&mut ctx.lir, LIR_CONST_INT, variant_idx, 0, 0)
+            let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, disc_var, disc_const)
+            ctx.lir.val = cond
+            ctx.lir.place = -1
+            lirCondition(&mut ctx)
+            flowLink(&mut ctx.flow, arm_body, next_test)
+            return false
+        }
+    }
+    if enum_decl >= 0 { lirMarkUnsupported(&mut ctx.lir, p_start) }
+    flowLink(&mut ctx.flow, arm_body, next_test)
+    return false
+}
+
+// Bind a primitive payload only in the matching arm. This produces an
+// explicit checked `payload` operation, never an unchecked `read` of the enum.
+// The value is Copy (Int/Bool); owned payload moves require move paths and
+// deterministic drops, and remain intentionally unsupported.
+fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int) {
+    if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
+    match ctx.types.types[scrut_t].kind {
+        SemTypeKind.Enum => {}
+        _ => { return }
+    }
+    let decl_id = ctx.types.types[scrut_t].nominal_id
+    if decl_id < 0 || decl_id >= tree.declarations.length { return }
+    let decl = &tree.declarations[decl_id]
+    var open = -1
+    var name_start = p_start
+    for i in p_start..p_end {
+        if source.byteAt(i) == 40 && open < 0 { open = i }
+        if source.byteAt(i) == 46 && open < 0 { name_start = i + 1 }
+    }
+    if open < 0 { return }
+    if p_end <= open + 2 || source.byteAt(p_end - 1) != 41 {
+        lirMarkUnsupported(&mut ctx.lir, p_start)
+        return
+    }
+    let binding_start = open + 1
+    let binding_end = p_end - 1
+    if binding_end == binding_start + 1 && source.byteAt(binding_start) == 95 { return }
+    for j in binding_start..binding_end {
+        let b = source.byteAt(j)
+        let letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+        let digit = (b >= 48 && b <= 57) && j > binding_start
+        if !letter && !digit { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+    }
+    for v in 0..decl.d {
+        let variant = &tree.variants[decl.c + v]
+        if !symbolNamesEqual(source, variant.name_start, variant.name_end, name_start, open) { continue }
+        if variant.payload_count != 1 {
+            lirMarkUnsupported(&mut ctx.lir, p_start)
+            return
+        }
+        let ty = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index])
+        if ty != 1 && ty != 4 {
+            lirMarkUnsupported(&mut ctx.lir, p_start)
+            return
+        }
+        var enum_id = -1
+        for k in 0..ctx.lir_module.en_decl.length {
+            if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+        }
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        let place = lirPlaceVar(&mut ctx.lir, scrut_var)
+        let value = lirNew(&mut ctx, ty, false, LIR_PAYLOAD, place, enum_id, v)
+        let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, binding_start, binding_end, ty, ctx.scopes.current_scope, false, false, -1, binding_start, binding_end)
+        scopeAddSymbol(&mut ctx.scopes, sym_id)
+        semaInitPath(&mut ctx, sym_id, binding_start, binding_end)
+        lirSetVal(&mut ctx, value)
+        lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, ty, false)
+        return
+    }
+    lirMarkUnsupported(&mut ctx.lir, p_start)
+}
+
+fn semaConstructorField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, decl_id: Int, arg: &AstExpr, ty: Int, seen: &mut List<Bool>, slots: &mut List<Int>) {
+    let decl = &tree.declarations[decl_id]
+    let field = semaNamedField(source, tree, decl_id, arg)
+    if field < 0 || seen[field - decl.c] {
+        semaAddError(&mut ctx, "L0004", "campo inválido o duplicado en constructor", arg.start, arg.end)
+    } else {
+        seen[field - decl.c] = true
+        slots[field - decl.c] = lirTakeOperand(&mut ctx, ty)
+        let expected = semaFieldType(&mut ctx, source, tree, field)
+        if !semTypeEquals(&ctx.types, ty, expected) {
+            semaAddError(&mut ctx, "L0004", "tipo incompatible en campo del constructor", arg.start, arg.end)
+        }
+    }
+}
+
+fn semaConstructorFinish(ctx: &mut SemaContext, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int, seen: &List<Bool>, slots: &List<Int>) {
+    let decl = &tree.declarations[decl_id]
+    for i in 0..decl.d {
+        if !seen[i] {
+            semaAddError(&mut ctx, "L0004", "el constructor requiere todos sus campos explícitos", expr.start, expr.end)
+            return
+        }
+    }
+    let first = lirSequence(&mut ctx, slots)
+    lirSetVal(&mut ctx, lirNew(&mut ctx, struct_t, false, LIR_STRUCT, ctx.lir_struct_index[decl_id], first, slots.length))
+}
+
+// A qualified enum variant constructor is parsed as a MethodCall on an
+// enum name. Never type-check the enum name as a runtime object.
+// Return -1 when this is an ordinary method call.
+fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+    if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
+    let base = &tree.expressions[expr.a]
+    match base.kind {
+        AstExprKind.Name => {}
+        _ => { return -1 }
+    }
+    let sym_id = semaLookupVisible(&mut ctx, source, base.start, base.end)
+    if sym_id < 0 { return -1 }
+    match ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Enum => {}
+        _ => { return -1 }
+    }
+    let decl_id = ctx.symbols.symbols[sym_id].decl_id
+    let enum_ty = ctx.symbols.symbols[sym_id].type_id
+    if decl_id < 0 || decl_id >= tree.declarations.length { return 7 }
+    let decl = &tree.declarations[decl_id]
+    let first = expr.d
+    let argc = tree.extra[first]
+    for v in 0..decl.d {
+        let variant = &tree.variants[decl.c + v]
+        if !symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) { continue }
+        if argc != variant.payload_count {
+            semaAddError(&mut ctx, "L0004", "cantidad de argumentos incorrecta para la variante", expr.start, expr.end)
+            return 7
+        }
+        if argc > 1 {
+            semaAddError(&mut ctx, "L0016", "Stage 1 solo admite un payload primitivo por variante", expr.start, expr.end)
+            return 7
+        }
+        var payload = LIR_NONE
+        if argc == 1 {
+            let expected = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index])
+            let actual = semaExprMode(&mut ctx, source, tree, tree.extra[first + 1], ACCESS_MOVE)
+            if expected != actual {
+                semaAddError(&mut ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
+                return 7
+            }
+            if expected != 1 && expected != 4 {
+                semaAddError(&mut ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
+                return 7
+            }
+            payload = lirTakeOperand(&mut ctx, actual)
+        }
+        var enum_id = -1
+        for k in 0..ctx.lir_module.en_decl.length {
+            if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+        }
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start); return 7 }
+        lirSetVal(&mut ctx, lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload))
+        return enum_ty
+    }
+    semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
+    return 7
+}
+
+fn semaEnumField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+    if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
+    match tree.expressions[expr.a].kind {
+        AstExprKind.Name => {}
+        _ => { return -1 }
+    }
+    let base_expr = &tree.expressions[expr.a]
+    let sym_id = semaLookupVisible(&mut ctx, source, base_expr.start, base_expr.end)
+    if sym_id < 0 { return -1 }
+    match ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Enum => {}
+        _ => { return -1 }
+    }
+    let decl_id = ctx.symbols.symbols[sym_id].decl_id
+    if decl_id >= 0 && decl_id < tree.declarations.length {
+        let decl = &tree.declarations[decl_id]
+        for v in 0..decl.d {
+            let variant = &tree.variants[decl.c + v]
+            if symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) {
+                let ty = ctx.symbols.symbols[sym_id].type_id
+                var enum_id = -1
+                for k in 0..ctx.lir_module.en_decl.length {
+                    if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+                }
+                if enum_id < 0 || variant.payload_count > 0 {
+                    // Payload variants require typed construction from their
+                    // call arguments, not the unit-variant field syntax.
+                    lirMarkUnsupported(&mut ctx.lir, expr.start)
+                } else {
+                    let result = lirNew(&mut ctx, ty, false, LIR_VARIANT, enum_id, v, LIR_NONE)
+                    lirSetVal(&mut ctx, result)
+                }
+                return ty
+            }
+        }
+    }
+    semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
+    return 7
+}

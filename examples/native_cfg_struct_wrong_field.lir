@@ -1,0 +1,26 @@
+ELE-LIR 1
+module structs 1 funcs 1 main f0
+struct s0 4:80,97,105,114 fields 3
+field 4:108,101,102,116 i
+field 4:102,108,97,103 b
+field 5:114,105,103,104,116 i
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 7 blocks 1
+var v0 val s0
+var v1 val s0
+var v2 val i
+var v3 val b
+var v4 val i
+var v5 val i
+var v6 val i
+block 0 8
+i struct v0 s0 3 ci19 cb1 ci20
+i use v1 v0
+i read v2 p1.3
+i read v3 p1.1
+i store p1.2 ci22
+i read v4 p1.2
+i binary v5 add v2 v4
+i binary v6 add v5 ci1
+t return v6
+endfunc
+end

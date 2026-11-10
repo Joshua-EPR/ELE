@@ -1,0 +1,49 @@
+ELE — ENTREGA INCREMENTAL 8.5/8.7 (10 noviembre 2026)
+
+Estado: progreso comprobable en fuentes; NO se declara Fase 8.5 terminada,
+ni Fase 8.7 completa, ni Stage 2/Stage 3, ni independencia total.
+
+Corrección concreta de Stage 1:
+- compiler-l/src/modules_l.l: LoadedProgram recibía module_starts en
+  module_paths y omitía por completo el campo module_starts. Corregido.
+
+Backend directo en ELE (.l):
+- compiler-l/src/codegen/x86_64.l
+- compiler-l/src/codegen/elf64.l
+- compiler-l/src/codegen/lir_tokens.l
+- compiler-l/src/codegen/lir_subset.l
+- compiler-l/src/native_elf_demo.l
+- compiler-l/src/native_lir_demo.l
+- compiler-l/src/native_encoder_cases.l
+- compiler-l/src/native_encoder_branches.l
+
+Fixtures y comprobaciones:
+- examples/native_int_subset.lir
+- examples/native_int_subset_invalid.lir
+- examples/native_int_subset_invalid_uninit.lir
+- crates/l/tests/native_encoder_l.rs (6 tests Rust de integración, SIN ejecutar)
+- bench/verify-native-encoder.ps1
+
+Backend x86-64 todavía reducido: una función main con 1 bloque, <=8 variables
+Int, use/add/sub/mul/return; errores explícitos para otros casos; overflow
+signed controlado mediante JO; salida ELF64 Linux en hexadecimal (no escritura
+binaria). Es una base del backend, NO un compilador completo.
+
+Pruebas REALMENTE ejecutadas aquí:
+- 16/16 pruebas Python existentes para backend C experimental y auditoría.
+- Auditoría estática de imports sin ciclos/faltantes desde main_sema.l y
+  native_lir_demo.l; no constituye pruebas semánticas ni nativas.
+- Validación independiente de instrucciones con GNU assembler y de ELF de
+  REFERENCIA ejecutado en Linux (exit status 42). No proviene de ejecutar ELE.
+
+Pruebas PENDIENTES:
+- 6 nuevos tests Rust (ELE .l -> Stage0 -> binario -> bytes x86 ELF).
+- Suite histórica MSVC (398 previas) y tests de import de fase 8.5.
+- Integración Stage 1 emitiendo LIR real al backend ELE.
+- Windows PE, escritura binaria, relocations, ABI, objetos, self-hosting.
+
+Cómo ejecutar nuevos tests en Windows/MSVC:
+.\bench\verify-native-encoder.ps1
+.\bench\verify-stage1-modules.ps1 -FullSuite
+
+Documentación: docs/ELE_NATIVE_BACKEND_PHASE_8_7.md

@@ -1,0 +1,28 @@
+ELE 8.7.4.4 — Corrección de validación nominal de enum y payload
+
+Base: ELE-fase8.7.4.3-avance-proyecto-completo.zip
+
+Se modificaron:
+  compiler-l/src/sema_stmt.l
+  compiler-l/src/lir_verify.l
+  crates/l/src/lir_protocol.rs
+  crates/l/tests/lir_payload_protocol.rs
+  crates/l/tests/native_enum_stage1_payload_l.rs
+Se añadieron:
+  bench/verify-enum-match-safety.ps1
+  docs/ELE_NATIVE_BACKEND_PHASE_8_7_4_4.md
+
+Pruebas realizadas localmente:
+  39 pruebas de herramientas y contratos (Python): OK
+  Auditoría de imports de main_sema.l: sin imports faltantes ni ciclos
+
+Pruebas NO ejecutadas aquí por ausencia de rustc/cargo:
+  Las cinco pruebas Rust añadidas
+  Stage 1 -> LIR -> backend ELE -> ELF64
+  cargo test / fmt / clippy
+
+Nuevas defensas: patrones de otro enum nominal; aridad de patrón;
+proyección de payload con variable ref; aridad de variantes al leer LIR;
+operando residual en variante unitaria.
+
+NO se declara completa 8.7.4, Option, Result, el runtime ni Stage 2.

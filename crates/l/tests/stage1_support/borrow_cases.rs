@@ -1,0 +1,1130 @@
+//! Borrow-checker programs shared by `borrow_l.rs` (verdicts) and
+//! `drops_l.rs` (drop plans of the accepted ones).
+
+/// (name, source, Stage 1 verdict, Stage 0 verdict)
+#[allow(dead_code)]
+pub const CASES: &[(&str, &str, &str, &str)] = &[
+    (
+        "shared_basic",
+        "fn main() { let x = 1\n let y = &x\n print(y)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "shared_two",
+        "fn main() { let x = 1\n let a = &x\n let b = &x\n print(a)\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_basic",
+        "fn main() { var x = 1\n let y = &mut x\n print(y)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_let_binding_rejected",
+        "fn main() { var x = 1\n var y = &mut x\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "borrow_non_named",
+        "fn main() { let y = &(1 + 2)\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "shared_conflict_write",
+        "fn main() { var x = 1\n let a = &x\n print(a)\n x = 2\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "shared_nll_ok",
+        "fn main() { var x = 1\n let a = &x\n print(a)\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_nll_sequential",
+        "fn main() { var x = 1\n let a = &mut x\n print(a)\n let b = &mut x\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_overlap_shared",
+        "fn main() { var x = 1\n let a = &mut x\n print(a)\n let b = &x\n print(b)\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "mut_overlap_shared_nll_ok",
+        "fn main() { var x = 1\n let a = &mut x\n print(a)\n let b = &x\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_unused_then_write",
+        "fn main() { var x = 1\n let a = &mut x\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "shared_of_mut_binding_read",
+        "fn main() { var x = 1\n let a = &mut x\n print(a)\n let b = &a\n print(b)\n print(a)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "reborrow_shared_of_shared",
+        "fn main() { let x = 1\n let a = &x\n print(a)\n let b = &a\n print(b)\n print(a)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "print_ref_auto_deref",
+        "fn main() { let x = 1\n let y = &x\n print(y + 1)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "write_through_mut",
+        "fn main() { var x = 1\n let y = &mut x\n y = 2\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "write_through_shared",
+        "fn main() { let x = 1\n let y = &x\n y = 2\n print(x)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "mut_borrow_immutable",
+        "fn main() { let x = 1\n let y = &mut x\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "mut_of_mut_var",
+        "fn main() { var x = 1\n let y = &mut x\n y = 2\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "escape_local",
+        "fn f() -> &Int { let x = 1\n return &x }\nfn main() { print(f())\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "return_param",
+        "fn f(n: &Int) -> &Int { return n }\nfn main() { let x = 1\n print(f(&x))\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "return_param_implicit",
+        "fn f(n: &Int) -> &Int { return n }\nfn main() { let x = 1\n print(f(x))\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "call_shared_arg_implicit",
+        "fn g(n: &Int) -> Int = 1\nfn main() { let x = 1\n print(g(x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "call_shared_arg_explicit",
+        "fn g(n: &Int) -> Int = 1\nfn main() { let x = 1\n print(g(&x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "call_mut_arg",
+        "fn g(n: &mut Int) -> Int = 1\nfn main() { var x = 1\n print(g(&mut x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "call_mut_arg_immutable_var",
+        "fn g(n: &mut Int) -> Int = 1\nfn main() { let x = 1\n print(g(&mut x))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "call_byval_rejects_borrow",
+        "fn g(n: Int) -> Int = 1\nfn main() { let x = 1\n print(g(&x))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "call_mut_arg_conflict_use_after",
+        "fn g(n: &mut Int) -> Int = 1\nfn main() { var x = 1\n let a = &x\n print(a)\n let r = g(&mut x)\n print(a)\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "loop_loan",
+        "fn main() { var x = 1\n while x < 3 { let a = &x\n print(a)\n x = x + 1 }\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "branch_loan_join",
+        "fn main() { var x = 1\n let a = &x\n if x == 1 { print(a) } else { print(a) }\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "disjoint_fields",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &p.x\n print(a)\n p.y = 3\n print(a)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "field_borrow_then_root_write",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &p.x\n print(a)\n p.x = 3\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "loan_in_condition",
+        "fn main() { var x = 1\n let a = &x\n if *a == 1 { x = 2 }\n}",
+        "PARSER",
+        "L0003",
+    ),
+    (
+        "move_while_loaned",
+        "struct P { x: Int }\nfn take(p: P) -> Int = 1\nfn main() { var p = P(x: 1)\n let a = &p.x\n print(a)\n let m = take(p)\n print(m)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "move_while_loaned_live",
+        "struct P { x: Int }\nfn take(p: P) -> Int = 1\nfn main() { var p = P(x: 1)\n let a = &p.x\n let m = take(p)\n print(a)\n print(m)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "root_write_while_field_loan",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &p.x\n p = P(x: 3, y: 4)\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ref_move_alias",
+        "fn main() { let x = 1\n let a = &x\n let b = a\n print(a)\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "ref_move_alias_conflict",
+        "fn main() { var x = 1\n let a = &mut x\n let b = a\n x = 2\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_expr_form",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n let r = f(&x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_expr_form_two",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n print(f(&x))\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "borrow_return_stmt",
+        "fn f(n: &Int) -> &Int { return &n }\nfn main() { let x = 1\n let r = f(&x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_annot_shared",
+        "fn main() { let x = 1\n let y: &Int = &x\n print(y)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_annot_mismatch",
+        "fn main() { var x = 1\n let y: &Int = &mut x\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "borrow_annot_mut",
+        "fn main() { var x = 1\n let y: &mut Int = &mut x\n print(y)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "assign_ref_binding",
+        "fn main() { let x = 1\n var y = 0\n y = &x\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "write_through_mut_field",
+        "struct P { x: Int }\nfn main() { var p = P(x: 1)\n let y = &mut p\n y.x = 3\n print(p.x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "compound_assign_through_ref",
+        "fn main() { var x = 1\n let y = &mut x\n y += 1\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "read_through_ref_in_arith",
+        "fn main() { var x = 1\n let y = &x\n print(y + 1)\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_ref_of_field_write_other",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &mut p.x\n a = 5\n p.y = 6\n print(p.x)\n print(p.y)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "param_ref_used_in_body",
+        "fn g(n: &Int) -> Int { return n + 1 }\nfn main() { let x = 2\n print(g(x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "param_mut_ref_written",
+        "fn g(n: &mut Int) { n = 5 }\nfn main() { var x = 1\n g(&mut x)\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "param_mut_ref_write_imm",
+        "fn g(n: &mut Int) { n = 5 }\nfn main() { let x = 1\n g(&mut x)\n print(x)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "loop_loan_live_across_backedge",
+        "fn main() { var x = 1\n let a = &x\n while x < 3 { print(a)\n x = x + 1 }\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "loan_live_across_loop_write",
+        "fn main() { var x = 1\n let a = &x\n while x < 3 { x = x + 1\n print(a) }\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "shared_of_struct_field_print",
+        "struct P { x: Int }\nfn main() { let p = P(x: 1)\n let a = &p\n print(a.x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "var_shared",
+        "fn main() { let x = 1\n var y = &x\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "print_borrow_arg",
+        "fn main() { let x = 1\n print(&x)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "interp_ref",
+        "fn main() { let x = 1\n let y = &x\n print(\"{y}\")\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "cmp_ref",
+        "fn main() { let x = 1\n let y = &x\n if y == 1 { print(1) }\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "reborrow_mut_of_mut",
+        "fn main() { var x = 1\n let a = &mut x\n print(a)\n let b = &mut a\n print(b)\n print(a)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "reborrow_mut_of_shared",
+        "fn main() { let x = 1\n let a = &x\n let b = &mut a\n print(b)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "var_result",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n var r = f(&x)\n print(r)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "annot_result_mismatch",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n let r: &mut Int = f(&x)\n print(r)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "annot_result_match",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n let r: &Int = f(&x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "assign_result",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n var r = 0\n r = f(&x)\n print(r)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "result_conflict",
+        "fn f(n: &Int) -> &Int = n\nfn main() { var x = 1\n let r = f(&x)\n x = 2\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "result_nll_ok",
+        "fn f(n: &Int) -> &Int = n\nfn main() { var x = 1\n let r = f(&x)\n print(r)\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mixed_returns",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }\nfn main() { let x = 1\n let r = f(true, &x, &x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "write_through_shared_param",
+        "fn g(n: &Int) { n = 5 }\nfn main() { let x = 1\n g(&x)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "ref_passed_byval",
+        "fn g(n: Int) -> Int = 1\nfn main() { let x = 1\n let y = &x\n print(g(y))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "compound_shared",
+        "fn main() { let x = 1\n let y = &x\n y += 1\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "return_call_chain",
+        "fn f(n: &Int) -> &Int = n\nfn g(n: &Int) -> &Int { return f(&n) }\nfn main() { let x = 1\n let r = g(&x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "return_local_call",
+        "fn f(n: &Int) -> &Int = n\nfn g() -> &Int { let x = 1\n return f(&x) }\nfn main() { print(1) }",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "mut_result_conflict",
+        "fn f(n: &mut Int) -> &mut Int { return &n }\nfn main() { var x = 1\n let r = f(&mut x)\n x = 2\n print(r)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "unused_result_let",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n let r = f(&x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "implicit_mut_arg",
+        "fn g(n: &mut Int) -> Int = 1\nfn main() { var x = 1\n print(g(x))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "deref_star",
+        "fn main() { let x = 1\n let y = &x\n print(*y)\n}",
+        "PARSER",
+        "L0003",
+    ),
+    (
+        "annot_nonref_of_loan",
+        "fn main() { let x = 1\n let y: Int = &x\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "borrow_of_param_shared",
+        "fn g(n: Int) { let y = &n\n print(y)\n}\nfn main() { g(1)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_of_param_mut",
+        "fn g(n: Int) { let y = &mut n\n print(y)\n}\nfn main() { g(1)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "double_write_through",
+        "fn main() { var x = 1\n let y = &mut x\n y = 2\n y = 3\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "field_write_through_shared",
+        "struct P { x: Int }\nfn main() { var p = P(x: 1)\n let y = &p\n y.x = 3\n print(p.x)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "nested_field_through_ref",
+        "struct P { x: Int }\nstruct Q { p: P }\nfn main() { var q = Q(p: P(x: 1))\n let y = &q.p\n print(y.x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "cond_conflict",
+        "fn main() { var x = 1\n let y = &x\n if y == 1 { x = 2 }\n print(y)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "cond_nll",
+        "fn main() { var x = 1\n let y = &x\n if y == 1 { print(2) }\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "two_shared_params",
+        "fn g(a: &Int, b: &Int) -> Int = 1\nfn main() { let x = 1\n let y = 2\n print(g(&x, &y))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "shared_loan_then_write_no_use",
+        "fn main() { var x = 1\n let y = &x\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_result_field",
+        "fn f(n: &mut Int) -> &mut Int { return &n }\nfn main() { var x = 1\n let r = f(&mut x)\n r = 5\n print(x)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "loop_result_ok",
+        "fn f(n: &Int) -> &Int = n\nfn main() { var x = 1\n while x < 3 { let r = f(&x)\n print(r)\n x = x + 1 }\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "return_n_bare",
+        "fn f(n: &Int) -> &Int { return n }\nfn main() { let x = 1\n let r = f(&x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "pass_through_ref_param",
+        "fn f(n: &Int) -> Int = 1\nfn g(n: &Int) -> Int { return f(n) }\nfn main() { let x = 1\n print(g(&x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "move_through_shared_ref",
+        "fn take(t: Text) -> Int = 1\nfn main() { let t = \"x\"\n let y = &t\n print(take(y))\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "move_through_mut_ref",
+        "fn take(t: Text) -> Int = 1\nfn main() { var t = \"x\"\n let y = &mut t\n print(take(y))\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "byval_field_through_ref",
+        "fn g(n: Int) -> Int = 1\nstruct P { x: Int }\nfn main() { var p = P(x: 1)\n let a = &p\n print(g(a.x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "two_refs_arith",
+        "fn main() { let x = 1\n let y = &x\n let z = &x\n print(y + z)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mixed_conflict_first",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }\nfn main() { var x = 1\n let r = f(true, &x, &x)\n x = 2\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "mixed_conflict_distinct",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }\nfn main() { var x = 1\n let y = 2\n let r = f(true, &x, &y)\n x = 2\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "return_mut_bare",
+        "fn f(n: &mut Int) -> &mut Int { return n }\nfn main() { var x = 1\n let r = f(&mut x)\n r = 5\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "mut_to_shared_param",
+        "fn f(n: &Int) -> Int = 1\nfn main() { var x = 1\n print(f(&mut x))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "mut_ref_to_shared_param",
+        "fn f(n: &Int) -> Int = 1\nfn main() { var x = 1\n let y = &mut x\n print(f(y))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "literal_to_ref_param",
+        "fn f(n: &Int) -> Int = 1\nfn main() { print(f(5))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "bare_borrow_stmt",
+        "fn main() { let x = 1\n &x\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "call_stmt_borrowed_result",
+        "fn f(n: &Int) -> &Int = n\nfn main() { let x = 1\n f(&x)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "return_ref_of_local_binding",
+        "fn f() -> &Int { let y = 1\n let x = &y\n return x }\nfn main() { print(1) }",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "mut_pass_through",
+        "fn f(n: &mut Int) -> Int = 1\nfn g(n: &mut Int) -> Int { return f(n) }\nfn main() { var x = 1\n print(g(&mut x))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "mixed_write_second",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }\nfn main() { var x = 1\n var y = 2\n let r = f(true, &x, &y)\n y = 3\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "struct_field_of_ref_type",
+        "struct P { r: &Int }\nfn main() { let x = 1\n let p = P(r: &x)\n}",
+        "L0012",
+        "OK",
+    ),
+    (
+        "list_of_borrows",
+        "fn main() { let x = 1\n let l = List[&x]\n}",
+        "L0001",
+        "OK",
+    ),
+    (
+        "alias_write_through",
+        "fn main() { var x = 1\n let a = &mut x\n let b = a\n b = 2\n print(x)\n}",
+        "L0006",
+        "L0001",
+    ),
+    (
+        "alias_use_then_write",
+        "fn main() { var x = 1\n let a = &mut x\n let b = a\n print(b)\n x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "read_between_mut_loan",
+        "fn main() { var x = 1\n let a = &mut x\n print(x)\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "write_through_parent_while_reborrow",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n a = 5\n print(b)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "read_parent_between_reborrow",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n print(a)\n print(b)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "shared_read_during_mut_loan",
+        "fn main() { var x = 1\n let a = &mut x\n let c = &x\n print(c)\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "struct_ref_conflict",
+        "struct P { r: &Int }\nfn main() { var x = 1\n let p = P(r: &x)\n x = 2\n print(p.r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "struct_ref_nll",
+        "struct P { r: &Int }\nfn main() { var x = 1\n let p = P(r: &x)\n print(p.r)\n x = 2\n}",
+        "L0012",
+        "OK",
+    ),
+    (
+        "struct_ref_move",
+        "struct P { r: &Int }\nfn main() { let x = 1\n let p = P(r: &x)\n let q = p\n print(q.r)\n}",
+        "L0012",
+        "OK",
+    ),
+    (
+        "struct_ref_annot",
+        "struct P { r: &Int }\nfn main() { let x = 1\n let p: P = P(r: &x)\n print(p.r)\n}",
+        "L0012",
+        "OK",
+    ),
+    (
+        "var_alias",
+        "fn main() { var x = 1\n let a = &mut x\n var b = a\n print(b)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "var_alias_write",
+        "fn main() { var x = 1\n let a = &mut x\n var b = a\n b = 2\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "implicit_shared_during_mut",
+        "fn g(n: &Int) -> Int = 1\nfn main() { var x = 1\n let a = &mut x\n g(x)\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "result_alias_conflict",
+        "fn f(n: &Int) -> &Int = n\nfn main() { var x = 1\n let r = f(&x)\n let s = r\n x = 2\n print(s)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "list_ref_len",
+        "fn main() { let x = 1\n let l = List[&x]\n print(l.length)\n}",
+        "L0001",
+        "OK",
+    ),
+    (
+        "mixed_mut_shared_ret",
+        "fn f(c: Bool, n: &Int, m: &mut Int) -> &Int { if c { return &n } else { return &m } }\nfn main() { let x = 1\n var y = 2\n let r = f(true, &x, &mut y)\n y = 3\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "mut_ret_shared_param",
+        "fn f(n: &Int) -> &mut Int { return n }\nfn main() { print(1) }",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "borrow_expr_in_arith",
+        "fn main() { let x = 1\n let y = 1 + &x\n print(y)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "ref_field_write_local",
+        "struct P { r: &Int }\nfn main() { var x = 1\n let p = P(r: &x)\n p.r = &x\n}",
+        "L0012",
+        "L0001",
+    ),
+    (
+        "shared_binding_arg",
+        "fn g(n: &Int) -> Int = 1\nfn main() { let x = 1\n let a = &x\n print(g(a))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "shared_binding_arg_conflict",
+        "fn g(n: &Int) -> Int = 1\nfn main() { var x = 1\n let a = &x\n g(a)\n x = 2\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "two_mut_args_same",
+        "fn g(a: &mut Int, b: &mut Int) -> Int = 1\nfn main() { var x = 1\n print(g(&mut x, &mut x))\n}",
+        "L0012",
+        "L0005",
+    ),
+    (
+        "mut_and_shared_args_same",
+        "fn g(a: &mut Int, b: &Int) -> Int = 1\nfn main() { var x = 1\n print(g(&mut x, &x))\n}",
+        "L0012",
+        "L0005",
+    ),
+    (
+        "two_shared_args_same",
+        "fn g(a: &Int, b: &Int) -> Int = 1\nfn main() { let x = 1\n print(g(&x, &x))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "disjoint_mut_field_args",
+        "struct P { x: Int, y: Int }\nfn g(a: &mut Int, b: &mut Int) -> Int = 1\nfn main() { var p = P(x: 1, y: 2)\n print(g(&mut p.x, &mut p.y))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "overlap_mut_field_args",
+        "struct P { x: Int, y: Int }\nfn g(a: &mut P, b: &mut Int) -> Int = 1\nfn main() { var p = P(x: 1, y: 2)\n print(g(&mut p, &mut p.y))\n}",
+        "L0012",
+        "L0005",
+    ),
+    (
+        "disjoint_mut_fields_let",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &mut p.x\n let b = &mut p.y\n a = 3\n b = 4\n print(p.x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "whole_vs_field_mut",
+        "struct P { x: Int, y: Int }\nfn main() { var p = P(x: 1, y: 2)\n let a = &mut p.x\n let b = &p\n print(b.y)\n a = 3\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "branch_conflict_one_side",
+        "fn main() { var x = 1\n let a = &x\n if x > 0 { x = 2 } else { print(a) }\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "branch_conflict_join",
+        "fn main() { var x = 1\n let a = &x\n if x > 0 { x = 2 }\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "branch_borrow_both",
+        "fn main() { var x = 1\n var y = 2\n if x > 0 { let a = &mut x\n a = 5 } else { let b = &mut y\n b = 6 }\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "loop_mut_each_iter",
+        "fn main() { var x = 0\n var i = 0\n while i < 3 { let a = &mut x\n a = a + 1\n i = i + 1 }\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "loop_break_live",
+        "fn main() { var x = 1\n let a = &x\n loop { x = 2\n break }\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "loop_break_dead",
+        "fn main() { var x = 1\n let a = &x\n print(a)\n loop { x = 2\n break }\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "nested_loop_conflict",
+        "fn main() { var x = 1\n let a = &x\n var i = 0\n while i < 2 { var j = 0\n while j < 2 { print(a)\n j = j + 1 }\n i = i + 1 }\n x = 3\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "for_loop_conflict",
+        "fn main() { var x = 1\n let a = &x\n for i in 0..3 { print(a)\n x = i }\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "borrow_moved",
+        "fn take(t: Text) -> Int = 1\nfn main() { let t = \"x\"\n print(take(t))\n let a = &t\n print(a)\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "borrow_maybe_moved",
+        "fn take(t: Text) -> Int = 1\nfn main() { let t = \"x\"\n if true { print(take(t)) }\n let a = &t\n print(a)\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "move_text_while_borrowed",
+        "fn take(t: Text) -> Int = 1\nfn main() { let t = \"x\"\n let a = &t\n print(take(t))\n print(a)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "move_text_after_borrow",
+        "fn take(t: Text) -> Int = 1\nfn main() { let t = \"x\"\n let a = &t\n print(a)\n print(take(t))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "reborrow_chain_ok",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n let c = &mut b\n c = 4\n b = 5\n a = 6\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "reborrow_chain_bad",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n let c = &mut b\n b = 5\n c = 4\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "reborrow_two_mut_of_mut",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n let c = &mut a\n b = 1\n c = 2\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "reborrow_shared_while_mut_child",
+        "fn main() { var x = 1\n let a = &mut x\n let b = &mut a\n let c = &a\n print(c)\n b = 2\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "early_return_loan",
+        "fn f(c: Bool) -> Int { var x = 1\n let a = &x\n if c { return a }\n x = 2\n return x }\nfn main() { print(f(true))\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "early_return_conflict",
+        "fn f(c: Bool) -> Int { var x = 1\n let a = &x\n if c { x = 2\n return a }\n return x }\nfn main() { print(f(true))\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ret_param_branch",
+        "fn f(c: Bool, n: &Int) -> &Int { if c { return n }\n return &n }\nfn main() { let x = 1\n let r = f(true, &x)\n print(r)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "ret_local_branch",
+        "fn f(c: Bool, n: &Int) -> &Int { let y = 1\n if c { return n }\n return &y }\nfn main() { print(1)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "ret_field_of_param",
+        "struct P { x: Int }\nfn f(p: &P) -> &Int { return &p.x }\nfn main() { var q = P(x: 1)\n let r = f(&q)\n q.x = 2\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ret_field_of_param_ok",
+        "struct P { x: Int }\nfn f(p: &P) -> &Int { return &p.x }\nfn main() { var q = P(x: 1)\n let r = f(&q)\n print(r)\n q.x = 2\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "ret_mut_param_write",
+        "fn f(n: &mut Int) -> &mut Int { return n }\nfn main() { var x = 1\n let r = f(&mut x)\n print(x)\n r = 3\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ret_unused_param_write",
+        "fn f(n: &Int, m: &Int) -> &Int { return n }\nfn main() { var x = 1\n var y = 2\n let r = f(&x, &y)\n y = 3\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ret_in_loop_reuse",
+        "fn f(n: &mut Int) -> &mut Int { return n }\nfn main() { var x = 1\n var i = 0\n while i < 3 { let r = f(&mut x)\n r = r + 1\n i = i + 1 }\n print(x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "ret_chain_two",
+        "fn f(n: &Int) -> &Int { return n }\nfn g(n: &Int) -> &Int { let r = f(&n)\n return r }\nfn main() { var x = 1\n let r = g(&x)\n x = 3\n print(r)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "ret_local_via_call",
+        "fn f(n: &Int) -> &Int { return n }\nfn g() -> &Int { let y = 1\n let r = f(&y)\n return r }\nfn main() { print(1)\n}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "write_through_shared_field_param",
+        "struct P { x: Int }\nfn g(p: &P) { p.x = 3 }\nfn main() { let q = P(x: 1)\n g(&q)\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "write_through_mut_field_param",
+        "struct P { x: Int }\nfn g(p: &mut P) { p.x = 3 }\nfn main() { var q = P(x: 1)\n g(&mut q)\n print(q.x)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "move_field_through_param",
+        "struct P { t: Text }\nfn take(t: Text) -> Int = 1\nfn g(p: &P) -> Int { return take(p.t) }\nfn main() { print(1)\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "borrow_param_field_disjoint",
+        "struct P { x: Int, y: Int }\nfn g(p: &mut P) { let a = &mut p.x\n let b = &mut p.y\n a = 1\n b = 2\n}\nfn main() { var q = P(x: 1, y: 2)\n g(&mut q)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "param_reborrow_conflict",
+        "fn g(p: &mut Int) { let a = &mut p\n p = 2\n a = 3\n}\nfn main() { var q = 1\n g(&mut q)\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "text_ref_print",
+        "fn main() { let t = \"hola\"\n let r = &t\n print(r)\n print(t)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "text_mut_ref_assign",
+        "fn main() { var t = \"hola\"\n let r = &mut t\n r = \"adios\"\n print(t)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "text_mut_ref_live_read",
+        "fn main() { var t = \"hola\"\n let r = &mut t\n print(t)\n r = \"adios\"\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "shared_annot_from_param",
+        "fn g(n: &Int) -> Int { let a: &Int = &n\n return a }\nfn main() { print(g(1))\n}",
+        "L0001",
+        "L0001",
+    ),
+    (
+        "ref_var_annot",
+        "fn main() { let x = 1\n var y: &Int = &x\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "borrow_uninit_like_sibling",
+        "struct P { t: Text, n: Int }\nfn take(t: Text) -> Int = 1\nfn main() { let p = P(t: \"a\", n: 1)\n print(take(p.t))\n let a = &p.n\n print(a)\n}",
+        "OK",
+        "OK",
+    ),
+    (
+        "borrow_moved_field",
+        "struct P { t: Text, n: Int }\nfn take(t: Text) -> Int = 1\nfn main() { let p = P(t: \"a\", n: 1)\n print(take(p.t))\n let a = &p\n print(a.n)\n}",
+        "L0005",
+        "L0005",
+    ),
+    (
+        "short_circuit_borrow",
+        "fn g(n: &Int) -> Bool = true\nfn main() { var x = 1\n let a = &mut x\n if g(x) && true { print(1) }\n a = 2\n}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "multi_reborrow_write_second",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn main() { var x = 1
+ var y = 2
+ let r = f(true, &x, &y)
+ let s = &r
+ y = 3
+ print(s)
+}",
+        "L0012",
+        "L0012",
+    ),
+    (
+        "multi_reborrow_ok",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn main() { var x = 1
+ var y = 2
+ let r = f(true, &x, &y)
+ let s = &r
+ print(s)
+ y = 3
+}",
+        "OK",
+        "OK",
+    ),
+    (
+        "multi_pass_arg",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn g(n: &Int) -> Int = 1
+fn main() { var x = 1
+ var y = 2
+ let r = f(true, &x, &y)
+ print(g(r))
+ y = 3
+}",
+        "OK",
+        "OK",
+    ),
+    (
+        "multi_ret_reborrow",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn h(n: &Int, m: &Int) -> &Int { let r = f(true, &n, &m)
+ let s = &r
+ return s }
+fn main() { print(1)
+}",
+        "OK",
+        "OK",
+    ),
+    (
+        "multi_ret_local",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn h(n: &Int) -> &Int { let y = 1
+ let r = f(true, &n, &y)
+ return r }
+fn main() { print(1)
+}",
+        "L0013",
+        "L0013",
+    ),
+    (
+        "multi_ret_local_reborrow",
+        "fn f(c: Bool, n: &Int, m: &Int) -> &Int { if c { return &n } else { return &m } }
+fn h(n: &Int) -> &Int { let y = 1
+ let r = f(true, &n, &y)
+ let s = &r
+ return s }
+fn main() { print(1)
+}",
+        "L0013",
+        "L0013",
+    ),
+];

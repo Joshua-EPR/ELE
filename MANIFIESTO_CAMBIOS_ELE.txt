@@ -1,0 +1,36 @@
+ELE — Entrega del 10 de noviembre de 2026
+==========================================
+
+MODIFICACIONES Y ADICIONES
+
+- tools/ele_c_backend.py: backend nuevo, escrito en Python, que valida un
+  subconjunto de ELE-LIR 1, genera C11 y compila a binario usando Clang/GCC.
+- tools/ele_runtime.h: runtime C11 independiente de Rust para operaciones
+  escalares, Text, structs, listas, referencias simples, drops y errores.
+- tools/ele_build.py: puente CLI entre un ejecutable Stage 1 preexistente
+  y el backend alternativo, sin invocar rustc/cargo/Cranelift.
+- tests/native_backend/: 12 pruebas automáticas, incluidas compilación
+  real, ejecución nativa, errores, listas, bucles, refs y contrato de bridge.
+- examples/native_without_rust.lir: demostración que imprime 42.
+- docs/RUST_FREE_BACKEND.md: instrucciones, límites y hoja de ruta.
+- docs/AGENT_HANDOFF.md y README.md: actualización de contexto.
+
+VERIFICACIÓN
+
+- 12 pruebas Python pasaron con compilación GCC nativa en Linux.
+- Un programa C generado compila con GCC y Clang, en C11 con warnings como errores.
+- Ejemplo con List<Text> ejecutado bajo ASan y UBSan de Clang, sin reporte
+  en el recorrido comprobado.
+- El entorno NO tiene Rust/Cargo ni un binario Stage 1, así que las 398
+  pruebas históricas y la compilación de fuentes .l reales con este puente
+  NO se comprobaron en esta sesión. No se realizaron commits.
+
+IMPORTANTE
+
+Esto NO completa la independencia de Rust. Sustituye la etapa de backend
+para un subconjunto, pero no construye Stage 2 ni Stage 3. Stage 1 todavía
+necesita el compilador Rust Stage 0 al menos para bootstrap, y hay
+construcciones de LIR no soportadas. No exponer el backend a LIR no
+confiable: su verificador no replica todo el chequeo de ownership de Rust.
+
+Más información: docs/RUST_FREE_BACKEND.md.

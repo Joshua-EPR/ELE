@@ -1,0 +1,23 @@
+[package]
+name = "project-l"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[lib]
+name = "project_l"
+
+[[bin]]
+name = "l"
+path = "src/main.rs"
+
+
+# Native backend (see docs/BACKEND.md). Versions pinned together; 0.137.1 is the
+# latest stable Cranelift release whose MSRV (1.97) fits the project's 1.99.1.
+[dependencies]
+cranelift-codegen = "=0.137.1"
+cranelift-frontend = "=0.137.1"
+cranelift-module = "=0.137.1"
+cranelift-object = "=0.137.1"
+cranelift-native = "=0.137.1"
+target-lexicon = "=0.13.5"

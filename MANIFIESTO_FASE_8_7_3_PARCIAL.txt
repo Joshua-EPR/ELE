@@ -1,0 +1,15 @@
+ELE — Fase 8.7.3 (primera entrega parcial)
+
+Implementado:
+- codificador x86-64 de memoria para base + disp32, 8/64 bits y SIB/REX;
+- reutilización de acceso a stack slots;
+- planificador ELE de layout de campos, padding, nested y orden de drops;
+- emisor ELE de ELF64 con agregado stack-only y resultado previsto 42;
+- tests Rust integrados (todavía pendientes de Stage 0 en Windows).
+
+Validación REAL aquí: 20/20 tests Python existentes; oracle independiente
+x86-64 desensamblado; oracle ELF64 exit 42; imports estáticos sin faltantes.
+NO validado: .l compilados, tests Rust/MSVC, ELF generado por ELE, heap,
+structs en ELE-LIR, drops reales, 8.7.4, 8.7.5, Stage 2/Stage 3.
+
+Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_3.md.
