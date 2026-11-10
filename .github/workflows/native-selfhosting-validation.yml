@@ -2,10 +2,14 @@ name: ELE native self-hosting validation
 
 on:
   push:
-    branches: [main, "feat/**", "fix/**"]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: native-interop-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
