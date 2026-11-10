@@ -49,11 +49,15 @@ fn rejects_payload_with_struct_field_projection() {
 
 #[test]
 fn empty_enum_cannot_be_projected_or_panic_in_protocol_parser() {
-    let good = fixture("native_cfg_enum_payload_int.lir");
+    // Git on Windows may check out CRLF fixtures. Normalize before editing:
+    // otherwise the replacements are no-ops and the test checks a valid enum.
+    let good = fixture("native_cfg_enum_payload_int.lir").replace("\r\n", "\n");
     let empty = good
         .replacen("variants 2\n", "variants 0\n", 1)
         .replace("variant 4:78,111,110,101 types 0\n", "")
         .replace("variant 4:83,111,109,101 types 1 i\n", "");
+    assert_ne!(empty, good, "el fixture de enum vacío no se modificó");
+    assert!(empty.contains("variants 0\n"));
     assert!(lir_protocol::parse(&empty).is_err());
 }
 
