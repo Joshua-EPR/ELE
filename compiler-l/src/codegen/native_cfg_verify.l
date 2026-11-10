@@ -17,7 +17,7 @@ fn cfgEdge(p: &CfgProgram, f: Int, from: Int, to: Int) -> Bool {
 }
 
 fn cfgMoveOperand(p: &CfgProgram, f: Int, op: &NativeOperand, variable: Int) -> Bool {
-    return op.is_var && op.value == variable && cfgOperandType(p, f, op) >= 2
+    return op.is_var && op.value == variable && cfgOperandType(p, f, &op) >= 2
 }
 
 // A whole-value move occurs in a struct assignment, struct constructor or
@@ -44,7 +44,7 @@ fn cfgTransferVar(p: &CfgProgram, f: Int, block: &CfgBlock, variable: Int, initi
     var live = initial
     for i in block.first..(block.first + block.count) {
         let inst = &p.insts[i]
-        if cfgMoves(p, f, inst, variable) { live = false }
+        if cfgMoves(p, f, &inst, variable) { live = false }
         if inst.kind != 6 && inst.dst == variable { live = true }
     }
     return live
@@ -54,7 +54,7 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
     if !op.is_var { return 0 }
     if op.value < 0 || op.value >= p.functions[f].vars { return 57 }
     if !live[op.value] { return 57 }
-    if cfgOperandType(p, f, op) >= 2 { live[op.value] = false }
+    if cfgOperandType(p, f, &op) >= 2 { live[op.value] = false }
     return 0
 }
 
@@ -172,7 +172,7 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
                 }
                 let slot = b * vars + v
                 if inputs[slot] != is_init { inputs[slot] = is_init; changing = true }
-                let after = cfgTransferVar(p, f, block, v, is_init)
+                let after = cfgTransferVar(p, f, &block, v, is_init)
                 if outputs[slot] != after { outputs[slot] = after; changing = true }
             }
         }
