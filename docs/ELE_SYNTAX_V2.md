@@ -108,11 +108,47 @@ flow main() => Int {
 
 `view` y `edit` son modos de préstamo, **no** claves para ignorar restricciones de aliasing/vida útil. `edit` conserva exclusividad y `view` solo permite lectura.
 
+## Genéricos propios de ELE: `of[T]` (Stage 0)
+
+En la sintaxis recomendada, **la declaración de parámetros de tipo y su aplicación usan `of[...]`**: no tienen la doble interpretación de los símbolos `<`/`>` como operadores de comparación. En contexto de expresiones, un genérico explícito debe terminar en una llamada con paréntesis; `id of[Int]` sin `(...)` **no** se trata como acceso a un array.
+
+```ele
+flow identidad of[T](valor: T) => T = valor
+
+shape Caja of[T] {
+    dato: T
+}
+
+extend of[T] Caja of[T] {
+    flow leer() => T = this.dato
+}
+
+contract Lectura {
+    flow codigo() => Int
+}
+
+shape Mensaje { numero: Int }
+
+extend Lectura on Mensaje {
+    flow codigo() => Int = this.numero
+}
+
+flow main() => Int {
+    hold n = identidad of[Int](42)
+    hold c: Caja of[Int] = Caja(dato: n)
+    give c@leer()
+}
+```
+
+Los `<T>` y `Tipo<T>` previos siguen admitidos **solo durante la migración**. La identidad de los tipos no depende de la forma escrita: `Caja<Int>` y `Caja of[Int]` producen el mismo tipo interno y pasan por el mismo control de ownership, reglas de monomorfización y verificación de tipos.
+
+**Compatibilidad real:** Stage 0 interpreta los genéricos, métodos e implementaciones anteriores. Stage 1 continúa con su subconjunto sin genéricos generales: no se debe presentar `of[T]` como soporte Stage 1 hasta que exista implementación y pruebas de compilación desde `.l` al backend ELE. La prueba diferencial Stage 0 contrasta `rustc` y Cranelift, **no** prueba self-hosting.
+
 ## Superficies por rediseñar antes del corte de compatibilidad
 
 Estas son **propuestas de diseño, NO sintaxis soportada actualmente**; están sujetas a pruebas y decisiones técnicas, sin alterar la semántica estable:
 
-1. **Genéricos:** sustituir `<T>` y `Tipo<T>` por `of[T]` / `Tipo of[Int]` solo si el parser distingue de forma no ambigua genéricos, comparación, arrays e indexación; conservar identidad nominal y monomorfización.
+1. **Genéricos (Stage 0 implementado):** `flow identidad of[T](x: T) => T`, `shape Caja of[T]`, `choice Estado of[T]`, `extend of[T] Caja of[T]`, `Caja of[Int]`, `identidad of[Int](42)` y `objeto@metodo of[Int](...)`. Esta sintaxis se distingue de índices y comparaciones gracias al marcador `of`. La monomorfización continúa utilizando el AST y la semántica existentes. **Pendiente:** parser/semántica de genéricos en Stage 1 y migración de fuentes históricas.
 2. **Constructores:** establecer una forma propia que distinga creación de datos de llamadas a funciones y conserve nombres de campos/orden de evaluación, sin cambiar arbitrariamente el AST.
 3. **Nombres del prelude y propagación:** decidir `Maybe` / `Outcome` en lugar de `Option` / `Result`, y una propagación explícita que no copie literalmente el postfix `?` de Rust. Antes de cambiar, garantizar drops y las pruebas de #5/#6.
 4. **Patrones, guards y errores:** completar `choose` anidado, exhaustividad, errores y bindings con seguridad de ownership; syntax v2 no puede aceptar funcionalidades que el backend no soporta.
