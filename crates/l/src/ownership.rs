@@ -255,7 +255,7 @@ impl State {
                         {
                             return Err(Diagnostic::new(
                                 value.span,
-                                format!("no se puede mover un campo prestado (self o patrón); value={value:?}"),
+                                "no se puede mover un campo prestado (self o patrón)",
                             ));
                         }
                         if self.protected.contains(&place.root) {
