@@ -43,6 +43,7 @@ jobs:
           cargo test -p project-l
           --test native_enum_stage1_l
           --test native_enum_stage1_payload_l
+          --test native_heap_l
           --test native_enum_l
           --test native_cfg_l
           --test native_struct_cfg_l
@@ -63,6 +64,8 @@ jobs:
             target/stage1-tests/native-cfg-loop/loop.elf
             target/stage1-tests/native-struct-source/struct.elf
             target/stage1-tests/native-nested-struct/nested.elf
+            target/stage1-tests/native-heap/heap-ok.elf
+            target/stage1-tests/native-heap/heap-bad.elf
           if-no-files-found: error
           retention-days: 3
       - name: Run native backend contract tests
@@ -102,6 +105,8 @@ jobs:
               ("loop.elf", 8),
               ("struct.elf", 42),
               ("nested.elf", 42),
+              ("heap-ok.elf", 42),
+              ("heap-bad.elf", 124),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"
