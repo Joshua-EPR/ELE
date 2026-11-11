@@ -1,7 +1,11 @@
 # Regresiones de módulos y cursor: línea base de self-hosting
 
-**Estado:** corrección en revisión; validar los dos binarios de pruebas y
-los tres trabajos de GitHub Actions antes de considerar esta fase cerrada.
+**Estado:** la corrección funcional fue verificada en GitHub Actions
+[43081976701](https://github.com/Joshua-EPR/ELE/actions/runs/43081976701):
+Ubuntu, Windows y ejecución ELF64 cruzada aprobaron (3/3).
+`modules_l` pasó 13/13 y `self_hosting` pasó 8/8 en Windows/MSVC.
+La suite global Windows/MSVC se incorpora ahora como validación adicional
+y todavía está pendiente sobre el último commit.
 
 ## Reproducción
 
@@ -39,7 +43,8 @@ de cursor.
 ## Criterios de aceptación
 
 - 13/13 en `modules_l`, 8/8 en `self_hosting`.
-- CI Ubuntu, Windows y ELF64 cruzado verde.
+- CI Ubuntu, Windows y ELF64 cruzado verde (confirmado 43081976701).
+- Suite Windows/MSVC completa verde en el workflow ampliado (pendiente).
 - Ninguna prueba desactivada o ignorada adicionalmente.
 - `cargo fmt --all --check` y
   `cargo clippy --workspace --all-targets -- -D warnings` verdes.

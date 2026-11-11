@@ -1395,3 +1395,10 @@ verifica directamente con Stage 1+LIR+ejecutable, ya que Stage 0 conserva
 la limitación de namespace global. No se ocultan pruebas ni se afirma que
 Stage 0 haya resuelto esa limitación.
 Ver `docs/SELF_HOSTING_MODULE_CURSOR_REGRESSIONS.md`.
+
+Verificación de las correcciones: 13/13 en `modules_l` y 8/8 en
+`self_hosting`; CI 3/3 aprobado en [43081976701](https://github.com/Joshua-EPR/ELE/actions/runs/43081976701).
+Se incorporó además `cargo test -p project-l --no-fail-fast -- --test-threads=1`
+como paso permanente de CI Windows (validación aún pendiente).
+La limitación Stage 0 de nombres privados homónimos queda rastreada en
+[issue #31](https://github.com/Joshua-EPR/ELE/issues/31).

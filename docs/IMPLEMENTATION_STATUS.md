@@ -1580,3 +1580,9 @@ de módulos (4 fallas) y 8 de self-hosting (1 falla), ahora con correcciones
 específicas: rutas y códigos de imports, fixture nominal y carga de
 dependencias del cursor. Verificación del resultado **pendiente de CI**.
 La limitación del namespace global de Stage 0 sigue explícita.
+
+Resultados verificados en [Actions 43081976701](https://github.com/Joshua-EPR/ELE/actions/runs/43081976701):
+`modules_l` 13/13, `self_hosting` 8/8 y tres trabajos CI aprobados.
+Nueva puerta de calidad: suite completa Windows/MSVC con `--no-fail-fast`
+en todos los PR; está pendiente de validarse sobre el commit nuevo.
+Issue #31 conserva el defecto de namespacing privado de Stage 0.
