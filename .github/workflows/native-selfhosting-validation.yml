@@ -98,6 +98,19 @@ jobs:
           --test regions
           --test borrow_l
           -- --test-threads=1
+      # Historical Stage 1 module integration and cursor equivalence tests.
+      # Run them in CI so these self-hosting blockers cannot remain invisible.
+      - name: Stage 1 module imports and token cursor regressions (MSVC)
+        if: runner.os == 'Windows' && !cancelled()
+        run: >-
+          cargo test -p project-l --no-fail-fast
+          --test modules_l --test self_hosting -- --test-threads=1
+      # The focused suites above detect module/cursor regressions early.
+      # Run ALL Windows tests as well; a green subset is not a green compiler.
+      - name: Suite completa Windows/MSVC (Stage 0 y Stage 1)
+        if: runner.os == 'Windows' && !cancelled()
+        run: >-
+          cargo test -p project-l --no-fail-fast -- --test-threads=1
       - name: Native print, references and Text queries through the ELE backend (MSVC host, image checks)
         if: runner.os == 'Windows' && !cancelled()
         run: >-

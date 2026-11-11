@@ -1384,3 +1384,21 @@ completa el compilador ni sustituye el self-hosting Stage 2/3.
 Validación registrada en GitHub Actions: ejecución 43072044595 (Ubuntu,
 Windows y ELF64 cruzado, tres trabajos aprobados). No es una verificación
 de self-hosting Stage 2 ni de la suite histórica completa.
+
+
+### Regresiones históricas de módulos y cursor (pendiente de CI)
+Se añadieron las suites `modules_l` y `self_hosting` completas al CI
+Windows/MSVC. Se corrigen la atribución y el código de estado de errores
+L0014 por import faltante o ciclo, un fixture nominal sin coma y una prueba
+de cursor que omitía `tokens.l`. El caso de nombres privados homónimos se
+verifica directamente con Stage 1+LIR+ejecutable, ya que Stage 0 conserva
+la limitación de namespace global. No se ocultan pruebas ni se afirma que
+Stage 0 haya resuelto esa limitación.
+Ver `docs/SELF_HOSTING_MODULE_CURSOR_REGRESSIONS.md`.
+
+Verificación de las correcciones: 13/13 en `modules_l` y 8/8 en
+`self_hosting`; CI 3/3 aprobado en [43081976701](https://github.com/Joshua-EPR/ELE/actions/runs/43081976701).
+Se incorporó además `cargo test -p project-l --no-fail-fast -- --test-threads=1`
+como paso permanente de CI Windows (validación aún pendiente).
+La limitación Stage 0 de nombres privados homónimos queda rastreada en
+[issue #31](https://github.com/Joshua-EPR/ELE/issues/31).

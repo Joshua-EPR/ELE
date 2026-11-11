@@ -14,6 +14,8 @@ import sema
 import modules_l
 
 fn reportFileError(path: &Text, code: Int) -> Int {
+    // loadModuleRecursive has already reported the import path/cycle.
+    if code == -14 { return 1 }
     if code == 1 {
         printError("{path}: ruta o límite inválido")
         return 2

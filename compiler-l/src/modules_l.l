@@ -144,7 +144,9 @@ fn loadModuleRecursive(
 ) -> Int {
     if listTextIndexOf(loading_stack, path) >= 0 {
         printError("error[L0014]: ciclo de dependencias detectado: {path}")
-        return 1
+        // A loader diagnostic has already been printed: avoid attributing
+        // it to the entry file a second time as an unrelated path error.
+        return -14
     }
     if listTextIndexOf(loaded_paths, path) >= 0 {
         return 0
@@ -225,6 +227,12 @@ fn loadModuleRecursive(
         }
         Err(code) => {
             loading_stack.pop()
+            if loading_stack.length > 0 {
+                // A missing dependency is an import error, not an absent
+                // entry file. Attribute it to the actual dependency path.
+                printError("error[L0014]: no se pudo importar {path} (archivo: {code})")
+                return -14
+            }
             return code
         }
     }
