@@ -40,6 +40,54 @@ fn nativeListExit(code: &mut X64Code, status: Int) {
     x64Syscall(&mut code)
 }
 
+// The comparison helpers emit 0 for valid, 1 for a violation in RAX.
+fn nativeListRejectFlag(code: &mut X64Code) {
+    x64TestRax(&mut code)
+    let sane = x64ConditionalPlaceholder(&mut code, true)
+    nativeListExit(&mut code, 127)
+    x64PatchRelative(&mut code, sane, code.bytes.length)
+}
+
+// Guard the *whole* list metadata on every read/write/pop. In particular,
+// length must not be negative, capacity must not exceed the bounded heap,
+// and capacity*8 must match the actual owner allocation. A corrupted cap
+// must never make an index look valid beyond the physical mapped bytes.
+fn nativeListGuard(code: &mut X64Code, s: &NativeIntListSlots) {
+    heapOwnerPtr(&mut code, s.ptr, s.live)
+    x64LoadSlot(&mut code, 0, s.len)
+    x64MovImm64(&mut code, 1, 0)
+    x64CmpReg(&mut code, 0, 1)
+    x64SetCondition(&mut code, 6) // len < 0
+    nativeListRejectFlag(&mut code)
+
+    x64LoadSlot(&mut code, 0, s.cap)
+    x64MovImm64(&mut code, 1, 1)
+    x64CmpReg(&mut code, 0, 1)
+    x64SetCondition(&mut code, 6) // cap < 1
+    nativeListRejectFlag(&mut code)
+
+    x64LoadSlot(&mut code, 0, s.cap)
+    x64MovImm64(&mut code, 1, 131072)
+    x64CmpReg(&mut code, 0, 1)
+    x64SetCondition(&mut code, 8) // cap > maximum
+    nativeListRejectFlag(&mut code)
+
+    x64LoadSlot(&mut code, 0, s.len)
+    x64LoadSlot(&mut code, 1, s.cap)
+    x64CmpReg(&mut code, 0, 1)
+    x64SetCondition(&mut code, 8) // len > cap
+    nativeListRejectFlag(&mut code)
+
+    x64LoadSlot(&mut code, 0, s.cap)
+    x64MovImm64(&mut code, 1, 8)
+    x64MulReg(&mut code, 0, 1)
+    x64LoadSlot(&mut code, 1, s.bytes)
+    x64CmpReg(&mut code, 0, 1)
+    let equal = x64ConditionalPlaceholder(&mut code, true)
+    nativeListExit(&mut code, 127)
+    x64PatchRelative(&mut code, equal, code.bytes.length)
+}
+
 // Initialize empty list with fixed initial capacity, 1..131072 Ints.
 pub fn nativeListInit(code: &mut X64Code, s: &NativeIntListSlots, initial: Int) {
     if !nativeListSlotsValid(s) || initial < 1 || initial > 131072 {
@@ -60,15 +108,7 @@ pub fn nativeListInit(code: &mut X64Code, s: &NativeIntListSlots, initial: Int) 
 // Never write to [ptr + len*8] unless capacity has been secured.
 pub fn nativeListPush(code: &mut X64Code, s: &NativeIntListSlots, value: Int) {
     if code.error != 0 { return }
-    heapOwnerPtr(&mut code, s.ptr, s.live)
-    x64LoadSlot(&mut code, 0, s.len)
-    x64LoadSlot(&mut code, 1, s.cap)
-    x64CmpReg(&mut code, 0, 1)
-    x64SetCondition(&mut code, 8) // corrupted len > cap
-    x64TestRax(&mut code)
-    let sane = x64ConditionalPlaceholder(&mut code, true)
-    nativeListExit(&mut code, 127)
-    x64PatchRelative(&mut code, sane, code.bytes.length)
+    nativeListGuard(&mut code, s)
 
     x64LoadSlot(&mut code, 0, s.len)
     x64LoadSlot(&mut code, 1, s.cap)
@@ -109,7 +149,7 @@ pub fn nativeListPush(code: &mut X64Code, s: &NativeIntListSlots, value: Int) {
 // Return element at a constant index in RAX; exit 127 on out-of-bounds.
 pub fn nativeListRead(code: &mut X64Code, s: &NativeIntListSlots, index: Int) {
     if index < 0 || index >= 131072 { code.error = 42; return }
-    heapOwnerPtr(&mut code, s.ptr, s.live)
+    nativeListGuard(&mut code, s)
     x64MovImm64(&mut code, 1, index)
     x64LoadSlot(&mut code, 2, s.len)
     x64CmpReg(&mut code, 1, 2)
@@ -126,7 +166,7 @@ pub fn nativeListRead(code: &mut X64Code, s: &NativeIntListSlots, index: Int) {
 
 // Remove the last initialized Int and return its value in RAX.
 pub fn nativeListPop(code: &mut X64Code, s: &NativeIntListSlots) {
-    heapOwnerPtr(&mut code, s.ptr, s.live)
+    nativeListGuard(&mut code, s)
     x64LoadSlot(&mut code, 0, s.len)
     x64TestRax(&mut code)
     let valid = x64ConditionalPlaceholder(&mut code, false)
@@ -145,6 +185,7 @@ pub fn nativeListPop(code: &mut X64Code, s: &NativeIntListSlots) {
 }
 
 pub fn nativeListDrop(code: &mut X64Code, s: &NativeIntListSlots) {
+    nativeListGuard(&mut code, s)
     heapOwnerDrop(&mut code, s.ptr, s.bytes, s.live)
     x64MovImm64(&mut code, 0, 0)
     x64StoreSlot(&mut code, s.len, 0)
