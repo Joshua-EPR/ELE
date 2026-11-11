@@ -70,7 +70,10 @@ flow main() => Int {
 "#;
     let ast = parser::parse(lexer::lex(source).unwrap()).unwrap();
     assert_eq!(ast.impls[0].trait_name.as_deref(), Some("Readable"));
-    assert_eq!(ast.functions[0].type_params[0].bound.as_deref(), Some("Readable"));
+    assert_eq!(
+        ast.functions[0].type_params[0].bound.as_deref(),
+        Some("Readable")
+    );
     check(source).unwrap();
 }
 
@@ -102,10 +105,8 @@ flow main() => Int {
 
 #[test]
 fn old_angle_generics_remain_available_for_bootstrap() {
-    check(
-        "fn identity<T>(value: T) -> T = value\nfn main() -> Int { return identity<Int>(42) }",
-    )
-    .unwrap();
+    check("fn identity<T>(value: T) -> T = value\nfn main() -> Int { return identity<Int>(42) }")
+        .unwrap();
 }
 
 #[test]
