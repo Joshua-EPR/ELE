@@ -12,7 +12,7 @@ fn parserSynchronize(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexT
     cursor.pos += 1
     while cursor.pos < tokens.length {
         let tok = &tokens[cursor.pos]
-        match tok.kind {
+        match &tok.kind {
             LexKind.Eof => { return }
             LexKind.Symbol => {
                 let len = tok.end - tok.start
