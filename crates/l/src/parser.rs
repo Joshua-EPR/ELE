@@ -231,7 +231,7 @@ fn canonical_ele_keyword(word: &str) -> &str {
         "during" => "while",
         "repeat" => "loop",
         "leave" => "break",
-        "next" => "continue",
+        "proceed" => "continue",
         "this" => "self",
         "exclusive" => "mut",
         "direct" => "static",
