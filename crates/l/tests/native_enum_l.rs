@@ -91,7 +91,7 @@ fn enum_payload_wrong_active_is_guarded_before_read() {
     );
     let bytes = fs::read(&output).unwrap();
     assert!(bytes.len() > 4096, "missing native instructions");
-    assert_eq!(&bytes[..7], b"\\x7fELF\\x02\\x01\\x01");
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
