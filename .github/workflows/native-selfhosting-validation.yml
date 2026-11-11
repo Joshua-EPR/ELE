@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, feat/ele-original-syntax-v2]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax]
+    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax, feat/ele-v2-stage1-of-types]
   workflow_dispatch:
 
 concurrency:
@@ -66,6 +66,7 @@ jobs:
             target/stage1-tests/native-enum-payload-stage1/payload.elf
             target/stage1-tests/native-enum-wrong-active/wrong-active.elf
             target/stage1-tests/ele-syntax-v2/syntax.elf
+            target/stage1-tests/ele-nested-nominal/nested-match.elf
             target/stage1-tests/native-cfg-loop/loop.elf
             target/stage1-tests/native-struct-source/struct.elf
             target/stage1-tests/native-nested-struct/nested.elf
@@ -104,6 +105,7 @@ jobs:
           for name, expected in [
               ("payload.elf", 42),
               ("syntax.elf", 42),
+              ("nested-match.elf", 42),
               ("wrong-active.elf", 126),
               ("loop.elf", 8),
               ("struct.elf", 42),
