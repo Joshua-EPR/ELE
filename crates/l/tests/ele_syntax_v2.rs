@@ -70,6 +70,14 @@ fn at_field_without_call_is_not_an_implicit_field_access() {
 }
 
 #[test]
+fn view_edit_source_has_distinct_borrow_modes() {
+    let source = include_str!("../../../examples/ele_borrow_syntax.l");
+    let ast = parser::parse(lexer::lex(source).unwrap()).unwrap();
+    assert_eq!(ast.functions.len(), 3);
+    check(source).unwrap();
+}
+
+#[test]
 fn legacy_spelling_is_temporarily_parseable() {
     check("fn main() -> Int { let n = 42\n return n }").unwrap();
 }
