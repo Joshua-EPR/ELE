@@ -329,7 +329,7 @@ fn nested_nominal_choose_from_real_ele_source_compiles_to_elf() {
     );
     let bytes = fs::read(&elf_file).unwrap();
     assert!(bytes.len() > 4096);
-    assert_eq!(&bytes[..7], b"\\x7fELF\\x02\\x01\\x01");
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
 }
 
 #[test]
@@ -340,7 +340,7 @@ fn enum_match_rejects_literal_and_multiple_payload_binders() {
         ("expression_pattern.l", "Estado.Si(v+1)"),
     ] {
         let source = format!(
-            "choice Estado {{ No, Si(Int) }}\\nflow main() => Int {{\\n hold e = Estado@Si(40)\\n choose e {{ Estado.No: {{ give 0 }}, {pattern}: {{ give 1 }} }}\\n give 2\\n}}\\n"
+            "choice Estado {{ No, Si(Int) }}\nflow main() => Int {{\n hold e = Estado@Si(40)\n choose e {{ Estado.No: {{ give 0 }}, {pattern}: {{ give 1 }} }}\n give 2\n}}\n"
         );
         reject_match_source(file, &source);
     }
