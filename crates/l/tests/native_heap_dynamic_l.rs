@@ -98,7 +98,7 @@ fn list_generator() -> &'static Path {
 
 #[test]
 fn native_int_buffer_push_grow_read_pop_and_drop_are_checked_in_elf() {
-    for mode in ["p", "g", "t", "o", "e", "d", "b"] {
+    for mode in ["p", "g", "t", "o", "e", "d", "b", "c", "k", "q"] {
         let image = export_case(list_generator(), "list", mode);
         assert!(
             image[4096..].windows(2).any(|b| b == [0x0f, 0x05]),
