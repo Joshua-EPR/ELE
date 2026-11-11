@@ -110,14 +110,48 @@ expose flow cfgParamNeedsMut(p: view CfgProgram, f: Int, v: Int) => Bool {
 
 // Two call arguments name overlapping storage. A by-value argument covers
 // its whole variable; constants overlap nothing.
-flow cfgArgsOverlap(p: view CfgProgram, a: Int, b: Int) => Bool {
+// A local reference is an alias of its borrowed storage, not its own slot.
+// Dynamic indices are conservatively treated as potentially overlapping.
+flow cfgArgsOverlap(p: view CfgProgram, f: Int, a: Int, b: Int) => Bool {
     when !p.call_args[a].is_var || !p.call_args[b].is_var { give false }
-    when p.call_args[a].value != p.call_args[b].value { give false }
-    hold fa = p.call_field[a]
-    hold fb = p.call_field[b]
+    hold first = p.functions[f].first_var
+    hold params = p.functions[f].params
+    change va = p.call_args[a].value
+    change vb = p.call_args[b].value
+    change fa = p.call_field[a]
+    change fb = p.call_field[b]
+    change sa = p.call_sub[a]
+    change sb = p.call_sub[b]
+    when p.call_ref[a] >= 0 && va >= params && p.var_ref[first + va] {
+        hold origin = first + va
+        hold field = p.ref_field[origin]
+        when field >= 0 {
+            when p.ref_sub[origin] >= 0 { sa = p.ref_sub[origin] }
+            otherwise { sa = fa }
+            fa = field
+        } otherwise {
+            fa = -1
+            sa = -1
+        }
+        va = p.ref_root[origin]
+    }
+    when p.call_ref[b] >= 0 && vb >= params && p.var_ref[first + vb] {
+        hold origin = first + vb
+        hold field = p.ref_field[origin]
+        when field >= 0 {
+            when p.ref_sub[origin] >= 0 { sb = p.ref_sub[origin] }
+            otherwise { sb = fb }
+            fb = field
+        } otherwise {
+            fb = -1
+            sb = -1
+        }
+        vb = p.ref_root[origin]
+    }
+    // Unknown origins must never count as a proof of disjointness.
+    when va < 0 || vb < 0 { give true }
+    when va != vb { give false }
     when fa >= 0 && fb >= 0 && fa != fb { give false }
-    hold sa = p.call_sub[a]
-    hold sb = p.call_sub[b]
     when fa >= 0 && fb >= 0 && sa >= 0 && sb >= 0 && sa != sb { give false }
     give true
 }
@@ -146,7 +180,7 @@ expose flow cfgCheckCallArgs(p: view CfgProgram, f: Int, inst: view CfgInst) => 
         each m among 0..n {
             hold other = inst.arg_first + m
             hold other_mode = p.call_ref[other]
-            when cfgArgsOverlap(p, other, k) {
+            when cfgArgsOverlap(p, f, other, k) {
                 when mode == 1 || other_mode == 1 { give 99 }
                 when mode < 0 && other_mode >= 0 && cfgIsMove(cfgArgType(p, f, k)) { give 99 }
                 when other_mode < 0 && mode >= 0 && cfgIsMove(cfgArgType(p, f, other)) { give 99 }

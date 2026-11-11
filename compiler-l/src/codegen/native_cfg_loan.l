@@ -95,8 +95,18 @@ flow cfgWriteKills(p: view CfgProgram, f: Int, l: Int, w: Int, wf: Int, ws: Int)
 expose flow cfgLoanKilledBy(p: view CfgProgram, f: Int, inst: view CfgInst, l: Int) => Bool {
     hold kind = inst.kind
     hold writes = kind == 6 || kind == 12 || kind == 17 || kind == 19 || kind == 20
-    when writes || (kind == 22 && inst.op == 1 && inst.dst != l) {
+    when writes {
         when cfgWriteKills(p, f, l, inst.place_var, inst.place_field, inst.place_subfield) { give true }
+    }
+    when kind == 22 && inst.dst != l {
+        hold first = p.functions[f].first_var
+        // A shared loan also invalidates an overlapping older exclusive
+        // loan: otherwise two usable references alias the same storage.
+        when inst.op == 1 || p.ref_mut[first + l] == 1 {
+            // Reborrowing directly through l must suspend its old access.
+            when inst.place_var == l { give true }
+            when cfgWriteKills(p, f, l, inst.place_var, inst.place_field, inst.place_subfield) { give true }
+        }
     }
     when kind == 3 {
         each n among 0..inst.argc {
