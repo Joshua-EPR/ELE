@@ -92,6 +92,19 @@ fn check_native_program(name: &str, source: &str, expected_stdout: &str) {
 }
 
 #[test]
+fn test_ele_v2_generic_of_executes_on_both_backends() {
+    let source = r#"
+flow identity of[T](value: T) => T = value
+
+flow main() {
+    hold value = identity of[Int](42)
+    print(value)
+}
+"#;
+    check_native_program("ele_v2_generic_of", source, "42\n");
+}
+
+#[test]
 fn test_generic_functions() {
     let source = r#"
 fn id<T>(x: T) -> T = x
