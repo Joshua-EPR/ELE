@@ -274,10 +274,11 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         // a field whose value was moved or released (native_cfg_paths).
         if inst.kind == 5 && cfgOwnsHeap(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
         if inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) { p.error = 95 }
-        // Through an extension (a list element, or deeper than the tracked
-        // move paths) a read is a copy and a store an overwrite: both are
-        // sound only for values that own no heap storage.
-        if p.error == 0 && inst.place_ext >= 0 && cfgOwnsHeap(p, ty) { p.error = 103 }
+        // Moving an owner out of an indexed place is not tracked by move
+        // paths. A store releases the old element before transferring its
+        // replacement; the source cannot be the collection itself.
+        if p.error == 0 && inst.kind == 5 && inst.place_ext >= 0 && cfgOwnsHeap(p, ty) { p.error = 103 }
+        if p.error == 0 && inst.kind == 6 && inst.place_ext >= 0 && cfgOwnsHeap(p, ty) && inst.a.is_var && inst.a.value == inst.place_var { p.error = 104 }
     }
     if p.error == 0 { p.insts.push(inst) }
 }

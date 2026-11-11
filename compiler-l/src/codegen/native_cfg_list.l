@@ -21,15 +21,15 @@ import native_cfg_types
 // - `listlit` and `listpush` move their operands into the buffer;
 // - an element is reached only through a place extension (`[vN]`), which
 //   is bounds-checked at run time (exit 127) and never moves ownership: a
-//   heap-free element is copied out or overwritten, an element that owns
-//   heap storage can only be borrowed (print, append, len, byteat and
-//   reference arguments) until `listpop` exists;
+//   heap-free element is copied out or overwritten. An element that owns
+//   heap storage can be borrowed or replaced (the old value is dropped);
+//   moving it out still waits for `listpop`;
 // - no reference to an element outlives the instruction or the call that
 //   created it, so growing a list never invalidates a live reference.
 //
 // Rejection codes: 100 malformed list declaration, 102 malformed list
-// instruction or operand type, 103 move of an owning value out of or over
-// an element, 104 a list pushed into itself.
+// instruction or operand type, 103 move of an owning value out of an
+// element, 104 a list pushed or stored into itself.
 
 expose flow cfgListType(p: view CfgProgram, k: Int) => Int {
     give 2 + p.decl_structs + p.decl_enums + k

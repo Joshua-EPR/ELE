@@ -221,6 +221,16 @@ fn compiles_real_flow_cfg_functions_natively() {
 }
 
 #[test]
+fn unsupported_list_pop_match_reports_a_diagnostic_not_an_ice() {
+    let source = "flow main() {\n    change xs: List of[Int] = List[1, 2]\n    hold x = xs@pop()\n    match x {\n        Some(v) => { print(v) }\n        None => { print(0) }\n    }\n}\n";
+    let out = emit_lir("list_pop_option_unsupported", source, "--emit-lir");
+    assert_ne!(out.code, Some(0));
+    assert!(out.stdout.is_empty(), "{}", out.stdout);
+    assert!(out.stderr.contains("error[L0016]"), "{}", out.stderr);
+    assert!(!out.stderr.contains("error[ICE]"), "{}", out.stderr);
+}
+
+#[test]
 fn list_type_and_ownership_errors_are_diagnostics() {
     let cases = [
         (
@@ -244,10 +254,6 @@ fn list_type_and_ownership_errors_are_diagnostics() {
             "fn main() { let xs = List[\"a\"]; let x = xs[0]; print(x) }",
         ),
         (
-            "owned_element_replace",
-            "fn main() { var xs = List[\"a\"]; xs[0] = \"b\" }",
-        ),
-        (
             "borrowed_growth",
             "fn main() { var xs = List[1]; let r = &xs[0]; xs.push(2); print(r) }",
         ),
@@ -261,6 +267,18 @@ fn list_type_and_ownership_errors_are_diagnostics() {
             out.stderr
         );
     }
+}
+
+#[test]
+fn owned_list_element_replacement_emits_a_typed_store() {
+    let source = "fn main() { var xs = List[\"a\"]; xs[0] = \"b\"; print(xs[0]) }";
+    let out = emit_lir("owned_element_replace", source, "--emit-lir");
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert!(
+        out.stdout.contains("i store p") && out.stdout.contains("[v"),
+        "{}",
+        out.stdout
+    );
 }
 
 #[test]

@@ -29,6 +29,14 @@ fn cfgPlaceKind(p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int
 // The place may be reached through a reference parameter or a list index.
 fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: &NativeOperand, fix: &mut CfgFix) {
     let ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
+    if ext >= 0 && cfgOwnsHeap(p, ty) {
+        // Indexed owners have no partial-move flag: the old element is live.
+        // Drop it before loading the source, then recompute the address since
+        // drop glue may clobber caller-saved registers.
+        cfgPlaceAddressRax(&mut code, p, f, variable, field, subfield, ext, &mut fix)
+        x64MovReg(&mut code, 7, 0)
+        cfgDropAt(&mut code, &mut fix, ty)
+    }
     if ty == cfgTextType() {
         // A Text operand, variable or literal, into the field.
         cfgTextWords(&mut code, p, f, value, &mut fix)

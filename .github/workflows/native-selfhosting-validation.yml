@@ -146,6 +146,7 @@ jobs:
             examples/native_list_int_stage1.expected
             examples/native_list_owned_stage1.expected
             examples/native_loans_stage1.expected
+            examples/native_list_replace_stage1.expected
           if-no-files-found: error
           retention-days: 3
       - name: Comprobar mmap/munmap de Text en shape amplio (Linux)
@@ -184,6 +185,7 @@ jobs:
               "native_list_int_stage1",
               "native_list_owned_stage1",
               "native_loans_stage1",
+              "native_list_replace_stage1",
           ):
               image = Path("target/stage1-tests/native-list") / f"{name}.elf"
               trace = Path("target/stage1-tests/native-list") / f"{name}.strace"
@@ -274,12 +276,14 @@ jobs:
               ("native_list_int_stage1.elf", 0),
               ("native_list_owned_stage1.elf", 0),
               ("native_loans_stage1.elf", 0),
+              ("native_list_replace_stage1.elf", 0),
               ("native_cfg_list_index_ok.elf", 2),
               ("native_cfg_list_elem_ref_ok.elf", 42),
               ("native_cfg_loan_ok.elf", 42),
               ("native_cfg_list_index_oob.elf", 127),
               ("native_cfg_list_index_negative.elf", 127),
               ("native_cfg_list_reserve_negative.elf", 123),
+              ("native_cfg_list_elem_store_owned.elf", 0),
               # view/edit references, Text queries and checked arithmetic.
               ("native_refs_stage1.elf", 0),
               ("native_text_query_stage1.elf", 0),
@@ -323,6 +327,7 @@ jobs:
                   "native_list_int_stage1.elf",
                   "native_list_owned_stage1.elf",
                   "native_loans_stage1.elf",
+                  "native_list_replace_stage1.elf",
               }:
                   expected_output = next(directory.rglob(name.removesuffix(".elf") + ".expected")).read_bytes().replace(b"\r\n", b"\n")
                   assert result.stdout == expected_output, f"{name}: stdout differs from Stage 0"

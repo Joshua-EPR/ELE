@@ -5,7 +5,7 @@
 Trabajo activo: `feat/native-list-cfg`, basado en `c8dfc81`. El resto de este
 documento recoge traspasos históricos y menciona ramas y cifras antiguas.
 La validación del commit y las correcciones pasó `cargo fmt --all --check`,
-Clippy con `-D warnings` y la suite completa Windows/MSVC: 524 aprobadas,
+Clippy con `-D warnings` y la suite completa Windows/MSVC: 526 aprobadas,
 0 fallidas y 3 ignoradas. El contrato Python de enums se actualizó
 porque el lector de instrucciones se trasladó a `native_cfg_inst.l` y el de
 tipos a `native_cfg_types.l`; se corrigieron además problemas CRLF y UTF-8
@@ -18,8 +18,10 @@ backend ELE/ELF64 1 como entradas independientes. Véanse también
 
 `stash@{0}` y el worktree `ELE-baseline` siguen intactos. WSL devuelve
 «Acceso denegado», así que falta ejecución Linux local. Quedan pendientes
-`listpop`, sobrescritura de propietarios y `dropfield` mediante referencias
-locales en el backend ELE. No se ha demostrado Stage 2/3 ni self-hosting.
+`listpop` y `dropfield` mediante referencias locales en el backend ELE.
+La sobrescritura de propietarios ya emite ELF64 y tiene paridad Stage 0 en
+Windows; falta ejecución Linux del nuevo caso. No se ha demostrado Stage 2/3
+ni self-hosting.
 
 Última actualización el 2026-11-10 en `dev/ele-self-hosting-lir`.
 El incremento vigente está en §35 (LIR de ELE y backend provisional).

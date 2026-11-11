@@ -3,8 +3,9 @@
 > Actualización 2026-11-11: el backend ELE de `feat/native-list-cfg`
 > verifica `list lN`, `i listlit`, `i listpush`, `i listreserve`, `i cap`,
 > lugares indexados y `i loan` en el subconjunto probado por
-> `crates/l/tests/native_list_l.rs`. `i listpop` se serializa desde Stage 1,
-> pero el backend ELE aún no lo acepta. Véase
+> `crates/l/tests/native_list_l.rs`. Existe código para serializar
+> `i listpop`, pero Stage 1 aún no representa su resultado `Option<T>` en
+> ELE-LIR ni el backend ELE lo acepta. Véase
 > [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md). Las notas
 > históricas inferiores describen el estado de fases anteriores.
 

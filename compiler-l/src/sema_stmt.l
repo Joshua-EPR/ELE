@@ -93,9 +93,6 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             lirDiscard(&mut ctx)
             let referent = semaRefElem(ctx, target_t)
             if referent >= 0 { target_t = referent }
-            if indexed && semaNeedsDrop(&mut ctx, source, tree, target_t) {
-                semaAddError(&mut ctx, "L0016", "reemplazo de elemento propietario aún no verificado", stmt.start, stmt.end)
-            }
             if target < 0 {
                 semaAddError(&mut ctx, "L0016", "destino de asignación no verificado", stmt.start, stmt.end)
             } else {

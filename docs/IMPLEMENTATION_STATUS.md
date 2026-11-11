@@ -4,12 +4,13 @@
 > históricos. En `feat/native-list-cfg` (`c8dfc81`) se verificaron 5/5
 > pruebas `native_list_l.rs` en MSVC para el subconjunto nativo de listas y
 > préstamos locales. `cargo fmt --all --check` y Clippy con `-D warnings`
-> pasan. La suite global Windows/MSVC terminó con 524 aprobadas, 0 fallidas
+> pasan. La suite global Windows/MSVC terminó con 526 aprobadas, 0 fallidas
 > y 3 ignoradas. La matriz de autocobertura de 89 fuentes está en
 > [SELF_COVERAGE_MATRIX_2026-11-11.md](SELF_COVERAGE_MATRIX_2026-11-11.md).
-> `listpop`, sobrescritura de
-> elementos propietarios y `dropfield` a través de referencias locales
-> siguen sin soporte en el backend ELE. No hay Stage 2 ni Stage 3. Consulte
+> La sobrescritura de elementos propietarios emite ELF64 en MSVC y tiene
+> paridad Stage 0; su ejecución Linux sigue pendiente. `listpop` y
+> `dropfield` a través de referencias locales siguen sin soporte en el
+> backend ELE. No hay Stage 2 ni Stage 3. Consulte
 > [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md).
 
 > Rama `dev/self-hosting-parser`. Parser autónomo completo en L con gramática Pratt,

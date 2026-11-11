@@ -71,6 +71,10 @@ fn lists_and_local_loans_match_stage0() {
             "native_loans_stage1",
             &["i loan v", " 0 @", " 1 @", "i print ref p"][..],
         ),
+        (
+            "native_list_replace_stage1",
+            &["i store p", "[v", "i drop v"][..],
+        ),
     ] {
         let emitted = Command::new(sema())
             .arg(root().join(format!("examples/{name}.l")))
@@ -120,6 +124,7 @@ fn accepted_list_fixtures_run_and_trap() {
         ("native_cfg_list_index_oob", 127),
         ("native_cfg_list_index_negative", 127),
         ("native_cfg_list_reserve_negative", 123),
+        ("native_cfg_list_elem_store_owned", 0),
     ] {
         let image = temp(&format!("{fixture}.elf"));
         let out = backend(&root().join(format!("examples/{fixture}.lir")), &image);
@@ -146,13 +151,13 @@ fn unsound_list_and_loan_lir_is_rejected() {
         ("native_cfg_list_double_drop.lir", 57),
         ("native_cfg_list_use_after_move.lir", 57),
         ("native_cfg_list_index_uninit.lir", 57),
-        // An element that owns memory is neither copied out nor overwritten.
+        // An element that owns memory cannot be copied out.
         ("native_cfg_list_elem_move.lir", 103),
-        ("native_cfg_list_elem_store_owned.lir", 103),
         ("native_cfg_list_dropfield_index.lir", 92),
         // Types and shape of the instructions.
         ("native_cfg_list_push_type.lir", 102),
         ("native_cfg_list_push_self.lir", 104),
+        ("native_cfg_list_elem_store_root.lir", 104),
         ("native_cfg_list_bad_decl.lir", 100),
         ("native_cfg_list_index_nonlist.lir", 33),
         ("native_cfg_list_index_bool.lir", 33),
@@ -187,10 +192,10 @@ fn unsound_list_and_loan_lir_is_rejected() {
 
 /// Stage 1 binds the variable of `each` over owning elements as a reference:
 /// the body cannot move the element out nor grow the collection, as in
-/// Stage 0. Before, Stage 1 copied the element and emitted LIR that owned
-/// the same Text twice.
+/// Stage 0. A live element loan also forbids replacing its owner. Before,
+/// Stage 1 copied the `each` element and emitted LIR owning Text twice.
 #[test]
-fn stage1_rejects_moving_or_growing_inside_each() {
+fn stage1_rejects_invalid_list_loans() {
     for (name, source, code) in [
         (
             "each_move",
@@ -200,6 +205,11 @@ fn stage1_rejects_moving_or_growing_inside_each() {
         (
             "each_grow",
             "flow main() {\n    change ts: List of[Text] = List[\"a{1}\", \"b{2}\"]\n    each t among ts {\n        ts@push(\"x\")\n        print(t)\n    }\n}\n",
+            "L0012",
+        ),
+        (
+            "overwrite_loan",
+            "flow main() {\n    change xs: List of[Text] = List[\"old\"]\n    hold r = view xs[0]\n    xs[0] = \"new\"\n    print(r)\n}\n",
             "L0012",
         ),
     ] {
