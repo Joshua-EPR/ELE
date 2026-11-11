@@ -23,8 +23,8 @@ fn main() -> Int {
     if processArgCount() != 2 { return 2 }
     match processArg(0) {
         Ok(mode) => {
-            let normal = mode.length == 2 && mode.byteAt(0) == 111 && mode.byteAt(1) == 107
-            let bad = mode.length == 3 && mode.byteAt(0) == 98 && mode.byteAt(1) == 97 && mode.byteAt(2) == 100
+            let normal = mode.byteLength == 2 && mode.byteAt(0) == 111 && mode.byteAt(1) == 107
+            let bad = mode.byteLength == 3 && mode.byteAt(0) == 98 && mode.byteAt(1) == 97 && mode.byteAt(2) == 100
             if !normal && !bad { return 3 }
             var code = x64New()
             x64FrameBegin(&mut code, 2)
