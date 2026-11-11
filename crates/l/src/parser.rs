@@ -1486,7 +1486,7 @@ impl Parser {
         self.need("impl")?;
         let params = self.parse_type_params()?;
         let first = self.name()?;
-        let (trait_name, target, target_args) = if self.take("for") {
+        let (trait_name, target, target_args) = if self.take("for") || self.take("on") {
             let target = self.name()?;
             let mut target_args = Vec::new();
             if let Some(close) = self.generic_open() {
