@@ -33,7 +33,7 @@ jobs:
       - name: Verify ELE of[T] generic grammar and semantic checks
         run: cargo test -p project-l --test ele_generics_v2 -- --test-threads=1
       - name: Execute ELE generic of[T] through both native backends
-        if: runner.os == 'Linux'
+        if: runner.os == 'Windows'
         run: cargo test -p project-l --test generics_traits test_ele_v2_generic_of_executes_on_both_backends -- --test-threads=1
       - name: Verify syntax and bootstrap regression cases
         run: cargo test -p project-l --test ele_syntax_regressions -- --test-threads=1
