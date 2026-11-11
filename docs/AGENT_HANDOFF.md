@@ -1340,3 +1340,13 @@ diagnósticos con el archivo real de cada módulo (`Span.file`) y fin del
 límite de 4096 tokens (límite de recursos 2^20 y pila de compilador de
 256 MiB, que además corrige el desbordamiento con 30 sumas encadenadas).
 Los módulos de `compiler-l/src` ya no necesitan partirse por tokens.
+
+### Fase 8.7.8 — agregados por valor y movimientos parciales (2026-11-11)
+
+Rama `feat/native-aggregate-abi`, apilada sobre `fix/stage0-diagnostics-stacked`.
+Detalle en [ELE_NATIVE_BACKEND_PHASE_8_7_8.md](ELE_NATIVE_BACKEND_PHASE_8_7_8.md).
+`shape`/`choice` como parámetros, argumentos y resultados (puntero oculto) y
+movimientos parciales de campos con seguimiento por camino
+(`codegen/native_cfg_paths.l`). `native_aggregates_l` 3/3; ELF ejecutados en
+WSL con salida idéntica a Stage 0. Siguiente: Text dentro de agregados con
+drops por campo, préstamos locales y `List of[T]` en el lowering CFG.

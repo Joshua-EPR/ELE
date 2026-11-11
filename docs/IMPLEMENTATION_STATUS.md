@@ -1535,3 +1535,10 @@ El backend nativo experimental admite ahora `i payload vD pN eK V` para copiar u
 - **Pendiente:** préstamos locales, Text en agregados, agregados por valor
   en llamadas y retornos, `List of[T]`, comparación directa de Text.
   Ver [ELE_NATIVE_BACKEND_PHASE_8_7_7.md](ELE_NATIVE_BACKEND_PHASE_8_7_7.md).
+
+## Fase 8.7.8 — agregados por valor en el backend ELE (2026-11-11)
+
+`shape`/`choice` por valor en llamadas y retornos, y movimientos parciales
+con seguimiento por camino. Verificado: `native_aggregates_l` 3/3 y suites
+nativas previas sin regresión; ejecución Linux idéntica a Stage 0. Ver
+[ELE_NATIVE_BACKEND_PHASE_8_7_8.md](ELE_NATIVE_BACKEND_PHASE_8_7_8.md).

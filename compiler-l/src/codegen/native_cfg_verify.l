@@ -2,6 +2,7 @@ import native_cfg_types
 import native_cfg_defs
 import native_cfg_ir
 import native_cfg_ref
+import native_cfg_paths
 
 // Flow-sensitive definedness and whole-value move validation for the
 // restricted native backend. Every struct is MOVE-only in ELE even if it
@@ -22,10 +23,7 @@ fn cfgHasDst(inst: &CfgInst) -> Bool {
 }
 
 fn cfgResultType(func: &CfgFunc) -> Int {
-    if func.result_bool { return 1 }
-    if func.result_unit { return cfgUnitType() }
-    if func.result_text { return cfgTextType() }
-    return 0
+    return func.result_type
 }
 
 fn cfgMoveOperand(p: &CfgProgram, f: Int, op: &NativeOperand, variable: Int) -> Bool {
@@ -161,6 +159,67 @@ fn cfgCheckCalls(p: &CfgProgram) -> Int {
     return 0
 }
 
+// State of path `k` after `inst`, from its state before (see native_cfg_paths).
+fn cfgPathAfter(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, k: Int, before: Bool) -> Bool {
+    let v = paths.var_of[k]
+    var live = before
+    if cfgMoves(p, f, &inst, v) { live = false }
+    if inst.kind == 5 && inst.place_var == v && inst.place_field >= 0 {
+        let place = CfgPlace(variable: v, field: inst.place_field, subfield: inst.place_subfield)
+        if cfgPlaceType(p, f, &place) >= 2 && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
+    }
+    if inst.kind == 6 && inst.place_var == v && inst.place_field >= 0 {
+        if cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = true }
+    }
+    if cfgHasDst(inst) && inst.dst == v { live = true }
+    return live
+}
+
+fn cfgTransferPath(p: &CfgProgram, f: Int, paths: &CfgPaths, block: &CfgBlock, k: Int, initial: Bool) -> Bool {
+    var live = initial
+    for i in block.first..(block.first + block.count) {
+        let inst = &p.insts[i]
+        live = cfgPathAfter(p, f, paths, &inst, k, live)
+    }
+    return live
+}
+
+fn cfgWholeLive(paths: &CfgPaths, vars: Int, live: &List<Bool>, op: &NativeOperand) -> Bool {
+    if !op.is_var { return true }
+    return cfgPathsLive(paths, vars, live, op.value, -1, -1)
+}
+
+// Every place and whole value that `inst` uses still has its moved-out
+// paths initialized; a store needs only the enclosing field of a subfield.
+fn cfgPathUses(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, live: &List<Bool>) -> Bool {
+    let vars = p.functions[f].vars
+    if paths.var_of.length == 0 { return true }
+    if !cfgWholeLive(paths, vars, live, &inst.a) || !cfgWholeLive(paths, vars, live, &inst.b) { return false }
+    if !cfgWholeLive(paths, vars, live, &inst.c) || !cfgWholeLive(paths, vars, live, &inst.d) { return false }
+    if inst.kind == 3 {
+        for n in 0..inst.argc {
+            let k = inst.arg_first + n
+            let arg = &p.call_args[k]
+            if p.call_ref[k] < 0 {
+                if !cfgWholeLive(paths, vars, live, &arg) { return false }
+            } else if !cfgPathsLive(paths, vars, live, arg.value, p.call_field[k], p.call_sub[k]) {
+                return false
+            }
+        }
+    }
+    let reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15
+    if reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { return false }
+    let whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
+    if whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { return false }
+    if inst.kind == 6 && inst.place_subfield >= 0 {
+        for k in 0..paths.var_of.length {
+            let enclosing = paths.var_of[k] == inst.place_var && paths.field[k] == inst.place_field && paths.sub[k] < 0
+            if enclosing && !live[vars + k] { return false }
+        }
+    }
+    return true
+}
+
 fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
     let func = &p.functions[f]
     let blocks = func.blocks
@@ -190,12 +249,17 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
         }
     }
 
+    // Bits 0..vars are variables; bits vars.. are the move paths of their
+    // aggregate fields (native_cfg_paths). Parameters arrive whole.
+    let paths = cfgPathsOf(p, f)
+    let bits = vars + paths.var_of.length
     var inputs: List<Bool> = List[]
     var outputs: List<Bool> = List[]
     for b in 0..blocks {
-        for v in 0..vars {
+        for v in 0..bits {
             var initial = true
-            if b == 0 { initial = v < func.params }
+            if b == 0 && v < vars { initial = v < func.params }
+            if b == 0 && v >= vars { initial = paths.var_of[v - vars] < func.params }
             inputs.push(initial)
             outputs.push(true)
         }
@@ -204,25 +268,31 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
     var iterations = 0
     while changing {
         iterations += 1
-        if iterations > blocks * vars + blocks + 2 { return 56 }
+        if iterations > blocks * bits + blocks + 2 { return 56 }
         changing = false
         for b in 0..blocks {
             let block = &p.blocks[func.first_block + b]
-            for v in 0..vars {
+            for v in 0..bits {
                 var is_init = true
-                if b == 0 { is_init = v < func.params }
+                if b == 0 && v < vars { is_init = v < func.params }
+                if b == 0 && v >= vars { is_init = paths.var_of[v - vars] < func.params }
                 // Entry can also have backedges. Intersect with their
                 // states rather than assuming every iteration begins with
                 // fresh parameters; moving a parameter in a loop must not
                 // silently reinitialize it.
                 for pred in 0..blocks {
-                    if cfgEdge(p, f, pred, b) && !outputs[pred * vars + v] {
+                    if cfgEdge(p, f, pred, b) && !outputs[pred * bits + v] {
                         is_init = false
                     }
                 }
-                let slot = b * vars + v
+                let slot = b * bits + v
                 if inputs[slot] != is_init { inputs[slot] = is_init; changing = true }
-                let after = cfgTransferVar(p, f, &block, v, is_init)
+                var after = is_init
+                if v < vars {
+                    after = cfgTransferVar(p, f, &block, v, is_init)
+                } else {
+                    after = cfgTransferPath(p, f, &paths, &block, v - vars, is_init)
+                }
                 if outputs[slot] != after { outputs[slot] = after; changing = true }
             }
         }
@@ -231,13 +301,19 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
     for b in 0..blocks {
         let block = &p.blocks[func.first_block + b]
         var live: List<Bool> = List[]
-        for v in 0..vars { live.push(inputs[b * vars + v]) }
+        for v in 0..bits { live.push(inputs[b * bits + v]) }
         for i in block.first..(block.first + block.count) {
             let inst = &p.insts[i]
+            // A use of a moved-out field, or of a partially moved value.
+            if !cfgPathUses(p, f, &paths, &inst, &live) { return 57 }
+            for k in 0..paths.var_of.length {
+                live[vars + k] = cfgPathAfter(p, f, &paths, &inst, k, live[vars + k])
+            }
             let error = cfgValidateInstruction(p, f, &inst, &mut live)
             if error != 0 { return error }
         }
         if block.term == 1 || block.term == 3 {
+            if !cfgWholeLive(&paths, vars, &live, &block.value) { return 57 }
             let last = cfgTakeOperand(p, f, &block.value, &mut live)
             if last != 0 { return last }
         }

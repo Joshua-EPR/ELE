@@ -93,6 +93,9 @@ pub struct CfgFunc {
     result_bool: Bool
     result_unit: Bool
     result_text: Bool
+    // Result type code; an aggregate (>= 2) is written through the hidden
+    // result pointer that the caller pushes after the arguments.
+    result_type: Int
 }
 
 pub struct CfgProgram {

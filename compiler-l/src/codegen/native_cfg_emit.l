@@ -142,18 +142,36 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
                 x64PushReg(&mut code, 2)
                 x64PushReg(&mut code, 0)
                 words += 3
+            } else if cfgOperandType(p, f, &arg) >= 2 {
+                // A moved shape/choice: every word of its storage, last first.
+                let base = cfgVarBase(p, f, arg.value)
+                let count = p.slot_count[cfgVarIndex(p, f, arg.value)]
+                for w in 0..count {
+                    x64LoadMem64(&mut code, 0, 5, base + 8 * (count - 1 - w))
+                    x64PushReg(&mut code, 0)
+                }
+                words += count
             } else {
                 cfgLoadOperand(&mut code, p, f, &arg, 0)
                 x64PushReg(&mut code, 0)
                 words += 1
             }
         }
+        let result_type = p.functions[inst.callee].result_type
+        if result_type >= 2 {
+            // Hidden result pointer: the callee writes into the destination.
+            cfgPlaceAddressRax(&mut code, p, f, inst.dst, -1, -1)
+            x64PushReg(&mut code, 0)
+            words += 1
+        }
         cfgCall(&mut code, &mut fix, inst.callee)
         if words > 0 {
             x64MovImm64(&mut code, 10, words * 8)
             x64AddReg(&mut code, 4, 10)
         }
-        if p.types_code[cfgVarIndex(p, f, inst.dst)] == cfgTextType() {
+        if result_type >= 2 {
+            // Already stored through the hidden pointer.
+        } else if p.types_code[cfgVarIndex(p, f, inst.dst)] == cfgTextType() {
             cfgStoreText(&mut code, p, f, inst.dst)
         } else {
             x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
@@ -219,6 +237,11 @@ fn cfgEmitTerm(code: &mut X64Code, p: &CfgProgram, f: Int, block: &CfgBlock, fun
         if func.result_unit {
             // Unit has no representation; a unit `main` exits with status 0.
             x64MovImm64(&mut code, 0, 0)
+        } else if func.result_type >= 2 {
+            // Copy the aggregate through the hidden pointer at [RBP+16].
+            x64LoadMem64(&mut code, 11, 5, 16)
+            cfgCopyValue(&mut code, p, func.result_type, 11, 0, 5, cfgVarBase(p, f, block.value.value))
+            x64MovReg(&mut code, 0, 11)
         } else if func.result_text {
             // RAX, RDX, RCX: address, byte length, capacity.
             cfgTextWords(&mut code, p, f, &block.value, &mut fix)
@@ -246,7 +269,9 @@ fn cfgEmitTerm(code: &mut X64Code, p: &CfgProgram, f: Int, block: &CfgBlock, fun
 // Copies the stack arguments of a call into the parameter variables.
 fn cfgEmitParams(code: &mut X64Code, p: &CfgProgram, f: Int) {
     let func = &p.functions[f]
+    // An aggregate result's hidden pointer occupies the first stack word.
     var word = 0
+    if func.result_type >= 2 { word = 1 }
     for i in 0..func.params {
         let base = cfgVarBase(p, f, i)
         for k in 0..p.slot_count[func.first_var + i] {
