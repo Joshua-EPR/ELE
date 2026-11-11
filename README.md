@@ -20,6 +20,24 @@ y dinámico, con liberación determinista por drops), interpolación, control de
 match sobre Int/Bool/Text, funciones y print, y rechaza el resto con un error claro. Ambos
 producen ejecutables nativos autónomos; solo Windows x86-64/MSVC está probado.
 
+## Nueva sintaxis canónica de ELE (migración v2)
+
+La sintaxis pública de ELE ya no se diseña como un clon de Rust. Se ha comenzado a
+implementar una gramática propia con `flow`, `shape`, `extend`, `choice`,
+`choose`, `hold`, `change`, `give`, `=>`, y llamadas `objeto@metodo()`
+(los campos siguen siendo `objeto.campo`). La forma `choose` usa
+`Patron: { ... }` en vez de `match Patron => ...`. Stage 0 también reconoce
+los préstamos `view` y `edit`.
+
+**Importante:** este cambio está en migración; los antiguos keywords siguen
+siendo entendidos temporalmente para compilar Stage 1, el prelude y ejemplos
+existentes. El subconjunto de Stage 1 no admite aún todas las construcciones
+de Stage 0. Las funciones no se hacen más rápidas por cambiar su ortografía,
+ni esto elimina la dependencia de Rust/Cranelift para bootstrap.
+
+Ver la [especificación y estado exacto de ELE v2](docs/ELE_SYNTAX_V2.md)
+y el [ejemplo de código nuevo](examples/ele_original_syntax.l).
+
 ## Ejecutar en este equipo
 
 ```powershell
