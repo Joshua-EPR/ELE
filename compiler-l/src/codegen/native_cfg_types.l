@@ -82,7 +82,7 @@ pub fn cfgReadStruct(p: &mut CfgProgram, source: &Text, reader: &mut NativeReade
     nativeExpect(source, &mut reader, "fields")
     let count = nativeNumber(source, &mut reader)
     nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != sid || !cfgEncodedName(source, &name) || count < 1 || count > 4 {
+    if reader.error != 0 || id != sid || !cfgEncodedName(source, &name) || count < 1 || count > 64 {
         p.error = 60
         return
     }

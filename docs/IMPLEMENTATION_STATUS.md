@@ -1548,3 +1548,11 @@ nativas previas sin regresión; ejecución Linux idéntica a Stage 0. Ver
 Campos Text con movimiento, liberación por campo y reemplazo por `edit`.
 Verificado: `native_text_fields_l` 3/3; ejecución Linux idéntica a Stage 0 y
 reservas equilibradas. Ver [ELE_NATIVE_BACKEND_PHASE_8_7_9.md](ELE_NATIVE_BACKEND_PHASE_8_7_9.md).
+
+## Fase 8.7.10 — shapes de más de cuatro campos (pendiente de CI)
+
+i struct utiliza ahora tabla separada de operandos, con 1..64 campos
+y máximo de 512 bytes por layout. El verificador recorre y consume
+todos los operandos, preservando ownership. Añade pruebas de 6/17/64
+campos y rechazos. Sin soporte completo de List, préstamos locales,
+Stage 2, Stage 3 ni PE64. No declarar el compilador completo.

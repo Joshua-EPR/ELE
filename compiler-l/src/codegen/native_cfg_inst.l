@@ -54,11 +54,14 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.dst = nativeId(source, &mut reader, 118)
         inst.op = nativeId(source, &mut reader, 115)
         inst.argc = nativeNumber(source, &mut reader)
-        if inst.argc < 1 || inst.argc > 4 { p.error = 64 }
-        if inst.argc >= 1 && inst.argc <= 4 { inst.a = cfgOperand(&mut p, source, &mut reader) }
-        if inst.argc >= 2 && inst.argc <= 4 { inst.b = cfgOperand(&mut p, source, &mut reader) }
-        if inst.argc >= 3 && inst.argc <= 4 { inst.c = cfgOperand(&mut p, source, &mut reader) }
-        if inst.argc == 4 { inst.d = cfgOperand(&mut p, source, &mut reader) }
+        // Store all operands in order, independent from call references.
+        if inst.argc < 1 || inst.argc > 64 { p.error = 64 }
+        inst.arg_first = p.struct_args.length
+        if p.error == 0 {
+            for n in 0..inst.argc {
+                p.struct_args.push(cfgOperand(&mut p, source, &mut reader))
+            }
+        }
     } else if nativeEquals(source, &kind, "read") {
         inst.kind = 5
         inst.dst = nativeId(source, &mut reader, 118)
@@ -193,10 +196,15 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         if p.error == 0 {
             let st = &p.structs[inst.op]
             if inst.argc != st.fields { p.error = 65 }
-            if inst.argc >= 1 && first_type != p.fields[st.first_field].ty { p.error = 66 }
-            if inst.argc >= 2 && cfgOperandType(p, f, &inst.b) != p.fields[st.first_field + 1].ty { p.error = 66 }
-            if inst.argc >= 3 && cfgOperandType(p, f, &inst.c) != p.fields[st.first_field + 2].ty { p.error = 66 }
-            if inst.argc == 4 && cfgOperandType(p, f, &inst.d) != p.fields[st.first_field + 3].ty { p.error = 66 }
+            if p.error == 0 {
+                for n in 0..inst.argc {
+                    let arg = &p.struct_args[inst.arg_first + n]
+                    if cfgOperandType(p, f, &arg) != p.fields[st.first_field + n].ty {
+                        p.error = 66
+                        break
+                    }
+                }
+            }
         }
     }
     if inst.kind == 7 {

@@ -116,6 +116,8 @@ pub struct CfgProgram {
     variants: List<CfgVariant>
     blocks: List<CfgBlock>
     insts: List<CfgInst>
+    // Constructor operands for kind 4. Call arguments remain separate.
+    struct_args: List<NativeOperand>
     call_args: List<NativeOperand>
     // Per call argument: -1 by value, 0 shared and 1 exclusive reference.
     // A reference argument keeps its root variable in `call_args[k].value`
@@ -134,6 +136,6 @@ pub fn cfgEmptyOperand() -> NativeOperand {
 }
 
 pub fn cfgEmpty() -> CfgProgram {
-    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[])
+    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[])
 }
 
