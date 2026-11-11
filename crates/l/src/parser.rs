@@ -810,7 +810,9 @@ impl Parser {
             if self.at("if") {
                 return Err(self.error("feature not implemented: guardas en match"));
             }
-            self.need("=>")?;
+            if !self.take(":") {
+                self.need("=>")?;
+            }
             self.nl();
             let body = if self.at("{") {
                 self.block()?
