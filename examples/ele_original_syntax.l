@@ -10,7 +10,7 @@ flow sumar(x: Int) => Int {
 }
 
 flow main() => Int {
-    hold estado = Estado.Si(40)
+    hold estado = Estado@Si(40)
     choose estado {
         Estado.No: { give 1 },
         Estado.Si(v): { give sumar(v) },
