@@ -69,14 +69,19 @@ fn run() -> Result<u8, String> {
             _ => return Err(format!("opción desconocida: {flag}")),
         }
     }
-    let report = |e: project_l::Diagnostic| {
+    // A diagnostic names the module its span comes from; the entry file is
+    // only the fallback for spans without one (the prelude).
+    let report_in = |files: &[String], e: project_l::Diagnostic| {
+        let e = project_l::modules::attribute(e, files);
         let f = e.file.as_deref().unwrap_or(file);
         format!(
             "{f}:{}:{}: {} [{}]: {}",
             e.span.line, e.span.column, e.code, e.category, e.message
         )
     };
-    let ast = project_l::modules::load_program(Path::new(file)).map_err(report)?;
+    let (ast, files) =
+        project_l::modules::load_program_files(Path::new(file)).map_err(|e| report_in(&[], e))?;
+    let report = |e: project_l::Diagnostic| report_in(&files, e);
     if emit.contains(&"--emit-ast") {
         println!("{ast:#?}");
     }
@@ -276,7 +281,7 @@ fn build_rustc(ir: &project_l::lir::Program, stem: &std::ffi::OsStr) -> Result<P
 }
 
 fn main() -> ExitCode {
-    match run() {
+    match project_l::with_compiler_stack(run) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("{e}");

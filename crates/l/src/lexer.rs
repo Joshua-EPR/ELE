@@ -21,6 +21,23 @@ pub struct Token {
     pub span: Span,
 }
 
+/// Resource bound on the tokens of one source file. Tokens live in a
+/// growable vector, so this is not a structural limit: it only keeps a
+/// hostile or generated input from exhausting memory (each token takes about
+/// 64 bytes, so the bound is about 64 MiB per file). It is far above any
+/// real module: the largest source of the self-hosted compiler has well under
+/// 10 000 tokens. Nesting depth, the other resource that inputs control, has
+/// its own limit in the parser.
+pub const MAX_TOKENS: usize = 1 << 20;
+
+/// The diagnostic for a file over [`MAX_TOKENS`].
+pub fn too_many_tokens(span: Span) -> Diagnostic {
+    Diagnostic::new(
+        span,
+        format!("límite de recursos: el archivo supera {MAX_TOKENS} tokens; divida el módulo"),
+    )
+}
+
 struct Lexer {
     chars: Vec<char>,
     pos: usize,
@@ -28,12 +45,14 @@ struct Lexer {
     column: usize,
     tokens: Vec<Token>,
     depth: usize,
+    file: u32,
 }
 impl Lexer {
     fn span(&self) -> Span {
         Span {
             line: self.line,
             column: self.column,
+            file: self.file,
         }
     }
     fn peek(&self) -> Option<char> {
@@ -54,11 +73,8 @@ impl Lexer {
         }
     }
     fn emit(&mut self, kind: Kind, span: Span) -> Result<(), Diagnostic> {
-        if self.tokens.len() >= 4096 {
-            return Err(Diagnostic::new(
-                span,
-                "límite CORE-1 de 4096 tokens excedido",
-            ));
+        if self.tokens.len() >= MAX_TOKENS {
+            return Err(too_many_tokens(span));
         }
         self.tokens.push(Token { kind, span });
         Ok(())
@@ -328,6 +344,12 @@ impl Lexer {
 }
 
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
+    lex_file(source, 0)
+}
+
+/// Lexes the source of file `file` (see [`Span::file`]): every token span
+/// records it, so later diagnostics can name the module they come from.
+pub fn lex_file(source: &str, file: u32) -> Result<Vec<Token>, Diagnostic> {
     let mut lexer = Lexer {
         chars: source.chars().collect(),
         pos: 0,
@@ -335,6 +357,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         column: 1,
         tokens: Vec::new(),
         depth: 0,
+        file,
     };
     lexer
         .scan(None)
@@ -352,7 +375,7 @@ mod tests {
         assert!(matches!(tokens[0].kind, Kind::TextStart));
         assert!(matches!(tokens[2].kind, Kind::InterpolationStart));
         assert!(matches!(&tokens[3].kind, Kind::Word(s) if s == "x"));
-        assert_eq!(tokens[3].span, Span { line: 1, column: 4 });
+        assert_eq!(tokens[3].span, Span::at(1, 4));
         assert!(matches!(tokens[6].kind, Kind::InterpolationEnd));
     }
     #[test]

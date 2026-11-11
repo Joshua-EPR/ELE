@@ -2417,7 +2417,7 @@ fn lower_async_new(
     let handle = vars.len() - 1;
     vars.push(VarTy::Ref(Type::Struct(info.state)));
     let state = vars.len() - 1;
-    let span = Span { line: 1, column: 1 };
+    let span = Span::at(1, 1);
     let mut insts = vec![
         Inst {
             kind: InstKind::Assign(handle, Rvalue::FutureNew(index)),
@@ -2624,7 +2624,7 @@ fn lower_async_drop(
     layout: &AsyncLayout,
 ) -> Func {
     let state = 0;
-    let span = Span { line: 1, column: 1 };
+    let span = Span::at(1, 1);
     let insts = layout
         .fields
         .iter()
@@ -2661,7 +2661,7 @@ fn lower_async_drop(
 /// cancels whatever is left (there should be nothing: leaving the body of
 /// `main` already destroyed its handles).
 fn lower_async_runner(main: usize, index: usize, _info: &FutureInfo) -> Func {
-    let span = Span { line: 1, column: 1 };
+    let span = Span::at(1, 1);
     let vars = vec![
         VarTy::Value(Type::Future(index)),
         VarTy::Value(Type::Task(index)),
@@ -2711,7 +2711,7 @@ pub struct VerifyError {
 impl VerifyError {
     pub fn into_diagnostic(self) -> Diagnostic {
         Diagnostic::new(
-            Span { line: 1, column: 1 },
+            Span::at(1, 1),
             format!(
                 "error interno del compilador: LIR inválida en {} (bloque {}): {}",
                 self.func, self.block, self.message

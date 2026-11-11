@@ -204,3 +204,67 @@ fn import_unicode_directory_and_spaces() {
     );
     fix.check("directorio café 👋/main.l", "éxito en carpeta unicode\n");
 }
+
+/// A semantic error inside an imported module names that module, with the
+/// line and column inside it, not the entry file (Stage 0 defect 1).
+#[test]
+fn semantic_errors_in_imported_modules_name_their_own_file() {
+    let fix = ModuleFixture::new("diagnostic-file");
+    fix.write_file(
+        "sub/ayudante.l",
+        "fn ayuda() -> Int {\n    return 1\n}\n\nfn rota() -> Int {\n    return verdadero\n}\n",
+    );
+    fix.write_file(
+        "intermedio.l",
+        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * 2\n",
+    );
+    fix.write_file(
+        "main.l",
+        "import intermedio\n\nfn main() {\n    print(doble())\n}\n",
+    );
+    let check = |entry: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_l"))
+            .current_dir(&fix.dir)
+            .args(["check", entry])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let err = check("main.l");
+    let first = err.lines().next().unwrap();
+    assert!(
+        first.contains("ayudante.l:6:12: L0001 [semántica]"),
+        "{err}"
+    );
+    assert!(first.contains("verdadero"), "{err}");
+    assert!(!first.contains("main.l"), "{err}");
+
+    // The same program with the error moved to the entry file names it.
+    fix.write_file("sub/ayudante.l", "fn ayuda() -> Int {\n    return 1\n}\n");
+    fix.write_file(
+        "main.l",
+        "import intermedio\n\nfn main() {\n    print(doble())\n    print(nada)\n}\n",
+    );
+    let err = check("main.l");
+    assert!(err.starts_with("main.l:5:11: L0001"), "{err}");
+
+    // And so does the library entry point.
+    let error = project_l::check_file(&fix.dir.join("main.l")).unwrap_err();
+    assert!(
+        error.file.as_deref().unwrap().ends_with("main.l"),
+        "{error:?}"
+    );
+    fix.write_file(
+        "intermedio.l",
+        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * verdad\n",
+    );
+    fix.write_file(
+        "main.l",
+        "import intermedio\n\nfn main() {\n    print(doble())\n}\n",
+    );
+    let error = project_l::check_file(&fix.dir.join("main.l")).unwrap_err();
+    let file = error.file.expect("file of an imported module");
+    assert!(file.ends_with("intermedio.l"), "{file}");
+    assert_eq!((error.span.line, error.span.column), (3, 31));
+}

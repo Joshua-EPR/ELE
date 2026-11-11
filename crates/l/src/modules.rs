@@ -13,6 +13,13 @@ pub const MAX_MODULE_BYTES: usize = 16 * 1024 * 1024;
 /// Loads an entry source file and all of its imported dependencies transitively,
 /// detecting cycles and resolving duplicate imports in deterministic topological order.
 pub fn load_program(entry_path: &Path) -> Result<Program, Diagnostic> {
+    load_program_files(entry_path).map(|(program, _)| program)
+}
+
+/// Like [`load_program`], and also returns the path of every file read, in
+/// the order of their [`Span::file`] identifiers (identifier k is entry
+/// k - 1). [`attribute`] names the file of a later diagnostic.
+pub fn load_program_files(entry_path: &Path) -> Result<(Program, Vec<String>), Diagnostic> {
     let canonical_entry = fs::canonicalize(entry_path).map_err(|e| {
         Diagnostic::new(Span::default(), format!("{}: {e}", entry_path.display()))
             .with_file(entry_path.display().to_string())
@@ -22,6 +29,7 @@ pub fn load_program(entry_path: &Path) -> Result<Program, Diagnostic> {
     let mut loaded_modules = Vec::new();
     let mut loaded_paths = HashSet::new();
     let mut loading_stack = Vec::new();
+    let mut files = Vec::new();
 
     load_module_recursive(
         &canonical_entry,
@@ -29,7 +37,15 @@ pub fn load_program(entry_path: &Path) -> Result<Program, Diagnostic> {
         &mut loaded_modules,
         &mut loaded_paths,
         &mut loading_stack,
-    )?;
+        &mut files,
+    )
+    .map_err(|mut d| {
+        // Errors of the entry file itself name it as the caller did.
+        if d.file.as_deref() == Some(shown(&canonical_entry).as_str()) {
+            d.file = Some(entry_path.display().to_string());
+        }
+        d
+    })?;
 
     // Merge in topological order (dependencies appear first, entry file appears last)
     let mut merged = Program {
@@ -52,7 +68,27 @@ pub fn load_program(entry_path: &Path) -> Result<Program, Diagnostic> {
         merged.impls.extend(prog.impls);
     }
 
-    Ok(merged)
+    // The entry file is read first; name it as the caller did.
+    if let Some(entry) = files.first_mut() {
+        *entry = entry_path.display().to_string();
+    }
+    Ok((merged, files))
+}
+
+/// Names the file of a diagnostic produced after loading (semantic analysis,
+/// lowering, verification) from the file identifier of its span. Diagnostics
+/// that already name a file, and spans of file 0, are returned unchanged.
+pub fn attribute(diagnostic: Diagnostic, files: &[String]) -> Diagnostic {
+    if diagnostic.file.is_some() || diagnostic.span.file == 0 {
+        return diagnostic;
+    }
+    match files.get(diagnostic.span.file as usize - 1) {
+        Some(path) => {
+            let path = path.clone();
+            diagnostic.with_file(path)
+        }
+        None => diagnostic,
+    }
 }
 
 fn load_module_recursive(
@@ -61,6 +97,7 @@ fn load_module_recursive(
     loaded_modules: &mut Vec<(PathBuf, Program)>,
     loaded_paths: &mut HashSet<PathBuf>,
     loading_stack: &mut Vec<PathBuf>,
+    files: &mut Vec<String>,
 ) -> Result<(), Diagnostic> {
     // Cycle detection
     if loading_stack.contains(&canonical_path.to_path_buf()) {
@@ -84,7 +121,7 @@ fn load_module_recursive(
             import_span,
             format!("ciclo de dependencias detectado: {}", chain.join(" -> ")),
         )
-        .with_file(canonical_path.display().to_string())
+        .with_file(shown(canonical_path))
         .classify("L0014", "módulos"));
     }
 
@@ -97,7 +134,7 @@ fn load_module_recursive(
 
     let source = fs::read_to_string(canonical_path).map_err(|e| {
         Diagnostic::new(import_span, format!("{}: {e}", canonical_path.display()))
-            .with_file(canonical_path.display().to_string())
+            .with_file(shown(canonical_path))
             .classify("L0014", "módulos")
     })?;
 
@@ -109,14 +146,19 @@ fn load_module_recursive(
                 canonical_path.display()
             ),
         )
-        .with_file(canonical_path.display().to_string())
+        .with_file(shown(canonical_path))
         .classify("L0014", "módulos"));
     }
 
+    files.push(shown(canonical_path));
+    let file_id = u32::try_from(files.len()).map_err(|_| {
+        Diagnostic::new(import_span, "demasiados módulos en el programa")
+            .with_file(shown(canonical_path))
+            .classify("L0014", "módulos")
+    })?;
     let tokens =
-        lexer::lex(&source).map_err(|d| d.with_file(canonical_path.display().to_string()))?;
-    let prog =
-        parser::parse(tokens).map_err(|d| d.with_file(canonical_path.display().to_string()))?;
+        lexer::lex_file(&source, file_id).map_err(|d| d.with_file(shown(canonical_path)))?;
+    let prog = parser::parse(tokens).map_err(|d| d.with_file(shown(canonical_path)))?;
 
     // Resolve dependencies relative to current module's directory
     let dir = canonical_path.parent().unwrap_or(Path::new("."));
@@ -136,13 +178,13 @@ fn load_module_recursive(
                     candidate.display()
                 ),
             )
-            .with_file(canonical_path.display().to_string())
+            .with_file(shown(canonical_path))
             .classify("L0014", "módulos"));
         }
 
         let canonical_candidate = fs::canonicalize(&candidate).map_err(|e| {
             Diagnostic::new(imp.span, format!("{}: {e}", candidate.display()))
-                .with_file(canonical_path.display().to_string())
+                .with_file(shown(canonical_path))
                 .classify("L0014", "módulos")
         })?;
 
@@ -152,6 +194,7 @@ fn load_module_recursive(
             loaded_modules,
             loaded_paths,
             loading_stack,
+            files,
         )?;
     }
 
@@ -160,4 +203,14 @@ fn load_module_recursive(
     loaded_modules.push((canonical_path.to_path_buf(), prog));
 
     Ok(())
+}
+
+/// How a module path appears in diagnostics: the canonical path without the
+/// Windows verbatim prefix (`\\?\C:\...` is shown as `C:\...`).
+fn shown(path: &Path) -> String {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => text,
+    }
 }

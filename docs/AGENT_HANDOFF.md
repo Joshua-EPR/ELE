@@ -1330,3 +1330,11 @@ Siguiente trabajo concreto: préstamos locales con análisis de vida, Text
 dentro de agregados con drops por campo, paso/retorno de agregados por
 valor, `List of[T]` en el lowering CFG reutilizando `native_list_int.l` /
 `native_heap_owner.l`, y los dos defectos de Stage 0.
+### Defectos de Stage 0 corregidos (2026-11-11)
+
+Rama `fix/stage0-diagnostic-files-token-limit`, basada en `main` `f19ec01`.
+Detalle en [STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md](STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md):
+diagnósticos con el archivo real de cada módulo (`Span.file`) y fin del
+límite de 4096 tokens (límite de recursos 2^20 y pila de compilador de
+256 MiB, que además corrige el desbordamiento con 30 sumas encadenadas).
+Los módulos de `compiler-l/src` ya no necesitan partirse por tokens.

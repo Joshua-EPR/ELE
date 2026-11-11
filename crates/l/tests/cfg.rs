@@ -17,7 +17,7 @@ fn lower(source: &str) -> Module {
 fn inst(kind: InstKind) -> Inst {
     Inst {
         kind,
-        span: Span { line: 1, column: 1 },
+        span: Span::at(1, 1),
     }
 }
 

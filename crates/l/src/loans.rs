@@ -361,7 +361,7 @@ fn collect_aliases(
         .blocks
         .first()
         .and_then(|b| b.insts.first())
-        .map_or(Span { line: 1, column: 1 }, |i| i.span);
+        .map_or(Span::at(1, 1), |i| i.span);
     for &param_var in &f.params {
         let pointee = f.vars[param_var].pointee();
         if let Some(view_fields) = views.get(&param_var) {
@@ -763,12 +763,7 @@ fn verify_returns(
                         None
                     }
                 })
-                .unwrap_or_else(|| {
-                    block
-                        .insts
-                        .last()
-                        .map_or(Span { line: 1, column: 1 }, |i| i.span)
-                });
+                .unwrap_or_else(|| block.insts.last().map_or(Span::at(1, 1), |i| i.span));
             for (&key, &loan_id) in field_map {
                 let field_origins = origins(&root(loan_id), aliases, views);
                 let is_mut_field = match (key, res_ty) {
