@@ -10,17 +10,34 @@ import codegen.native_list_int
 // e: pop empty list => 127
 // d: drop list twice => 121
 // b: access a dropped list => 121
+// c: negative length, k: mismatched capacity/owned bytes,
+// q: zero capacity => 127 before touching heap memory
 flow main() => Int {
     when processArgCount() != 2 { give 2 }
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
             hold kind = mode.byteAt(0)
-            when kind != 112 && kind != 103 && kind != 116 && kind != 111 && kind != 101 && kind != 100 && kind != 98 { give 4 }
+            when kind != 112 && kind != 103 && kind != 116 && kind != 111 && kind != 101 && kind != 100 && kind != 98 && kind != 99 && kind != 107 && kind != 113 { give 4 }
             hold slots = NativeIntListSlots(ptr: 0, bytes: 1, live: 2, len: 3, cap: 4, resize_scratch: 5, cap_scratch: 6)
             change code = x64New()
             x64FrameBegin(edit code, 10)
             nativeListInit(edit code, view slots, 1)
+            when kind == 99 {
+                x64MovImm64(edit code, 0, -1)
+                x64StoreSlot(edit code, 3, 0)
+                nativeListPush(edit code, view slots, 42)
+            }
+            when kind == 107 {
+                x64MovImm64(edit code, 0, 2)
+                x64StoreSlot(edit code, 4, 0)
+                nativeListRead(edit code, view slots, 0)
+            }
+            when kind == 113 {
+                x64MovImm64(edit code, 0, 0)
+                x64StoreSlot(edit code, 4, 0)
+                nativeListPush(edit code, view slots, 42)
+            }
             when kind == 112 || kind == 116 {
                 nativeListPush(edit code, view slots, 40)
                 nativeListPush(edit code, view slots, 2)
