@@ -101,7 +101,7 @@ flow main() {
     print(value)
 }
 "#;
-    check_native_program("ele_v2_generic_of", source, "42\\n");
+    check_native_program("ele_v2_generic_of", source, "42\n");
 }
 
 #[test]
