@@ -45,34 +45,34 @@ fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool 
 fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Word => {
-            if expected == "fn" && parserMatchText(source, token.start, token.end, "flow") { return true }
-            if expected == "struct" && parserMatchText(source, token.start, token.end, "shape") { return true }
-            if expected == "impl" && parserMatchText(source, token.start, token.end, "extend") { return true }
-            if expected == "enum" && parserMatchText(source, token.start, token.end, "choice") { return true }
-            if expected == "trait" && parserMatchText(source, token.start, token.end, "contract") { return true }
-            if expected == "pub" && parserMatchText(source, token.start, token.end, "expose") { return true }
-            if expected == "let" && parserMatchText(source, token.start, token.end, "hold") { return true }
-            if expected == "var" && parserMatchText(source, token.start, token.end, "change") { return true }
-            if expected == "const" && parserMatchText(source, token.start, token.end, "fixed") { return true }
-            if expected == "return" && parserMatchText(source, token.start, token.end, "give") { return true }
-            if expected == "match" && parserMatchText(source, token.start, token.end, "choose") { return true }
-            if expected == "if" && parserMatchText(source, token.start, token.end, "when") { return true }
-            if expected == "else" && parserMatchText(source, token.start, token.end, "otherwise") { return true }
-            if expected == "for" && parserMatchText(source, token.start, token.end, "each") { return true }
-            if expected == "in" && parserMatchText(source, token.start, token.end, "among") { return true }
-            if expected == "while" && parserMatchText(source, token.start, token.end, "during") { return true }
-            if expected == "loop" && parserMatchText(source, token.start, token.end, "repeat") { return true }
-            if expected == "break" && parserMatchText(source, token.start, token.end, "leave") { return true }
-            if expected == "continue" && parserMatchText(source, token.start, token.end, "proceed") { return true }
-            if expected == "self" && parserMatchText(source, token.start, token.end, "this") { return true }
-            if expected == "mut" && parserMatchText(source, token.start, token.end, "exclusive") { return true }
-            if expected == "static" && parserMatchText(source, token.start, token.end, "direct") { return true }
-            if expected == "async" && parserMatchText(source, token.start, token.end, "later") { return true }
-            if expected == "await" && parserMatchText(source, token.start, token.end, "wait") { return true }
-            if expected == "spawn" && parserMatchText(source, token.start, token.end, "launch") { return true }
-            if expected == "import" && parserMatchText(source, token.start, token.end, "take") { return true }
-            if expected == "module" && parserMatchText(source, token.start, token.end, "space") { return true }
-            if expected == "region" && parserMatchText(source, token.start, token.end, "zone") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "fn") && parserMatchText(source, token.start, token.end, "flow") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "struct") && parserMatchText(source, token.start, token.end, "shape") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "impl") && parserMatchText(source, token.start, token.end, "extend") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "enum") && parserMatchText(source, token.start, token.end, "choice") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "trait") && parserMatchText(source, token.start, token.end, "contract") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "pub") && parserMatchText(source, token.start, token.end, "expose") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "let") && parserMatchText(source, token.start, token.end, "hold") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "var") && parserMatchText(source, token.start, token.end, "change") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "const") && parserMatchText(source, token.start, token.end, "fixed") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "return") && parserMatchText(source, token.start, token.end, "give") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "match") && parserMatchText(source, token.start, token.end, "choose") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "if") && parserMatchText(source, token.start, token.end, "when") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "else") && parserMatchText(source, token.start, token.end, "otherwise") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "for") && parserMatchText(source, token.start, token.end, "each") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "in") && parserMatchText(source, token.start, token.end, "among") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "while") && parserMatchText(source, token.start, token.end, "during") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "loop") && parserMatchText(source, token.start, token.end, "repeat") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "break") && parserMatchText(source, token.start, token.end, "leave") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "continue") && parserMatchText(source, token.start, token.end, "proceed") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "self") && parserMatchText(source, token.start, token.end, "this") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "mut") && parserMatchText(source, token.start, token.end, "exclusive") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "static") && parserMatchText(source, token.start, token.end, "direct") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "async") && parserMatchText(source, token.start, token.end, "later") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "await") && parserMatchText(source, token.start, token.end, "wait") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "spawn") && parserMatchText(source, token.start, token.end, "launch") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "import") && parserMatchText(source, token.start, token.end, "take") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "module") && parserMatchText(source, token.start, token.end, "space") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "region") && parserMatchText(source, token.start, token.end, "zone") { return true }
             return parserMatchText(source, token.start, token.end, expected)
         }
         _ => { return false }
@@ -82,8 +82,8 @@ fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
 fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Symbol => {
-            if expected == "->" && parserMatchText(source, token.start, token.end, "=>") { return true }
-            if expected == "=>" && parserMatchText(source, token.start, token.end, ":") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "->") && parserMatchText(source, token.start, token.end, "=>") { return true }
+            if parserMatchText(&expected, 0, expected.byteLength, "=>") && parserMatchText(source, token.start, token.end, ":") { return true }
             return parserMatchText(source, token.start, token.end, expected)
         }
         _ => { return false }
