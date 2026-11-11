@@ -10,7 +10,7 @@ import x86_64
 // unmap: RDI=mapped address, RSI=original bytes; exits 122/124 on error.
 // No Rust/C runtime, libc, GC, or linked object is used by emitted ELF code.
 
-fn heapDynExit(code: &mut X64Code, status: Int) {
+pub fn heapDynExit(code: &mut X64Code, status: Int) {
     x64MovImm64(&mut code, 7, status)
     x64MovImm64(&mut code, 0, 60)
     x64Syscall(&mut code)
@@ -18,7 +18,7 @@ fn heapDynExit(code: &mut X64Code, status: Int) {
 
 // Reject signed sizes outside [1,1048576] at runtime, before any syscall.
 // Input size is kept unchanged in the specified register (RDI or RSI).
-fn heapDynSizeGuard(code: &mut X64Code, reg: Int) {
+pub fn heapDynSizeGuard(code: &mut X64Code, reg: Int) {
     x64MovImm64(&mut code, 1, 0)
     x64CmpReg(&mut code, reg, 1)
     x64SetCondition(&mut code, 7) // signed <= 0
@@ -39,11 +39,20 @@ fn heapDynSizeGuard(code: &mut X64Code, reg: Int) {
 // Given a validated positive size in RSI, round it up to 4 KiB without
 // arithmetic overflow. Bound 1 MiB guarantees size+4095 fits signed Int.
 // This new primitive is emitted as AND rsi,-4096 after adding 4095.
-fn heapDynPageRoundRsi(code: &mut X64Code) {
+pub fn heapDynPageRoundRsi(code: &mut X64Code) {
     x64MovImm64(&mut code, 1, 4095)
     x64AddReg(&mut code, 6, 1)
     x64MovImm64(&mut code, 1, -4096)
     x64AndReg(&mut code, 6, 1)
+}
+
+// Same bounded round-up, but for RDX (new size in Linux mremap).
+// The size guard must be applied before calling this helper.
+pub fn heapDynPageRoundRdx(code: &mut X64Code) {
+    x64MovImm64(&mut code, 1, 4095)
+    x64AddReg(&mut code, 2, 1)
+    x64MovImm64(&mut code, 1, -4096)
+    x64AndReg(&mut code, 2, 1)
 }
 
 pub fn heapEmitDynamicMap(code: &mut X64Code) -> Bool {
