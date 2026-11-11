@@ -11,25 +11,25 @@ import native_heap_dynamic
 // does not invalidate the original mapping, but this bootstrap fail-closes
 // by exiting rather than exposing a partly updated allocation.
 
-pub fn heapEmitDynamicResize(code: &mut X64Code) -> Bool {
-    if code.error != 0 { return false }
-    heapDynSizeGuard(&mut code, 6)
-    heapDynSizeGuard(&mut code, 2)
-    heapDynPageRoundRsi(&mut code)
-    heapDynPageRoundRdx(&mut code)
-    x64MovImm64(&mut code, 0, 25) // sys_mremap (Linux x86-64)
-    x64MovImm64(&mut code, 10, 1) // MREMAP_MAYMOVE
-    x64Syscall(&mut code)
+expose flow heapEmitDynamicResize(code: edit X64Code) => Bool {
+    when code.error != 0 { give false }
+    heapDynSizeGuard(edit code, 6)
+    heapDynSizeGuard(edit code, 2)
+    heapDynPageRoundRsi(edit code)
+    heapDynPageRoundRdx(edit code)
+    x64MovImm64(edit code, 0, 25) // sys_mremap (Linux x86-64)
+    x64MovImm64(edit code, 10, 1) // MREMAP_MAYMOVE
+    x64Syscall(edit code)
     // Preserve returned pointer across condition setting. Linux syscall
     // clobbers RCX/R11; RDX is safe after the syscall.
-    x64MovReg(&mut code, 2, 0)
-    x64MovImm64(&mut code, 1, 0)
-    x64CmpReg(&mut code, 0, 1)
-    x64SetCondition(&mut code, 6) // signed -errno < 0
-    x64TestRax(&mut code)
-    let success = x64ConditionalPlaceholder(&mut code, true)
-    heapDynExit(&mut code, 125)
-    x64PatchRelative(&mut code, success, code.bytes.length)
-    x64MovReg(&mut code, 0, 2)
-    return code.error == 0
+    x64MovReg(edit code, 2, 0)
+    x64MovImm64(edit code, 1, 0)
+    x64CmpReg(edit code, 0, 1)
+    x64SetCondition(edit code, 6) // signed -errno < 0
+    x64TestRax(edit code)
+    hold success = x64ConditionalPlaceholder(edit code, true)
+    heapDynExit(edit code, 125)
+    x64PatchRelative(edit code, success, code.bytes.length)
+    x64MovReg(edit code, 0, 2)
+    give code.error == 0
 }

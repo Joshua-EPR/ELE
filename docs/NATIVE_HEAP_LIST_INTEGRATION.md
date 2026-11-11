@@ -16,7 +16,7 @@ Este cambio integra en `main` el código probado en los PR #18, #20 y #21, prese
 
 1. **No se genera aún `List of[Int]` automáticamente desde programas de usuario** en Stage 1/ELE-LIR. El emisor del buffer es un módulo de código escrito en ELE invocado por un fixture, no una implementación integral del tipo de lenguaje.
 2. Los límites de heap (1 MiB), pruebas de flags de propietario y salida controlada son protecciones experimentales; no prueban seguridad general frente a aliasing, concurrencia, campos propietarios, excepciones o CFG.
-3. Los módulos preexistentes del emisor conservan parcialmente alias sintácticos heredados por compatibilidad de bootstrap; deben migrarse a ELE v2 (issue #12), sin adoptar Rust como gramática pública.
+3. Los cuatro módulos de heap/buffer incorporados a esta integración se han migrado a la sintaxis canónica ELE v2 (declaraciones `flow`/`shape`, préstamos `view`/`edit`, `when`, `hold`/`change` y genéricos `of[T]`). Otros módulos de Stage 1 todavía conservan alias heredados por compatibilidad de bootstrap: la migración general sigue pendiente (#12).
 4. Los ELF emitidos no requieren libc ni runtime Rust, pero **Stage 0 todavía usa Rust/Cranelift para compilar el emisor**. No hay self-hosting ni PE64 Windows.
 5. No cerrar la issue #4 ni la #8 hasta contar con pruebas de integración real de tipos, drops de CFG y Stage 2.
 
