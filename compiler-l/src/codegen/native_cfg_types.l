@@ -62,6 +62,7 @@ pub fn cfgTypeSize(p: &CfgProgram, ty: Int) -> Int {
 pub fn cfgTypeAlign(p: &CfgProgram, ty: Int) -> Int {
     if ty == 0 { return 8 }
     if ty == 1 { return 1 }
+    if ty == cfgTextType() { return 8 }
     if ty >= 2 && ty - 2 < p.structs.length { return p.structs[ty - 2].align }
     let enum_id = ty - 2 - p.structs.length
     if enum_id >= 0 && enum_id < p.enums.length { return p.enums[enum_id].align }
@@ -90,9 +91,10 @@ pub fn cfgReadStruct(p: &mut CfgProgram, source: &Text, reader: &mut NativeReade
     for i in 0..count {
         nativeExpect(source, &mut reader, "field")
         let fname = nativeWord(source, &mut reader)
-        let ty = cfgType(p, source, &mut reader)
+        // A field may own a Text (three words); see native_cfg_paths.
+        let ty = cfgTypeOrUnit(p, source, &mut reader)
         nativeEndLine(source, &mut reader)
-        if reader.error != 0 || !cfgEncodedName(source, &fname) || ty < 0 {
+        if reader.error != 0 || !cfgEncodedName(source, &fname) || (ty < 0 && ty != cfgTextType()) {
             p.error = 61
             break
         }

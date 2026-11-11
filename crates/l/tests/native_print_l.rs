@@ -188,6 +188,8 @@ fn text_lir_fixtures_run_with_their_documented_status() {
     for (fixture, _status, _stdout) in [
         ("native_cfg_text_literal_ok.lir", 0, "hi\n\n"),
         ("native_cfg_text_flagged_drop.lir", 0, "false\n"),
+        // A shape may hold a Text field (native_text_fields_l covers them).
+        ("native_cfg_text_in_struct.lir", 0, ""),
         // Appending to a literal is caught at run time, before any write.
         ("native_cfg_text_append_literal.lir", 121, ""),
     ] {
@@ -252,7 +254,6 @@ fn unsupported_or_invalid_print_and_unit_forms_are_rejected() {
     rejected("native_cfg_text_append_self.lir", 93);
     // Forms the backend does not lower yet must not be accepted silently.
     rejected("native_cfg_text_append_by_value.lir", 90);
-    rejected("native_cfg_text_in_struct.lir", 61);
     // A reference argument for a by-value parameter.
     rejected("native_cfg_call_ref_arg.lir", 54);
     rejected("native_cfg_text_drop_int.lir", 92);

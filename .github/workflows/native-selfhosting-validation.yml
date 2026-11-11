@@ -66,6 +66,7 @@ jobs:
           --test native_print_l
           --test native_refs_l
           --test native_aggregates_l
+          --test native_text_fields_l
           --test native_enum_stage1_l
           --test ele_stage1_generic_types
           --test native_enum_stage1_payload_l
@@ -96,7 +97,7 @@ jobs:
           -- --test-threads=1
       - name: Native print, references and Text queries through the ELE backend (MSVC host, image checks)
         if: runner.os == 'Windows' && !cancelled()
-        run: cargo test -p project-l --test native_print_l --test native_refs_l --test native_aggregates_l -- --test-threads=1
+        run: cargo test -p project-l --test native_print_l --test native_refs_l --test native_aggregates_l --test native_text_fields_l -- --test-threads=1
       # Compile actual .l source and the wrong-active LIR using the ELE-written
       # backend on Windows, then execute their Linux ELF64 output on Linux.
       # Stage 0 itself is currently MSVC-only; no Linux Stage 0 is assumed.
@@ -118,6 +119,7 @@ jobs:
             target/stage1-tests/native-heap-advanced/*.elf
             target/stage1-tests/native-refs/*.elf
             target/stage1-tests/native-aggregates/*.elf
+            target/stage1-tests/native-text-fields/*.elf
           if-no-files-found: error
           retention-days: 3
       - name: Run native backend contract tests
@@ -203,6 +205,11 @@ jobs:
               ("native_shape_abi_stage1.elf", 0),
               ("native_shape_moves_stage1.elf", 0),
               ("partial_move_ok.elf", 135),
+              # Text fields of shapes.
+              ("native_text_fields_stage1.elf", 0),
+              ("native_text_fields_heap_stage1.elf", 0),
+              ("native_text_fields_flags_stage1.elf", 0),
+              ("tfield_replace_ok.elf", 2),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"

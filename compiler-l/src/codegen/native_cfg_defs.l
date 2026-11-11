@@ -40,6 +40,10 @@ pub struct CfgInst {
     place_field: Int
     place_subfield: Int
     arg_first: Int
+    // Projections of the `ref` source of print/append (kinds 10, 12) and
+    // of the place of dropfield (kind 17 uses place_*), or -1.
+    src_field: Int
+    src_sub: Int
 }
 
 pub struct CfgField {

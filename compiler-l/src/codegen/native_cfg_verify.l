@@ -19,7 +19,7 @@ fn cfgEdge(p: &CfgProgram, f: Int, from: Int, to: Int) -> Bool {
 }
 
 fn cfgHasDst(inst: &CfgInst) -> Bool {
-    return inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13
+    return inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17
 }
 
 fn cfgResultType(func: &CfgFunc) -> Int {
@@ -80,13 +80,13 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut List<Bool>) -> Int {
-    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 13 && inst.op < 0) {
+    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
         if inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { return 57 }
     }
     if inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, &inst.a) >= 2 {
         return 58
     }
-    if (inst.kind == 10 || inst.kind == 12 || inst.kind == 13) && inst.op >= 0 {
+    if (inst.kind == 10 || inst.kind == 12 || inst.kind == 13 || inst.kind == 17) && inst.op >= 0 {
         // A referenced source, or a drop flag, is read and stays live.
         if !live[inst.op] { return 57 }
     }
@@ -164,10 +164,14 @@ fn cfgPathAfter(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, k: Int
     let v = paths.var_of[k]
     var live = before
     if cfgMoves(p, f, &inst, v) { live = false }
-    if inst.kind == 5 && inst.place_var == v && inst.place_field >= 0 {
+    // Moving a field out of an owned shape, or releasing its Text, kills
+    // the paths inside it. Through a reference a read is a copy.
+    if inst.kind == 5 && inst.place_var == v && inst.place_field >= 0 && !p.var_ref[p.functions[f].first_var + v] {
         let place = CfgPlace(variable: v, field: inst.place_field, subfield: inst.place_subfield)
-        if cfgPlaceType(p, f, &place) >= 2 && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
+        let moved = cfgPlaceType(p, f, &place)
+        if (moved >= 2 || moved == cfgTextType()) && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     }
+    if inst.kind == 17 && inst.place_var == v && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     if inst.kind == 6 && inst.place_var == v && inst.place_field >= 0 {
         if cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = true }
     }
@@ -207,10 +211,12 @@ fn cfgPathUses(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, live: &
             }
         }
     }
-    let reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15
+    let reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0)
     if reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { return false }
     let whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
     if whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { return false }
+    let projected_source = (inst.kind == 10 || inst.kind == 12) && inst.op >= 0
+    if projected_source && !cfgPathsLive(paths, vars, live, inst.op, inst.src_field, inst.src_sub) { return false }
     if inst.kind == 6 && inst.place_subfield >= 0 {
         for k in 0..paths.var_of.length {
             let enclosing = paths.var_of[k] == inst.place_var && paths.field[k] == inst.place_field && paths.sub[k] < 0
@@ -306,6 +312,10 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             let inst = &p.insts[i]
             // A use of a moved-out field, or of a partially moved value.
             if !cfgPathUses(p, f, &paths, &inst, &live) { return 57 }
+            // Storing over a live Text, or giving a new value to a variable
+            // that still owns one in a field, would leak it.
+            if inst.kind == 6 && cfgTextLiveWithin(&paths, vars, &live, inst.place_var, inst.place_field, inst.place_subfield) { return 59 }
+            if cfgHasDst(inst) && live[inst.dst] && cfgTextLiveWithin(&paths, vars, &live, inst.dst, -1, -1) { return 59 }
             for k in 0..paths.var_of.length {
                 live[vars + k] = cfgPathAfter(p, f, &paths, &inst, k, live[vars + k])
             }
@@ -318,6 +328,13 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             if last != 0 { return last }
         }
         if block.term == 1 {
+            // A Text field still owned by a live variable leaks; a referent
+            // must be given back whole.
+            for k in 0..paths.var_of.length {
+                let root = paths.var_of[k]
+                if paths.text[k] && p.var_ref[func.first_var + root] && !live[vars + k] { return 95 }
+                if paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { return 59 }
+            }
             // Every owned Text must have been moved out or dropped by now.
             // A reference parameter does not own its referent.
             for v in 0..vars {

@@ -1350,3 +1350,12 @@ movimientos parciales de campos con seguimiento por camino
 (`codegen/native_cfg_paths.l`). `native_aggregates_l` 3/3; ELF ejecutados en
 WSL con salida idéntica a Stage 0. Siguiente: Text dentro de agregados con
 drops por campo, préstamos locales y `List of[T]` en el lowering CFG.
+
+### Fase 8.7.9 — Text dentro de `shape` (2026-11-11)
+
+Rama `feat/native-text-fields`, apilada sobre `feat/native-aggregate-abi`.
+Detalle en [ELE_NATIVE_BACKEND_PHASE_8_7_9.md](ELE_NATIVE_BACKEND_PHASE_8_7_9.md).
+Campos Text con movimiento, `dropfield` (con bandera), reemplazo por `edit`
+y fuentes proyectadas; propiedad verificada con caminos de movimiento.
+Siguiente bloqueo para compilar `compiler-l/src`: el límite de 4 campos por
+`shape` (CfgProgram tiene 17), después `List of[T]` y préstamos locales.
