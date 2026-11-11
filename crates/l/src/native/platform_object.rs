@@ -425,24 +425,31 @@ pub unsafe extern "system" fn l_platform_write_bytes(
         )
     };
     if handle as usize == usize::MAX { return 2; }
+    // A 4096-byte stack array emits __chkstk and memset on MSVC. This
+    // standalone no_std platform object is linked with /NODEFAULTLIB, so
+    // neither CRT helper is available. Use the existing ELE allocator for
+    // scratch bytes instead, preserving the same bounded chunked writes.
+    let mut chunk = Buffer::new();
+    chunk.grow(4096);
+    if chunk.data.is_null() {
+        unsafe { CloseHandle(handle) };
+        return 3;
+    }
     let mut error = 0;
     let mut pos = 0usize;
-    let mut chunk = [0u8; 4096];
     while pos < count as usize {
-        let amount = (count as usize - pos).min(chunk.len());
+        let amount = (count as usize - pos).min(chunk.capacity);
         let mut offset = 0usize;
         while offset < amount {
-            // The slice bounds are validated by the loop and amount <= 4096.
-            // Raw pointer access avoids importing panicking helpers into the
-            // standalone no_std Windows object.
-            unsafe { chunk.as_mut_ptr().add(offset).write(*data.add(pos + offset) as u8) };
+            // Each source byte was validated before opening the file.
+            unsafe { chunk.data.add(offset).write(*data.add(pos + offset) as u8) };
             offset += 1;
         }
         let mut written = 0usize;
         while written < amount {
             let mut done = 0u32;
             let ok = unsafe { WriteFile(
-                handle, chunk.as_ptr().add(written), (amount - written) as u32,
+                handle, chunk.data.add(written), (amount - written) as u32,
                 &mut done, ptr::null_mut(),
             ) };
             if ok == 0 || done == 0 || done as usize > amount - written {
