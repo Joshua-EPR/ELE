@@ -1,7 +1,10 @@
 //! Compatibility tests for the shared primitive-payload LIR extension.
 //! A parsed payload operation must remain typed and retain a projection;
 //! it may not silently become an unchecked integer load.
-use project_l::{cfg::{InstKind, Proj, Rvalue}, lir_protocol};
+use project_l::{
+    cfg::{InstKind, Proj, Rvalue},
+    lir_protocol,
+};
 use std::{fs, path::PathBuf};
 
 fn fixture(name: &str) -> String {
@@ -18,11 +21,14 @@ fn parses_checked_primitive_payloads_with_nominal_projection() {
     ] {
         let module = lir_protocol::parse(&fixture(name)).unwrap();
         let insts = &module.funcs[module.main].blocks[0].insts;
-        assert!(insts.iter().any(|i| matches!(
-            &i.kind,
-            InstKind::Assign(_, Rvalue::Read(place))
-                if place.proj == [Proj::Payload(variant, 0)]
-        )), "{name}");
+        assert!(
+            insts.iter().any(|i| matches!(
+                &i.kind,
+                InstKind::Assign(_, Rvalue::Read(place))
+                    if place.proj == [Proj::Payload(variant, 0)]
+            )),
+            "{name}"
+        );
         // A variant mismatch is a runtime check, not a parse rejection.
     }
 }

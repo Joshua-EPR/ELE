@@ -746,13 +746,13 @@ impl FnGen<'_> {
                         b.ins().iadd_imm_s(addr, offset)
                     };
                     let active = b.ins().load(types::I64, flags(), enum_addr, 0);
-                    let wrong = b.ins().icmp_imm_s(
-                        IntCC::NotEqual,
-                        active,
-                        *variant as i64,
-                    );
+                    let wrong = b.ins().icmp_imm_s(IntCC::NotEqual, active, *variant as i64);
                     self.panic_msg_if(
-                        b, h, wrong, self.span.get(), "acceso a variante enum inactiva",
+                        b,
+                        h,
+                        wrong,
+                        self.span.get(),
+                        "acceso a variante enum inactiva",
                     )?;
                     let field_off = self
                         .layouts

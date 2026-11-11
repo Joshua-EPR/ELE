@@ -49,7 +49,10 @@ fn generate(fixture: &str) -> Vec<u8> {
     fs::remove_file(&target).unwrap();
     assert!(data.len() > 4096);
     assert_eq!(&data[0..7], b"\x7fELF\x02\x01\x01");
-    assert_eq!(u64::from_le_bytes(data[24..32].try_into().unwrap()), 0x401000);
+    assert_eq!(
+        u64::from_le_bytes(data[24..32].try_into().unwrap()),
+        0x401000
+    );
     data
 }
 
@@ -115,7 +118,6 @@ fn ele_cfg_backend_rejects_nonexistent_branch_target() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("rechazado"));
 }
 
-
 #[test]
 fn ele_cfg_backend_supports_recursive_calls() {
     let elf = generate("native_cfg_recursive.lir");
@@ -142,7 +144,11 @@ fn ele_cfg_generated_elf_executes_with_last_loop_value() {
         .arg(&target)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let mut perm = fs::metadata(&target).unwrap().permissions();
     perm.set_mode(0o700);
     fs::set_permissions(&target, perm).unwrap();

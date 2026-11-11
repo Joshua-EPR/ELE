@@ -2,7 +2,12 @@
 //! backend. Struct definitions are consumed from ELE-LIR 1, not test layouts.
 mod stage1_support;
 
-use std::{fs, path::{Path, PathBuf}, process::Command, sync::OnceLock};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
 
 fn compiler() -> &'static Path {
     static EXE: OnceLock<PathBuf> = OnceLock::new();
@@ -15,14 +20,28 @@ fn root() -> PathBuf {
 
 fn temporary(name: &str, suffix: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    std::env::temp_dir().join(format!("ele-struct-{name}-{}-{nanos}.{suffix}",std::process::id()))
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "ele-struct-{name}-{}-{nanos}.{suffix}",
+        std::process::id()
+    ))
 }
 
 fn generate(input: &Path) -> (Vec<u8>, PathBuf) {
     let target = temporary("out", "elf");
-    let output = Command::new(compiler()).arg(input).arg(&target).output().unwrap();
-    assert!(output.status.success(), "{}\n{}", input.display(), String::from_utf8_lossy(&output.stderr));
+    let output = Command::new(compiler())
+        .arg(input)
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        input.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let bytes = fs::read(&target).unwrap();
     assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
     assert!(bytes.len() > 4100);
@@ -57,7 +76,7 @@ fn malformed_aggregate_lir_is_rejected_with_nonzero_status() {
     }
 }
 
-#[cfg(all(target_os="linux", target_arch="x86_64"))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn exec_elf(file: &Path) -> i32 {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(file).unwrap().permissions();
@@ -68,7 +87,7 @@ fn exec_elf(file: &Path) -> i32 {
     code
 }
 
-#[cfg(all(target_os="linux", target_arch="x86_64"))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn ele_native_struct_elf_executes_without_external_runtime() {
     let (_, file) = generate(&root().join("examples/native_cfg_struct_copy.lir"));
@@ -81,8 +100,16 @@ fn ele_native_struct_elf_executes_without_external_runtime() {
 fn stage1_emitted_struct_lir_is_accepted_by_ele_native_backend() {
     let sema = stage1_support::build("main_sema", false);
     let source = root().join("examples/native_cfg_real_struct.l");
-    let output = Command::new(sema).arg(&source).arg("--emit-lir").output().unwrap();
-    assert!(output.status.success(), "Stage1: {}", String::from_utf8_lossy(&output.stderr));
+    let output = Command::new(sema)
+        .arg(&source)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "Stage1: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let lir = String::from_utf8(output.stdout).unwrap();
     assert!(lir.starts_with("ELE-LIR 1\n"));
     assert!(lir.contains("struct s0 "));
@@ -90,8 +117,8 @@ fn stage1_emitted_struct_lir_is_accepted_by_ele_native_backend() {
     fs::write(&file, lir).unwrap();
     let generated = generate(&file);
     fs::remove_file(file).unwrap();
-    #[cfg(all(target_os="linux", target_arch="x86_64"))]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     assert_eq!(exec_elf(&generated.1), 42);
-    #[cfg(not(all(target_os="linux", target_arch="x86_64")))]
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     fs::remove_file(generated.1).unwrap();
 }

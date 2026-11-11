@@ -3,7 +3,12 @@
 //! This does not certify Stage 1 enum serialization, Option or Result.
 mod stage1_support;
 
-use std::{fs, path::{Path, PathBuf}, process::Command, sync::OnceLock};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -26,11 +31,21 @@ fn build_fixture(name: &str, expect_success: bool) -> Option<PathBuf> {
     let input = root().join("examples").join(name);
     let output = temp_elf();
     let built = Command::new(compiler())
-        .arg(&input).arg(&output).output().expect("build backend");
-    assert_eq!(built.status.success(), expect_success,
-        "{name}: {}", String::from_utf8_lossy(&built.stderr));
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .expect("build backend");
+    assert_eq!(
+        built.status.success(),
+        expect_success,
+        "{name}: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     if !expect_success {
-        assert!(!output.exists(), "{name}: no debe escribirse ELF al rechazar LIR");
+        assert!(
+            !output.exists(),
+            "{name}: no debe escribirse ELF al rechazar LIR"
+        );
         return None;
     }
     let elf = fs::read(&output).unwrap();
@@ -47,17 +62,28 @@ fn run_and_remove(path: PathBuf, expected: i32) {
         perms.set_mode(0o700);
         fs::set_permissions(&path, perms).unwrap();
         let actual = Command::new(&path).output().expect("run native ELF");
-        assert_eq!(actual.status.code(), Some(expected),
-            "{}: {}", path.display(), String::from_utf8_lossy(&actual.stderr));
+        assert_eq!(
+            actual.status.code(),
+            Some(expected),
+            "{}: {}",
+            path.display(),
+            String::from_utf8_lossy(&actual.stderr)
+        );
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    { let _ = expected; }
+    {
+        let _ = expected;
+    }
     fs::remove_file(path).unwrap();
 }
 
 #[test]
 fn native_payload_loads_int_and_bool_after_variant_check() {
-    for name in ["native_cfg_enum_payload_int.lir", "native_cfg_enum_payload_bool.lir", "native_cfg_enum_payload_branch.lir"] {
+    for name in [
+        "native_cfg_enum_payload_int.lir",
+        "native_cfg_enum_payload_bool.lir",
+        "native_cfg_enum_payload_branch.lir",
+    ] {
         run_and_remove(build_fixture(name, true).unwrap(), 42);
     }
 }
