@@ -1304,3 +1304,29 @@ orden de dependencia:
 
 Siguiente trabajo concreto: punto 1, empezando por `ref` en parámetros y
 `i len`/`byteAt` de Text, que son las operaciones que más usa `compiler-l`.
+
+### Fase 8.7.7 — referencias, consultas de Text y aritmética comprobada (2026-11-11)
+
+Rama `feat/native-refs-text-ops`, basada en `main` `f19ec01` (PR #23).
+Detalle en [ELE_NATIVE_BACKEND_PHASE_8_7_7.md](ELE_NATIVE_BACKEND_PHASE_8_7_7.md).
+
+El backend ELE acepta parámetros `view`/`edit` (Int, Bool, Text, `shape`
+anidado, `choice`), `byteLength`, `byteAt` con límites (127), `unary`
+`neg`/`not`, `div` y `rem` comprobados (125). Módulos nuevos
+`codegen/native_cfg_ref.l` y `codegen/native_cfg_arith.l` (sintaxis
+canónica). Verificado: `native_refs_l` 4/4 y las suites nativas previas en
+Windows; los ELF se ejecutaron en WSL Ubuntu con salida idéntica a Stage 0.
+
+**Entorno Windows de esta sesión:** usar `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc`
+(el `rust-toolchain.toml` fija GNU 1.99.1, que no enlaza Cranelift aquí).
+`wsl -d Ubuntu` ejecuta ELF64 pero no tiene cargo; para la parte Linux de las
+pruebas, ejecutar con WSL las imágenes de `target/stage1-tests/<prueba>/`.
+`cargo test` sin `--no-fail-fast` se detiene en el primer binario que falla.
+
+**Diagnóstico observado (defecto 1 de Stage 0):** un error en
+`codegen/native_cfg_ref.l:121` se informó como `native_cfg_demo.l:121:52`.
+
+Siguiente trabajo concreto: préstamos locales con análisis de vida, Text
+dentro de agregados con drops por campo, paso/retorno de agregados por
+valor, `List of[T]` en el lowering CFG reutilizando `native_list_int.l` /
+`native_heap_owner.l`, y los dos defectos de Stage 0.

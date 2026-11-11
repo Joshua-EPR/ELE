@@ -25,6 +25,54 @@ pub fn cfgVarBase(p: &CfgProgram, f: Int, variable: Int) -> Int {
     return -8 * (p.slot_start[index] + p.slot_count[index])
 }
 
+pub struct CfgAddr {
+    base: Int
+    disp: Int
+}
+
+// Byte offset of a place inside the storage of its root (the referent when
+// the root is a reference). Field -1 is the whole root.
+fn cfgPlaceRel(p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int) -> Int {
+    if field < 0 { return 0 }
+    let ty = p.types_code[cfgVarIndex(p, f, variable)]
+    let member = p.structs[ty - 2].first_field + field
+    let offset = p.fields[member].offset
+    if subfield < 0 { return offset }
+    let child = p.fields[member].ty
+    return offset + p.fields[p.structs[child - 2].first_field + subfield].offset
+}
+
+// Base register and displacement of a place. A reference root loads the
+// referent's address into R11; callers access memory before any other
+// code could reuse R11.
+pub fn cfgPlaceAddr(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int) -> CfgAddr {
+    let rel = cfgPlaceRel(p, f, variable, field, subfield)
+    let index = cfgVarIndex(p, f, variable)
+    if p.var_ref[index] {
+        x64LoadSlot(&mut code, 11, p.slot_start[index])
+        return CfgAddr(base: 11, disp: rel)
+    }
+    return CfgAddr(base: 5, disp: cfgVarBase(p, f, variable) + rel)
+}
+
+// RAX = address of a place.
+pub fn cfgPlaceAddressRax(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int) {
+    let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+    x64MovReg(&mut code, 0, at.base)
+    x64MovImm64(&mut code, 10, at.disp)
+    x64AddReg(&mut code, 0, 10)
+}
+
+// Loads a primitive place (Bool as one byte, Int as eight) into `dst`.
+pub fn cfgLoadPlace(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ty: Int, dst: Int) {
+    let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+    if ty == 1 {
+        x64LoadMem8(&mut code, dst, at.base, at.disp)
+    } else {
+        x64LoadMem64(&mut code, dst, at.base, at.disp)
+    }
+}
+
 pub fn cfgLoadOperand(code: &mut X64Code, p: &CfgProgram, f: Int, op: &NativeOperand, dst: Int) {
     if op.is_var {
         x64LoadSlot(&mut code, dst, p.slot_start[cfgVarIndex(p, f, op.value)])
@@ -42,6 +90,7 @@ pub struct CfgFix {
     jump_to: List<Int>
     overflow_at: List<Int>
     bad_variant_at: List<Int>
+    bad_index_at: List<Int>
     text_at: List<Int>
     text_id: List<Int>
 }
@@ -59,10 +108,11 @@ pub fn cfgRuntimeCall(code: &mut X64Code, fix: &mut CfgFix, routine: Int) {
 // A literal gets capacity 0 and an address patched in after layout.
 pub fn cfgTextWords(code: &mut X64Code, p: &CfgProgram, f: Int, op: &NativeOperand, fix: &mut CfgFix) {
     if op.is_var {
-        let base = cfgVarBase(p, f, op.value)
-        x64LoadMem64(&mut code, 0, 5, base)
-        x64LoadMem64(&mut code, 2, 5, base + 8)
-        x64LoadMem64(&mut code, 1, 5, base + 16)
+        // Through a reference only `print` and `append` read a Text here.
+        let at = cfgPlaceAddr(&mut code, p, f, op.value, -1, -1)
+        x64LoadMem64(&mut code, 0, at.base, at.disp)
+        x64LoadMem64(&mut code, 2, at.base, at.disp + 8)
+        x64LoadMem64(&mut code, 1, at.base, at.disp + 16)
     } else {
         x64MovImm64(&mut code, 0, 0)
         fix.text_at.push(code.bytes.length - 8)
@@ -80,11 +130,25 @@ pub fn cfgStoreText(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int) {
     x64StoreMem64(&mut code, 5, base + 16, 1)
 }
 
-// RDI = address of a variable's storage.
+// RDI = address of a variable's storage, or of its referent.
 fn cfgVarAddress(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int) {
-    x64MovReg(&mut code, 7, 5)
-    x64MovImm64(&mut code, 10, cfgVarBase(p, f, variable))
-    x64AddReg(&mut code, 7, 10)
+    cfgPlaceAddressRax(&mut code, p, f, variable, -1, -1)
+    x64MovReg(&mut code, 7, 0)
+}
+
+// Type of the source of `print`/`append`, seen through a reference.
+fn cfgSourceType(p: &CfgProgram, f: Int, inst: &CfgInst) -> Int {
+    if inst.op >= 0 { return p.types_code[cfgVarIndex(p, f, inst.op)] }
+    return cfgOperandType(p, f, &inst.a)
+}
+
+// Loads an Int/Bool source of `print`/`append` into `dst`.
+fn cfgLoadSource(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, ty: Int, dst: Int) {
+    if inst.op >= 0 {
+        cfgLoadPlace(&mut code, p, f, inst.op, -1, -1, ty, dst)
+    } else {
+        cfgLoadOperand(&mut code, p, f, &inst.a, dst)
+    }
 }
 
 // Type and operand of the source of `print`/`append`: the referenced
@@ -99,14 +163,14 @@ fn cfgSourceOperand(inst: &CfgInst) -> NativeOperand {
 pub fn cfgEmitText(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, fix: &mut CfgFix) {
     if inst.kind == 10 {
         let value = cfgSourceOperand(inst)
-        let ty = cfgOperandType(p, f, &value)
+        let ty = cfgSourceType(p, f, inst)
         if ty == cfgTextType() {
             cfgTextWords(&mut code, p, f, &value, &mut fix)
             x64MovReg(&mut code, 7, 0)
             x64MovReg(&mut code, 6, 2)
             cfgRuntimeCall(&mut code, &mut fix, rtPrintText())
         } else {
-            cfgLoadOperand(&mut code, p, f, &value, 7)
+            cfgLoadSource(&mut code, p, f, inst, ty, 7)
             if ty == 1 {
                 cfgRuntimeCall(&mut code, &mut fix, rtPrintBool())
             } else {
@@ -122,14 +186,14 @@ pub fn cfgEmitText(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, f
         cfgStoreText(&mut code, p, f, inst.dst)
     } else if inst.kind == 12 {
         let value = cfgSourceOperand(inst)
-        let ty = cfgOperandType(p, f, &value)
+        let ty = cfgSourceType(p, f, inst)
         if ty == cfgTextType() {
             cfgTextWords(&mut code, p, f, &value, &mut fix)
             x64MovReg(&mut code, 6, 0)
             cfgVarAddress(&mut code, p, f, inst.place_var)
             cfgRuntimeCall(&mut code, &mut fix, rtTextAppend())
         } else {
-            cfgLoadOperand(&mut code, p, f, &value, 6)
+            cfgLoadSource(&mut code, p, f, inst, ty, 6)
             cfgVarAddress(&mut code, p, f, inst.place_var)
             if ty == 1 {
                 cfgRuntimeCall(&mut code, &mut fix, rtAppendBool())
@@ -149,6 +213,22 @@ pub fn cfgEmitText(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, f
         x64LoadMem64(&mut code, 6, 5, base + 16)
         cfgRuntimeCall(&mut code, &mut fix, rtTextDrop())
         if skip >= 0 { x64PatchRelative(&mut code, skip, code.bytes.length) }
+    } else if inst.kind == 14 {
+        // byteLength: the second word of the Text.
+        let at = cfgPlaceAddr(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield)
+        x64LoadMem64(&mut code, 0, at.base, at.disp + 8)
+        x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
+    } else if inst.kind == 15 {
+        // byteAt(i): 0 <= i < length, checked unsigned, or exit 127.
+        cfgLoadOperand(&mut code, p, f, &inst.a, 1)
+        let at = cfgPlaceAddr(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield)
+        x64LoadMem64(&mut code, 2, at.base, at.disp + 8)
+        x64CmpReg(&mut code, 1, 2)
+        fix.bad_index_at.push(x64AboveEqualPlaceholder(&mut code))
+        x64LoadMem64(&mut code, 0, at.base, at.disp)
+        x64AddReg(&mut code, 0, 1)
+        x64LoadMem8(&mut code, 0, 0, 0)
+        x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } else {
         code.error = 10
     }

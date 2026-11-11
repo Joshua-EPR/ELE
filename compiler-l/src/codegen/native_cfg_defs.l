@@ -4,12 +4,17 @@ import lir_tokens
 // independent ELE-written x86-64 bootstrap backend. Supports move-only,
 // drop-free structs with primitive fields (including nested structs).
 // Also supports tagged enums with zero or one primitive payload per variant.
-// Loans, floats, arrays and Text inside aggregates are explicitly rejected.
+// Local loans, returned references, floats, arrays and Text inside
+// aggregates are explicitly rejected.
 // Type IDs: 0 = Int, 1 = Bool, 2+s = nominal struct s,
 // 2+struct_count+e = nominal enum e.
 // Instruction kinds: 1 use, 2 binary, 3 call, 4 struct, 5 read,
 // 6 store, 7 variant, 8 discriminant, 9 checked primitive payload,
-// 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt).
+// 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt),
+// 14 len (Text byte length), 15 byteat (bounds-checked Text byte).
+// Reference parameters (`var vN ref T`, N < params) occupy one word: the
+// address of the referent. `types_code` keeps the referent type and
+// `var_ref` marks them; native_cfg_ref documents their rules.
 // Unit is type code -2: valid only as a function result, as the `cu`
 // constant and as a non-parameter variable that receives a unit call.
 // Text is type code -3: a move-only value of three words (address, byte
@@ -105,6 +110,13 @@ pub struct CfgProgram {
     blocks: List<CfgBlock>
     insts: List<CfgInst>
     call_args: List<NativeOperand>
+    // Per call argument: -1 by value, 0 shared and 1 exclusive reference.
+    // A reference argument keeps its root variable in `call_args[k].value`
+    // and its projections in `call_field`/`call_sub` (-1 when absent).
+    call_ref: List<Int>
+    call_field: List<Int>
+    call_sub: List<Int>
+    var_ref: List<Bool>
     text_start: List<Int>
     text_length: List<Int>
     text_bytes: List<Int>
@@ -115,6 +127,6 @@ pub fn cfgEmptyOperand() -> NativeOperand {
 }
 
 pub fn cfgEmpty() -> CfgProgram {
-    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], call_args: List[], text_start: List[], text_length: List[], text_bytes: List[])
+    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[])
 }
 

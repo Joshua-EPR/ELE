@@ -142,6 +142,16 @@ pub fn x64ConditionalPlaceholder(code: &mut X64Code, if_equal: Bool) -> Int {
     return at
 }
 
+// Writes 0F 83 (JAE): unsigned "above or equal", used for bounds checks so
+// that a negative index, read as unsigned, is also out of range.
+pub fn x64AboveEqualPlaceholder(code: &mut X64Code) -> Int {
+    x64Put(&mut code, 15)
+    x64Put(&mut code, 131)
+    let at = code.bytes.length
+    for i in 0..4 { x64Put(&mut code, 0) }
+    return at
+}
+
 // Patch a rel32 displacement. Invalid patches set error without modifying it.
 pub fn x64PatchRelative(code: &mut X64Code, at: Int, target: Int) {
     if at < 0 || at + 4 > code.bytes.length || target < 0 || target > code.bytes.length {
@@ -320,6 +330,24 @@ pub fn x64DivUnsignedReg(code: &mut X64Code, reg: Int) {
     x64Put(&mut code, rex)
     x64Put(&mut code, 247)
     x64Put(&mut code, 240 + reg % 8)
+}
+
+// CQO (REX.W 99): sign-extends RAX into RDX before a signed division.
+pub fn x64Cqo(code: &mut X64Code) {
+    x64Put(&mut code, 72)
+    x64Put(&mut code, 153)
+}
+
+// IDIV r/m64 (REX.W F7 /7): signed RDX:RAX / reg -> RAX quotient, RDX
+// remainder, truncating toward zero. The caller must exclude a zero
+// divisor and Int.MIN / -1, which trap in hardware.
+pub fn x64IdivReg(code: &mut X64Code, reg: Int) {
+    if !x64RegisterValid(reg) { code.error = 3; return }
+    var rex = 72
+    if reg >= 8 { rex += 1 }
+    x64Put(&mut code, rex)
+    x64Put(&mut code, 247)
+    x64Put(&mut code, 248 + reg % 8)
 }
 
 // PUSH r64 (50+r, REX.B for R8-R15).

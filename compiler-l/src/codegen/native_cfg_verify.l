@@ -1,6 +1,7 @@
 import native_cfg_types
 import native_cfg_defs
 import native_cfg_ir
+import native_cfg_ref
 
 // Flow-sensitive definedness and whole-value move validation for the
 // restricted native backend. Every struct is MOVE-only in ELE even if it
@@ -39,7 +40,7 @@ fn cfgMoves(p: &CfgProgram, f: Int, inst: &CfgInst, variable: Int) -> Bool {
     if inst.kind == 3 {
         for n in 0..inst.argc {
             let arg = &p.call_args[inst.arg_first + n]
-            if cfgMoveOperand(p, f, &arg, variable) { return true }
+            if p.call_ref[inst.arg_first + n] < 0 && cfgMoveOperand(p, f, &arg, variable) { return true }
         }
         return false
     }
@@ -81,7 +82,7 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut List<Bool>) -> Int {
-    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || (inst.kind == 13 && inst.op < 0) {
+    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 13 && inst.op < 0) {
         if inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { return 57 }
     }
     if inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, &inst.a) >= 2 {
@@ -98,8 +99,13 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
     if inst.kind == 3 {
         for n in 0..inst.argc {
             let arg = &p.call_args[inst.arg_first + n]
-            let taken = cfgTakeOperand(p, f, &arg, &mut live)
-            if taken != 0 { return taken }
+            if p.call_ref[inst.arg_first + n] >= 0 {
+                // A borrowed root must be initialized and stays owned.
+                if !live[arg.value] { return 57 }
+            } else {
+                let taken = cfgTakeOperand(p, f, &arg, &mut live)
+                if taken != 0 { return taken }
+            }
         }
     }
     if (inst.kind == 10 || inst.kind == 12) && inst.op < 0 && inst.a.is_var {
@@ -107,7 +113,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         if inst.a.value < 0 || inst.a.value >= p.functions[f].vars { return 57 }
         if !live[inst.a.value] { return 57 }
     }
-    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 4 || inst.kind == 6
+    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 4 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16
     if reads_a || (inst.kind == 7 && inst.argc == 1) {
         let a = cfgTakeOperand(p, f, &inst.a, &mut live)
         if a != 0 { return a }
@@ -146,20 +152,13 @@ fn cfgCheckCalls(p: &CfgProgram) -> Int {
                     if inst.argc != target.params { return 52 }
                     let dst_type = p.types_code[func.first_var + inst.dst]
                     if dst_type != cfgResultType(target) { return 53 }
-                    for n in 0..inst.argc {
-                        let arg = &p.call_args[inst.arg_first + n]
-                        if cfgOperandType(p, f, &arg) != cfgParamType(p, callee, n) { return 54 }
-                    }
+                    let args = cfgCheckCallArgs(p, f, inst)
+                    if args != 0 { return args }
                 }
             }
         }
     }
     return 0
-}
-
-fn cfgParamType(p: &CfgProgram, f: Int, i: Int) -> Int {
-    if i < 0 || i >= p.functions[f].params { return -1 }
-    return p.types_code[p.functions[f].first_var + i]
 }
 
 fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
@@ -244,8 +243,9 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
         }
         if block.term == 1 {
             // Every owned Text must have been moved out or dropped by now.
+            // A reference parameter does not own its referent.
             for v in 0..vars {
-                if live[v] && p.types_code[func.first_var + v] == cfgTextType() { return 59 }
+                if live[v] && !p.var_ref[func.first_var + v] && p.types_code[func.first_var + v] == cfgTextType() { return 59 }
             }
         }
     }

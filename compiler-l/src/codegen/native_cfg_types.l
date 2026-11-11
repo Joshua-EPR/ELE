@@ -144,13 +144,23 @@ pub fn cfgReadEnum(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     p.enums.push(CfgEnum(first_variant: first, variants: count, size: size, align: 8))
 }
 
-// Supports direct places `pN.M` and two-level primitive projections
-// `pN.M.K`. A field holding another struct cannot be read by value yet:
-// doing so would partially move its parent and require move-path flags.
+// Supports whole variables `pN` (field -1), direct places `pN.M` and
+// two-level projections `pN.M.K`. When `pN` is a reference parameter the
+// place denotes its referent. A field holding another struct cannot be read
+// by value yet: doing so would partially move its parent and require
+// move-path flags.
 pub fn cfgReadPlace(p: &CfgProgram, f: Int, source: &Text, reader: &mut NativeReader) -> CfgPlace {
     let w = nativeWord(source, &mut reader)
     var dot1 = w.start
     while dot1 < w.end && source.byteAt(dot1) != 46 { dot1 += 1 }
+    if dot1 == w.end && w.end - w.start >= 2 && source.byteAt(w.start) == 112 {
+        let whole = nativeDecimal(source, &mut reader, &w, 1)
+        if whole < 0 || whole >= p.functions[f].vars || reader.error != 0 {
+            reader.error = 70
+            return CfgPlace(variable: -1, field: -1, subfield: -1)
+        }
+        return CfgPlace(variable: whole, field: -1, subfield: -1)
+    }
     if dot1 <= w.start + 1 || dot1 >= w.end - 1 || source.byteAt(w.start) != 112 {
         reader.error = 70
         return CfgPlace(variable: -1, field: -1, subfield: -1)
@@ -193,6 +203,7 @@ pub fn cfgReadPlace(p: &CfgProgram, f: Int, source: &Text, reader: &mut NativeRe
 pub fn cfgPlaceType(p: &CfgProgram, f: Int, place: &CfgPlace) -> Int {
     if place.variable < 0 || place.variable >= p.functions[f].vars { return -1 }
     let ty = p.types_code[p.functions[f].first_var + place.variable]
+    if place.field < 0 { return ty }
     if ty < 2 || ty - 2 >= p.structs.length { return -1 }
     let st = &p.structs[ty - 2]
     if place.field < 0 || place.field >= st.fields { return -1 }
@@ -253,6 +264,8 @@ pub fn cfgBinaryOp(source: &Text, w: &NativeWord) -> Int {
     if nativeEquals(source, w, "le") { return 7 }
     if nativeEquals(source, w, "gt") { return 8 }
     if nativeEquals(source, w, "ge") { return 9 }
+    if nativeEquals(source, w, "div") { return 10 }
+    if nativeEquals(source, w, "rem") { return 11 }
     return 0
 }
 
@@ -265,6 +278,9 @@ pub fn cfgOperandType(p: &CfgProgram, f: Int, op: &NativeOperand) -> Int {
     }
     if op.value < 0 || op.value >= p.functions[f].vars { return -1 }
     let slot = p.functions[f].first_var + op.value
+    // A reference is never a value operand: it cannot be copied, moved,
+    // returned or stored. Only places and reference arguments may name it.
+    if p.var_ref[slot] { return -1 }
     return p.types_code[slot]
 }
 

@@ -85,17 +85,24 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     for i in 0..vars {
         nativeExpect(source, &mut reader, "var")
         let vid = nativeId(source, &mut reader, 118)
-        nativeExpect(source, &mut reader, "val")
+        let mode = nativeWord(source, &mut reader)
+        let is_ref = nativeEquals(source, &mode, "ref")
+        if !is_ref && !nativeEquals(source, &mode, "val") { reader.error = 14 }
         let ty = cfgTypeOrUnit(p, source, &mut reader)
         nativeEndLine(source, &mut reader)
         let unit_var = ty == cfgUnitType()
         let text_var = ty == cfgTextType()
-        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && (ty >= 2 || unit_var)) { p.error = 45; break }
-        let size = cfgTypeSize(p, ty)
+        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && (ty >= 2 || unit_var)) { p.error = 45; break }
+        // References exist only as parameters: they cannot outlive the
+        // caller's frame, so no local loan needs a lifetime analysis here.
+        if is_ref && (i >= params || unit_var) { p.error = 96; break }
+        var size = cfgTypeSize(p, ty)
+        if is_ref { size = 8 }
         let count_slots = (size + 7) / 8
         if size < 1 || count_slots < 1 || next_slot + count_slots > 512 { p.error = 69; break }
-        p.types_bool.push(ty == 1)
+        p.types_bool.push(ty == 1 && !is_ref)
         p.types_code.push(ty)
+        p.var_ref.push(is_ref)
         p.slot_start.push(next_slot)
         p.slot_count.push(count_slots)
         next_slot += count_slots
