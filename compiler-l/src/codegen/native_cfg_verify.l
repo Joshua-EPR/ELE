@@ -84,7 +84,7 @@ flow cfgTransferVar(p: view CfgProgram, f: Int, block: view CfgBlock, variable: 
     give live
 }
 
-flow cfgTakeOperand(p: view CfgProgram, f: Int, op: view NativeOperand, live: edit List<Bool>) => Int {
+flow cfgTakeOperand(p: view CfgProgram, f: Int, op: view NativeOperand, live: edit List of[Bool]) => Int {
     when !op.is_var { give 0 }
     when op.value < 0 || op.value >= p.functions[f].vars { give 57 }
     when !live[op.value] { give 57 }
@@ -94,7 +94,7 @@ flow cfgTakeOperand(p: view CfgProgram, f: Int, op: view NativeOperand, live: ed
 
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
-flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live: edit List<Bool>) => Int {
+flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live: edit List of[Bool]) => Int {
     when inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { give 57 }
     }
@@ -210,14 +210,14 @@ flow cfgTransferPath(p: view CfgProgram, f: Int, paths: view CfgPaths, block: vi
     give live
 }
 
-flow cfgWholeLive(paths: view CfgPaths, vars: Int, live: view List<Bool>, op: view NativeOperand) => Bool {
+flow cfgWholeLive(paths: view CfgPaths, vars: Int, live: view List of[Bool], op: view NativeOperand) => Bool {
     when !op.is_var { give true }
     give cfgPathsLive(paths, vars, live, op.value, -1, -1)
 }
 
 // Every place and whole value that `inst` uses still has its moved-out
 // paths initialized; a store needs only the enclosing field of a subfield.
-flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view CfgInst, live: view List<Bool>) => Bool {
+flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view CfgInst, live: view List of[Bool]) => Bool {
     hold vars = p.functions[f].vars
     when paths.var_of.length == 0 { give true }
     when !cfgWholeLive(paths, vars, live, view inst.a) || !cfgWholeLive(paths, vars, live, view inst.b) { give false }
@@ -260,7 +260,7 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     hold func = view p.functions[f]
     hold blocks = func.blocks
     hold vars = func.vars
-    change reachable: List<Bool> = List[]
+    change reachable: List of[Bool] = List[]
     each b among 0..blocks { reachable@push(b == 0) }
     change changing = true
     during changing {
@@ -289,8 +289,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     // aggregate fields (native_cfg_paths). Parameters arrive whole.
     hold paths = cfgPathsOf(p, f)
     hold bits = vars + paths.var_of.length
-    change inputs: List<Bool> = List[]
-    change outputs: List<Bool> = List[]
+    change inputs: List of[Bool] = List[]
+    change outputs: List of[Bool] = List[]
     each b among 0..blocks {
         each v among 0..bits {
             change initial = true
@@ -336,7 +336,7 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
 
     each b among 0..blocks {
         hold block = view p.blocks[func.first_block + b]
-        change live: List<Bool> = List[]
+        change live: List of[Bool] = List[]
         each v among 0..bits { live@push(inputs[b * bits + v]) }
         each i among block.first..(block.first + block.count) {
             hold inst = view p.insts[i]

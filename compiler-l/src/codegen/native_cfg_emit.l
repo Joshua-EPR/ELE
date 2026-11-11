@@ -14,7 +14,7 @@ take native_cfg_list_emit
 // sys_exit(main()), without libc, Rust or a linker.
 
 expose shape CfgImage {
-    image: List<Int>
+    image: List of[Int]
     error: Int
 }
 
@@ -296,8 +296,8 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
         give result
     }
     change code = x64New()
-    change func_at: List<Int> = List[]
-    change block_at: List<Int> = List[]
+    change func_at: List of[Int] = List[]
+    change block_at: List of[Int] = List[]
     change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[])
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
@@ -328,7 +328,7 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     }
 
     // The runtime is emitted only for programs that print or own Text.
-    change runtime_at: List<Int> = List[]
+    change runtime_at: List of[Int] = List[]
     when cfgNeedsRuntime(p) { runtime_at = rtEmitAll(edit code) }
     when p.decl_lists > 0 { cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at) }
 
@@ -381,7 +381,7 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     }
     // Text literals follow the code inside the same read-only segment, one
     // copy per occurrence in the LIR.
-    change literal_at: List<Int> = List[]
+    change literal_at: List of[Int] = List[]
     each t among 0..p.text_start.length {
         literal_at@push(code.bytes.length)
         each i among 0..p.text_length[t] {
