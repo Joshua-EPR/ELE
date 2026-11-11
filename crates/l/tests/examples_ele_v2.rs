@@ -171,3 +171,42 @@ fn migrated_examples_preserve_observable_output() {
         );
     }
 }
+
+// Mantener el núcleo del backend ELE en la sintaxis oficial. Esta prueba
+// controla la superficie; las pruebas native_* compilan Stage 1 y ejecutan
+// ELF64 para validar el comportamiento y el ownership por separado.
+#[test]
+fn migrated_native_cfg_core_uses_ele_v2_surface() {
+    let migrated = [
+        "native_cfg_verify.l",
+        "native_cfg_emit.l",
+        "native_cfg_ir.l",
+        "native_cfg_inst.l",
+        "native_cfg_types.l",
+    ];
+    let legacy = [
+        "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if",
+        "else", "for", "while", "loop", "break", "continue", "match", "self", "pub",
+        "import", "module",
+    ];
+    for name in migrated {
+        let file = root().join("compiler-l/src/codegen").join(name);
+        let source = fs::read_to_string(&file).unwrap();
+        let clean = code_without_comments_and_strings(&source);
+        for token in clean.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
+            assert!(
+                !legacy.contains(&token),
+                "{}: palabra de la sintaxis histórica: {token}",
+                file.display()
+            );
+        }
+        assert!(
+            !clean.contains("->")
+                && !clean.contains("&mut")
+                && !clean.contains("&view")
+                && !clean.contains("List<"),
+            "{}: el módulo conserva operadores o tipos de la gramática histórica",
+            file.display()
+        );
+    }
+}
