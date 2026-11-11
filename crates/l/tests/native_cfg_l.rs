@@ -77,6 +77,15 @@ fn ele_cfg_backend_emits_real_multifunction_loop_elf() {
 }
 
 #[test]
+fn ele_cfg_loop_exports_elf_for_linux_execution() {
+    // The Windows bootstrap compiler emits ELF64 for execution on Linux CI.
+    let bytes = generate("native_cfg_loop_call.lir");
+    let output = root().join("target/stage1-tests/native-cfg-loop/loop.elf");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    fs::write(&output, bytes).unwrap();
+}
+
+#[test]
 fn ele_cfg_backend_compiles_boolean_comparison_and_branches() {
     let elf = generate("native_cfg_branch.lir");
     assert!(elf[4096..].windows(3).any(|b| b == [0x0f, 0x9c, 0xc0]));
