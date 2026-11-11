@@ -635,7 +635,7 @@ impl Parser {
                     if s == "edit" { "&mut" } else { "&" }.into(),
                     Box::new(self.expr(8)?),
                 )
-            },
+            }
             Kind::Word(ref s) if canonical_ele_keyword(s) == "match" => self.match_expr()?,
             // `await` binds like a unary operator: `await f() + 1` awaits the
             // call. Where it may appear is decided by semantic analysis.
@@ -663,12 +663,12 @@ impl Parser {
                         self.need("(")?;
                         ExprKind::GenericCall(name, type_args, self.arguments()?)
                     } else {
-                        ExprKind::Name(s)
+                        ExprKind::Name(name)
                     }
                 } else if self.take("(") {
                     ExprKind::Call(name, self.arguments()?)
                 } else {
-                    ExprKind::Name(s)
+                    ExprKind::Name(name)
                 }
             }
             Kind::Sym(s) if s == "(" => {
