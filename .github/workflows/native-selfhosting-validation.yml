@@ -67,6 +67,7 @@ jobs:
           --test native_refs_l
           --test native_aggregates_l
           --test native_text_fields_l
+          --test native_wide_struct_l
           --test native_enum_stage1_l
           --test ele_stage1_generic_types
           --test native_enum_stage1_payload_l
@@ -97,7 +98,10 @@ jobs:
           -- --test-threads=1
       - name: Native print, references and Text queries through the ELE backend (MSVC host, image checks)
         if: runner.os == 'Windows' && !cancelled()
-        run: cargo test -p project-l --test native_print_l --test native_refs_l --test native_aggregates_l --test native_text_fields_l -- --test-threads=1
+        run: >-
+          cargo test -p project-l --test native_print_l --test native_refs_l
+          --test native_aggregates_l --test native_text_fields_l
+          --test native_wide_struct_l -- --test-threads=1
       # Compile actual .l source and the wrong-active LIR using the ELE-written
       # backend on Windows, then execute their Linux ELF64 output on Linux.
       # Stage 0 itself is currently MSVC-only; no Linux Stage 0 is assumed.
@@ -120,8 +124,33 @@ jobs:
             target/stage1-tests/native-refs/*.elf
             target/stage1-tests/native-aggregates/*.elf
             target/stage1-tests/native-text-fields/*.elf
+            target/stage1-tests/native-wide-struct/*.elf
           if-no-files-found: error
           retention-days: 3
+      - name: Comprobar mmap/munmap de Text en shape amplio (Linux)
+        if: runner.os == 'Linux' && success()
+        shell: bash
+        run: |
+          if ! command -v strace >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq strace
+          fi
+          image=target/stage1-tests/native-wide-struct/native_wide_6_text_stage1.elf
+          chmod +x "$image"
+          strace -qq -e trace=mmap,mremap,munmap -o "$RUNNER_TEMP/wide-text.strace" "$image" > "$RUNNER_TEMP/wide-text.out"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "wide-text.strace"
+          lines = path.read_text().splitlines()
+          maps = [line for line in lines if line.startswith("mmap(") and " = -1" not in line]
+          unmaps = [line for line in lines if line.startswith("munmap(") and line.rstrip().endswith("= 0")]
+          remaps = [line for line in lines if line.startswith("mremap(")]
+          print(f"Text propietario: mmap={len(maps)}, mremap={len(remaps)}, munmap={len(unmaps)}")
+          assert len(maps) >= 2, "no se observaron reservas de los dos Text propios"
+          assert len(maps) == len(unmaps), "el ejemplo no libera todas sus reservas"
+          PY
       - name: Run native backend contract tests
         if: runner.os == 'Linux' && always()
         run: python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
@@ -210,6 +239,10 @@ jobs:
               ("native_text_fields_heap_stage1.elf", 0),
               ("native_text_fields_flags_stage1.elf", 0),
               ("tfield_replace_ok.elf", 2),
+              # Constructors with 6, 17 and 64 fields.
+              ("native_wide_17_stage1.elf", 0),
+              ("native_wide_6_text_stage1.elf", 0),
+              ("native_cfg_wide_64.elf", 42),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"

@@ -191,10 +191,11 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
             x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
         }
     } else if inst.kind == 4 {
-        cfgStoreField(&mut code, p, f, inst.dst, 0, -1, &inst.a, &mut fix)
-        if inst.argc >= 2 { cfgStoreField(&mut code, p, f, inst.dst, 1, -1, &inst.b, &mut fix) }
-        if inst.argc >= 3 { cfgStoreField(&mut code, p, f, inst.dst, 2, -1, &inst.c, &mut fix) }
-        if inst.argc == 4 { cfgStoreField(&mut code, p, f, inst.dst, 3, -1, &inst.d, &mut fix) }
+        for n in 0..inst.argc {
+            let arg = &p.struct_args[inst.arg_first + n]
+            cfgStoreField(&mut code, p, f, inst.dst, n, -1, &arg, &mut fix)
+            if code.error != 0 { break }
+        }
     } else if inst.kind == 5 {
         cfgReadField(&mut code, p, f, inst.dst, inst.place_var, inst.place_field, inst.place_subfield)
     } else if inst.kind == 6 {

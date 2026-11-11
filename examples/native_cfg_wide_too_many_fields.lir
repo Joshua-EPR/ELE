@@ -1,0 +1,75 @@
+ELE-LIR 1
+module structs 1 funcs 1 main f0
+struct s0 6:71,114,97,110,100,101 fields 65
+field 2:102,48 i
+field 2:102,49 i
+field 2:102,50 i
+field 2:102,51 i
+field 2:102,52 i
+field 2:102,53 i
+field 2:102,54 i
+field 2:102,55 i
+field 2:102,56 i
+field 2:102,57 i
+field 3:102,49,48 i
+field 3:102,49,49 i
+field 3:102,49,50 i
+field 3:102,49,51 i
+field 3:102,49,52 i
+field 3:102,49,53 i
+field 3:102,49,54 i
+field 3:102,49,55 i
+field 3:102,49,56 i
+field 3:102,49,57 i
+field 3:102,50,48 i
+field 3:102,50,49 i
+field 3:102,50,50 i
+field 3:102,50,51 i
+field 3:102,50,52 i
+field 3:102,50,53 i
+field 3:102,50,54 i
+field 3:102,50,55 i
+field 3:102,50,56 i
+field 3:102,50,57 i
+field 3:102,51,48 i
+field 3:102,51,49 i
+field 3:102,51,50 i
+field 3:102,51,51 i
+field 3:102,51,52 i
+field 3:102,51,53 i
+field 3:102,51,54 i
+field 3:102,51,55 i
+field 3:102,51,56 i
+field 3:102,51,57 i
+field 3:102,52,48 i
+field 3:102,52,49 i
+field 3:102,52,50 i
+field 3:102,52,51 i
+field 3:102,52,52 i
+field 3:102,52,53 i
+field 3:102,52,54 i
+field 3:102,52,55 i
+field 3:102,52,56 i
+field 3:102,52,57 i
+field 3:102,53,48 i
+field 3:102,53,49 i
+field 3:102,53,50 i
+field 3:102,53,51 i
+field 3:102,53,52 i
+field 3:102,53,53 i
+field 3:102,53,54 i
+field 3:102,53,55 i
+field 3:102,53,56 i
+field 3:102,53,57 i
+field 3:102,54,48 i
+field 3:102,54,49 i
+field 3:102,54,50 i
+field 3:102,54,51 i
+field 3:102,54,52 i
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 1 blocks 1
+var v0 val s0
+block 0 1
+i struct v0 s0 65 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1 ci1
+t return ci42
+endfunc
+end

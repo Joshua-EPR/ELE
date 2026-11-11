@@ -1359,3 +1359,13 @@ Campos Text con movimiento, `dropfield` (con bandera), reemplazo por `edit`
 y fuentes proyectadas; propiedad verificada con caminos de movimiento.
 Siguiente bloqueo para compilar `compiler-l/src`: el límite de 4 campos por
 `shape` (CfgProgram tiene 17), después `List of[T]` y préstamos locales.
+
+### Fase 8.7.10 — constructores anchos del backend nativo (pendiente de CI)
+
+Rama feat/native-wide-struct-operands sobre main tras el PR #27.
+CfgProgram.struct_args guarda hasta 64 operandos por constructor;
+el backend extiende comprobación de tipos, movimientos, caminos y emisión.
+Se mantienen límites de 512 bytes por layout y 512 slots por función.
+Fixtures de seis, diecisiete y sesenta y cuatro campos, con Text,
+pruebas negativas y ejecución cruzada ELF en CI.
+No existe Stage 2 ni PE64. Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_10.md.

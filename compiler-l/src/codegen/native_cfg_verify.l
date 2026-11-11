@@ -49,10 +49,10 @@ fn cfgMoves(p: &CfgProgram, f: Int, inst: &CfgInst, variable: Int) -> Bool {
         return cfgMoveOperand(p, f, &inst.a, variable)
     }
     if inst.kind == 4 {
-        if cfgMoveOperand(p, f, &inst.a, variable) { return true }
-        if inst.argc >= 2 && cfgMoveOperand(p, f, &inst.b, variable) { return true }
-        if inst.argc >= 3 && cfgMoveOperand(p, f, &inst.c, variable) { return true }
-        if inst.argc >= 4 && cfgMoveOperand(p, f, &inst.d, variable) { return true }
+        for n in 0..inst.argc {
+            let arg = &p.struct_args[inst.arg_first + n]
+            if cfgMoveOperand(p, f, &arg, variable) { return true }
+        }
     }
     return false
 }
@@ -111,22 +111,22 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         if inst.a.value < 0 || inst.a.value >= p.functions[f].vars { return 57 }
         if !live[inst.a.value] { return 57 }
     }
-    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 4 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16
+    if inst.kind == 4 {
+        // Consume left to right: duplicate moves in one constructor fail.
+        for n in 0..inst.argc {
+            let arg = &p.struct_args[inst.arg_first + n]
+            let taken = cfgTakeOperand(p, f, &arg, &mut live)
+            if taken != 0 { return taken }
+        }
+    }
+    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16
     if reads_a || (inst.kind == 7 && inst.argc == 1) {
         let a = cfgTakeOperand(p, f, &inst.a, &mut live)
         if a != 0 { return a }
     }
-    if inst.kind == 2 || (inst.kind == 4 && inst.argc >= 2) {
+    if inst.kind == 2 {
         let b = cfgTakeOperand(p, f, &inst.b, &mut live)
         if b != 0 { return b }
-    }
-    if inst.kind == 4 && inst.argc >= 3 {
-        let c = cfgTakeOperand(p, f, &inst.c, &mut live)
-        if c != 0 { return c }
-    }
-    if inst.kind == 4 && inst.argc == 4 {
-        let d = cfgTakeOperand(p, f, &inst.d, &mut live)
-        if d != 0 { return d }
     }
     if cfgHasDst(inst) {
         // Overwriting a live owned Text would leak its buffer.
@@ -200,6 +200,12 @@ fn cfgPathUses(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, live: &
     if paths.var_of.length == 0 { return true }
     if !cfgWholeLive(paths, vars, live, &inst.a) || !cfgWholeLive(paths, vars, live, &inst.b) { return false }
     if !cfgWholeLive(paths, vars, live, &inst.c) || !cfgWholeLive(paths, vars, live, &inst.d) { return false }
+    if inst.kind == 4 {
+        for n in 0..inst.argc {
+            let arg = &p.struct_args[inst.arg_first + n]
+            if !cfgWholeLive(paths, vars, live, &arg) { return false }
+        }
+    }
     if inst.kind == 3 {
         for n in 0..inst.argc {
             let k = inst.arg_first + n
