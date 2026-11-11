@@ -55,7 +55,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.op = nativeId(source, &mut reader, 115)
         inst.argc = nativeNumber(source, &mut reader)
         // Store all operands in order, independent from call references.
-        if inst.argc < 1 || inst.argc > 64 { p.error = 64 }
+        if inst.argc < 1 || inst.argc > 64 { p.error = 64; return }
         inst.arg_first = p.struct_args.length
         if p.error == 0 {
             for n in 0..inst.argc {

@@ -59,12 +59,10 @@ fn wide_shapes_from_source_match_stage0() {
             lir.contains(&format!(" fields {constructor_size}")),
             "{name}: sin declaracion esperada\n{lir}"
         );
-        assert!(
-            lir.lines().any(|line| {
-                line.starts_with("i struct ") && line.contains(&format!(" {constructor_size} "))
-            }),
-            "{name}: sin constructor esperado\n{lir}"
-        );
+        let has_constructor = lir.lines().any(|line| {
+            line.starts_with("i struct ") && line.contains(&format!(" {constructor_size} "))
+        });
+        assert!(has_constructor, "{name}: sin constructor esperado\n{lir}");
         let lir_file = temp(&format!("{name}.lir"));
         fs::write(&lir_file, &lir).unwrap();
         let image = temp(&format!("{name}.elf"));
@@ -88,10 +86,14 @@ fn wide_shapes_from_source_match_stage0() {
 }
 
 #[test]
-fn 512_byte_shape_reads_last_field() {
+fn shape_512_bytes_reads_last_field() {
     let image = temp("native_cfg_wide_64.elf");
     let out = backend(&root().join("examples/native_cfg_wide_64.lir"), &image);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let bytes = fs::read(&image).unwrap();
     assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -111,9 +113,15 @@ fn invalid_wide_shapes_and_duplicate_moves_are_rejected() {
         ("native_cfg_wide_too_many_fields.lir", 60),
         ("native_cfg_wide_too_many_args.lir", 64),
     ] {
-        let out = backend(&root().join("examples").join(name), &temp("rejected.elf"));
+        let out = backend(
+            &root().join("examples").join(name),
+            &temp("rejected.elf"),
+        );
         assert_eq!(out.status.code(), Some(3), "{name}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains(&format!("rechazado (código {expected})")), "{name}: {stderr}");
+        assert!(
+            stderr.contains(&format!("rechazado (código {expected})")),
+            "{name}: {stderr}"
+        );
     }
 }
