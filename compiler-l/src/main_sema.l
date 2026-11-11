@@ -13,6 +13,20 @@ import sema_stmt
 import sema
 import modules_l
 
+// Keep accesses to CLI pattern bindings behind shared borrows. Stage 0
+// forbids moving a field out of a borrowed match-pattern value.
+fn cliFlagEquals(flag: &Text, expected: &Text) -> Bool {
+    return symbolNameEqualsText(flag, 0, flag.byteLength, expected)
+}
+
+fn cliFlagLength(flag: &Text) -> Int {
+    return flag.byteLength
+}
+
+fn cliFlagByte(flag: &Text, index: Int) -> Int {
+    return flag.byteAt(index)
+}
+
 fn reportFileError(path: &Text, code: Int) -> Int {
     if code == 1 {
         printError("{path}: ruta o límite inválido")
@@ -202,18 +216,18 @@ fn main() -> Int {
                 let fault_flag = "--drop-fault="
                 let lir_flag = "--emit-lir"
                 let lir_fault_flag = "--lir-fault="
-                if symbolNameEqualsText(flag, 0, flag.byteLength, lir_flag) {
+                if cliFlagEquals(flag, lir_flag) {
                     lir = true
-                } else if flag.byteLength == 13 && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
+                } else if cliFlagLength(flag) == 13 && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
                     // Test hook: corrupt the LIR to exercise its verifier.
                     lir = true
-                    lir_fault = flag.byteAt(12) - 48
-                } else if symbolNameEqualsText(flag, 0, flag.byteLength, plan) {
+                    lir_fault = cliFlagByte(flag, 12) - 48
+                } else if cliFlagEquals(flag, plan) {
                     dump = true
-                } else if flag.byteLength == 14 && symbolNameEqualsText(flag, 0, 13, fault_flag) {
+                } else if cliFlagLength(flag) == 14 && symbolNameEqualsText(flag, 0, 13, fault_flag) {
                     // Test hook: corrupt the plan to exercise the verifier.
-                    fault = flag.byteAt(13) - 48
-                } else if !symbolNameEqualsText(flag, 0, flag.byteLength, check) {
+                    fault = cliFlagByte(flag, 13) - 48
+                } else if !cliFlagEquals(flag, check) {
                     printError(usage)
                     return 2
                 }
