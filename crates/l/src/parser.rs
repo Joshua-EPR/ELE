@@ -1190,7 +1190,7 @@ impl Parser {
         if self.at("!") {
             effects = Some(self.effects_annotation()?);
         }
-        let result = if (self.take("->") || self.take("=>")) {
+        let result = if self.take("->") || self.take("=>") {
             Some(self.ty()?)
         } else {
             None
@@ -1426,7 +1426,7 @@ impl Parser {
         if self.at("!") {
             effects = Some(self.effects_annotation()?);
         }
-        let result = if (self.take("->") || self.take("=>")) {
+        let result = if self.take("->") || self.take("=>") {
             Some(self.ty()?)
         } else {
             None
