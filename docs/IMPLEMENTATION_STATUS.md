@@ -1,5 +1,18 @@
 # Estado de implementación — 2026-11-09
 
+> Actualización 2026-11-11: el encabezado y las fases inferiores son
+> históricos. En `feat/native-list-cfg` (`c8dfc81`) se verificaron 5/5
+> pruebas `native_list_l.rs` en MSVC para el subconjunto nativo de listas y
+> préstamos locales. `cargo fmt --all --check` y Clippy con `-D warnings`
+> pasan. La suite global Windows/MSVC terminó con 526 aprobadas, 0 fallidas
+> y 3 ignoradas. La matriz de autocobertura de 89 fuentes está en
+> [SELF_COVERAGE_MATRIX_2026-11-11.md](SELF_COVERAGE_MATRIX_2026-11-11.md).
+> La sobrescritura de elementos propietarios emite ELF64 en MSVC y tiene
+> paridad Stage 0; su ejecución Linux sigue pendiente. `listpop` y
+> `dropfield` a través de referencias locales siguen sin soporte en el
+> backend ELE. No hay Stage 2 ni Stage 3. Consulte
+> [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md).
+
 > Rama `dev/self-hosting-parser`. Parser autónomo completo en L con gramática Pratt,
 > AST tipado e indexado en arenas continuas (`List<T>`), manejo de expresiones, sentencias,
 > declaraciones, tipos y control de flujo; recuperación de errores sintácticos con sincronización;
@@ -1586,3 +1599,25 @@ Resultados verificados en [Actions 43081976701](https://github.com/Joshua-EPR/EL
 Nueva puerta de calidad: suite completa Windows/MSVC con `--no-fail-fast`
 en todos los PR; está pendiente de validarse sobre el commit nuevo.
 Issue #31 conserva el defecto de namespacing privado de Stage 0.
+
+### Corrección de seguridad: aliasing de préstamos locales
+## Corrección del verificador de préstamos locales — 2026-11-11
+
+El backend ELE ya no identifica la independencia de dos argumentos de
+referencia por tener IDs de variables distintos. El análisis de llamadas
+resuelve préstamos locales a `ref_root` y proyecciones estáticas, y trata
+índices dinámicos de listas como potencialmente iguales. Se preserva el
+paso de préstamos sobre campos disjuntos.
+
+Al crear un préstamo compartido solapado con otro exclusivo vivo, el
+verificador invalida el exclusivo previo; usarlo después se rechaza con 57.
+La regla incluye préstamos derivados directamente de referencias locales.
+
+Se añadieron fixtures negativos de dos referencias locales en una llamada
+(99), referencia local y acceso directo (99) y préstamo compartido
+posterior al exclusivo con uso del original (57). Se añadió un fixture
+positivo de dos campos disjuntos de un shape, cuyo ELF debe salir con 42.
+
+**Estado de este incremento:** pendiente de verificación CI sobre el
+commit que contiene la corrección y estos fixtures. No modifica Stage 2,
+`listpop` ni `dropfield` mediante referencias locales.

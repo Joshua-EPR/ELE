@@ -56,7 +56,7 @@ class NativeELFVerifierTests(unittest.TestCase):
         for path in files:
             with self.subTest(file=path):
                 self.assertIn("writebytes" if path.endswith("lir_protocol.rs") else ("writeBytes" if path.endswith(".l") or path.endswith("sema.rs") or path.endswith("lir.rs") or path.endswith("cfg.rs") else "write_bytes"),
-                              (ROOT / path).read_text())
+                              (ROOT / path).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

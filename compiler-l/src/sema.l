@@ -212,7 +212,14 @@ fn semaCheckDrops(ctx: &mut SemaContext, source: &Text, tree: &AstTree, name: In
     ctx.drop_iterations += verdict.iterations
     if verdict.status != 0 {
         let code = verdict.status
-        semaAddError(&mut ctx, "ICE", "error interno del compilador: plan de drops inválido (regla {code})", start, end)
+        if ctx.lir.unsupported >= 0 {
+            // An unsupported lowering (notably Option/Result match) may not
+            // have a complete drop plan. It must fail as unsupported source,
+            // while a bad plan in the supported subset remains an ICE.
+            semaAddError(&mut ctx, "L0016", "construcción fuera del subconjunto de la LIR v1 de ELE", ctx.lir.unsupported, ctx.lir.unsupported)
+        } else {
+            semaAddError(&mut ctx, "ICE", "error interno del compilador: plan de drops inválido (regla {code})", start, end)
+        }
     }
     if ctx.dump_drops {
         dropDump(&ctx.flow, &plan, source, tree, name)

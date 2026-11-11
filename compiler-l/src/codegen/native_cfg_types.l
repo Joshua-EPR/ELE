@@ -14,6 +14,12 @@ pub fn cfgType(p: &CfgProgram, source: &Text, reader: &mut NativeReader) -> Int 
         let id = nativeDecimal(source, &mut reader, &w, 1)
         if id >= 0 && id < p.enums.length { return 2 + p.structs.length + id }
     }
+    if w.start < w.end && source.byteAt(w.start) == 108 {
+        // A list is three words whatever its element, so `lK` is usable
+        // before `list lK` is read; only the declared count matters.
+        let id = nativeDecimal(source, &mut reader, &w, 1)
+        if id >= 0 && id < p.decl_lists { return 2 + p.decl_structs + p.decl_enums + id }
+    }
     reader.error = 30
     return -1
 }
@@ -51,7 +57,7 @@ pub fn cfgTypeSize(p: &CfgProgram, ty: Int) -> Int {
     if ty == 0 { return 8 }
     // A unit variable owns one never-read slot so that slot math stays uniform.
     if ty == cfgUnitType() { return 8 }
-    if ty == cfgTextType() { return 24 }
+    if ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { return 24 }
     if ty == 1 { return 1 }
     if ty >= 2 && ty - 2 < p.structs.length { return p.structs[ty - 2].size }
     let enum_id = ty - 2 - p.structs.length
@@ -62,7 +68,7 @@ pub fn cfgTypeSize(p: &CfgProgram, ty: Int) -> Int {
 pub fn cfgTypeAlign(p: &CfgProgram, ty: Int) -> Int {
     if ty == 0 { return 8 }
     if ty == 1 { return 1 }
-    if ty == cfgTextType() { return 8 }
+    if ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { return 8 }
     if ty >= 2 && ty - 2 < p.structs.length { return p.structs[ty - 2].align }
     let enum_id = ty - 2 - p.structs.length
     if enum_id >= 0 && enum_id < p.enums.length { return p.enums[enum_id].align }
@@ -146,63 +152,98 @@ pub fn cfgReadEnum(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     p.enums.push(CfgEnum(first_variant: first, variants: count, size: size, align: 8))
 }
 
-// Supports whole variables `pN` (field -1), direct places `pN.M` and
-// two-level projections `pN.M.K`. When `pN` is a reference parameter the
-// place denotes its referent. A field holding another struct cannot be read
-// by value yet: doing so would partially move its parent and require
-// move-path flags.
-pub fn cfgReadPlace(p: &CfgProgram, f: Int, source: &Text, reader: &mut NativeReader) -> CfgPlace {
-    let w = nativeWord(source, &mut reader)
-    var dot1 = w.start
-    while dot1 < w.end && source.byteAt(dot1) != 46 { dot1 += 1 }
-    if dot1 == w.end && w.end - w.start >= 2 && source.byteAt(w.start) == 112 {
-        let whole = nativeDecimal(source, &mut reader, &w, 1)
-        if whole < 0 || whole >= p.functions[f].vars || reader.error != 0 {
-            reader.error = 70
-            return CfgPlace(variable: -1, field: -1, subfield: -1)
-        }
-        return CfgPlace(variable: whole, field: -1, subfield: -1)
-    }
-    if dot1 <= w.start + 1 || dot1 >= w.end - 1 || source.byteAt(w.start) != 112 {
-        reader.error = 70
-        return CfgPlace(variable: -1, field: -1, subfield: -1)
-    }
-    var dot2 = dot1 + 1
-    while dot2 < w.end && source.byteAt(dot2) != 46 { dot2 += 1 }
-    if dot2 == dot1 + 1 || dot2 == w.end - 1 {
-        reader.error = 70
-        return CfgPlace(variable: -1, field: -1, subfield: -1)
-    }
-    let root_word = NativeWord(start: w.start, end: dot1)
-    let field_word = NativeWord(start: dot1 + 1, end: dot2)
-    let variable = nativeDecimal(source, &mut reader, &root_word, 1)
-    let field = nativeDecimal(source, &mut reader, &field_word, 0)
-    var subfield = -1
-    if dot2 < w.end {
-        let nested_word = NativeWord(start: dot2 + 1, end: w.end)
-        subfield = nativeDecimal(source, &mut reader, &nested_word, 0)
-    }
-    if variable < 0 || variable >= p.functions[f].vars || field < 0 || reader.error != 0 {
-        reader.error = 70
-        return CfgPlace(variable: -1, field: -1, subfield: -1)
-    }
-    let ty = p.types_code[p.functions[f].first_var + variable]
-    if ty < 2 || ty - 2 >= p.structs.length || field >= p.structs[ty - 2].fields {
-        reader.error = 70
-        return CfgPlace(variable: -1, field: -1, subfield: -1)
-    }
-    if subfield >= 0 {
-        let st = &p.structs[ty - 2]
-        let child_ty = p.fields[st.first_field + field].ty
-        if child_ty < 2 || subfield >= p.structs[child_ty - 2].fields {
-            reader.error = 70
-            return CfgPlace(variable: -1, field: -1, subfield: -1)
-        }
-    }
-    return CfgPlace(variable: variable, field: field, subfield: subfield)
+fn cfgBadPlace(reader: &mut NativeReader) -> CfgPlace {
+    reader.error = 70
+    return CfgPlace(variable: -1, field: -1, subfield: -1, ext: -1)
 }
 
-pub fn cfgPlaceType(p: &CfgProgram, f: Int, place: &CfgPlace) -> Int {
+// Decimal digits of `source` from `at` (at most seven). Returns the position
+// after them; `out.start` receives the value and `out.end` the digit count.
+fn cfgPlaceDigits(source: &Text, at: Int, end: Int, out: &mut NativeWord) -> Int {
+    var pos = at
+    var value = 0
+    while pos < end && pos - at < 7 {
+        let b = source.byteAt(pos)
+        if b < 48 || b > 57 { break }
+        value = value * 10 + b - 48
+        pos += 1
+    }
+    out.start = value
+    out.end = pos - at
+    return pos
+}
+
+// A place is `p<N>` followed by projections: `.k` (field k of a shape) and
+// `[v<I>]` (element of a list at the Int variable I). When `pN` is a
+// reference parameter the place denotes its referent.
+//
+// The first two fields before any index are the static prefix
+// (`field`/`subfield`), whose ownership the verifier follows with move
+// paths. Everything after it is the extension (`ext`): storage reached
+// through a list buffer or deeper than the tracked paths. An extension
+// never moves ownership: reads through it are copies of heap-free values
+// (see native_cfg_list).
+pub fn cfgReadPlace(p: &mut CfgProgram, f: Int, source: &Text, reader: &mut NativeReader) -> CfgPlace {
+    let w = nativeWord(source, &mut reader)
+    if reader.error != 0 || w.end - w.start < 2 || source.byteAt(w.start) != 112 { return cfgBadPlace(&mut reader) }
+    var number = NativeWord(start: 0, end: 0)
+    var pos = cfgPlaceDigits(source, w.start + 1, w.end, &mut number)
+    let variable = number.start
+    if number.end == 0 || variable >= p.functions[f].vars { return cfgBadPlace(&mut reader) }
+    var ty = p.types_code[p.functions[f].first_var + variable]
+    var field = -1
+    var subfield = -1
+    var ext = -1
+    var steps = 0
+    while pos < w.end {
+        steps += 1
+        if steps > 8 { return cfgBadPlace(&mut reader) }
+        let b = source.byteAt(pos)
+        if b == 46 {
+            pos = cfgPlaceDigits(source, pos + 1, w.end, &mut number)
+            let k = number.start
+            if number.end == 0 || ty < 2 || ty - 2 >= p.structs.length || k >= p.structs[ty - 2].fields { return cfgBadPlace(&mut reader) }
+            ty = p.fields[p.structs[ty - 2].first_field + k].ty
+            if ext < 0 && field < 0 {
+                field = k
+            } else if ext < 0 && subfield < 0 {
+                subfield = k
+            } else {
+                if ext < 0 {
+                    ext = p.ext_first.length
+                    p.ext_first.push(p.proj_kind.length)
+                    p.ext_count.push(0)
+                }
+                p.proj_kind.push(0)
+                p.proj_value.push(k)
+            }
+        } else if b == 91 {
+            if pos + 1 >= w.end || source.byteAt(pos + 1) != 118 { return cfgBadPlace(&mut reader) }
+            pos = cfgPlaceDigits(source, pos + 2, w.end, &mut number)
+            let iv = number.start
+            let list = cfgListIndex(p, ty)
+            if number.end == 0 || pos >= w.end || source.byteAt(pos) != 93 || list < 0 || iv >= p.functions[f].vars { return cfgBadPlace(&mut reader) }
+            pos += 1
+            let slot = p.functions[f].first_var + iv
+            if p.types_code[slot] != 0 || p.var_ref[slot] { return cfgBadPlace(&mut reader) }
+            ty = p.list_elem[list]
+            if ext < 0 {
+                ext = p.ext_first.length
+                p.ext_first.push(p.proj_kind.length)
+                p.ext_count.push(0)
+            }
+            p.proj_kind.push(1)
+            p.proj_value.push(iv)
+        } else {
+            return cfgBadPlace(&mut reader)
+        }
+    }
+    if ext >= 0 { p.ext_count[ext] = p.proj_kind.length - p.ext_first[ext] }
+    return CfgPlace(variable: variable, field: field, subfield: subfield, ext: ext)
+}
+
+// Type of the static prefix of a place (without its extension).
+fn cfgPrefixType(p: &CfgProgram, f: Int, place: &CfgPlace) -> Int {
     if place.variable < 0 || place.variable >= p.functions[f].vars { return -1 }
     let ty = p.types_code[p.functions[f].first_var + place.variable]
     if place.field < 0 { return ty }
@@ -215,6 +256,24 @@ pub fn cfgPlaceType(p: &CfgProgram, f: Int, place: &CfgPlace) -> Int {
     let child = &p.structs[first_ty - 2]
     if place.subfield >= child.fields { return -1 }
     return p.fields[child.first_field + place.subfield].ty
+}
+
+pub fn cfgPlaceType(p: &CfgProgram, f: Int, place: &CfgPlace) -> Int {
+    var ty = cfgPrefixType(p, f, place)
+    if place.ext < 0 || ty == -1 { return ty }
+    if place.ext >= p.ext_first.length { return -1 }
+    let first = p.ext_first[place.ext]
+    for n in first..(first + p.ext_count[place.ext]) {
+        if p.proj_kind[n] == 1 {
+            let list = cfgListIndex(p, ty)
+            if list < 0 { return -1 }
+            ty = p.list_elem[list]
+        } else {
+            if ty < 2 || ty - 2 >= p.structs.length || p.proj_value[n] >= p.structs[ty - 2].fields { return -1 }
+            ty = p.fields[p.structs[ty - 2].first_field + p.proj_value[n]].ty
+        }
+    }
+    return ty
 }
 
 // Strict ASCII-only identifier decoding for this bootstrap subset.

@@ -2,6 +2,7 @@ import lir_tokens
 import native_cfg_defs
 import native_cfg_types
 import native_cfg_inst
+import native_cfg_list
 
 // ELE-LIR CFG reader; split across modules to obey CORE-1 token limit.
 fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f: Int, b: Int) {
@@ -91,9 +92,8 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         let unit_var = ty == cfgUnitType()
         let text_var = ty == cfgTextType()
         if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && unit_var) { p.error = 45; break }
-        // References exist only as parameters: they cannot outlive the
-        // caller's frame, so no local loan needs a lifetime analysis here.
-        if is_ref && (i >= params || unit_var) { p.error = 96; break }
+        // A local reference is defined by a `loan` (native_cfg_loan).
+        if is_ref && unit_var { p.error = 96; break }
         var size = cfgTypeSize(p, ty)
         if is_ref { size = 8 }
         let count_slots = (size + 7) / 8
@@ -101,6 +101,10 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         p.types_bool.push(ty == 1 && !is_ref)
         p.types_code.push(ty)
         p.var_ref.push(is_ref)
+        p.ref_root.push(-1)
+        p.ref_field.push(-1)
+        p.ref_sub.push(-1)
+        p.ref_mut.push(-1)
         p.slot_start.push(next_slot)
         p.slot_count.push(count_slots)
         next_slot += count_slots
@@ -136,16 +140,26 @@ pub fn cfgParse(source: &Text) -> CfgProgram {
         nativeExpect(source, &mut r, "enums")
         enums = nativeNumber(source, &mut r)
     }
+    var lists = 0
+    var list_probe = NativeReader(offset: r.offset, error: 0)
+    let list_word = nativeWord(source, &mut list_probe)
+    if nativeEquals(source, &list_word, "lists") {
+        nativeExpect(source, &mut r, "lists")
+        lists = nativeNumber(source, &mut r)
+    }
     nativeExpect(source, &mut r, "funcs")
     let functions = nativeNumber(source, &mut r)
     nativeExpect(source, &mut r, "main")
     let main = nativeId(source, &mut r, 102)
     nativeEndLine(source, &mut r)
-    if r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || functions < 1 || functions > 256 || main < 0 || main >= functions {
+    if r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || lists < 0 || lists > 64 || functions < 1 || functions > 256 || main < 0 || main >= functions {
         p.error = 48
         return p
     }
     p.main = main
+    p.decl_structs = structs
+    p.decl_enums = enums
+    p.decl_lists = lists
     for i in 0..structs {
         if p.error != 0 { break }
         cfgReadStruct(&mut p, source, &mut r, i)
@@ -154,6 +168,11 @@ pub fn cfgParse(source: &Text) -> CfgProgram {
     for i in 0..enums {
         if p.error != 0 { break }
         cfgReadEnum(&mut p, source, &mut r, i)
+    }
+    if p.error != 0 { return p }
+    for i in 0..lists {
+        if p.error != 0 { break }
+        cfgReadList(&mut p, source, &mut r, i)
     }
     if p.error != 0 { return p }
     for i in 0..functions {

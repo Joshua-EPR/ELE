@@ -1,5 +1,28 @@
 # Traspaso de agente — ELE
 
+## Estado actual — 2026-11-11
+
+Trabajo activo: `feat/native-list-cfg`, basado en `c8dfc81`. El resto de este
+documento recoge traspasos históricos y menciona ramas y cifras antiguas.
+La validación del commit y las correcciones pasó `cargo fmt --all --check`,
+Clippy con `-D warnings` y la suite completa Windows/MSVC: 526 aprobadas,
+0 fallidas y 3 ignoradas. El contrato Python de enums se actualizó
+porque el lector de instrucciones se trasladó a `native_cfg_inst.l` y el de
+tipos a `native_cfg_types.l`; se corrigieron además problemas CRLF y UTF-8
+de pruebas Python en Windows. `tests/native_backend` ejecuta 39 casos:
+27 aprobados y 12 omitidos. La [matriz medida](SELF_COVERAGE_MATRIX_2026-11-11.md)
+invocó 89 fuentes reales: parser 89, semántica/ownership 23, LIR 9 y
+backend ELE/ELF64 1 como entradas independientes. Véanse también
+[NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md) y
+[BRANCH_INTEGRATION_AUDIT.md](BRANCH_INTEGRATION_AUDIT.md).
+
+`stash@{0}` y el worktree `ELE-baseline` siguen intactos. WSL devuelve
+«Acceso denegado», así que falta ejecución Linux local. Quedan pendientes
+`listpop` y `dropfield` mediante referencias locales en el backend ELE.
+La sobrescritura de propietarios ya emite ELF64 y tiene paridad Stage 0 en
+Windows; falta ejecución Linux del nuevo caso. No se ha demostrado Stage 2/3
+ni self-hosting.
+
 Última actualización el 2026-11-10 en `dev/ele-self-hosting-lir`.
 El incremento vigente está en §35 (LIR de ELE y backend provisional).
 §33 documenta los drops; §32, el borrow checker.
@@ -1402,3 +1425,25 @@ Se incorporó además `cargo test -p project-l --no-fail-fast -- --test-threads=
 como paso permanente de CI Windows (validación aún pendiente).
 La limitación Stage 0 de nombres privados homónimos queda rastreada en
 [issue #31](https://github.com/Joshua-EPR/ELE/issues/31).
+
+### Corrección de seguridad: aliasing de préstamos locales
+## Corrección del verificador de préstamos locales — 2026-11-11
+
+El backend ELE ya no identifica la independencia de dos argumentos de
+referencia por tener IDs de variables distintos. El análisis de llamadas
+resuelve préstamos locales a `ref_root` y proyecciones estáticas, y trata
+índices dinámicos de listas como potencialmente iguales. Se preserva el
+paso de préstamos sobre campos disjuntos.
+
+Al crear un préstamo compartido solapado con otro exclusivo vivo, el
+verificador invalida el exclusivo previo; usarlo después se rechaza con 57.
+La regla incluye préstamos derivados directamente de referencias locales.
+
+Se añadieron fixtures negativos de dos referencias locales en una llamada
+(99), referencia local y acceso directo (99) y préstamo compartido
+posterior al exclusivo con uso del original (57). Se añadió un fixture
+positivo de dos campos disjuntos de un shape, cuyo ELF debe salir con 42.
+
+**Estado de este incremento:** pendiente de verificación CI sobre el
+commit que contiene la corrección y estos fixtures. No modifica Stage 2,
+`listpop` ni `dropfield` mediante referencias locales.

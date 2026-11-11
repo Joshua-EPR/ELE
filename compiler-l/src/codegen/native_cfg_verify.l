@@ -3,6 +3,8 @@ import native_cfg_defs
 import native_cfg_ir
 import native_cfg_ref
 import native_cfg_paths
+import native_cfg_list
+import native_cfg_loan
 
 // Flow-sensitive definedness and whole-value move validation for the
 // restricted native backend. Every struct is MOVE-only in ELE even if it
@@ -19,7 +21,7 @@ fn cfgEdge(p: &CfgProgram, f: Int, from: Int, to: Int) -> Bool {
 }
 
 fn cfgHasDst(inst: &CfgInst) -> Bool {
-    return inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17
+    return inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17 && inst.kind != 19 && inst.kind != 20
 }
 
 fn cfgResultType(func: &CfgFunc) -> Int {
@@ -42,19 +44,31 @@ fn cfgMoves(p: &CfgProgram, f: Int, inst: &CfgInst, variable: Int) -> Bool {
         }
         return false
     }
-    if inst.kind == 1 || inst.kind == 6 {
+    if inst.kind == 1 || inst.kind == 6 || inst.kind == 19 {
         return cfgMoveOperand(p, f, &inst.a, variable)
     }
     if inst.kind == 7 && inst.argc == 1 {
         return cfgMoveOperand(p, f, &inst.a, variable)
     }
-    if inst.kind == 4 {
+    if inst.kind == 4 || inst.kind == 18 {
         for n in 0..inst.argc {
             let arg = &p.struct_args[inst.arg_first + n]
             if cfgMoveOperand(p, f, &arg, variable) { return true }
         }
     }
     return false
+}
+
+// Local reference `variable` stops being valid at `inst`: its root is moved,
+// dropped or redefined, or overlapping storage is written (native_cfg_loan).
+fn cfgLoanDies(p: &CfgProgram, f: Int, inst: &CfgInst, variable: Int) -> Bool {
+    let slot = p.functions[f].first_var + variable
+    if !p.var_ref[slot] || variable < p.functions[f].params { return false }
+    let root = p.ref_root[slot]
+    if root < 0 { return false }
+    if cfgMoves(p, f, &inst, root) { return true }
+    if cfgHasDst(inst) && inst.dst == root { return true }
+    return cfgLoanKilledBy(p, f, inst, variable)
 }
 
 // Transfer for a single definitely-initialized bit, evaluated in
@@ -64,6 +78,7 @@ fn cfgTransferVar(p: &CfgProgram, f: Int, block: &CfgBlock, variable: Int, initi
     for i in block.first..(block.first + block.count) {
         let inst = &p.insts[i]
         if cfgMoves(p, f, &inst, variable) { live = false }
+        if cfgLoanDies(p, f, &inst, variable) { live = false }
         if cfgHasDst(inst) && inst.dst == variable { live = true }
     }
     return live
@@ -80,9 +95,11 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut List<Bool>) -> Int {
-    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
+    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
         if inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { return 57 }
     }
+    // The index variables of a place are read before the instruction runs.
+    if !cfgExtLive(p, inst.place_ext, live) || !cfgExtLive(p, inst.src_ext, live) { return 57 }
     if inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, &inst.a) >= 2 {
         return 58
     }
@@ -100,6 +117,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
             if p.call_ref[inst.arg_first + n] >= 0 {
                 // A borrowed root must be initialized and stays owned.
                 if !live[arg.value] { return 57 }
+                if !cfgExtLive(p, p.call_ext[inst.arg_first + n], live) { return 57 }
             } else {
                 let taken = cfgTakeOperand(p, f, &arg, &mut live)
                 if taken != 0 { return taken }
@@ -111,7 +129,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         if inst.a.value < 0 || inst.a.value >= p.functions[f].vars { return 57 }
         if !live[inst.a.value] { return 57 }
     }
-    if inst.kind == 4 {
+    if inst.kind == 4 || inst.kind == 18 {
         // Consume left to right: duplicate moves in one constructor fail.
         for n in 0..inst.argc {
             let arg = &p.struct_args[inst.arg_first + n]
@@ -119,7 +137,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
             if taken != 0 { return taken }
         }
     }
-    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16
+    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16 || inst.kind == 19 || inst.kind == 20
     if reads_a || (inst.kind == 7 && inst.argc == 1) {
         let a = cfgTakeOperand(p, f, &inst.a, &mut live)
         if a != 0 { return a }
@@ -129,8 +147,10 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         if b != 0 { return b }
     }
     if cfgHasDst(inst) {
-        // Overwriting a live owned Text would leak its buffer.
-        if live[inst.dst] && p.types_code[p.functions[f].first_var + inst.dst] == cfgTextType() { return 59 }
+        // Overwriting a live owned Text or list would leak its buffer. A
+        // reference owns nothing: a loop may take its loan again.
+        let dst_slot = p.functions[f].first_var + inst.dst
+        if live[inst.dst] && !p.var_ref[dst_slot] && cfgHeapDirect(p, p.types_code[dst_slot]) { return 59 }
         live[inst.dst] = true
     }
     return 0
@@ -164,15 +184,17 @@ fn cfgPathAfter(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, k: Int
     let v = paths.var_of[k]
     var live = before
     if cfgMoves(p, f, &inst, v) { live = false }
+    if cfgLoanDies(p, f, &inst, v) { live = false }
     // Moving a field out of an owned shape, or releasing its Text, kills
     // the paths inside it. Through a reference a read is a copy.
-    if inst.kind == 5 && inst.place_var == v && inst.place_field >= 0 && !p.var_ref[p.functions[f].first_var + v] {
-        let place = CfgPlace(variable: v, field: inst.place_field, subfield: inst.place_subfield)
+    if inst.kind == 5 && inst.place_ext < 0 && inst.place_var == v && inst.place_field >= 0 && !p.var_ref[p.functions[f].first_var + v] {
+        let place = CfgPlace(variable: v, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
         let moved = cfgPlaceType(p, f, &place)
         if (moved >= 2 || moved == cfgTextType()) && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     }
     if inst.kind == 17 && inst.place_var == v && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
-    if inst.kind == 6 && inst.place_var == v && inst.place_field >= 0 {
+    // A store through an extension writes inside a list, not the path.
+    if inst.kind == 6 && inst.place_ext < 0 && inst.place_var == v && inst.place_field >= 0 {
         if cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = true }
     }
     if cfgHasDst(inst) && inst.dst == v { live = true }
@@ -200,7 +222,7 @@ fn cfgPathUses(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, live: &
     if paths.var_of.length == 0 { return true }
     if !cfgWholeLive(paths, vars, live, &inst.a) || !cfgWholeLive(paths, vars, live, &inst.b) { return false }
     if !cfgWholeLive(paths, vars, live, &inst.c) || !cfgWholeLive(paths, vars, live, &inst.d) { return false }
-    if inst.kind == 4 {
+    if inst.kind == 4 || inst.kind == 18 {
         for n in 0..inst.argc {
             let arg = &p.struct_args[inst.arg_first + n]
             if !cfgWholeLive(paths, vars, live, &arg) { return false }
@@ -217,13 +239,15 @@ fn cfgPathUses(p: &CfgProgram, f: Int, paths: &CfgPaths, inst: &CfgInst, live: &
             }
         }
     }
-    let reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0)
+    // A place with an extension needs its whole static prefix: the list that
+    // is indexed must still be there, also for a store.
+    let reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || (inst.kind == 6 && inst.place_ext >= 0)
     if reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { return false }
     let whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
     if whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { return false }
     let projected_source = (inst.kind == 10 || inst.kind == 12) && inst.op >= 0
     if projected_source && !cfgPathsLive(paths, vars, live, inst.op, inst.src_field, inst.src_sub) { return false }
-    if inst.kind == 6 && inst.place_subfield >= 0 {
+    if inst.kind == 6 && inst.place_ext < 0 && inst.place_subfield >= 0 {
         for k in 0..paths.var_of.length {
             let enclosing = paths.var_of[k] == inst.place_var && paths.field[k] == inst.place_field && paths.sub[k] < 0
             if enclosing && !live[vars + k] { return false }
@@ -320,13 +344,17 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             if !cfgPathUses(p, f, &paths, &inst, &live) { return 57 }
             // Storing over a live Text, or giving a new value to a variable
             // that still owns one in a field, would leak it.
-            if inst.kind == 6 && cfgTextLiveWithin(&paths, vars, &live, inst.place_var, inst.place_field, inst.place_subfield) { return 59 }
-            if cfgHasDst(inst) && live[inst.dst] && cfgTextLiveWithin(&paths, vars, &live, inst.dst, -1, -1) { return 59 }
+            if inst.kind == 6 && inst.place_ext < 0 && cfgTextLiveWithin(&paths, vars, &live, inst.place_var, inst.place_field, inst.place_subfield) { return 59 }
+            if cfgHasDst(inst) && live[inst.dst] && !p.var_ref[func.first_var + inst.dst] && cfgTextLiveWithin(&paths, vars, &live, inst.dst, -1, -1) { return 59 }
             for k in 0..paths.var_of.length {
                 live[vars + k] = cfgPathAfter(p, f, &paths, &inst, k, live[vars + k])
             }
             let error = cfgValidateInstruction(p, f, &inst, &mut live)
             if error != 0 { return error }
+            // References into storage that this instruction moved or wrote die.
+            for v in func.params..vars {
+                if live[v] && cfgLoanDies(p, f, &inst, v) { live[v] = false }
+            }
         }
         if block.term == 1 || block.term == 3 {
             if !cfgWholeLive(&paths, vars, &live, &block.value) { return 57 }
@@ -338,13 +366,13 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             // must be given back whole.
             for k in 0..paths.var_of.length {
                 let root = paths.var_of[k]
-                if paths.text[k] && p.var_ref[func.first_var + root] && !live[vars + k] { return 95 }
+                if paths.text[k] && root < func.params && p.var_ref[func.first_var + root] && !live[vars + k] { return 95 }
                 if paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { return 59 }
             }
-            // Every owned Text must have been moved out or dropped by now.
+            // Every owned Text or list must have been moved out or dropped by now.
             // A reference parameter does not own its referent.
             for v in 0..vars {
-                if live[v] && !p.var_ref[func.first_var + v] && p.types_code[func.first_var + v] == cfgTextType() { return 59 }
+                if live[v] && !p.var_ref[func.first_var + v] && cfgHeapDirect(p, p.types_code[func.first_var + v]) { return 59 }
             }
         }
     }
@@ -356,6 +384,8 @@ pub fn cfgVerify(p: &CfgProgram) -> Int {
     let calls = cfgCheckCalls(p)
     if calls != 0 { return calls }
     for f in 0..p.functions.length {
+        let modes = cfgCheckLoanModes(p, f)
+        if modes != 0 { return modes }
         let result = cfgCheckFunction(p, f)
         if result != 0 { return result }
     }
