@@ -62,10 +62,18 @@ class NestedStructFixtureContract(unittest.TestCase):
     def test_codegen_recursive_copy_has_byte_and_word_cases(self):
         code=(ROOT / "compiler-l/src/codegen/native_cfg_emit.l").read_text()
         self.assertIn("fn cfgCopyValue(", code)
-        self.assertIn("x64LoadMem64(&mut code, 0, 5, src_disp)", code)
-        self.assertIn("x64LoadMem8(&mut code, 0, 5, src_disp)", code)
-        self.assertIn("cfgCopyValue(&mut code, p, member.ty,",code)
-        self.assertIn("cfgCopyValue(&mut code, p, ty, cfgVarBase",code)
+        copy = code.split("fn cfgCopyValue(", 1)[1].split("\nfn cfgStoreField(", 1)[0]
+        # Addressing is intentionally parameterized: src_base/dst_base may
+        # point at a stack slot or a borrowed referent (not always RBP=5).
+        self.assertIn("x64LoadMem64(&mut code, 0, src_base, src_disp)", copy)
+        self.assertIn("x64StoreMem64(&mut code, dst_base, dst_disp, 0)", copy)
+        self.assertIn("x64LoadMem8(&mut code, 0, src_base, src_disp)", copy)
+        self.assertIn("x64StoreMem8(&mut code, dst_base, dst_disp, 0)", copy)
+        self.assertIn("cfgCopyValue(&mut code, p, member.ty,", copy)
+        # Struct moves must use the computed destination address, including
+        # through a reference, and preserve the recursive copy helper.
+        self.assertIn("cfgCopyValue(&mut code, p, ty, at.base, at.disp, 5, cfgVarBase(", code)
+        self.assertIn("cfgCopyValue(&mut code, p, ty, 5, cfgVarBase(", code)
         verifier=(ROOT / "compiler-l/src/codegen/native_cfg_verify.l").read_text()
         self.assertIn("fn cfgMoves(",verifier)
         self.assertIn("fn cfgTakeOperand(",verifier)
