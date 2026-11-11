@@ -195,6 +195,14 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
             if parserTakeWord(source, &mut cursor, tokens, "None") {
                 return astAddExpr(&mut tree, AstExprKind.Name, tok.start, tok.end, tok.start, tok.end, 0, 0)
             }
+            let is_view = parserTakeWord(source, &mut cursor, tokens, "view")
+            let is_edit = parserTakeWord(source, &mut cursor, tokens, "edit")
+            if is_view || is_edit {
+                parserSkipNewlines(&mut cursor, tokens)
+                let operand = parseExpr(&mut tree, source, &mut cursor, tokens, 8, parens, depth + 1)
+                let end_pos = astExprEnd(&tree, operand, tok.end)
+                return astAddExpr(&mut tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, tok.end, 0)
+            }
             if parserTakeWord(source, &mut cursor, tokens, "await") {
                 parserSkipNewlines(&mut cursor, tokens)
                 let operand = parseExpr(&mut tree, source, &mut cursor, tokens, 8, parens, depth + 1)
