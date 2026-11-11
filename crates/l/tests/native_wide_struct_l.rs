@@ -113,10 +113,7 @@ fn invalid_wide_shapes_and_duplicate_moves_are_rejected() {
         ("native_cfg_wide_too_many_fields.lir", 60),
         ("native_cfg_wide_too_many_args.lir", 64),
     ] {
-        let out = backend(
-            &root().join("examples").join(name),
-            &temp("rejected.elf"),
-        );
+        let out = backend(&root().join("examples").join(name), &temp("rejected.elf"));
         assert_eq!(out.status.code(), Some(3), "{name}");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
