@@ -4,11 +4,20 @@ import lir_tokens
 // independent ELE-written x86-64 bootstrap backend. Supports move-only,
 // drop-free structs with primitive fields (including nested structs).
 // Also supports tagged enums with zero or one primitive payload per variant.
-// Text, loans, floats, arrays and side effects are explicitly rejected.
+// Loans, floats, arrays and Text inside aggregates are explicitly rejected.
 // Type IDs: 0 = Int, 1 = Bool, 2+s = nominal struct s,
 // 2+struct_count+e = nominal enum e.
 // Instruction kinds: 1 use, 2 binary, 3 call, 4 struct, 5 read,
-// 6 store, 7 variant, 8 discriminant, 9 checked primitive payload.
+// 6 store, 7 variant, 8 discriminant, 9 checked primitive payload,
+// 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt).
+// Unit is type code -2: valid only as a function result, as the `cu`
+// constant and as a non-parameter variable that receives a unit call.
+// Text is type code -3: a move-only value of three words (address, byte
+// length, capacity) valid as variable, parameter, result and literal.
+// For kinds 10 and 12 `op` is the variable passed by reference, or -1 when
+// the source is operand `a`. For kind 12 `place_var` is the buffer. For
+// kind 13 `place_var` is the value and `op` its drop flag, or -1.
+// Call arguments live in `CfgProgram.call_args` from `arg_first`.
 // Binary operations: 1 add, 2 sub, 3 mul, 4 eq, 5 ne, 6 lt,
 // 7 le, 8 gt, 9 ge. Terminators: 1 return, 2 jump, 3 branch.
 
@@ -25,6 +34,7 @@ pub struct CfgInst {
     place_var: Int
     place_field: Int
     place_subfield: Int
+    arg_first: Int
 }
 
 pub struct CfgField {
@@ -76,6 +86,8 @@ pub struct CfgFunc {
     blocks: Int
     params: Int
     result_bool: Bool
+    result_unit: Bool
+    result_text: Bool
 }
 
 pub struct CfgProgram {
@@ -92,13 +104,17 @@ pub struct CfgProgram {
     variants: List<CfgVariant>
     blocks: List<CfgBlock>
     insts: List<CfgInst>
+    call_args: List<NativeOperand>
+    text_start: List<Int>
+    text_length: List<Int>
+    text_bytes: List<Int>
 }
 
 pub fn cfgEmptyOperand() -> NativeOperand {
-    return NativeOperand(is_var: false, value: 0, is_bool: false)
+    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
 }
 
 pub fn cfgEmpty() -> CfgProgram {
-    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[])
+    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], call_args: List[], text_start: List[], text_length: List[], text_bytes: List[])
 }
 

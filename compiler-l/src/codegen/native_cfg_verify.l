@@ -16,13 +16,33 @@ fn cfgEdge(p: &CfgProgram, f: Int, from: Int, to: Int) -> Bool {
     return false
 }
 
+fn cfgHasDst(inst: &CfgInst) -> Bool {
+    return inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13
+}
+
+fn cfgResultType(func: &CfgFunc) -> Int {
+    if func.result_bool { return 1 }
+    if func.result_unit { return cfgUnitType() }
+    if func.result_text { return cfgTextType() }
+    return 0
+}
+
 fn cfgMoveOperand(p: &CfgProgram, f: Int, op: &NativeOperand, variable: Int) -> Bool {
-    return op.is_var && op.value == variable && cfgOperandType(p, f, &op) >= 2
+    return op.is_var && op.value == variable && cfgIsMove(cfgOperandType(p, f, &op))
 }
 
 // A whole-value move occurs in a struct assignment, struct constructor or
-// store of a struct-valued field. Primitive values and calls are Copy-only.
+// store of a struct-valued field, in a Text passed by value to a call and
+// in a drop. Primitive values are Copy.
 fn cfgMoves(p: &CfgProgram, f: Int, inst: &CfgInst, variable: Int) -> Bool {
+    if inst.kind == 13 { return inst.place_var == variable }
+    if inst.kind == 3 {
+        for n in 0..inst.argc {
+            let arg = &p.call_args[inst.arg_first + n]
+            if cfgMoveOperand(p, f, &arg, variable) { return true }
+        }
+        return false
+    }
     if inst.kind == 1 || inst.kind == 6 {
         return cfgMoveOperand(p, f, &inst.a, variable)
     }
@@ -45,7 +65,7 @@ fn cfgTransferVar(p: &CfgProgram, f: Int, block: &CfgBlock, variable: Int, initi
     for i in block.first..(block.first + block.count) {
         let inst = &p.insts[i]
         if cfgMoves(p, f, &inst, variable) { live = false }
-        if inst.kind != 6 && inst.dst == variable { live = true }
+        if cfgHasDst(inst) && inst.dst == variable { live = true }
     }
     return live
 }
@@ -54,24 +74,45 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
     if !op.is_var { return 0 }
     if op.value < 0 || op.value >= p.functions[f].vars { return 57 }
     if !live[op.value] { return 57 }
-    if cfgOperandType(p, f, &op) >= 2 { live[op.value] = false }
+    if cfgIsMove(cfgOperandType(p, f, &op)) { live[op.value] = false }
     return 0
 }
 
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut List<Bool>) -> Int {
-    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 {
+    if inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || (inst.kind == 13 && inst.op < 0) {
         if inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { return 57 }
     }
     if inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, &inst.a) >= 2 {
         return 58
     }
-    if inst.kind == 1 || inst.kind == 2 || inst.kind == 3 || inst.kind == 4 || inst.kind == 6 || (inst.kind == 7 && inst.argc == 1) {
+    if (inst.kind == 10 || inst.kind == 12 || inst.kind == 13) && inst.op >= 0 {
+        // A referenced source, or a drop flag, is read and stays live.
+        if !live[inst.op] { return 57 }
+    }
+    if inst.kind == 13 {
+        live[inst.place_var] = false
+        return 0
+    }
+    if inst.kind == 3 {
+        for n in 0..inst.argc {
+            let arg = &p.call_args[inst.arg_first + n]
+            let taken = cfgTakeOperand(p, f, &arg, &mut live)
+            if taken != 0 { return taken }
+        }
+    }
+    if (inst.kind == 10 || inst.kind == 12) && inst.op < 0 && inst.a.is_var {
+        // `print` and `append` read their source without consuming it.
+        if inst.a.value < 0 || inst.a.value >= p.functions[f].vars { return 57 }
+        if !live[inst.a.value] { return 57 }
+    }
+    let reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 4 || inst.kind == 6
+    if reads_a || (inst.kind == 7 && inst.argc == 1) {
         let a = cfgTakeOperand(p, f, &inst.a, &mut live)
         if a != 0 { return a }
     }
-    if inst.kind == 2 || (inst.kind == 3 && inst.argc >= 2) || (inst.kind == 4 && inst.argc >= 2) {
+    if inst.kind == 2 || (inst.kind == 4 && inst.argc >= 2) {
         let b = cfgTakeOperand(p, f, &inst.b, &mut live)
         if b != 0 { return b }
     }
@@ -83,7 +124,11 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         let d = cfgTakeOperand(p, f, &inst.d, &mut live)
         if d != 0 { return d }
     }
-    if inst.kind != 6 { live[inst.dst] = true }
+    if cfgHasDst(inst) {
+        // Overwriting a live owned Text would leak its buffer.
+        if live[inst.dst] && p.types_code[p.functions[f].first_var + inst.dst] == cfgTextType() { return 59 }
+        live[inst.dst] = true
+    }
     return 0
 }
 
@@ -100,11 +145,11 @@ fn cfgCheckCalls(p: &CfgProgram) -> Int {
                     let target = &p.functions[callee]
                     if inst.argc != target.params { return 52 }
                     let dst_type = p.types_code[func.first_var + inst.dst]
-                    var ret_type = 0
-                    if target.result_bool { ret_type = 1 }
-                    if dst_type != ret_type { return 53 }
-                    if inst.argc >= 1 && cfgOperandType(p, f, &inst.a) != cfgParamType(p, callee, 0) { return 54 }
-                    if inst.argc == 2 && cfgOperandType(p, f, &inst.b) != cfgParamType(p, callee, 1) { return 54 }
+                    if dst_type != cfgResultType(target) { return 53 }
+                    for n in 0..inst.argc {
+                        let arg = &p.call_args[inst.arg_first + n]
+                        if cfgOperandType(p, f, &arg) != cfgParamType(p, callee, n) { return 54 }
+                    }
                 }
             }
         }
@@ -114,8 +159,7 @@ fn cfgCheckCalls(p: &CfgProgram) -> Int {
 
 fn cfgParamType(p: &CfgProgram, f: Int, i: Int) -> Int {
     if i < 0 || i >= p.functions[f].params { return -1 }
-    if p.types_bool[p.functions[f].first_var + i] { return 1 }
-    return 0
+    return p.types_code[p.functions[f].first_var + i]
 }
 
 fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
@@ -197,6 +241,12 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
         if block.term == 1 || block.term == 3 {
             let last = cfgTakeOperand(p, f, &block.value, &mut live)
             if last != 0 { return last }
+        }
+        if block.term == 1 {
+            // Every owned Text must have been moved out or dropped by now.
+            for v in 0..vars {
+                if live[v] && p.types_code[func.first_var + v] == cfgTextType() { return 59 }
+            }
         }
     }
     return 0

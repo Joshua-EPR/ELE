@@ -79,6 +79,31 @@ pub fn nativeDecimal(source: &Text, reader: &mut NativeReader, word: &NativeWord
     return n
 }
 
+// Full Int (64-bit signed) range for `ci` constants. The magnitude is
+// accumulated as a negative number so the minimum Int needs no special case.
+pub fn nativeDecimal64(source: &Text, reader: &mut NativeReader, word: &NativeWord, prefix: Int) -> Int {
+    var p = word.start + prefix
+    var negative = false
+    if p < word.end && source.byteAt(p) == 45 {
+        negative = true
+        p += 1
+    }
+    if p == word.end { reader.error = 4; return 0 }
+    let minimum = -9223372036854775807 - 1
+    var n = 0
+    while p < word.end {
+        let b = source.byteAt(p)
+        if b < 48 || b > 57 { reader.error = 4; return 0 }
+        let digit = b - 48
+        if n < (minimum + digit) / 10 { reader.error = 5; return 0 }
+        n = n * 10 - digit
+        p += 1
+    }
+    if negative { return n }
+    if n == minimum { reader.error = 5; return 0 }
+    return -n
+}
+
 pub fn nativeNumber(source: &Text, reader: &mut NativeReader) -> Int {
     let w = nativeWord(source, &mut reader)
     return nativeDecimal(source, &mut reader, &w, 0)
@@ -97,29 +122,36 @@ pub struct NativeOperand {
     is_var: Bool
     value: Int
     is_bool: Bool
+    is_unit: Bool
+    // Text literal: `value` indexes the literal table of the program.
+    is_text: Bool
 }
 
 pub fn nativeOperand(source: &Text, reader: &mut NativeReader) -> NativeOperand {
     let w = nativeWord(source, &mut reader)
     if w.start >= w.end {
         reader.error = 7
-        return NativeOperand(is_var: false, value: 0, is_bool: false)
+        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
     }
     if source.byteAt(w.start) == 118 {
         let index = nativeDecimal(source, &mut reader, &w, 1)
-        return NativeOperand(is_var: true, value: index, is_bool: false)
+        return NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false)
     }
     if w.end - w.start >= 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 105 {
-        let value = nativeDecimal(source, &mut reader, &w, 2)
-        return NativeOperand(is_var: false, value: value, is_bool: false)
+        let value = nativeDecimal64(source, &mut reader, &w, 2)
+        return NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false)
     }
     if w.end - w.start == 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 98 {
         let value = source.byteAt(w.start + 2)
-        if value == 48 { return NativeOperand(is_var: false, value: 0, is_bool: true) }
-        if value == 49 { return NativeOperand(is_var: false, value: 1, is_bool: true) }
+        if value == 48 { return NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false) }
+        if value == 49 { return NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false) }
+    }
+    // `cu` is the only unit constant. It carries no runtime value.
+    if w.end - w.start == 2 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 117 {
+        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false)
     }
     reader.error = 7
-    return NativeOperand(is_var: false, value: 0, is_bool: false)
+    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
 }
 
 pub fn nativeAtEnd(source: &Text, reader: &NativeReader) -> Bool {

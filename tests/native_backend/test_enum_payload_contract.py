@@ -40,6 +40,6 @@ class PayloadContractTests(unittest.TestCase):
         payload_part = emit[emit.index('} else if inst.kind == 9 {'):]
         self.assertLess(payload_part.index('x64CmpReg'), payload_part.index('x64LoadMem8'))
         self.assertLess(payload_part.index('bad_variant_at.push'), payload_part.index('x64LoadMem64(&mut code, 0, 5, owner + 8)'))
-        self.assertIn('x64PatchRelative(&mut code, bad_variant_at[i], bad_variant_handler)', emit)
+        self.assertIn('x64PatchRelative(&mut code, fix.bad_variant_at[i], bad_variant_handler)', emit)
 
 if __name__ == '__main__': unittest.main()

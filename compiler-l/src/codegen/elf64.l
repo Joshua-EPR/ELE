@@ -20,6 +20,12 @@ fn elfLittle(out: &mut List<Int>, n: Int, width: Int) {
     }
 }
 
+// Virtual address of the first code byte: fixups of absolute addresses
+// inside the image are relative to it.
+pub fn elf64CodeAddress() -> Int {
+    return ELF64_LOAD_ADDRESS + ELF64_CODE_OFFSET
+}
+
 // Return an empty buffer for unsupported / unrepresentable inputs.
 pub fn elf64Executable(code: &List<Int>) -> List<Int> {
     var out: List<Int> = List[]

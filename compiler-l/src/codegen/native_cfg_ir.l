@@ -9,7 +9,7 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
     let id = nativeNumber(source, &mut reader)
     let count = nativeNumber(source, &mut reader)
     nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != b || count < 0 || count > 10000 {
+    if reader.error != 0 || id != b || count < 0 || count > 100000 {
         p.error = 38
         return
     }
@@ -27,7 +27,7 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
     var no = -1
     if nativeEquals(source, &keyword, "return") {
         kind = 1
-        value = nativeOperand(source, &mut reader)
+        value = cfgOperand(&mut p, source, &mut reader)
     } else if nativeEquals(source, &keyword, "jump") {
         kind = 2
         yes = nativeNumber(source, &mut reader)
@@ -46,6 +46,8 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
     if kind == 1 {
         var expected = 0
         if p.functions[f].result_bool { expected = 1 }
+        if p.functions[f].result_unit { expected = cfgUnitType() }
+        if p.functions[f].result_text { expected = cfgTextType() }
         if cfgOperandType(p, f, &value) != expected { p.error = 41 }
     }
     if kind == 3 && cfgOperandType(p, f, &value) != 1 { p.error = 42 }
@@ -63,7 +65,7 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     nativeExpect(source, &mut reader, "params")
     let params = nativeNumber(source, &mut reader)
     nativeExpect(source, &mut reader, "result")
-    let result_type = cfgType(p, source, &mut reader)
+    let result_type = cfgTypeOrUnit(p, source, &mut reader)
     let returned_ref = nativeNumber(source, &mut reader)
     let returned_mut = nativeNumber(source, &mut reader)
     nativeExpect(source, &mut reader, "vars")
@@ -71,25 +73,27 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     nativeExpect(source, &mut reader, "blocks")
     let blocks = nativeNumber(source, &mut reader)
     nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != f || !cfgEncodedName(source, &name) || params < 0 || params > 2 || vars < params || vars > 64 || blocks < 1 || blocks > 32 || returned_ref != 0 || returned_mut != 0 || result_type < 0 {
+    if reader.error != 0 || id != f || !cfgEncodedName(source, &name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
         p.error = 44
         return
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     if result_type >= 2 { p.error = 68; return }
-    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1))
+    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType()))
     var next_slot = 0
     for i in 0..vars {
         nativeExpect(source, &mut reader, "var")
         let vid = nativeId(source, &mut reader, 118)
         nativeExpect(source, &mut reader, "val")
-        let ty = cfgType(p, source, &mut reader)
+        let ty = cfgTypeOrUnit(p, source, &mut reader)
         nativeEndLine(source, &mut reader)
-        if reader.error != 0 || vid != i || ty < 0 || (i < params && ty >= 2) { p.error = 45; break }
+        let unit_var = ty == cfgUnitType()
+        let text_var = ty == cfgTextType()
+        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && (ty >= 2 || unit_var)) { p.error = 45; break }
         let size = cfgTypeSize(p, ty)
         let count_slots = (size + 7) / 8
-        if size < 1 || count_slots < 1 || next_slot + count_slots > 64 { p.error = 69; break }
+        if size < 1 || count_slots < 1 || next_slot + count_slots > 512 { p.error = 69; break }
         p.types_bool.push(ty == 1)
         p.types_code.push(ty)
         p.slot_start.push(next_slot)
@@ -132,7 +136,7 @@ pub fn cfgParse(source: &Text) -> CfgProgram {
     nativeExpect(source, &mut r, "main")
     let main = nativeId(source, &mut r, 102)
     nativeEndLine(source, &mut r)
-    if r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || functions < 1 || functions > 16 || main < 0 || main >= functions {
+    if r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || functions < 1 || functions > 256 || main < 0 || main >= functions {
         p.error = 48
         return p
     }
