@@ -85,6 +85,7 @@ fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
         LexKind.Symbol => {
             if parserMatchText(source, token.start, token.end, expected) { return true }
             if expected == "->" { return parserMatchText(source, token.start, token.end, "=>") }
+            if expected == "=>" { return parserMatchText(source, token.start, token.end, ":") }
             return false
         }
         _ => { return false }
