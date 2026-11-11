@@ -74,3 +74,19 @@ fn linear_owner_slots_emit_move_and_exactly_once_drop_guards() {
         );
     }
 }
+
+fn resize_generator() -> &'static Path {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| stage1_support::build("native_heap_resize_cases", false))
+}
+
+#[test]
+fn linux_mremap_preserves_bytes_across_grow_shrink_and_owner_transfer() {
+    for mode in ["g", "s", "t", "z", "h", "m"] {
+        let image = export_case(resize_generator(), "resize", mode);
+        assert!(
+            image[4096..].windows(2).any(|b| b == [0x0f, 0x05]),
+            "Linux syscall missing in mremap case {mode}"
+        );
+    }
+}

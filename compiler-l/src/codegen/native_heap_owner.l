@@ -1,5 +1,6 @@
 import x86_64
 import native_heap_dynamic
+import native_heap_resize
 
 // Minimal linear owner-slot machine. Each owner occupies three independent
 // stack slots: address, raw requested bytes, live flag (0 or 1). These are
@@ -90,4 +91,31 @@ pub fn heapOwnerDrop(code: &mut X64Code, ptr: Int, bytes: Int, live: Int) {
 pub fn heapOwnerPtr(code: &mut X64Code, ptr: Int, live: Int) {
     heapOwnerRequireLive(&mut code, live)
     x64LoadSlot(&mut code, 0, ptr)
+}
+
+// Resize a live owner. RDI carries the new raw byte count. The separate
+// scratch slot must not alias the owner's three slots. The old owner state
+// remains unchanged until Linux mremap succeeds; then the possibly moved
+// pointer and the new raw length are both stored. Access after a move is
+// still prohibited by heapOwnerRequireLive.
+pub fn heapOwnerResize(code: &mut X64Code, ptr: Int, bytes: Int, live: Int, scratch: Int) {
+    if ptr < 0 || ptr >= 64 || bytes < 0 || bytes >= 64 || live < 0 || live >= 64 || scratch < 0 || scratch >= 64 {
+        code.error = 31
+        return
+    }
+    if ptr == bytes || ptr == live || bytes == live || scratch == ptr || scratch == bytes || scratch == live {
+        code.error = 31
+        return
+    }
+    heapOwnerRequireLive(&mut code, live)
+    x64StoreSlot(&mut code, scratch, 7)
+    x64LoadSlot(&mut code, 7, ptr)
+    x64LoadSlot(&mut code, 6, bytes)
+    x64LoadSlot(&mut code, 2, scratch)
+    heapEmitDynamicResize(&mut code)
+    x64StoreSlot(&mut code, ptr, 0)
+    x64LoadSlot(&mut code, 0, scratch)
+    x64StoreSlot(&mut code, bytes, 0)
+    x64MovImm64(&mut code, 0, 0)
+    x64StoreSlot(&mut code, scratch, 0)
 }
