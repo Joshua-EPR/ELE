@@ -130,6 +130,9 @@ fn stage1_real_nested_copy_struct_to_native_elf() {
         String::from_utf8_lossy(&run.stderr)
     );
     let bytes = fs::read(&output).unwrap();
+    let artifact = root().join("target/stage1-tests/native-nested-struct/nested.elf");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::write(&artifact, &bytes).unwrap();
     assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
