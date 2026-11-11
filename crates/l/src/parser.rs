@@ -209,6 +209,42 @@ pub struct Program {
     pub impls: Vec<ImplDecl>,
 }
 
+/// Original ELE surface spellings; historic tokens remain accepted during
+/// bootstrap migration. AST/LIR identities do not change.
+fn canonical_ele_keyword(word: &str) -> &str {
+    match word {
+        "flow" => "fn",
+        "shape" => "struct",
+        "extend" => "impl",
+        "choice" => "enum",
+        "contract" => "trait",
+        "expose" => "pub",
+        "hold" => "let",
+        "change" => "var",
+        "fixed" => "const",
+        "give" => "return",
+        "choose" => "match",
+        "when" => "if",
+        "otherwise" => "else",
+        "each" => "for",
+        "among" => "in",
+        "during" => "while",
+        "repeat" => "loop",
+        "leave" => "break",
+        "next" => "continue",
+        "this" => "self",
+        "exclusive" => "mut",
+        "direct" => "static",
+        "later" => "async",
+        "wait" => "await",
+        "launch" => "spawn",
+        "take" => "import",
+        "space" => "module",
+        "zone" => "region",
+        _ => word,
+    }
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -220,7 +256,11 @@ impl Parser {
         &self.tokens[self.pos.min(self.tokens.len() - 1)]
     }
     fn at(&self, s: &str) -> bool {
-        matches!(&self.token().kind, Kind::Word(x) | Kind::Sym(x) if x == s)
+        match &self.token().kind {
+            Kind::Word(x) => x == s || canonical_ele_keyword(x) == s,
+            Kind::Sym(x) => x == s,
+            _ => false,
+        }
     }
     fn take(&mut self, s: &str) -> bool {
         if self.at(s) {
@@ -260,7 +300,7 @@ impl Parser {
                 "continue", "async", "await", "spawn", "mut", "static", "unsafe", "region",
                 "extern", "as", "true", "false", "None", "move", "self",
             ]
-            .contains(&s.as_str())
+            .contains(&canonical_ele_keyword(&s))
             {
                 return Err(self.error("se esperaba identificador, no palabra reservada"));
             }
@@ -581,15 +621,15 @@ impl Parser {
             }
             Kind::Word(ref s) if s == "true" || s == "false" => ExprKind::Bool(s == "true"),
             Kind::Word(ref s) if s == "None" => ExprKind::Name("None".into()),
-            Kind::Word(ref s) if s == "match" => self.match_expr()?,
+            Kind::Word(ref s) if canonical_ele_keyword(s) == "match" => self.match_expr()?,
             // `await` binds like a unary operator: `await f() + 1` awaits the
             // call. Where it may appear is decided by semantic analysis.
-            Kind::Word(ref s) if s == "await" => {
+            Kind::Word(ref s) if canonical_ele_keyword(s) == "await" => {
                 self.nl();
                 ExprKind::Await(Box::new(self.expr(8)?))
             }
             // `spawn` takes a call to an async function, like `await`.
-            Kind::Word(ref s) if s == "spawn" => {
+            Kind::Word(ref s) if canonical_ele_keyword(s) == "spawn" => {
                 self.nl();
                 ExprKind::Spawn(Box::new(self.expr(8)?))
             }
@@ -658,7 +698,7 @@ impl Parser {
         };
         let mut lhs = Expr { kind, span: t.span };
         // Postfix access and `?` bind tighter than any prefix or binary operator.
-        while self.at(".") || self.at("?") || self.at("[") {
+        while self.at(".") || self.at("@") || self.at("?") || self.at("[") {
             let span = self.token().span;
             if self.take("[") {
                 self.parens += 1;
@@ -680,7 +720,10 @@ impl Parser {
                 };
                 continue;
             }
-            self.pos += 1;
+            let method_only = self.take("@");
+            if !method_only {
+                self.need(".")?;
+            }
             let member = self.member()?;
             let kind = if self.at("<")
                 && let Some(type_args) = self.try_type_args_call()
@@ -689,6 +732,8 @@ impl Parser {
                 ExprKind::GenericMethodCall(Box::new(lhs), member, type_args, self.arguments()?)
             } else if self.take("(") {
                 ExprKind::MethodCall(Box::new(lhs), member, self.arguments()?)
+            } else if method_only {
+                return Err(self.error("se esperaba llamada '(...)' después de '@método'"));
             } else {
                 ExprKind::Field(Box::new(lhs), member)
             };
@@ -1128,7 +1173,7 @@ impl Parser {
         if self.at("!") {
             effects = Some(self.effects_annotation()?);
         }
-        let result = if self.take("->") {
+        let result = if (self.take("->") || self.take("=>")) {
             Some(self.ty()?)
         } else {
             None
@@ -1364,7 +1409,7 @@ impl Parser {
         if self.at("!") {
             effects = Some(self.effects_annotation()?);
         }
-        let result = if self.take("->") {
+        let result = if (self.take("->") || self.take("=>")) {
             Some(self.ty()?)
         } else {
             None
