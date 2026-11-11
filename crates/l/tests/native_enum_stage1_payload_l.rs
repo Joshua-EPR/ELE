@@ -96,7 +96,10 @@ fn canonical_ele_syntax_compiles_real_stage1_lir_to_native_elf() {
     );
     let lir = String::from_utf8(emitted.stdout).unwrap();
     assert!(lir.contains("module structs 0 enums 1"), "{lir}");
-    assert!(lir.contains("i variant ") && lir.contains("i payload "), "{lir}");
+    assert!(
+        lir.contains("i variant ") && lir.contains("i payload "),
+        "{lir}"
+    );
     let parsed = project_l::lir_protocol::parse(&lir).unwrap();
     project_l::lir_protocol::validate(&parsed).unwrap();
     fs::write(&lir_file, &lir).unwrap();
