@@ -3,7 +3,12 @@
 //! the generated ELF binaries from these tests. Not Stage 2 or LIR drops.
 mod stage1_support;
 
-use std::{fs, path::{Path, PathBuf}, process::Command, sync::OnceLock};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
