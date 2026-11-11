@@ -238,6 +238,7 @@ fn parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             arm_starts.push(p_start)
             arm_ends.push(p_end)
             arm_stmts.push(body_stmt)
+            parserTakeSymbol(source, &mut cursor, tokens, ",")
             parserSkipSeparators(source, &mut cursor, tokens)
         }
         parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "}}")

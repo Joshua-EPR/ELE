@@ -41,6 +41,7 @@ fn unit_enum_source_uses_real_nominal_lir_and_native_encoder() {
     );
     let lir = String::from_utf8(emitted.stdout).unwrap();
     assert!(lir.contains("module structs 0 enums 1"), "{lir}");
+    assert!(lir.contains("variants 2"), "comma must not become an enum variant: {lir}");
     assert!(lir.contains("i variant"), "{lir}");
     assert!(lir.contains(" e0 1 0"), "{lir}");
     let parsed = project_l::lir_protocol::parse(&lir).unwrap();
