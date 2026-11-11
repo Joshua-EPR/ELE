@@ -177,7 +177,7 @@ fn native_acceptance_and_failure_paths() {
         ),
         (
             "else_if",
-            "fn choose(x: Int) -> Int { if x == 1 { 10 } else if x == 2 { 20 } else { 30 } }\nfn main() { print(choose(1)); print(choose(2)); print(choose(3)) }",
+            "fn elegir(x: Int) -> Int { if x == 1 { 10 } else if x == 2 { 20 } else { 30 } }\nfn main() { print(elegir(1)); print(elegir(2)); print(elegir(3)) }",
             "10\n20\n30\n",
         ),
         (
@@ -249,4 +249,64 @@ fn native_acceptance_and_failure_paths() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+}
+
+/// Files over the old fixed limit of 4096 tokens compile and run (Stage 0
+/// defect 2). Only a resource bound far above any module remains, and it is
+/// reported as such; nesting stays bounded by its own limits, so long or deep
+/// expressions are diagnostics, never a crash of the compiler.
+#[test]
+fn files_beyond_4096_tokens_compile_and_run() {
+    let mut source = String::from("fn main() {\n    var total = 0\n");
+    for i in 0..1500 {
+        source.push_str(&format!("    total = total + {i}\n"));
+    }
+    source.push_str("    print(total)\n}\n");
+    assert!(lexer::lex(&source).unwrap().len() > 2 * 4096);
+    check(&source).expect("program over 4096 tokens");
+
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/conformance-tokens");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("largo.l"), &source).unwrap();
+    for backend in ["cranelift", "rustc"] {
+        let out = cli(&dir, &["run", "largo.l", "--backend", backend]);
+        assert!(
+            out.status.success(),
+            "{backend}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(stdout.lines().last(), Some("1124250"), "{backend}");
+    }
+
+    // The resource bound is a diagnostic of its own, not a crash.
+    let huge = "1 ".repeat(lexer::MAX_TOKENS);
+    let error = lexer::lex(&huge).unwrap_err();
+    assert_eq!(error.code, "L0002");
+    assert!(error.message.contains("límite de recursos"), "{error:?}");
+
+    // A chain of 300 additions, and 200 nested parentheses, through the CLI.
+    for (name, text, cause) in [
+        (
+            "cadena.l",
+            format!("fn main() {{ print(1{}) }}", "+1".repeat(300)),
+            "expresión demasiado profunda (128)",
+        ),
+        (
+            "parentesis.l",
+            format!(
+                "fn main() {{ print({}1{}) }}",
+                "(".repeat(200),
+                ")".repeat(200)
+            ),
+            "límite de anidamiento (128) excedido",
+        ),
+    ] {
+        fs::write(dir.join(name), text).unwrap();
+        let out = cli(&dir, &["check", name]);
+        assert_eq!(out.status.code(), Some(1), "{name}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.starts_with(&format!("{name}:")), "{stderr}");
+        assert!(stderr.contains(cause), "{stderr}");
+    }
 }

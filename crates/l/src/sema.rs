@@ -5601,7 +5601,7 @@ fn lower_target(
             body: vec![Instruction::Sleep(Value {
                 kind: ValueKind::Local(0),
                 ty: Type::Int,
-                span: Span { line: 1, column: 1 },
+                span: Span::at(1, 1),
             })],
             by_value_bindings: HashSet::new(),
             effects: EffectSet::EMPTY,
@@ -5629,7 +5629,7 @@ pub fn check(program: parser::Program) -> Result<Program, Diagnostic> {
         .functions
         .borrow()
         .get("main")
-        .ok_or_else(|| err(Span { line: 1, column: 1 }, "falta fn main()"))?;
+        .ok_or_else(|| err(Span::at(1, 1), "falta fn main()"))?;
 
     let mut lowered: Vec<Option<Function>> = Vec::new();
     loop {
@@ -6044,7 +6044,7 @@ fn check_async_state(env: &Env, body: &[Instruction]) -> Result<(), Diagnostic> 
         fn block(&mut self, body: &[Instruction]) -> Result<(), Diagnostic> {
             for i in body {
                 match i {
-                    Instruction::Yield => self.suspend(Span { line: 1, column: 1 })?,
+                    Instruction::Yield => self.suspend(Span::at(1, 1))?,
                     Instruction::Sleep(v) => {
                         self.value(v)?;
                         self.suspend(v.span)?;
@@ -6119,7 +6119,7 @@ fn check_async_state(env: &Env, body: &[Instruction]) -> Result<(), Diagnostic> 
                     }
                     Instruction::Loop(b) | Instruction::Block(b) => {
                         if matches!(i, Instruction::Loop(_)) && suspends(b) {
-                            self.suspend(Span { line: 1, column: 1 })?;
+                            self.suspend(Span::at(1, 1))?;
                         }
                         self.block(b)?;
                     }

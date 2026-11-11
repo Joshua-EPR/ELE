@@ -168,9 +168,9 @@ fn stage1_borrow_checker_scales_and_frees_its_memory() {
     let s1 = stage1("borrow_scale", &source);
     assert_eq!(s1.code, "OK", "{}", s1.stderr);
     assert!(s1.stdout.contains("loans=1501"), "{}", s1.stdout);
-    // Stage 0 cannot be the reference here: the file exceeds its CORE-1
-    // budget of 4 096 tokens per source file.
-    assert_eq!(stage0(&source), "L0002");
+    // Stage 0 is the reference again: the old CORE-1 limit of 4 096 tokens
+    // per file, which this source exceeds, no longer exists.
+    assert_eq!(stage0(&source), "OK");
 
     let traced = stage1_support::build("main_sema", true);
     let file = case_dir().join("borrow_trace.l");

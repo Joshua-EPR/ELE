@@ -66,11 +66,7 @@ fn unsupported(span: Span, what: impl std::fmt::Display) -> Diagnostic {
 }
 
 fn internal(e: impl std::fmt::Display) -> Diagnostic {
-    Diagnostic::new(
-        Span { line: 1, column: 1 },
-        format!("backend cranelift: {e}"),
-    )
-    .classify("L0008", "backend")
+    Diagnostic::new(Span::at(1, 1), format!("backend cranelift: {e}")).classify("L0008", "backend")
 }
 
 // ------------------------------------------------------------ support check --
@@ -179,7 +175,7 @@ pub fn check_supported(module: &cfg::Module) -> Result<(), Diagnostic> {
             .flat_map(|b| b.insts.first())
             .map(|i| i.span)
             .next()
-            .unwrap_or(Span { line: 1, column: 1 });
+            .unwrap_or(Span::at(1, 1));
         if let Some(p) = f.params.first()
             && let VarTy::Ref(ty) = f.vars[*p]
             && !supported_type(ty)
@@ -273,7 +269,7 @@ pub fn check_supported(module: &cfg::Module) -> Result<(), Diagnostic> {
                 }
             }
             if let Some(Terminator::Branch(o, ..) | Terminator::Return(o)) = &block.term {
-                check_operand(o, Span { line: 1, column: 1 })?;
+                check_operand(o, Span::at(1, 1))?;
             }
         }
     }
@@ -2156,7 +2152,7 @@ pub fn compile(module: &cfg::Module, options: Options) -> Result<Vec<u8>, Diagno
                 task_groups: &module.task_groups,
                 list_drops: &list_drops,
                 task_group_drops: &task_group_drops,
-                span: Cell::new(Span { line: 1, column: 1 }),
+                span: Cell::new(Span::at(1, 1)),
             }
             .build(b, h)
         })?;
@@ -2182,7 +2178,7 @@ pub fn compile(module: &cfg::Module, options: Options) -> Result<Vec<u8>, Diagno
                 task_groups: &module.task_groups,
                 list_drops: &list_drops,
                 task_group_drops: &task_group_drops,
-                span: Cell::new(Span { line: 1, column: 1 }),
+                span: Cell::new(Span::at(1, 1)),
             }
             .list_drop_glue(b, h, l)
         })?;
@@ -2208,7 +2204,7 @@ pub fn compile(module: &cfg::Module, options: Options) -> Result<Vec<u8>, Diagno
                 task_groups: &module.task_groups,
                 list_drops: &list_drops,
                 task_group_drops: &task_group_drops,
-                span: Cell::new(Span { line: 1, column: 1 }),
+                span: Cell::new(Span::at(1, 1)),
             }
             .task_group_drop_glue(b, h, group_idx)
         })?;

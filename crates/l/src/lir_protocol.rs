@@ -38,10 +38,7 @@ pub struct ProtocolError {
 impl ProtocolError {
     pub fn into_diagnostic(self) -> Diagnostic {
         Diagnostic::new(
-            Span {
-                line: self.line,
-                column: 1,
-            },
+            Span::at(self.line, 1),
             format!("protocolo LIR inválido: {}", self.message),
         )
         .classify("L0017", "lir-protocolo")
@@ -568,9 +565,7 @@ fn span(line: &mut Line) -> Res<Span> {
     line.words.pop();
     match pos.split_once(':') {
         Some((l, c)) => match (l.parse::<usize>(), c.parse::<usize>()) {
-            (Ok(l), Ok(c)) if l < usize::MAX / 2 && c < usize::MAX / 2 => {
-                Ok(Span { line: l, column: c })
-            }
+            (Ok(l), Ok(c)) if l < usize::MAX / 2 && c < usize::MAX / 2 => Ok(Span::at(l, c)),
             _ => line.fail("posición inválida"),
         },
         None => line.fail("posición inválida"),
@@ -839,7 +834,7 @@ pub fn validate(module: &Module) -> Result<(), Diagnostic> {
     for func in &module.funcs {
         drops::verify(func, &ownership).map_err(|v| {
             Diagnostic::new(
-                Span { line: 1, column: 1 },
+                Span::at(1, 1),
                 format!(
                     "LIR rechazada en {} (bloque {}): {}",
                     func.name, v.block, v.message
