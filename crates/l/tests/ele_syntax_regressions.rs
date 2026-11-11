@@ -31,11 +31,14 @@ fn main() -> Int { return 0 }
 
 #[test]
 fn canonical_keyword_aliases_do_not_turn_old_fields_into_keywords() {
-    check(r#"
+    check(
+        r#"
 struct State { flow: Int, change: Int, next: Int }
 fn main() -> Int {
     let s = State(flow: 1, change: 2, next: 3)
     return s.flow + s.change + s.next
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 }
