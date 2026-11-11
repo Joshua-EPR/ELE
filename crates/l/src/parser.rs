@@ -300,7 +300,7 @@ impl Parser {
                 "continue", "async", "await", "spawn", "mut", "static", "unsafe", "region",
                 "extern", "as", "true", "false", "None", "move", "self", "view", "edit",
             ]
-            .contains(&canonical_ele_keyword(&s))
+            .contains(&s.as_str())
             {
                 return Err(self.error("se esperaba identificador, no palabra reservada"));
             }
