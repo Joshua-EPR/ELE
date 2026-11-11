@@ -15,7 +15,7 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
     var lhs = parsePrimaryExpr(&mut tree, source, &mut cursor, tokens, parens, depth + 1)
     if lhs < 0 { return -1 }
 
-    while parserAtSymbol(source, cursor, tokens, ".") || parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "[") {
+    while parserAtSymbol(source, cursor, tokens, ".") || parserAtSymbol(source, cursor, tokens, "@") || parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "[") {
         let tok = &tokens[cursor.pos]
         if parserTakeSymbol(source, &mut cursor, tokens, "[") {
             parserSkipNewlines(&mut cursor, tokens)
@@ -31,7 +31,8 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             continue
         }
 
-        parserTakeSymbol(source, &mut cursor, tokens, ".")
+        let method_only = parserTakeSymbol(source, &mut cursor, tokens, "@")
+        if !method_only { parserTakeSymbol(source, &mut cursor, tokens, ".") }
         if cursor.pos >= tokens.length {
             astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
             break
@@ -67,6 +68,10 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             let end_pos = cursorPrevEnd(cursor, tokens, m_end)
             lhs = astAddExpr(&mut tree, AstExprKind.MethodCall, tree.expressions[lhs].start, end_pos, lhs, m_start, m_end, first_call)
         } else {
+            if method_only {
+                astAddError(&mut tree, ParseProblem.ExpectedToken, "(", m_start, m_end)
+                return -1
+            }
             lhs = astAddExpr(&mut tree, AstExprKind.Field, tree.expressions[lhs].start, m_end, lhs, m_start, m_end, 0)
         }
     }
