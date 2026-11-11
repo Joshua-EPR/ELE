@@ -22,12 +22,14 @@ class NestedStructFixtureContract(unittest.TestCase):
         self.assertIn("i struct v2 s1 2 v0 ci20", fixture)
         self.assertIn("i store p2.0 v1", fixture)
         self.assertIn("i use v3 v2", fixture)
+        self.assertIn("var v4 val i", fixture)
         self.assertIn("i read v4 p3.0.0", fixture)
-        self.assertIn("i read v8 p3.0.1", fixture)
-        self.assertIn("t branch v8 1 2", fixture)
+        self.assertIn("i binary v6 add v4 v5", fixture)
+        self.assertIn("i read v7 p3.0.1", fixture)
+        self.assertIn("t branch v7 1 2", fixture)
         self.assertEqual(fixture[-3:], ["t return ci0", "endfunc", "end"])
-        idx=fixture.index("block 0 10")
-        self.assertEqual(fixture[idx+11], "t branch v8 1 2")
+        idx=fixture.index("block 0 9")
+        self.assertEqual(fixture[idx+10], "t branch v7 1 2")
 
     def test_false_branch_fixture_differs_only_at_bool_field(self):
         ok=(ROOT / "examples/native_cfg_nested_copy.lir").read_text()
