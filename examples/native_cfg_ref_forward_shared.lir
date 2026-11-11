@@ -1,0 +1,24 @@
+ELE-LIR 1
+module structs 0 funcs 3 main f2
+func f0 1:102 params 1 result u 0 0 vars 1 blocks 1
+var v0 ref i
+block 0 1
+i store p0 ci7
+t return cu
+endfunc
+func f1 1:103 params 1 result u 0 0 vars 2 blocks 1
+var v0 ref i
+var v1 val u
+block 0 1
+i call v1 f0 1 ref p0 1
+t return cu
+endfunc
+func f2 4:109,97,105,110 params 0 result i 0 0 vars 2 blocks 1
+var v0 val i
+var v1 val u
+block 0 2
+i use v0 ci1
+i call v1 f1 1 ref p0 0
+t return v0
+endfunc
+end

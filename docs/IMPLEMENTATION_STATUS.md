@@ -1521,3 +1521,17 @@ El backend nativo experimental admite ahora `i payload vD pN eK V` para copiar u
   Option/Result y `match` con bindings, drops propietarios y Stage 2.
 - **Próximo paso:** ejecutar `bench/verify-enum-lir-interop.ps1` y reparar
   regresiones observadas antes de ampliar el frontend.
+
+## Fase 8.7.7 — referencias y consultas de Text en el backend ELE (2026-11-11)
+
+- **Implementado y ejecutado:** parámetros `view`/`edit` de Int, Bool,
+  Text, `shape` anidado y `choice`; lectura, escritura, `print`, `append`,
+  `disc` y `payload` a través de ellos; `Text.byteLength`; `Text.byteAt`
+  con comprobación de límites (salida 127); `unary` `neg`/`not`; `div` y
+  `rem` con la misma trampa que Stage 0 (salida 125).
+- **Verificación:** `native_refs_l` 4/4 en Windows (aceptación, 16
+  rechazos, imágenes); las 12 imágenes se ejecutaron en Linux x86-64 (WSL)
+  con salida idéntica a Stage 0. Suites nativas previas sin regresión.
+- **Pendiente:** préstamos locales, Text en agregados, agregados por valor
+  en llamadas y retornos, `List of[T]`, comparación directa de Text.
+  Ver [ELE_NATIVE_BACKEND_PHASE_8_7_7.md](ELE_NATIVE_BACKEND_PHASE_8_7_7.md).

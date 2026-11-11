@@ -253,7 +253,8 @@ fn unsupported_or_invalid_print_and_unit_forms_are_rejected() {
     // Forms the backend does not lower yet must not be accepted silently.
     rejected("native_cfg_text_append_by_value.lir", 90);
     rejected("native_cfg_text_in_struct.lir", 61);
-    rejected("native_cfg_call_ref_arg.lir", 33);
+    // A reference argument for a by-value parameter.
+    rejected("native_cfg_call_ref_arg.lir", 54);
     rejected("native_cfg_text_drop_int.lir", 92);
     // Malformed literals.
     rejected("native_cfg_text_bad_literal.lir", 33);

@@ -1,0 +1,11 @@
+ELE-LIR 1
+module structs 0 funcs 1 main f0
+func f0 1:102 params 1 result u 0 0 vars 2 blocks 1
+var v0 ref t
+var v1 val t
+block 0 2
+i read v1 p0
+i drop v1 -
+t return cu
+endfunc
+end

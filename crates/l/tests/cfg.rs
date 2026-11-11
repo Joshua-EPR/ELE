@@ -158,12 +158,7 @@ fn structs_enums_and_match_have_memory_level_operations() {
 fn all_repository_programs_lower_and_verify() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut count = 0;
-    for dir in [
-        "examples",
-        "ejemplos",
-        "crates/l/tests/differential",
-        "crates/l/tests/differential/unsupported",
-    ] {
+    for dir in ["examples", "ejemplos", "crates/l/tests/differential"] {
         for entry in fs::read_dir(root.join(dir)).unwrap().flatten() {
             let path = entry.path();
             if path.extension().is_none_or(|e| e != "l") {

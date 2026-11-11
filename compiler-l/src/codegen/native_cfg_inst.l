@@ -1,6 +1,8 @@
 import lir_tokens
 import native_cfg_defs
 import native_cfg_types
+import native_cfg_ref
+import native_cfg_arith
 
 // Source of `print` and `append`: `val <operand>` fills `inst.a` and returns
 // -1; `ref p<N> 0` returns the referenced variable.
@@ -39,13 +41,9 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         if inst.argc < 0 || inst.argc > 16 { p.error = 32 }
         inst.arg_first = p.call_args.length
         if p.error == 0 {
-            // Only by-value arguments: reference parameters are not lowered.
             for n in 0..inst.argc {
-                nativeExpect(source, &mut reader, "val")
-                let arg = cfgOperand(&mut p, source, &mut reader)
-                let arg_type = cfgOperandType(p, f, &arg)
-                if reader.error != 0 || (arg_type != 0 && arg_type != 1 && arg_type != cfgTextType()) { p.error = 37 }
-                p.call_args.push(arg)
+                let arg_error = cfgReadCallArg(&mut p, f, source, &mut reader)
+                if arg_error != 0 { p.error = arg_error }
             }
         }
     } else if nativeEquals(source, &kind, "struct") {
@@ -126,6 +124,12 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         } else {
             inst.op = nativeId(source, &mut reader, 118)
         }
+    } else if nativeEquals(source, &kind, "unary") {
+        cfgReadUnary(&mut p, f, source, &mut reader, &mut inst)
+    } else if nativeEquals(source, &kind, "len") {
+        cfgReadTextQuery(&mut p, f, source, &mut reader, &mut inst, 14)
+    } else if nativeEquals(source, &kind, "byteat") {
+        cfgReadTextQuery(&mut p, f, source, &mut reader, &mut inst, 15)
     } else {
         p.error = 31
     }
@@ -134,6 +138,13 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     if reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
         p.error = 33
     }
+    if p.error != 0 { return }
+    if has_dst && cfgIsRef(p, f, inst.dst) { p.error = 96 }
+    if inst.kind == 13 && inst.place_var >= 0 && inst.place_var < p.functions[f].vars {
+        if cfgIsRef(p, f, inst.place_var) { p.error = 95 }
+    }
+    if inst.kind == 14 || inst.kind == 15 { p.error = cfgCheckTextQuery(p, f, &inst) }
+    if inst.kind == 16 { p.error = cfgCheckUnary(p, f, &inst) }
     if p.error != 0 { return }
     var dest_type = -1
     if has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
@@ -167,9 +178,9 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     if inst.kind == 2 {
         let second_type = cfgOperandType(p, f, &inst.b)
         if inst.op == 0 || first_type < 0 || second_type < 0 { p.error = 35 }
-        if inst.op <= 3 && (dest_type != 0 || first_type != 0 || second_type != 0) { p.error = 36 }
-        if inst.op >= 4 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
-        if inst.op >= 6 && first_type != 0 { p.error = 36 }
+        if (inst.op <= 3 || inst.op >= 10) && (dest_type != 0 || first_type != 0 || second_type != 0) { p.error = 36 }
+        if inst.op >= 4 && inst.op <= 9 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
+        if inst.op >= 6 && inst.op <= 9 && first_type != 0 { p.error = 36 }
     }
     if inst.kind == 4 {
         if inst.op < 0 || inst.op >= p.structs.length || dest_type != inst.op + 2 { p.error = 65 }
@@ -227,9 +238,17 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         if ty < 0 { p.error = 67 }
         if inst.kind == 5 && dest_type != ty { p.error = 67 }
         if inst.kind == 6 && first_type != ty { p.error = 67 }
+        // A bare `pN` is a place only through a reference; plain variables
+        // are read and written with `use`.
+        if inst.place_field < 0 && !cfgIsRef(p, f, inst.place_var) { p.error = 67 }
+        // Moving a Text out of a referent, or overwriting it in place,
+        // would duplicate or leak its buffer.
+        if ty == cfgTextType() { p.error = 95 }
         // Reading a struct field by value would partially move its parent;
         // this subset has only whole-variable move flags, so reject it.
-        if inst.kind == 5 && ty >= 2 { p.error = 73 }
+        // Through a reference the copy is safe: every aggregate accepted
+        // here is drop-free, so no resource is duplicated.
+        if inst.kind == 5 && ty >= 2 && !cfgIsRef(p, f, inst.place_var) { p.error = 73 }
     }
     if p.error == 0 { p.insts.push(inst) }
 }
