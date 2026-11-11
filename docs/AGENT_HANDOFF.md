@@ -1304,3 +1304,12 @@ orden de dependencia:
 
 Siguiente trabajo concreto: punto 1, empezando por `ref` en parámetros y
 `i len`/`byteAt` de Text, que son las operaciones que más usa `compiler-l`.
+
+### Defectos de Stage 0 corregidos (2026-11-11)
+
+Rama `fix/stage0-diagnostic-files-token-limit`, basada en `main` `f19ec01`.
+Detalle en [STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md](STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md):
+diagnósticos con el archivo real de cada módulo (`Span.file`) y fin del
+límite de 4096 tokens (límite de recursos 2^20 y pila de compilador de
+256 MiB, que además corrige el desbordamiento con 30 sumas encadenadas).
+Los módulos de `compiler-l/src` ya no necesitan partirse por tokens.

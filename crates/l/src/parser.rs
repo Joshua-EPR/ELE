@@ -1583,10 +1583,10 @@ fn parse_inner(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
             "secuencia de tokens incompleta",
         ));
     }
-    if tokens.len() > 4096 {
-        return Err(Diagnostic::new(
-            tokens[4096].span,
-            "límite CORE-1 de 4096 tokens excedido",
+    // Token vectors built by other callers than the lexer get the same bound.
+    if tokens.len() > crate::lexer::MAX_TOKENS {
+        return Err(crate::lexer::too_many_tokens(
+            tokens[crate::lexer::MAX_TOKENS].span,
         ));
     }
     let mut p = Parser {

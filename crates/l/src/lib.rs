@@ -23,6 +23,20 @@ pub mod sema;
 pub struct Span {
     pub line: usize,
     pub column: usize,
+    /// Source file of the span: 0 for a lone source (or the prelude), k > 0
+    /// for the k-th file read by [`modules::load_program_files`].
+    pub file: u32,
+}
+
+impl Span {
+    /// A position in the lone source (file 0).
+    pub const fn at(line: usize, column: usize) -> Self {
+        Self {
+            line,
+            column,
+            file: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -71,19 +85,46 @@ pub fn lower_to_cfg(program: &lir::Program) -> Result<cfg::Module, Diagnostic> {
     Ok(module)
 }
 
+/// Stack of the thread that runs the compiler's recursive passes. Their
+/// depth is bounded by the nesting limits (128 levels in the parser and in
+/// semantic analysis), but frames are large in unoptimized builds: a chain
+/// of 30 additions already exceeded the 1 MiB main-thread stack of Windows.
+/// The stack is reserved address space, committed only as it is used.
+pub const COMPILER_STACK_BYTES: usize = 256 << 20;
+
+/// Runs `f` on a thread with [`COMPILER_STACK_BYTES`] of stack and returns
+/// its result; a panic inside `f` propagates to the caller.
+pub fn with_compiler_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("ele-compiler".into())
+            .stack_size(COMPILER_STACK_BYTES)
+            .spawn_scoped(scope, f)
+            .expect("no se pudo crear el hilo del compilador");
+        worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
 /// Front end + semantic analysis + CFG lowering/verification.
 pub fn check(source: &str) -> Result<lir::Program, Diagnostic> {
-    let tokens = lexer::lex(source)?;
-    let ast = parser::parse(tokens)?;
-    let program = sema::check(ast)?;
-    lower_to_cfg(&program)?;
-    Ok(program)
+    with_compiler_stack(|| {
+        let tokens = lexer::lex(source)?;
+        let ast = parser::parse(tokens)?;
+        let program = sema::check(ast)?;
+        lower_to_cfg(&program)?;
+        Ok(program)
+    })
 }
 
 /// Front end + semantic analysis + CFG lowering/verification for a file (including imports).
 pub fn check_file(path: &std::path::Path) -> Result<lir::Program, Diagnostic> {
-    let ast = modules::load_program(path)?;
-    let program = sema::check(ast)?;
-    lower_to_cfg(&program)?;
-    Ok(program)
+    with_compiler_stack(|| {
+        let (ast, files) = modules::load_program_files(path)?;
+        let attribute = |d| modules::attribute(d, &files);
+        let program = sema::check(ast).map_err(attribute)?;
+        lower_to_cfg(&program).map_err(attribute)?;
+        Ok(program)
+    })
 }
