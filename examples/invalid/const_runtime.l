@@ -1,4 +1,4 @@
-fn main() {
-    var valor = 21
-    const resultado = valor * 2
+flow main() {
+    change valor = 21
+    fixed resultado = valor * 2
 }

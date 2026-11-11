@@ -1,20 +1,20 @@
 // Phase 8.7.4.3: Stage 1 must produce real typed ELE-LIR from this .l file.
-enum Estado {
+choice Estado {
     No,
     Si(Int),
     Flag(Bool),
 }
 
-fn sumar(x: Int) -> Int {
-    return x + 2
+flow sumar(x: Int) => Int {
+    give x + 2
 }
 
-fn main() -> Int {
-    let estado = Estado.Si(40)
-    match estado {
-        Estado.No => { return 1 },
-        Estado.Si(v) => { return sumar(v) },
-        Estado.Flag(flag) => { return 0 },
+flow main() => Int {
+    hold estado = Estado@Si(40)
+    choose estado {
+        Estado.No: { give 1 },
+        Estado.Si(v): { give sumar(v) },
+        Estado.Flag(flag): { give 0 },
     }
-    return 3
+    give 3
 }

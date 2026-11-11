@@ -1,12 +1,12 @@
-fn fibonacci(n: Int) -> Int {
-    if n <= 1 {
-        return n
+flow fibonacci(n: Int) => Int {
+    when n <= 1 {
+        give n
     }
 
-    return fibonacci(n - 1) + fibonacci(n - 2)
+    give fibonacci(n - 1) + fibonacci(n - 2)
 }
 
-fn main() {
-    let resultado = fibonacci(10)
+flow main() {
+    hold resultado = fibonacci(10)
     print("Fibonacci: {resultado}")
 }

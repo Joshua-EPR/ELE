@@ -1,9 +1,9 @@
-const RESPUESTA: Int = BASE * 2
-const BASE = 21
-const ACTIVO: Bool = RESPUESTA == 42 && !false
+fixed RESPUESTA: Int = BASE * 2
+fixed BASE = 21
+fixed ACTIVO: Bool = RESPUESTA == 42 && !false
 
-fn main() {
-    const siguiente = RESPUESTA + 1
+flow main() {
+    fixed siguiente = RESPUESTA + 1
     print(RESPUESTA)
     print(siguiente)
     print(ACTIVO)

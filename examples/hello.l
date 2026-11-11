@@ -1,2 +1,2 @@
-// Text is not implemented yet; this native example prints a number.
-fn main() { print(42) }
+// Ejemplo mínimo de salida numérica en sintaxis ELE v2.
+flow main() { print(42) }

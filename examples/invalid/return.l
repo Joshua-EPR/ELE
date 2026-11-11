@@ -1,2 +1,2 @@
-fn f(x: Bool) -> Int { return x }
-fn main() {}
+flow f(x: Bool) => Int { give x }
+flow main() {}

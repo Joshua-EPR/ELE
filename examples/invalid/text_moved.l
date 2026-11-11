@@ -1,5 +1,5 @@
-fn main() {
-    let origen = "texto"
-    let destino = origen
+flow main() {
+    hold origen = "texto"
+    hold destino = origen
     print(origen)
 }
