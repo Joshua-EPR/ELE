@@ -53,7 +53,7 @@ class NativeStructProtocolFixtures(unittest.TestCase):
 
     def test_stage1_source_includes_real_nominal_field_access(self):
         src = (ROOT / 'examples/native_cfg_real_struct.l').read_text()
-        self.assertIn('struct Pair', src)
+        self.assertIn('shape Pair', src)
         self.assertIn('pair.flag', src)
         self.assertIn('pair.left', src)
         self.assertIn('pair.right', src)

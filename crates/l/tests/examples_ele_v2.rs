@@ -2,7 +2,7 @@
 use project_l::check;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
 };
 
@@ -86,10 +86,9 @@ fn code_without_comments_and_strings(source: &str) -> String {
 #[test]
 fn all_example_sources_use_canonical_ele_syntax() {
     let legacy = [
-        "fn", "struct", "enum", "impl", "trait", "let", "var", "const",
-        "return", "if", "else", "for", "while", "loop", "break", "continue",
-        "match", "self", "pub", "import", "module", "region", "async",
-        "await", "spawn",
+        "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if", "else",
+        "for", "while", "loop", "break", "continue", "match", "self", "pub", "import", "module",
+        "region", "async", "await", "spawn",
     ];
     for file in example_files() {
         let source = fs::read_to_string(&file).unwrap();

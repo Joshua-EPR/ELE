@@ -49,10 +49,10 @@ class EnumPayloadBridgeContract(unittest.TestCase):
 
     def test_real_source_fixture_is_not_manual_lir(self):
         source = read('examples/native_enum_payload_stage1.l')
-        self.assertIn('enum Estado', source)
-        self.assertIn('Estado.Si(40)', source)
-        self.assertIn('Estado.Si(v)', source)
-        self.assertIn('return sumar(v)', source)
+        self.assertIn('choice Estado', source)
+        self.assertIn('Estado@Si(40)', source)
+        self.assertIn('Estado.Si(v):', source)
+        self.assertIn('give sumar(v)', source)
 
 if __name__ == '__main__':
     unittest.main()
