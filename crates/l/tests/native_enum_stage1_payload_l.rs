@@ -120,6 +120,25 @@ fn canonical_ele_syntax_compiles_real_stage1_lir_to_native_elf() {
 }
 
 #[test]
+fn stage1_accepts_ele_view_and_edit_borrow_spellings() {
+    let file = root().join("examples/ele_borrow_syntax.l");
+    let emitted = Command::new(sema())
+        .arg(&file)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "Stage 1 borrow syntax must lower to typed LIR: {}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let lir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(lir.starts_with("ELE-LIR 1\n"), "{lir}");
+    // Reference locals are currently not accepted by the ELE-native ELF
+    // backend; this test does NOT claim native borrow execution.
+}
+
+#[test]
 fn enum_payload_wrong_constructor_type_is_rejected_by_stage1() {
     let base = root();
     let temp = base.join("target/stage1-tests/enum-payload-negative");
