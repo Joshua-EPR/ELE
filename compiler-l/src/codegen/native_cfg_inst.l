@@ -3,13 +3,16 @@ import native_cfg_defs
 import native_cfg_types
 import native_cfg_ref
 import native_cfg_arith
+import native_cfg_fields
 
 // Source of `print` and `append`: `val <operand>` fills `inst.a` and returns
 // -1; `ref p<N> 0` returns the referenced variable.
 fn cfgReadSource(p: &mut CfgProgram, f: Int, source: &Text, reader: &mut NativeReader, inst: &mut CfgInst) -> Int {
     let mode = nativeWord(source, &mut reader)
     if nativeEquals(source, &mode, "ref") {
-        return cfgSharedVar(p, f, source, &mut reader)
+        let error = cfgReadSourceRef(p, f, source, &mut reader, &mut inst)
+        if error != 0 { reader.error = error }
+        return inst.op
     }
     if !nativeEquals(source, &mode, "val") { reader.error = 14 }
     inst.a = cfgOperand(&mut p, source, &mut reader)
@@ -21,7 +24,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     let kind = nativeWord(source, &mut reader)
     var inst = CfgInst(kind: 0, dst: -1, op: 0, callee: -1, argc: 0,
         a: cfgEmptyOperand(), b: cfgEmptyOperand(), c: cfgEmptyOperand(), d: cfgEmptyOperand(),
-        place_var: -1, place_field: -1, place_subfield: -1, arg_first: -1)
+        place_var: -1, place_field: -1, place_subfield: -1, arg_first: -1, src_field: -1, src_sub: -1)
     if nativeEquals(source, &kind, "use") {
         inst.kind = 1
         inst.dst = nativeId(source, &mut reader, 118)
@@ -52,10 +55,10 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.op = nativeId(source, &mut reader, 115)
         inst.argc = nativeNumber(source, &mut reader)
         if inst.argc < 1 || inst.argc > 4 { p.error = 64 }
-        if inst.argc >= 1 && inst.argc <= 4 { inst.a = nativeOperand(source, &mut reader) }
-        if inst.argc >= 2 && inst.argc <= 4 { inst.b = nativeOperand(source, &mut reader) }
-        if inst.argc >= 3 && inst.argc <= 4 { inst.c = nativeOperand(source, &mut reader) }
-        if inst.argc == 4 { inst.d = nativeOperand(source, &mut reader) }
+        if inst.argc >= 1 && inst.argc <= 4 { inst.a = cfgOperand(&mut p, source, &mut reader) }
+        if inst.argc >= 2 && inst.argc <= 4 { inst.b = cfgOperand(&mut p, source, &mut reader) }
+        if inst.argc >= 3 && inst.argc <= 4 { inst.c = cfgOperand(&mut p, source, &mut reader) }
+        if inst.argc == 4 { inst.d = cfgOperand(&mut p, source, &mut reader) }
     } else if nativeEquals(source, &kind, "read") {
         inst.kind = 5
         inst.dst = nativeId(source, &mut reader, 118)
@@ -69,7 +72,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.place_var = place.variable
         inst.place_field = place.field
         inst.place_subfield = place.subfield
-        inst.a = nativeOperand(source, &mut reader)
+        inst.a = cfgOperand(&mut p, source, &mut reader)
     } else if nativeEquals(source, &kind, "variant") {
         inst.kind = 7
         inst.dst = nativeId(source, &mut reader, 118)
@@ -124,6 +127,8 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         } else {
             inst.op = nativeId(source, &mut reader, 118)
         }
+    } else if nativeEquals(source, &kind, "dropfield") {
+        cfgReadDropField(p, f, source, &mut reader, &mut inst)
     } else if nativeEquals(source, &kind, "unary") {
         cfgReadUnary(&mut p, f, source, &mut reader, &mut inst)
     } else if nativeEquals(source, &kind, "len") {
@@ -134,7 +139,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         p.error = 31
     }
     nativeEndLineSpan(source, &mut reader)
-    let has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13
+    let has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17
     if reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
         p.error = 33
     }
@@ -145,6 +150,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     }
     if inst.kind == 14 || inst.kind == 15 { p.error = cfgCheckTextQuery(p, f, &inst) }
     if inst.kind == 16 { p.error = cfgCheckUnary(p, f, &inst) }
+    if inst.kind == 17 { p.error = cfgCheckDropField(p, f, &inst) }
     if p.error != 0 { return }
     var dest_type = -1
     if has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
@@ -153,7 +159,7 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         // The source is Int, Bool or Text. A Text variable must come by
         // reference: by value it would be consumed, which is not lowered.
         var source_type = first_type
-        if inst.op >= 0 { source_type = p.types_code[p.functions[f].first_var + inst.op] }
+        if inst.op >= 0 { source_type = cfgSourcePlaceType(p, f, &inst) }
         if source_type != 0 && source_type != 1 && source_type != cfgTextType() { p.error = 90 }
         if inst.kind == 12 && inst.op < 0 && inst.a.is_var && source_type == cfgTextType() { p.error = 90 }
     }
@@ -235,19 +241,21 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     if inst.kind == 5 || inst.kind == 6 {
         let place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield)
         let ty = cfgPlaceType(p, f, &place)
-        if ty < 0 { p.error = 67 }
+        if ty == -1 { p.error = 67 }
         if inst.kind == 5 && dest_type != ty { p.error = 67 }
         if inst.kind == 6 && first_type != ty { p.error = 67 }
         // A bare `pN` is a place only through a reference; plain variables
         // are read and written with `use`.
         if inst.place_field < 0 && !cfgIsRef(p, f, inst.place_var) { p.error = 67 }
-        // Moving a Text out of a referent, or overwriting it in place,
-        // would duplicate or leak its buffer.
-        if ty == cfgTextType() { p.error = 95 }
+        // Moving a Text out of a referent would duplicate its buffer. A
+        // Text field of an owned shape moves out, and a store may refill a
+        // field whose Text was moved or released (native_cfg_paths).
+        if inst.kind == 5 && cfgOwnsText(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
+        if inst.place_field < 0 && cfgOwnsText(p, ty) { p.error = 95 }
         // Reading a shape/choice field by value moves it out of an owned
         // parent; the verifier tracks that move path (native_cfg_paths).
-        // Through a reference it is a copy, safe because every aggregate
-        // accepted here is drop-free.
+        // Through a reference it is a copy, allowed only for values that own
+        // no Text.
     }
     if p.error == 0 { p.insts.push(inst) }
 }

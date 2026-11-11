@@ -84,7 +84,7 @@ expose flow cfgParamNeedsMut(p: view CfgProgram, f: Int, v: Int) => Bool {
         hold first = p.blocks[b].first
         each i among first..(first + p.blocks[b].count) {
             hold kind = p.insts[i].kind
-            when (kind == 6 || kind == 12) && p.insts[i].place_var == v { give true }
+            when (kind == 6 || kind == 12 || kind == 17) && p.insts[i].place_var == v { give true }
             when kind == 3 {
                 each n among 0..p.insts[i].argc {
                     hold k = p.insts[i].arg_first + n

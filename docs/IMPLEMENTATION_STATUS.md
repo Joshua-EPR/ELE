@@ -1542,3 +1542,9 @@ El backend nativo experimental admite ahora `i payload vD pN eK V` para copiar u
 con seguimiento por camino. Verificado: `native_aggregates_l` 3/3 y suites
 nativas previas sin regresión; ejecución Linux idéntica a Stage 0. Ver
 [ELE_NATIVE_BACKEND_PHASE_8_7_8.md](ELE_NATIVE_BACKEND_PHASE_8_7_8.md).
+
+## Fase 8.7.9 — Text dentro de `shape` en el backend ELE (2026-11-11)
+
+Campos Text con movimiento, liberación por campo y reemplazo por `edit`.
+Verificado: `native_text_fields_l` 3/3; ejecución Linux idéntica a Stage 0 y
+reservas equilibradas. Ver [ELE_NATIVE_BACKEND_PHASE_8_7_9.md](ELE_NATIVE_BACKEND_PHASE_8_7_9.md).

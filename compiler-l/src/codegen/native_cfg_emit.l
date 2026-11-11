@@ -32,6 +32,13 @@ fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_base: Int, dst_
     if ty == 0 {
         x64LoadMem64(&mut code, 0, src_base, src_disp)
         x64StoreMem64(&mut code, dst_base, dst_disp, 0)
+    } else if ty == cfgTextType() {
+        // A Text field: address, byte length, capacity. Moving it moves the
+        // ownership; the verifier invalidates the source.
+        for w in 0..3 {
+            x64LoadMem64(&mut code, 0, src_base, src_disp + 8 * w)
+            x64StoreMem64(&mut code, dst_base, dst_disp + 8 * w, 0)
+        }
     } else if ty == 1 {
         x64LoadMem8(&mut code, 0, src_base, src_disp)
         x64StoreMem8(&mut code, dst_base, dst_disp, 0)
@@ -60,9 +67,16 @@ fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_base: Int, dst_
 // of a MOVE, never as permission to duplicate ownership. The verifier
 // invalidates moved source variables. Struct-valued field reads are rejected.
 // The place may be reached through a reference parameter.
-fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, value: &NativeOperand) {
+fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, value: &NativeOperand, fix: &mut CfgFix) {
     let ty = cfgPlaceKind(p, f, variable, field, subfield)
-    if ty >= 2 {
+    if ty == cfgTextType() {
+        // A Text operand, variable or literal, into the field.
+        cfgTextWords(&mut code, p, f, value, &mut fix)
+        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+        x64StoreMem64(&mut code, at.base, at.disp, 0)
+        x64StoreMem64(&mut code, at.base, at.disp + 8, 2)
+        x64StoreMem64(&mut code, at.base, at.disp + 16, 1)
+    } else if ty >= 2 {
         if !value.is_var { code.error = 12; return }
         let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
         cfgCopyValue(&mut code, p, ty, at.base, at.disp, 5, cfgVarBase(p, f, value.value))
@@ -79,7 +93,7 @@ fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, fiel
 
 fn cfgReadField(code: &mut X64Code, p: &CfgProgram, f: Int, dst: Int, variable: Int, field: Int, subfield: Int) {
     let ty = cfgPlaceKind(p, f, variable, field, subfield)
-    if ty >= 2 {
+    if ty >= 2 || ty == cfgTextType() {
         let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
         cfgCopyValue(&mut code, p, ty, 5, cfgVarBase(p, f, dst), at.base, at.disp)
     } else {
@@ -177,14 +191,14 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
             x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
         }
     } else if inst.kind == 4 {
-        cfgStoreField(&mut code, p, f, inst.dst, 0, -1, &inst.a)
-        if inst.argc >= 2 { cfgStoreField(&mut code, p, f, inst.dst, 1, -1, &inst.b) }
-        if inst.argc >= 3 { cfgStoreField(&mut code, p, f, inst.dst, 2, -1, &inst.c) }
-        if inst.argc == 4 { cfgStoreField(&mut code, p, f, inst.dst, 3, -1, &inst.d) }
+        cfgStoreField(&mut code, p, f, inst.dst, 0, -1, &inst.a, &mut fix)
+        if inst.argc >= 2 { cfgStoreField(&mut code, p, f, inst.dst, 1, -1, &inst.b, &mut fix) }
+        if inst.argc >= 3 { cfgStoreField(&mut code, p, f, inst.dst, 2, -1, &inst.c, &mut fix) }
+        if inst.argc == 4 { cfgStoreField(&mut code, p, f, inst.dst, 3, -1, &inst.d, &mut fix) }
     } else if inst.kind == 5 {
         cfgReadField(&mut code, p, f, inst.dst, inst.place_var, inst.place_field, inst.place_subfield)
     } else if inst.kind == 6 {
-        cfgStoreField(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, &inst.a)
+        cfgStoreField(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, &inst.a, &mut fix)
     } else if inst.kind == 7 {
         let kind = &p.enums[inst.op]
         let dest = cfgVarBase(p, f, inst.dst)
@@ -284,7 +298,7 @@ fn cfgEmitParams(code: &mut X64Code, p: &CfgProgram, f: Int) {
 
 fn cfgNeedsRuntime(p: &CfgProgram) -> Bool {
     for i in 0..p.insts.length {
-        if p.insts[i].kind >= 10 && p.insts[i].kind <= 13 { return true }
+        if (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { return true }
     }
     return false
 }
