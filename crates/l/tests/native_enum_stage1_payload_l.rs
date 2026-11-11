@@ -283,3 +283,65 @@ fn main() -> Int {
 "#,
     );
 }
+
+#[test]
+fn nested_nominal_choose_from_real_ele_source_compiles_to_elf() {
+    let base = root();
+    let source = base.join("examples/ele_nested_nominal_match.l");
+    let temp = base.join("target/stage1-tests/ele-nested-nominal");
+    fs::create_dir_all(&temp).unwrap();
+    let lir_file = temp.join("nested-match.lir");
+    let elf_file = temp.join("nested-match.elf");
+
+    let emitted = Command::new(sema())
+        .arg(&source)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "Stage 1 nested match: {}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let lir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(lir.contains("module structs 0 enums 2"), "{lir}");
+    assert!(
+        lir.matches("i disc ").count() >= 2,
+        "both nominal discriminants must be checked: {lir}"
+    );
+    assert!(
+        lir.matches("i payload ").count() >= 2,
+        "both primitive payloads must be guarded: {lir}"
+    );
+    let parsed = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&parsed).unwrap();
+    fs::write(&lir_file, &lir).unwrap();
+
+    let compiled = Command::new(native())
+        .arg(&lir_file)
+        .arg(&elf_file)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "ELE backend nested match: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let bytes = fs::read(&elf_file).unwrap();
+    assert!(bytes.len() > 4096);
+    assert_eq!(&bytes[..7], b"\\x7fELF\\x02\\x01\\x01");
+}
+
+#[test]
+fn enum_match_rejects_literal_and_multiple_payload_binders() {
+    for (file, pattern) in [
+        ("numeric_pattern.l", "Estado.Si(42)"),
+        ("multiple_binders.l", "Estado.Si(a, b)"),
+        ("expression_pattern.l", "Estado.Si(v+1)"),
+    ] {
+        let source = format!(
+            "choice Estado {{ No, Si(Int) }}\\nflow main() => Int {{\\n hold e = Estado@Si(40)\\n choose e {{ Estado.No: {{ give 0 }}, {pattern}: {{ give 1 }} }}\\n give 2\\n}}\\n"
+        );
+        reject_match_source(file, &source);
+    }
+}
