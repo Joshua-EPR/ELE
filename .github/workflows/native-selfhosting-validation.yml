@@ -132,6 +132,9 @@ jobs:
               ("list-e.elf", 127),
               ("list-d.elf", 121),
               ("list-b.elf", 121),
+              ("list-c.elf", 127),
+              ("list-k.elf", 127),
+              ("list-q.elf", 127),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"
