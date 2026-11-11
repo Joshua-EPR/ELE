@@ -298,7 +298,7 @@ impl Parser {
                 "fn", "let", "var", "const", "struct", "impl", "trait", "enum", "module", "import",
                 "pub", "return", "if", "else", "match", "for", "in", "while", "loop", "break",
                 "continue", "async", "await", "spawn", "mut", "static", "unsafe", "region",
-                "extern", "as", "true", "false", "None", "move", "self",
+                "extern", "as", "true", "false", "None", "move", "self", "view", "edit",
             ]
             .contains(&canonical_ele_keyword(&s))
             {
@@ -351,6 +351,14 @@ impl Parser {
         result
     }
     fn ty_inner(&mut self) -> Result<TypeExpr, Diagnostic> {
+        if self.take("view") {
+            let span = self.tokens[self.pos - 1].span;
+            return Ok(TypeExpr::Ref(Box::new(self.ty()?), false, span));
+        }
+        if self.take("edit") {
+            let span = self.tokens[self.pos - 1].span;
+            return Ok(TypeExpr::Ref(Box::new(self.ty()?), true, span));
+        }
         if self.take("&") {
             let span = self.tokens[self.pos - 1].span;
             let mutable = self.take("mut");
@@ -621,6 +629,13 @@ impl Parser {
             }
             Kind::Word(ref s) if s == "true" || s == "false" => ExprKind::Bool(s == "true"),
             Kind::Word(ref s) if s == "None" => ExprKind::Name("None".into()),
+            Kind::Word(ref s) if s == "view" || s == "edit" => {
+                self.nl();
+                ExprKind::Unary(
+                    if s == "edit" { "&mut" } else { "&" }.into(),
+                    Box::new(self.expr(8)?),
+                )
+            },
             Kind::Word(ref s) if canonical_ele_keyword(s) == "match" => self.match_expr()?,
             // `await` binds like a unary operator: `await f() + 1` awaits the
             // call. Where it may appear is decided by semantic analysis.
