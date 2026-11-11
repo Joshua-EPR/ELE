@@ -90,9 +90,29 @@ pub fn semaEnumMatchCovered(ctx: &mut SemaContext, source: &Text, tree: &AstTree
             } else {
                 seen[found] = true
             }
-            if open >= 0 && (p_end <= open + 1 || source.byteAt(p_end - 1) != 41) {
-                semaAddError(&mut ctx, "L0004", "patrón de payload mal formado", p_start, p_end)
-                valid = false
+            if open >= 0 {
+                if p_end <= open + 2 || source.byteAt(p_end - 1) != 41 {
+                    semaAddError(&mut ctx, "L0004", "patrón de payload mal formado", p_start, p_end)
+                    valid = false
+                } else {
+                    // In the native Stage 1 subset a primitive payload arm
+                    // binds exactly one identifier (or '_'). Do not accept
+                    // literals, multiple binders or arbitrary expressions
+                    // here: they have no verified lowering or move paths.
+                    let first = open + 1
+                    let last = p_end - 1
+                    var binder_valid = true
+                    for j in first..last {
+                        let b = source.byteAt(j)
+                        let letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+                        let digit = (b >= 48 && b <= 57) && j > first
+                        if !letter && !digit { binder_valid = false }
+                    }
+                    if !binder_valid {
+                        semaAddError(&mut ctx, "L0004", "patrón de payload requiere un único identificador", p_start, p_end)
+                        valid = false
+                    }
+                }
             }
         }
     }
