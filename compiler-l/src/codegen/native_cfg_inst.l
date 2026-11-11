@@ -244,11 +244,10 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         // Moving a Text out of a referent, or overwriting it in place,
         // would duplicate or leak its buffer.
         if ty == cfgTextType() { p.error = 95 }
-        // Reading a struct field by value would partially move its parent;
-        // this subset has only whole-variable move flags, so reject it.
-        // Through a reference the copy is safe: every aggregate accepted
-        // here is drop-free, so no resource is duplicated.
-        if inst.kind == 5 && ty >= 2 && !cfgIsRef(p, f, inst.place_var) { p.error = 73 }
+        // Reading a shape/choice field by value moves it out of an owned
+        // parent; the verifier tracks that move path (native_cfg_paths).
+        // Through a reference it is a copy, safe because every aggregate
+        // accepted here is drop-free.
     }
     if p.error == 0 { p.insts.push(inst) }
 }

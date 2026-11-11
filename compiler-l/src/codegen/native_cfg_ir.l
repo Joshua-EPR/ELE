@@ -44,10 +44,7 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
     nativeEndLineSpan(source, &mut reader)
     if reader.error != 0 { p.error = 40 }
     if kind == 1 {
-        var expected = 0
-        if p.functions[f].result_bool { expected = 1 }
-        if p.functions[f].result_unit { expected = cfgUnitType() }
-        if p.functions[f].result_text { expected = cfgTextType() }
+        let expected = p.functions[f].result_type
         if cfgOperandType(p, f, &value) != expected { p.error = 41 }
     }
     if kind == 3 && cfgOperandType(p, f, &value) != 1 { p.error = 42 }
@@ -79,8 +76,9 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
-    if result_type >= 2 { p.error = 68; return }
-    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType()))
+    // Aggregate results travel through a hidden pointer (see native_cfg_emit).
+    if result_type >= 2 && cfgTypeSize(p, result_type) > 512 { p.error = 68; return }
+    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType(), result_type: result_type))
     var next_slot = 0
     for i in 0..vars {
         nativeExpect(source, &mut reader, "var")
@@ -92,7 +90,7 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         nativeEndLine(source, &mut reader)
         let unit_var = ty == cfgUnitType()
         let text_var = ty == cfgTextType()
-        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && (ty >= 2 || unit_var)) { p.error = 45; break }
+        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && unit_var) { p.error = 45; break }
         // References exist only as parameters: they cannot outlive the
         // caller's frame, so no local loan needs a lifetime analysis here.
         if is_ref && (i >= params || unit_var) { p.error = 96; break }
@@ -169,6 +167,6 @@ pub fn cfgParse(source: &Text) -> CfgProgram {
         p.error = 49
         return p
     }
-    if p.functions[main].params != 0 || p.functions[main].result_bool { p.error = 50 }
+    if p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 { p.error = 50 }
     return p
 }

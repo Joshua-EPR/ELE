@@ -53,7 +53,8 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
     p.call_ref@push(-1)
     p.call_field@push(-1)
     p.call_sub@push(-1)
-    when reader.error != 0 || (arg_type != 0 && arg_type != 1 && arg_type != cfgTextType()) { give 37 }
+    // By value: Int, Bool, Text, or a whole shape/choice (moved).
+    when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType()) { give 37 }
     give 0
 }
 
