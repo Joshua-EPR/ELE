@@ -45,36 +45,35 @@ fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool 
 fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Word => {
-            if parserMatchText(source, token.start, token.end, expected) { return true }
-            if expected == "fn" { return parserMatchText(source, token.start, token.end, "flow") }
-            if expected == "struct" { return parserMatchText(source, token.start, token.end, "shape") }
-            if expected == "impl" { return parserMatchText(source, token.start, token.end, "extend") }
-            if expected == "enum" { return parserMatchText(source, token.start, token.end, "choice") }
-            if expected == "trait" { return parserMatchText(source, token.start, token.end, "contract") }
-            if expected == "pub" { return parserMatchText(source, token.start, token.end, "expose") }
-            if expected == "let" { return parserMatchText(source, token.start, token.end, "hold") }
-            if expected == "var" { return parserMatchText(source, token.start, token.end, "change") }
-            if expected == "const" { return parserMatchText(source, token.start, token.end, "fixed") }
-            if expected == "return" { return parserMatchText(source, token.start, token.end, "give") }
-            if expected == "match" { return parserMatchText(source, token.start, token.end, "choose") }
-            if expected == "if" { return parserMatchText(source, token.start, token.end, "when") }
-            if expected == "else" { return parserMatchText(source, token.start, token.end, "otherwise") }
-            if expected == "for" { return parserMatchText(source, token.start, token.end, "each") }
-            if expected == "in" { return parserMatchText(source, token.start, token.end, "among") }
-            if expected == "while" { return parserMatchText(source, token.start, token.end, "during") }
-            if expected == "loop" { return parserMatchText(source, token.start, token.end, "repeat") }
-            if expected == "break" { return parserMatchText(source, token.start, token.end, "leave") }
-            if expected == "continue" { return parserMatchText(source, token.start, token.end, "proceed") }
-            if expected == "self" { return parserMatchText(source, token.start, token.end, "this") }
-            if expected == "mut" { return parserMatchText(source, token.start, token.end, "exclusive") }
-            if expected == "static" { return parserMatchText(source, token.start, token.end, "direct") }
-            if expected == "async" { return parserMatchText(source, token.start, token.end, "later") }
-            if expected == "await" { return parserMatchText(source, token.start, token.end, "wait") }
-            if expected == "spawn" { return parserMatchText(source, token.start, token.end, "launch") }
-            if expected == "import" { return parserMatchText(source, token.start, token.end, "take") }
-            if expected == "module" { return parserMatchText(source, token.start, token.end, "space") }
-            if expected == "region" { return parserMatchText(source, token.start, token.end, "zone") }
-            return false
+            if expected == "fn" && parserMatchText(source, token.start, token.end, "flow") { return true }
+            if expected == "struct" && parserMatchText(source, token.start, token.end, "shape") { return true }
+            if expected == "impl" && parserMatchText(source, token.start, token.end, "extend") { return true }
+            if expected == "enum" && parserMatchText(source, token.start, token.end, "choice") { return true }
+            if expected == "trait" && parserMatchText(source, token.start, token.end, "contract") { return true }
+            if expected == "pub" && parserMatchText(source, token.start, token.end, "expose") { return true }
+            if expected == "let" && parserMatchText(source, token.start, token.end, "hold") { return true }
+            if expected == "var" && parserMatchText(source, token.start, token.end, "change") { return true }
+            if expected == "const" && parserMatchText(source, token.start, token.end, "fixed") { return true }
+            if expected == "return" && parserMatchText(source, token.start, token.end, "give") { return true }
+            if expected == "match" && parserMatchText(source, token.start, token.end, "choose") { return true }
+            if expected == "if" && parserMatchText(source, token.start, token.end, "when") { return true }
+            if expected == "else" && parserMatchText(source, token.start, token.end, "otherwise") { return true }
+            if expected == "for" && parserMatchText(source, token.start, token.end, "each") { return true }
+            if expected == "in" && parserMatchText(source, token.start, token.end, "among") { return true }
+            if expected == "while" && parserMatchText(source, token.start, token.end, "during") { return true }
+            if expected == "loop" && parserMatchText(source, token.start, token.end, "repeat") { return true }
+            if expected == "break" && parserMatchText(source, token.start, token.end, "leave") { return true }
+            if expected == "continue" && parserMatchText(source, token.start, token.end, "proceed") { return true }
+            if expected == "self" && parserMatchText(source, token.start, token.end, "this") { return true }
+            if expected == "mut" && parserMatchText(source, token.start, token.end, "exclusive") { return true }
+            if expected == "static" && parserMatchText(source, token.start, token.end, "direct") { return true }
+            if expected == "async" && parserMatchText(source, token.start, token.end, "later") { return true }
+            if expected == "await" && parserMatchText(source, token.start, token.end, "wait") { return true }
+            if expected == "spawn" && parserMatchText(source, token.start, token.end, "launch") { return true }
+            if expected == "import" && parserMatchText(source, token.start, token.end, "take") { return true }
+            if expected == "module" && parserMatchText(source, token.start, token.end, "space") { return true }
+            if expected == "region" && parserMatchText(source, token.start, token.end, "zone") { return true }
+            return parserMatchText(source, token.start, token.end, expected)
         }
         _ => { return false }
     }
@@ -83,10 +82,9 @@ fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
 fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Symbol => {
-            if parserMatchText(source, token.start, token.end, expected) { return true }
-            if expected == "->" { return parserMatchText(source, token.start, token.end, "=>") }
-            if expected == "=>" { return parserMatchText(source, token.start, token.end, ":") }
-            return false
+            if expected == "->" && parserMatchText(source, token.start, token.end, "=>") { return true }
+            if expected == "=>" && parserMatchText(source, token.start, token.end, ":") { return true }
+            return parserMatchText(source, token.start, token.end, expected)
         }
         _ => { return false }
     }
