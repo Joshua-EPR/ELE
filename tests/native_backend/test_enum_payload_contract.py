@@ -37,9 +37,25 @@ class PayloadContractTests(unittest.TestCase):
         self.assertIn('nativeEquals(source, &kind, "payload")', ir)
         self.assertIn('if inst.kind == 9', ir)
         self.assertIn('inst.kind == 9', verify)
-        payload_part = emit[emit.index('} else if inst.kind == 9 {'):]
-        self.assertLess(payload_part.index('x64CmpReg'), payload_part.index('x64LoadMem8'))
-        self.assertLess(payload_part.index('bad_variant_at.push'), payload_part.index('x64LoadMem64(&mut code, 0, 5, owner + 8)'))
+        # Scope the contract to the payload-emission branch: the place may
+        # now be a local slot OR a reference parameter (at.base).
+        payload_part = emit.split('} else if inst.kind == 9 {', 1)[1].split('} else if inst.kind == 16 {', 1)[0]
+        tag_read = 'x64LoadMem64(&mut code, 0, at.base, owner)'
+        compare = 'x64CmpReg(&mut code, 0, 1)'
+        guard = 'fix.bad_variant_at.push(x64ConditionalPlaceholder(&mut code, false))'
+        self.assertIn(tag_read, payload_part)
+        self.assertIn(compare, payload_part)
+        self.assertIn(guard, payload_part)
+        self.assertLess(payload_part.index(tag_read), payload_part.index(compare))
+        self.assertLess(payload_part.index(compare), payload_part.index(guard))
+        # Both Bool and Int payload reads must happen AFTER the checked tag.
+        for read in (
+            'x64LoadMem8(&mut code, 0, at.base, owner + 8)',
+            'x64LoadMem64(&mut code, 0, at.base, owner + 8)',
+        ):
+            with self.subTest(read=read):
+                self.assertIn(read, payload_part)
+                self.assertLess(payload_part.index(guard), payload_part.index(read))
         self.assertIn('x64PatchRelative(&mut code, fix.bad_variant_at[i], bad_variant_handler)', emit)
 
 if __name__ == '__main__': unittest.main()
