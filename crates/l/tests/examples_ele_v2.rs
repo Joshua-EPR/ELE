@@ -1,10 +1,6 @@
 //! Regresión de la migración de todos los ejemplos de usuario a ELE v2.
 use project_l::check;
-use std::{
-    fs,
-    path::PathBuf,
-    process::Command,
-};
+use std::{fs, path::PathBuf, process::Command};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
