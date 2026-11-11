@@ -79,6 +79,20 @@ jobs:
           --test native_memory_l
           --test native_stack_layout_l
           -- --test-threads=1
+      # Suites restored by fixing Stage 0 diagnostics, the token limit and the
+      # compiler stack. They build with Cranelift, which targets Windows only.
+      - name: Stage 0 front end, modules, references and differential suites (MSVC)
+        if: runner.os == 'Windows' && !cancelled()
+        run: >-
+          cargo test -p project-l
+          --test cfg
+          --test conformance
+          --test differential
+          --test modules
+          --test references
+          --test regions
+          --test borrow_l
+          -- --test-threads=1
       - name: Native print, references and Text queries through the ELE backend (MSVC host, image checks)
         if: runner.os == 'Windows' && !cancelled()
         run: cargo test -p project-l --test native_print_l --test native_refs_l -- --test-threads=1
