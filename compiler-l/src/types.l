@@ -36,6 +36,14 @@ fn parseTypeAtom(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, to
     }
     let tok = &tokens[cursor.pos]
 
+    let is_view = parserTakeWord(source, &mut cursor, tokens, "view")
+    let is_edit = parserTakeWord(source, &mut cursor, tokens, "edit")
+    if is_view || is_edit {
+        let inner = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
+        let end_p = astTypeEnd(&tree, inner, tok.end)
+        return astAddType(&mut tree, AstTypeKind.Ref, tok.start, end_p, inner, selectInt(is_edit, 1, 0), 0)
+    }
+
     if parserTakeSymbol(source, &mut cursor, tokens, "&") {
         let mutable = parserTakeWord(source, &mut cursor, tokens, "mut")
         let inner = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)

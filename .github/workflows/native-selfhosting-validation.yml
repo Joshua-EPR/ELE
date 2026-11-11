@@ -2,9 +2,9 @@ name: ELE native self-hosting validation
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/ele-original-syntax-v2]
   pull_request:
-    branches: [main]
+    branches: [main, feat/ele-8.7.4.5-native-interop-ci]
   workflow_dispatch:
 
 concurrency:
@@ -28,6 +28,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Verify original ELE surface syntax in Stage 0
+        run: cargo test -p project-l --test ele_syntax_v2 -- --test-threads=1
+      - name: Verify syntax and bootstrap regression cases
+        run: cargo test -p project-l --test ele_syntax_regressions -- --test-threads=1
       - name: Verify platform-independent ELE-LIR protocol
         run: cargo test -p project-l --test lir_payload_protocol -- --test-threads=1
       # Stage 0's Cranelift builder currently targets only Windows x86-64.
@@ -55,6 +59,7 @@ jobs:
           path: |
             target/stage1-tests/native-enum-payload-stage1/payload.elf
             target/stage1-tests/native-enum-wrong-active/wrong-active.elf
+            target/stage1-tests/ele-syntax-v2/syntax.elf
             target/stage1-tests/native-cfg-loop/loop.elf
             target/stage1-tests/native-struct-source/struct.elf
             target/stage1-tests/native-nested-struct/nested.elf
@@ -92,6 +97,7 @@ jobs:
           # 126: invalid active variant must trap before extracting its payload.
           for name, expected in [
               ("payload.elf", 42),
+              ("syntax.elf", 42),
               ("wrong-active.elf", 126),
               ("loop.elf", 8),
               ("struct.elf", 42),
