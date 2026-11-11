@@ -16,7 +16,7 @@ fn tokenName(kind: &LexKind) -> Text {
 fn emitTokens(tokens: &List<LexToken>) {
     for i in 0..tokens.length {
         let token = &tokens[i]
-        let name = tokenName(token.kind)
+        let name = tokenName(&token.kind)
         let start = token.start
         let end = token.end
         print("{name}:{start}:{end}")
