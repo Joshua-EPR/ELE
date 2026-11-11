@@ -107,18 +107,32 @@ fn parseTypeAtom(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, to
             let name_end = tok.end
             cursor.pos += 1
             var extra_idx = -1
-            if parserTakeSymbol(source, &mut cursor, tokens, "<") {
-                var type_args: List<Int> = List[]
-                while !parserAtSymbol(source, cursor, tokens, ">") && cursor.pos < tokens.length {
-                    let arg = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
-                    if arg >= 0 {
-                        type_args.push(arg)
-                    }
-                    if !parserTakeSymbol(source, &mut cursor, tokens, ",") {
-                        break
-                    }
+            // ELE v2: Type of[Arg, ...]. The historic Type<Arg> remains
+            // accepted during bootstrap migration. Both have the same AST.
+            var closes_square = false
+            var has_args = parserTakeSymbol(source, &mut cursor, tokens, "<")
+            if !has_args && parserTakeWord(source, &mut cursor, tokens, "of") {
+                if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "[") {
+                    return -1
                 }
-                parserNeedSymbol(&mut tree, source, &mut cursor, tokens, ">")
+                has_args = true
+                closes_square = true
+            }
+            if has_args {
+                var type_args: List<Int> = List[]
+                while cursor.pos < tokens.length {
+                    var at_end = parserAtSymbol(source, cursor, tokens, ">")
+                    if closes_square { at_end = parserAtSymbol(source, cursor, tokens, "]") }
+                    if at_end { break }
+                    let arg = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
+                    if arg >= 0 { type_args.push(arg) }
+                    if !parserTakeSymbol(source, &mut cursor, tokens, ",") { break }
+                }
+                if closes_square {
+                    if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "]") { return -1 }
+                } else {
+                    if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, ">") { return -1 }
+                }
                 let first_pos = tree.extra.length
                 astAddExtra(&mut tree, type_args.length)
                 for a in 0..type_args.length {

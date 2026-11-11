@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, feat/ele-original-syntax-v2]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci]
+    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax]
   workflow_dispatch:
 
 concurrency:
@@ -47,6 +47,7 @@ jobs:
         run: >-
           cargo test -p project-l
           --test native_enum_stage1_l
+          --test ele_stage1_generic_types
           --test native_enum_stage1_payload_l
           --test native_enum_l
           --test native_cfg_l

@@ -142,7 +142,21 @@ flow main() => Int {
 
 Los `<T>` y `Tipo<T>` previos siguen admitidos **solo durante la migración**. La identidad de los tipos no depende de la forma escrita: `Caja<Int>` y `Caja of[Int]` producen el mismo tipo interno y pasan por el mismo control de ownership, reglas de monomorfización y verificación de tipos.
 
-**Compatibilidad real:** Stage 0 interpreta los genéricos, métodos e implementaciones anteriores. Stage 1 continúa con su subconjunto sin genéricos generales: no se debe presentar `of[T]` como soporte Stage 1 hasta que exista implementación y pruebas de compilación desde `.l` al backend ELE. La prueba diferencial Stage 0 contrasta `rustc` y Cranelift, **no** prueba self-hosting.
+**Compatibilidad real:** Stage 0 implementa `of[T]` en declaraciones, tipos, llamadas y extensiones genéricas y contrasta sus dos backends. Stage 1 **solo** reconoce `Type of[Args]` como anotación de tipo para los genéricos integrados `List`, `Option` y `Result`; conserva el mismo AST y resolución de tipos que `Type<Args>`. No admite funciones o tipos genéricos definidos por el usuario, ni `funcion of[Int](...)` en Stage 1. La prueba diferencial Stage 0 contrasta Rustc y Cranelift, **no** demuestra self-hosting.
+
+### Subconjunto comprobable de Stage 1
+
+```ele
+flow count(items: List of[Int]) => Int {
+    give items.length
+}
+
+flow main() => Int {
+    give 42
+}
+```
+
+Se comprueban también las anotaciones `Option of[Int]`, `Result of[Int, Text]` y el anidamiento `List of[Option of[Int]]` mediante el compilador Stage 1 generado por Stage 0. La corrección se comprueba por aceptación de tipos y rechazo de genéricos con aridad errónea; esto **no** significa que el backend nativo de ELE soporte todavía los valores propietarios de todos estos tipos.
 
 ## Superficies por rediseñar antes del corte de compatibilidad
 
