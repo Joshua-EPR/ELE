@@ -40,16 +40,53 @@ fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool 
     return true
 }
 
+// Canonical ELE keywords are recognized at the syntax boundary without
+// rewriting the underlying source offsets used by Stage 1 diagnostics.
 fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
-        LexKind.Word => { return parserMatchText(source, token.start, token.end, expected) }
+        LexKind.Word => {
+            if parserMatchText(source, token.start, token.end, expected) { return true }
+            if expected == "fn" { return parserMatchText(source, token.start, token.end, "flow") }
+            if expected == "struct" { return parserMatchText(source, token.start, token.end, "shape") }
+            if expected == "impl" { return parserMatchText(source, token.start, token.end, "extend") }
+            if expected == "enum" { return parserMatchText(source, token.start, token.end, "choice") }
+            if expected == "trait" { return parserMatchText(source, token.start, token.end, "contract") }
+            if expected == "pub" { return parserMatchText(source, token.start, token.end, "expose") }
+            if expected == "let" { return parserMatchText(source, token.start, token.end, "hold") }
+            if expected == "var" { return parserMatchText(source, token.start, token.end, "change") }
+            if expected == "const" { return parserMatchText(source, token.start, token.end, "fixed") }
+            if expected == "return" { return parserMatchText(source, token.start, token.end, "give") }
+            if expected == "match" { return parserMatchText(source, token.start, token.end, "choose") }
+            if expected == "if" { return parserMatchText(source, token.start, token.end, "when") }
+            if expected == "else" { return parserMatchText(source, token.start, token.end, "otherwise") }
+            if expected == "for" { return parserMatchText(source, token.start, token.end, "each") }
+            if expected == "in" { return parserMatchText(source, token.start, token.end, "among") }
+            if expected == "while" { return parserMatchText(source, token.start, token.end, "during") }
+            if expected == "loop" { return parserMatchText(source, token.start, token.end, "repeat") }
+            if expected == "break" { return parserMatchText(source, token.start, token.end, "leave") }
+            if expected == "continue" { return parserMatchText(source, token.start, token.end, "proceed") }
+            if expected == "self" { return parserMatchText(source, token.start, token.end, "this") }
+            if expected == "mut" { return parserMatchText(source, token.start, token.end, "exclusive") }
+            if expected == "static" { return parserMatchText(source, token.start, token.end, "direct") }
+            if expected == "async" { return parserMatchText(source, token.start, token.end, "later") }
+            if expected == "await" { return parserMatchText(source, token.start, token.end, "wait") }
+            if expected == "spawn" { return parserMatchText(source, token.start, token.end, "launch") }
+            if expected == "import" { return parserMatchText(source, token.start, token.end, "take") }
+            if expected == "module" { return parserMatchText(source, token.start, token.end, "space") }
+            if expected == "region" { return parserMatchText(source, token.start, token.end, "zone") }
+            return false
+        }
         _ => { return false }
     }
 }
 
 fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
-        LexKind.Symbol => { return parserMatchText(source, token.start, token.end, expected) }
+        LexKind.Symbol => {
+            if parserMatchText(source, token.start, token.end, expected) { return true }
+            if expected == "->" { return parserMatchText(source, token.start, token.end, "=>") }
+            return false
+        }
         _ => { return false }
     }
 }
