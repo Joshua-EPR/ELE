@@ -6,9 +6,10 @@ import elf64
 import native_rt
 import native_cfg_text
 import native_cfg_arith
+import native_cfg_list_emit
 
-// x86-64 ELF64 lowering for CFG with move-only drop-free structs and owned
-// Text. Calls use an ELE-internal convention: arguments on the stack, results
+// x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
+// (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
 // in RAX (Int, Bool) or RAX, RDX, RCX (Text). The entry stub performs Linux
 // sys_exit(main()), without libc, Rust or a linker.
 
@@ -17,72 +18,31 @@ pub struct CfgImage {
     error: Int
 }
 
-fn cfgPlaceKind(p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int) -> Int {
-    let place = CfgPlace(variable: variable, field: field, subfield: subfield)
+fn cfgPlaceKind(p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int) -> Int {
+    let place = CfgPlace(variable: variable, field: field, subfield: subfield, ext: ext)
     return cfgPlaceType(p, f, &place)
-}
-
-// Transfer a typed value between memory locations ([base + disp]) without
-// copying potentially uninitialized padding. The struct graph is acyclic:
-// each nested field is an already-declared struct, so recursion terminates.
-// Primitive fields are emitted with their exact declared width (Bool=1,
-// Int=8); fields of a nested struct are copied recursively by layout.
-// Only RAX is used as scratch, so R11 may hold a referent address.
-fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_base: Int, dst_disp: Int, src_base: Int, src_disp: Int) -> () {
-    if ty == 0 {
-        x64LoadMem64(&mut code, 0, src_base, src_disp)
-        x64StoreMem64(&mut code, dst_base, dst_disp, 0)
-    } else if ty == cfgTextType() {
-        // A Text field: address, byte length, capacity. Moving it moves the
-        // ownership; the verifier invalidates the source.
-        for w in 0..3 {
-            x64LoadMem64(&mut code, 0, src_base, src_disp + 8 * w)
-            x64StoreMem64(&mut code, dst_base, dst_disp + 8 * w, 0)
-        }
-    } else if ty == 1 {
-        x64LoadMem8(&mut code, 0, src_base, src_disp)
-        x64StoreMem8(&mut code, dst_base, dst_disp, 0)
-    } else if ty >= 2 && ty - 2 < p.structs.length {
-        let st = &p.structs[ty - 2]
-        for field in 0..st.fields {
-            let member = &p.fields[st.first_field + field]
-            cfgCopyValue(&mut code, p, member.ty, dst_base, dst_disp + member.offset, src_base, src_disp + member.offset)
-        }
-    } else if ty >= 2 + p.structs.length && ty - 2 - p.structs.length < p.enums.length {
-        let enum_id = ty - 2 - p.structs.length
-        // Both the tag and the optional 8-byte payload slot are ALWAYS
-        // initialized by `i variant`, including unit/Bool cases.
-        x64LoadMem64(&mut code, 0, src_base, src_disp)
-        x64StoreMem64(&mut code, dst_base, dst_disp, 0)
-        if p.enums[enum_id].size == 16 {
-            x64LoadMem64(&mut code, 0, src_base, src_disp + 8)
-            x64StoreMem64(&mut code, dst_base, dst_disp + 8, 0)
-        }
-    } else {
-        code.error = 12
-    }
 }
 
 // Whole struct transfers use these bytes as the physical representation
 // of a MOVE, never as permission to duplicate ownership. The verifier
 // invalidates moved source variables. Struct-valued field reads are rejected.
-// The place may be reached through a reference parameter.
-fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, value: &NativeOperand, fix: &mut CfgFix) {
-    let ty = cfgPlaceKind(p, f, variable, field, subfield)
+// The place may be reached through a reference parameter or a list index.
+fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: &NativeOperand, fix: &mut CfgFix) {
+    let ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
     if ty == cfgTextType() {
         // A Text operand, variable or literal, into the field.
         cfgTextWords(&mut code, p, f, value, &mut fix)
-        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield, ext, &mut fix)
         x64StoreMem64(&mut code, at.base, at.disp, 0)
         x64StoreMem64(&mut code, at.base, at.disp + 8, 2)
         x64StoreMem64(&mut code, at.base, at.disp + 16, 1)
     } else if ty >= 2 {
         if !value.is_var { code.error = 12; return }
-        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield, ext, &mut fix)
         cfgCopyValue(&mut code, p, ty, at.base, at.disp, 5, cfgVarBase(p, f, value.value))
     } else {
         cfgLoadOperand(&mut code, p, f, value, 0)
-        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield, ext, &mut fix)
         if ty == 1 {
             x64StoreMem8(&mut code, at.base, at.disp, 0)
         } else {
@@ -91,13 +51,13 @@ fn cfgStoreField(code: &mut X64Code, p: &CfgProgram, f: Int, variable: Int, fiel
     }
 }
 
-fn cfgReadField(code: &mut X64Code, p: &CfgProgram, f: Int, dst: Int, variable: Int, field: Int, subfield: Int) {
-    let ty = cfgPlaceKind(p, f, variable, field, subfield)
+fn cfgReadField(code: &mut X64Code, p: &CfgProgram, f: Int, dst: Int, variable: Int, field: Int, subfield: Int, ext: Int, fix: &mut CfgFix) {
+    let ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
     if ty >= 2 || ty == cfgTextType() {
-        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield)
+        let at = cfgPlaceAddr(&mut code, p, f, variable, field, subfield, ext, &mut fix)
         cfgCopyValue(&mut code, p, ty, 5, cfgVarBase(p, f, dst), at.base, at.disp)
     } else {
-        cfgLoadPlace(&mut code, p, f, variable, field, subfield, ty, 0)
+        cfgLoadPlace(&mut code, p, f, variable, field, subfield, ext, ty, 0, &mut fix)
         x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, dst)], 0)
     }
 }
@@ -147,7 +107,7 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
             let arg = &p.call_args[k]
             if p.call_ref[k] >= 0 {
                 // A reference argument is the address of its place.
-                cfgPlaceAddressRax(&mut code, p, f, arg.value, p.call_field[k], p.call_sub[k])
+                cfgPlaceAddressRax(&mut code, p, f, arg.value, p.call_field[k], p.call_sub[k], p.call_ext[k], &mut fix)
                 x64PushReg(&mut code, 0)
                 words += 1
             } else if cfgOperandType(p, f, &arg) == cfgTextType() {
@@ -174,7 +134,7 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
         let result_type = p.functions[inst.callee].result_type
         if result_type >= 2 {
             // Hidden result pointer: the callee writes into the destination.
-            cfgPlaceAddressRax(&mut code, p, f, inst.dst, -1, -1)
+            cfgPlaceAddressRax(&mut code, p, f, inst.dst, -1, -1, -1, &mut fix)
             x64PushReg(&mut code, 0)
             words += 1
         }
@@ -193,13 +153,13 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
     } else if inst.kind == 4 {
         for n in 0..inst.argc {
             let arg = &p.struct_args[inst.arg_first + n]
-            cfgStoreField(&mut code, p, f, inst.dst, n, -1, &arg, &mut fix)
+            cfgStoreField(&mut code, p, f, inst.dst, n, -1, -1, &arg, &mut fix)
             if code.error != 0 { break }
         }
     } else if inst.kind == 5 {
-        cfgReadField(&mut code, p, f, inst.dst, inst.place_var, inst.place_field, inst.place_subfield)
+        cfgReadField(&mut code, p, f, inst.dst, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, &mut fix)
     } else if inst.kind == 6 {
-        cfgStoreField(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, &inst.a, &mut fix)
+        cfgStoreField(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, &inst.a, &mut fix)
     } else if inst.kind == 7 {
         let kind = &p.enums[inst.op]
         let dest = cfgVarBase(p, f, inst.dst)
@@ -221,12 +181,12 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
             }
         }
     } else if inst.kind == 8 {
-        cfgLoadPlace(&mut code, p, f, inst.place_var, -1, -1, 0, 0)
+        cfgLoadPlace(&mut code, p, f, inst.place_var, -1, -1, -1, 0, 0, &mut fix)
         x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } else if inst.kind == 9 {
         // Checked payload extraction: an unmatched variant exits with 126.
         // Never read [enum+8] until the actual discriminant has been tested.
-        let at = cfgPlaceAddr(&mut code, p, f, inst.place_var, -1, -1)
+        let at = cfgPlaceAddr(&mut code, p, f, inst.place_var, -1, -1, -1, &mut fix)
         let owner = at.disp
         x64LoadMem64(&mut code, 0, at.base, owner)
         x64MovImm64(&mut code, 1, inst.place_field)
@@ -242,6 +202,12 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
         x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } else if inst.kind == 16 {
         cfgEmitUnary(&mut code, p, f, inst, &mut fix)
+    } else if inst.kind >= 18 && inst.kind <= 21 {
+        cfgEmitList(&mut code, p, f, inst, &mut fix)
+    } else if inst.kind == 22 {
+        // loan: the address of the place becomes the local reference.
+        cfgPlaceAddressRax(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, &mut fix)
+        x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } else {
         cfgEmitText(&mut code, p, f, inst, &mut fix)
     }
@@ -298,6 +264,9 @@ fn cfgEmitParams(code: &mut X64Code, p: &CfgProgram, f: Int) {
 }
 
 fn cfgNeedsRuntime(p: &CfgProgram) -> Bool {
+    // A list type brings its growth routine and drop glue, which release
+    // Text elements through the runtime.
+    if p.decl_lists > 0 { return true }
     for i in 0..p.insts.length {
         if (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { return true }
     }
@@ -340,9 +309,10 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
     x64MovImm64(&mut code, 0, 60)
     x64Syscall(&mut code)
 
-    // Index out of range (byteAt): exit 127, emitted only when used.
+    // Index out of range (byteAt, list element): exit 127, emitted only when
+    // used.
     var bad_index_handler = -1
-    if cfgUsesKind(p, 15) {
+    if cfgUsesKind(p, 15) || p.proj_kind.length > 0 {
         bad_index_handler = code.bytes.length
         x64MovImm64(&mut code, 7, 127)
         x64MovImm64(&mut code, 0, 60)
@@ -352,6 +322,7 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
     // The runtime is emitted only for programs that print or own Text.
     var runtime_at: List<Int> = List[]
     if cfgNeedsRuntime(p) { runtime_at = rtEmitAll(&mut code) }
+    if p.decl_lists > 0 { cfgEmitListRuntime(&mut code, p, &mut fix, &mut runtime_at) }
 
     for f in 0..p.functions.length {
         let func = &p.functions[f]

@@ -6,8 +6,12 @@ import native_cfg_types
 // ELE-written CFG backend.
 //
 // Model, sound by construction for this subset:
-// - A reference exists only as a parameter (`var vN ref T`, N < params).
-//   It is one word, the address of the referent, pushed by the caller.
+// - A reference is a parameter (`var vN ref T`, N < params), one word with
+//   the address of the referent, pushed by the caller; or a local defined
+//   by a `loan`, whose validity the verifier follows (native_cfg_loan).
+// - A reference argument may name a list element (`ref pN[vI] 0|1`); it
+//   lasts for that call only, and the overlap rule below keeps the list
+//   itself from being passed exclusively next to it.
 // - A reference is never a value: it cannot be copied, moved, returned,
 //   stored in an aggregate, dropped or assigned. Only places (`pN`,
 //   `pN.k`, `pN.k.j`) and reference arguments (`ref <place> 0|1`) name it.
@@ -35,7 +39,7 @@ expose flow cfgIsRef(p: view CfgProgram, f: Int, variable: Int) => Bool {
 expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader: edit NativeReader) => Int {
     hold mode = nativeWord(source, edit reader)
     when nativeEquals(source, view mode, "ref") {
-        hold place = cfgReadPlace(p, f, source, edit reader)
+        hold place = cfgReadPlace(edit p, f, source, edit reader)
         hold exclusive = nativeNumber(source, edit reader)
         when reader.error != 0 || place.variable < 0 || (exclusive != 0 && exclusive != 1) { give 37 }
         hold ty = cfgPlaceType(p, f, view place)
@@ -44,6 +48,7 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
         p.call_ref@push(exclusive)
         p.call_field@push(place.field)
         p.call_sub@push(place.subfield)
+        p.call_ext@push(place.ext)
         give 0
     }
     when !nativeEquals(source, view mode, "val") { give 37 }
@@ -53,6 +58,7 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
     p.call_ref@push(-1)
     p.call_field@push(-1)
     p.call_sub@push(-1)
+    p.call_ext@push(-1)
     // By value: Int, Bool, Text, or a whole shape/choice (moved).
     when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType()) { give 37 }
     give 0
@@ -62,17 +68,21 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
 expose flow cfgReadTextQuery(p: edit CfgProgram, f: Int, source: view Text, reader: edit NativeReader, inst: edit CfgInst, kind: Int) {
     inst.kind = kind
     inst.dst = nativeId(source, edit reader, 118)
-    hold place = cfgReadPlace(p, f, source, edit reader)
+    hold place = cfgReadPlace(edit p, f, source, edit reader)
     inst.place_var = place.variable
     inst.place_field = place.field
     inst.place_subfield = place.subfield
+    inst.place_ext = place.ext
     when kind == 15 { inst.a = nativeOperand(source, edit reader) }
 }
 
 expose flow cfgCheckTextQuery(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     hold first = p.functions[f].first_var
-    hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield)
-    when p.types_code[first + inst.dst] != 0 || cfgPlaceType(p, f, view place) != cfgTextType() { give 97 }
+    hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: inst.place_ext)
+    hold ty = cfgPlaceType(p, f, view place)
+    // `len` counts the bytes of a Text or the elements of a list.
+    hold measurable = ty == cfgTextType() || (inst.kind == 14 && cfgListIndex(p, ty) >= 0)
+    when p.types_code[first + inst.dst] != 0 || !measurable { give 97 }
     when inst.kind == 15 && cfgOperandType(p, f, view inst.a) != 0 { give 97 }
     give 0
 }
@@ -84,7 +94,9 @@ expose flow cfgParamNeedsMut(p: view CfgProgram, f: Int, v: Int) => Bool {
         hold first = p.blocks[b].first
         each i among first..(first + p.blocks[b].count) {
             hold kind = p.insts[i].kind
-            when (kind == 6 || kind == 12 || kind == 17) && p.insts[i].place_var == v { give true }
+            when (kind == 6 || kind == 12 || kind == 17 || kind == 19 || kind == 20) && p.insts[i].place_var == v { give true }
+            // An exclusive loan of the referent, direct or through a reborrow.
+            when kind == 22 && p.insts[i].op == 1 && p.ref_root[p.functions[f].first_var + p.insts[i].dst] == v { give true }
             when kind == 3 {
                 each n among 0..p.insts[i].argc {
                     hold k = p.insts[i].arg_first + n
@@ -127,7 +139,7 @@ expose flow cfgCheckCallArgs(p: view CfgProgram, f: Int, inst: view CfgInst) => 
         when mode < 0 {
             when param_ref || cfgArgType(p, f, k) != param_type { give 54 }
         } otherwise {
-            hold place = CfgPlace(variable: p.call_args[k].value, field: p.call_field[k], subfield: p.call_sub[k])
+            hold place = CfgPlace(variable: p.call_args[k].value, field: p.call_field[k], subfield: p.call_sub[k], ext: p.call_ext[k])
             when !param_ref || cfgPlaceType(p, f, view place) != param_type { give 54 }
             when mode == 0 && cfgParamNeedsMut(p, inst.callee, n) { give 98 }
         }

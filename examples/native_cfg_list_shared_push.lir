@@ -1,0 +1,21 @@
+ELE-LIR 1
+module structs 0 lists 1 funcs 2 main f1
+list l0 i
+func f0 1:97 params 1 result u 0 0 vars 1 blocks 1
+var v0 ref l0
+block 0 1
+i listpush p0 ci1
+t return cu
+endfunc
+func f1 4:109,97,105,110 params 0 result i 0 0 vars 3 blocks 1
+var v0 val l0
+var v1 val u
+var v2 val i
+block 0 4
+i listlit v0 l0 0
+i call v1 f0 1 ref p0 0
+i len v2 p0
+i drop v0 -
+t return v2
+endfunc
+end

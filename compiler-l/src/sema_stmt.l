@@ -237,11 +237,25 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
         }
         AstStmtKind.ForEach => {
             let col_e = stmt.c
+            // Scope of a collection produced by the expression itself.
+            semaScopeEnter(&mut ctx)
             let col_t = semaExprMode(&mut ctx, source, tree, col_e, ACCESS_PLACE)
+            var col_path = ctx.expression_path
+            ctx.expression_path = -1
             var col_place = ctx.lir.place
             if col_place < 0 {
                 let holder = lirValueVar(&mut ctx, col_t)
-                if holder >= 0 { col_place = lirPlaceVar(&mut ctx.lir, holder) }
+                if holder >= 0 {
+                    col_place = lirPlaceVar(&mut ctx.lir, holder)
+                    // A temporary collection is owned by the loop: it lives in
+                    // its own path and is released on every way out.
+                    let made = &tree.expressions[col_e]
+                    let temp = flowRoot(&mut ctx.flow, -1)
+                    lirBindPath(&mut ctx.lir, temp, holder)
+                    semaOwn(&mut ctx, source, tree, temp, col_t, made.start)
+                    flowEvent(&mut ctx.flow, FLOW_INIT, temp, made.start, made.end)
+                    col_path = temp
+                }
             }
             var elem_t = 0
             var unwrapped = col_t
@@ -258,6 +272,24 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
                     }
                 }
             }
+            // An element that owns resources cannot be copied out of the
+            // collection: the loop variable is then a shared reference to the
+            // element, backed by a loan of the collection (as in Stage 0), so
+            // the body can neither move the element nor grow the collection.
+            var by_ref = false
+            if elem_t > 0 && elem_t < ctx.types.types.length {
+                let element = &ctx.types.types[elem_t]
+                by_ref = semTypeIsMove(element.kind)
+            }
+            var loop_loan = -1
+            var bind_t = elem_t
+            if by_ref {
+                let col_span = &tree.expressions[col_e]
+                semaBorrowPlace(&mut ctx, col_path, col_t, false, SITE_LET, col_span.start, col_span.end)
+                loop_loan = ctx.pending_loan
+                ctx.pending_loan = -1
+                bind_t = semTypeMakeRef(&mut ctx.types, elem_t, false)
+            }
             let len_dst = lirVar(&mut ctx.lir, 1, false)
             if col_place >= 0 {
                 lirAt(&mut ctx, LIR_LEN, len_dst, col_place, 0, 0)
@@ -273,17 +305,23 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             ctx.flow.continue_to = step
             scopePush(&mut ctx.scopes)
             semaScopeEnter(&mut ctx)
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, elem_t, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, bind_t, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
             scopeAddSymbol(&mut ctx.scopes, sym_id)
             semaInitPath(&mut ctx, sym_id, stmt.a, stmt.b)
 
             if col_place >= 0 {
                 let elem_place = lirPlaceIndex(&mut ctx.lir, col_place, counter)
-                let elem_var = lirVar(&mut ctx.lir, elem_t, false)
-                lirAt(&mut ctx, LIR_READ, elem_var, elem_place, 0, 0)
-                ctx.lir.val = elem_var
+                if by_ref {
+                    lirSetVal(&mut ctx, lirNew(&mut ctx, elem_t, true, LIR_LOAN, elem_place, 0, 0))
+                } else {
+                    let elem_var = lirVar(&mut ctx.lir, elem_t, false)
+                    lirAt(&mut ctx, LIR_READ, elem_var, elem_place, 0, 0)
+                    ctx.lir.val = elem_var
+                }
             }
-            lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, elem_t, false)
+            let loop_path = ctx.symbols.symbols[sym_id].move_path
+            lirLetBind(&mut ctx, loop_path, bind_t, by_ref && loop_loan >= 0)
+            if loop_loan >= 0 { loanBind(&mut ctx.flow, loop_path, loop_loan) }
             let body_stmt = stmt.d
             if body_stmt >= 0 {
                 semaCheckStmt(&mut ctx, source, tree, body_stmt)
@@ -295,6 +333,7 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             lirForStep(&mut ctx, counter)
             flowLoopEnd(&mut ctx.flow, loop_header)
             ctx.loop_mark = outer_mark
+            semaScopeExit(&mut ctx, stmt.end, stmt.end)
         }
         AstStmtKind.Loop => {
             let outer_mark = ctx.loop_mark

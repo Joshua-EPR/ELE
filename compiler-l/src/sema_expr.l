@@ -52,9 +52,13 @@ fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     let operand_t = semaExprMode(&mut ctx, source, tree, expr.a, ACCESS_PLACE)
     let path = ctx.expression_path
     ctx.expression_path = -1
+    let operand_place = ctx.lir.place
     // The loan starts at the borrowed place, as Stage 0 reports it.
     let place = &tree.expressions[expr.a]
     let ty = semaBorrowPlace(&mut ctx, path, operand_t, is_mut, site, place.start, place.end)
+    // The flow path of an indexed operand is its collection, but the
+    // reference must point at the element: keep the place of the operand.
+    if operand_place >= 0 && ctx.lir.borrowed >= 0 { ctx.lir.borrowed = operand_place }
     if site != SITE_ARG && ctx.lir.borrowed >= 0 {
         var mutable = 0
         if is_mut { mutable = 1 }

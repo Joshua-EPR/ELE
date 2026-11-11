@@ -12,7 +12,8 @@ import native_cfg_defs
 // - a whole move of the variable kills all of them;
 // - using a place, or the whole variable, requires every bit within it and
 //   the bit of its enclosing field.
-// Text bits also carry ownership: a live Text field of a live variable at
+// `text` marks the paths that own heap storage themselves (a Text or a list
+// field). Those bits also carry ownership: a live Text field of a live variable at
 // `return` leaks (59); storing a Text over a live one leaks (59); and a
 // reference parameter must give its referent back whole (95).
 // Primitive fields are copied, so they have no bit of their own.
@@ -47,14 +48,14 @@ expose flow cfgPathsOf(p: view CfgProgram, f: Int) => CfgPaths {
             each k among 0..p.structs[ty - 2].fields {
                 hold field_ty = p.fields[first_field + k].ty
                 when cfgTracked(p, field_ty) {
-                    cfgPathPush(edit paths, v, k, -1, field_ty == -3)
+                    cfgPathPush(edit paths, v, k, -1, cfgHeapDirect(p, field_ty))
                 }
                 when field_ty >= 2 && field_ty - 2 < p.structs.length {
                     hold child_first = p.structs[field_ty - 2].first_field
                     each j among 0..p.structs[field_ty - 2].fields {
                         hold sub_ty = p.fields[child_first + j].ty
                         when cfgTracked(p, sub_ty) {
-                            cfgPathPush(edit paths, v, k, j, sub_ty == -3)
+                            cfgPathPush(edit paths, v, k, j, cfgHeapDirect(p, sub_ty))
                         }
                     }
                 }

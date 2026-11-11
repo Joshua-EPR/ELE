@@ -61,8 +61,11 @@ class NestedStructFixtureContract(unittest.TestCase):
 
     def test_codegen_recursive_copy_has_byte_and_word_cases(self):
         code=(ROOT / "compiler-l/src/codegen/native_cfg_emit.l").read_text()
-        self.assertIn("fn cfgCopyValue(", code)
-        copy = code.split("fn cfgCopyValue(", 1)[1].split("\nfn cfgStoreField(", 1)[0]
+        # The recursive copy helper is shared with the list lowering, so it
+        # lives next to the other place helpers in native_cfg_text.l.
+        shared=(ROOT / "compiler-l/src/codegen/native_cfg_text.l").read_text()
+        self.assertIn("fn cfgCopyValue(", shared)
+        copy = shared.split("fn cfgCopyValue(", 1)[1].split("\npub fn cfgStoreValueAt(", 1)[0]
         # Addressing is intentionally parameterized: src_base/dst_base may
         # point at a stack slot or a borrowed referent (not always RBP=5).
         self.assertIn("x64LoadMem64(&mut code, 0, src_base, src_disp)", copy)

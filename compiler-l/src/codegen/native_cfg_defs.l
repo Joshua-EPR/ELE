@@ -12,8 +12,8 @@ import lir_tokens
 // 6 store, 7 variant, 8 discriminant, 9 checked primitive payload,
 // 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt),
 // 14 len (Text byte length), 15 byteat (bounds-checked Text byte).
-// Reference parameters (`var vN ref T`, N < params) occupy one word: the
-// address of the referent. `types_code` keeps the referent type and
+// References (`var vN ref T`: parameters, and locals defined by `loan`,
+// kind 22) occupy one word: the address of the referent. `types_code` keeps the referent type and
 // `var_ref` marks them; native_cfg_ref documents their rules.
 // Unit is type code -2: valid only as a function result, as the `cu`
 // constant and as a non-parameter variable that receives a unit call.
@@ -44,6 +44,10 @@ pub struct CfgInst {
     // of the place of dropfield (kind 17 uses place_*), or -1.
     src_field: Int
     src_sub: Int
+    // Projections after the static prefix of the place (`[vN]` and deeper
+    // fields): an index into `CfgProgram.ext_first`, or -1. See native_cfg_list.
+    place_ext: Int
+    src_ext: Int
 }
 
 pub struct CfgField {
@@ -77,6 +81,7 @@ pub struct CfgPlace {
     variable: Int
     field: Int
     subfield: Int
+    ext: Int
 }
 
 pub struct CfgBlock {
@@ -125,10 +130,33 @@ pub struct CfgProgram {
     call_ref: List<Int>
     call_field: List<Int>
     call_sub: List<Int>
+    call_ext: List<Int>
     var_ref: List<Bool>
     text_start: List<Int>
     text_length: List<Int>
     text_bytes: List<Int>
+    // Counts declared by the module header. Type codes are fixed by them:
+    // list k is 2 + decl_structs + decl_enums + k, known before any
+    // declaration is read, so a shape may hold a list of itself.
+    decl_structs: Int
+    decl_enums: Int
+    decl_lists: Int
+    // Element type of each `list lK <type>`.
+    list_elem: List<Int>
+    // Place extensions: run `ext_first[e]..+ext_count[e]` of projections.
+    // proj_kind 0 is a field (proj_value its index) and 1 an index
+    // (proj_value the Int variable that holds it).
+    ext_first: List<Int>
+    ext_count: List<Int>
+    proj_kind: List<Int>
+    proj_value: List<Int>
+    // Local references, per variable slot (native_cfg_loan): the root
+    // variable and static prefix of the place its loan took, and the mode
+    // (-1 no loan yet, 0 shared, 1 exclusive).
+    ref_root: List<Int>
+    ref_field: List<Int>
+    ref_sub: List<Int>
+    ref_mut: List<Int>
 }
 
 pub fn cfgEmptyOperand() -> NativeOperand {
@@ -136,6 +164,18 @@ pub fn cfgEmptyOperand() -> NativeOperand {
 }
 
 pub fn cfgEmpty() -> CfgProgram {
-    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[])
+    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], call_ext: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[], decl_structs: 0, decl_enums: 0, decl_lists: 0, list_elem: List[], ext_first: List[], ext_count: List[], proj_kind: List[], proj_value: List[], ref_root: List[], ref_field: List[], ref_sub: List[], ref_mut: List[])
 }
 
+// Index of the list type `ty`, or -1 when it is not a list.
+pub fn cfgListIndex(p: &CfgProgram, ty: Int) -> Int {
+    let k = ty - 2 - p.decl_structs - p.decl_enums
+    if ty >= 2 && k >= 0 && k < p.decl_lists { return k }
+    return -1
+}
+
+// A value that owns heap storage by itself: Text or a list. Shapes own
+// storage through their fields (see cfgOwnsHeap in native_cfg_fields).
+pub fn cfgHeapDirect(p: &CfgProgram, ty: Int) -> Bool {
+    return ty == -3 || cfgListIndex(p, ty) >= 0
+}

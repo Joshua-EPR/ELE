@@ -1,0 +1,20 @@
+ELE-LIR 1
+module structs 1 lists 1 funcs 1 main f0
+struct s0 1:80 fields 2
+field 1:97 t
+field 1:98 i
+list l0 i
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 4 blocks 1
+var v0 val s0
+var v1 ref s0
+var v2 val i
+var v3 val i
+block 0 5
+i struct v0 s0 2 ct1:97 ci1
+i loan v1 p0 1
+i dropfield p1.0 -
+i use v3 ci0
+i dropfield p0.0 -
+t return v3
+endfunc
+end
