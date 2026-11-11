@@ -1780,8 +1780,8 @@ impl Checker<'_> {
                     return Err(err(
                         a.span,
                         format!(
-                            "el parámetro {} es una referencia (&T): pase una variable o un campo, que se presta automáticamente; argumento recibido: {:?}",
-                            i + 1, &a.kind
+                            "el parámetro {} es una referencia (&T): pase una variable o un campo, que se presta automáticamente",
+                            i + 1
                         ),
                     ));
                 };
