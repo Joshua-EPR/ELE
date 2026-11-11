@@ -53,7 +53,7 @@ fn parseTypeAtom(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, to
             }
             let lenTok = &tokens[cursor.pos]
             var arrLen = 0
-            match lenTok.kind {
+            match tokenKindValue(&lenTok.kind) {
                 LexKind.Integer => {
                     arrLen = parserParseDecimalInt(source, lenTok.start, lenTok.end)
                     cursor.pos += 1
@@ -93,7 +93,7 @@ fn parseTypeAtom(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, to
         return astAddType(&mut tree, AstTypeKind.Unit, tok.start, end_p, 0, 0, 0)
     }
 
-    match tok.kind {
+    match tokenKindValue(&tok.kind) {
         LexKind.Word => {
             let name_start = tok.start
             let name_end = tok.end

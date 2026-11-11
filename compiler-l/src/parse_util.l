@@ -41,14 +41,14 @@ fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool 
 }
 
 fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
-    match token.kind {
+    match tokenKindValue(&token.kind) {
         LexKind.Word => { return parserMatchText(source, token.start, token.end, expected) }
         _ => { return false }
     }
 }
 
 fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
-    match token.kind {
+    match tokenKindValue(&token.kind) {
         LexKind.Symbol => { return parserMatchText(source, token.start, token.end, expected) }
         _ => { return false }
     }
@@ -70,7 +70,7 @@ fn parserParseDecimalInt(source: &Text, start: Int, end: Int) -> Int {
 
 fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     while cursor.pos < tokens.length {
-        match tokens[cursor.pos].kind {
+        match tokenKindValue(&tokens[cursor.pos].kind) {
             LexKind.Newline => { cursor.pos += 1 }
             _ => { return }
         }
@@ -80,7 +80,7 @@ fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
 fn parserSkipSeparators(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     while cursor.pos < tokens.length {
         let tok = &tokens[cursor.pos]
-        match tok.kind {
+        match tokenKindValue(&tok.kind) {
             LexKind.Newline => { cursor.pos += 1 }
             LexKind.Symbol => {
                 if tok.end - tok.start == 1 && source.byteAt(tok.start) == 59 {
@@ -143,7 +143,7 @@ fn parserNeedSymbol(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
 }
 
 fn parserGetBinaryPrecedence(source: &Text, token: &LexToken) -> Int {
-    match token.kind {
+    match tokenKindValue(&token.kind) {
         LexKind.Symbol => {
             let len = token.end - token.start
             let b0 = source.byteAt(token.start)

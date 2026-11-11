@@ -31,13 +31,17 @@ fn ele_x86_64_memory_addressing_handles_rex_sib_and_signed_offsets() {
     ]
     .concat()
     .as_bytes()
-    .as_chunks::<2>().0.iter()
+    .as_chunks::<2>()
+    .0
+    .iter()
     .map(|bytes| u8::from_str_radix(std::str::from_utf8(bytes).unwrap(), 16).unwrap())
     .collect();
     assert_eq!(encoded.len() % 2, 0, "hex string must have pairs");
     let actual: Vec<u8> = encoded
         .as_bytes()
-        .as_chunks::<2>().0.iter()
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|bytes| u8::from_str_radix(std::str::from_utf8(bytes).unwrap(), 16).unwrap())
         .collect();
     assert_eq!(actual, expected);

@@ -122,7 +122,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
     }
     let tok = &tokens[cursor.pos]
 
-    match tok.kind {
+    match tokenKindValue(&tok.kind) {
         LexKind.Integer => {
             let val = parserParseDecimalInt(source, tok.start, tok.end)
             cursor.pos += 1
@@ -141,7 +141,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
             var children: List<Int> = List[]
             while cursor.pos < tokens.length {
                 let partTok = &tokens[cursor.pos]
-                match partTok.kind {
+                match tokenKindValue(&partTok.kind) {
                     LexKind.TextEnd => {
                         cursor.pos += 1
                         break
@@ -160,7 +160,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
                         }
                         parserSkipNewlines(&mut cursor, tokens)
                         if cursor.pos < tokens.length {
-                            match tokens[cursor.pos].kind {
+                            match tokenKindValue(&tokens[cursor.pos].kind) {
                                 LexKind.InterpolationEnd => { cursor.pos += 1 }
                                 _ => {
                                     astAddError(&mut tree, ParseProblem.UnclosedInterpolation, "}}", tokens[cursor.pos].start, tokens[cursor.pos].end)
@@ -245,7 +245,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
                             let t0 = &tokens[cursor.pos]
                             let t1 = &tokens[cursor.pos + 1]
                             if parserIsSymbol(source, t1, ":") {
-                                match t0.kind {
+                                match tokenKindValue(&t0.kind) {
                                     LexKind.Word => { is_named = true }
                                     _ => {}
                                 }

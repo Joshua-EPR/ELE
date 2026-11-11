@@ -208,7 +208,7 @@ fn loadModuleRecursive(
                     var tokens: List<LexToken> = List[]
                     for t in 0..mod_tokens.length {
                         let token = &mod_tokens[t]
-                        tokens.push(LexToken(kind: token.kind, start: token.start + offset, end: token.end + offset))
+                        tokens.push(LexToken(kind: tokenKindValue(&token.kind), start: token.start + offset, end: token.end + offset))
                     }
                     parseProgram(&mut tree, combined_source, &tokens, file_id)
                     module_decl_count.push(tree.declarations.length - module_first_decl[module_first_decl.length - 1])
