@@ -38,7 +38,7 @@ fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
 // or a borrowed return may hold a borrow (Stage 0 rules).
 fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, site: Int) -> Int {
     let expr = &tree.expressions[expr_id]
-    let is_mut = expr.c - expr.b >= 4
+    let is_mut = (expr.c - expr.b >= 4 && source.byteAt(expr.b) == 38) || source.byteAt(expr.b) == 101
     if site == SITE_VAR || semaPlaceRoot(tree, expr.a) < 0 {
         semaAddError(&mut ctx, "L0012", "use let para prestar una variable, campo o elemento con un origen fijo", expr.start, expr.end)
         return 7
@@ -71,9 +71,9 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
     var arg_mut = false
     match arg.kind {
         AstExprKind.Unary => {
-            if arg.b >= 0 && arg.b < source.byteLength && source.byteAt(arg.b) == 38 {
+            if arg.b >= 0 && arg.b < source.byteLength && (source.byteAt(arg.b) == 38 || source.byteAt(arg.b) == 118 || source.byteAt(arg.b) == 101) {
                 explicit = true
-                arg_mut = arg.c - arg.b >= 4
+                arg_mut = (arg.c - arg.b >= 4 && source.byteAt(arg.b) == 38) || source.byteAt(arg.b) == 101
             }
         }
         _ => {}
@@ -195,7 +195,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
         AstExprKind.Unary => {
             if expr.b >= 0 && expr.b < source.byteLength {
                 let op = source.byteAt(expr.b)
-                if op == 38 {
+                if op == 38 || (expr.c - expr.b == 4 && (op == 118 || op == 101)) {
                     return semaBorrowExpr(&mut ctx, source, tree, expr_id, site)
                 }
                 if op == 42 {
