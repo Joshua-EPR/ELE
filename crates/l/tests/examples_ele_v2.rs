@@ -185,9 +185,8 @@ fn migrated_native_cfg_core_uses_ele_v2_surface() {
         "native_cfg_types.l",
     ];
     let legacy = [
-        "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if",
-        "else", "for", "while", "loop", "break", "continue", "match", "self", "pub",
-        "import", "module",
+        "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if", "else",
+        "for", "while", "loop", "break", "continue", "match", "self", "pub", "import", "module",
     ];
     for name in migrated {
         let file = root().join("compiler-l/src/codegen").join(name);
