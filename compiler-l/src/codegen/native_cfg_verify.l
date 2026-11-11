@@ -21,7 +21,7 @@ flow cfgEdge(p: view CfgProgram, f: Int, from: Int, to: Int) => Bool {
 }
 
 flow cfgHasDst(inst: view CfgInst) => Bool {
-    give inst.kind != 6 &view  inst.kind != 10 &view  inst.kind != 12 &view  inst.kind != 13 &view  inst.kind != 17 &view  inst.kind != 19 &view  inst.kind != 20
+    give inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17 && inst.kind != 19 && inst.kind != 20
 }
 
 flow cfgResultType(func: view CfgFunc) => Int {
@@ -29,7 +29,7 @@ flow cfgResultType(func: view CfgFunc) => Int {
 }
 
 flow cfgMoveOperand(p: view CfgProgram, f: Int, op: view NativeOperand, variable: Int) => Bool {
-    give op.is_var &view  op.value == variable &view  cfgIsMove(cfgOperandType(p, f, view op))
+    give op.is_var && op.value == variable && cfgIsMove(cfgOperandType(p, f, view op))
 }
 
 // A whole-value move occurs in a struct assignment, struct constructor or
@@ -40,14 +40,14 @@ flow cfgMoves(p: view CfgProgram, f: Int, inst: view CfgInst, variable: Int) => 
     when inst.kind == 3 {
         each n among 0..inst.argc {
             hold arg = view p.call_args[inst.arg_first + n]
-            when p.call_ref[inst.arg_first + n] < 0 &view  cfgMoveOperand(p, f, view arg, variable) { give true }
+            when p.call_ref[inst.arg_first + n] < 0 && cfgMoveOperand(p, f, view arg, variable) { give true }
         }
         give false
     }
     when inst.kind == 1 || inst.kind == 6 || inst.kind == 19 {
         give cfgMoveOperand(p, f, view inst.a, variable)
     }
-    when inst.kind == 7 &view  inst.argc == 1 {
+    when inst.kind == 7 && inst.argc == 1 {
         give cfgMoveOperand(p, f, view inst.a, variable)
     }
     when inst.kind == 4 || inst.kind == 18 {
@@ -67,7 +67,7 @@ flow cfgLoanDies(p: view CfgProgram, f: Int, inst: view CfgInst, variable: Int) 
     hold root = p.ref_root[slot]
     when root < 0 { give false }
     when cfgMoves(p, f, view inst, root) { give true }
-    when cfgHasDst(inst) &view  inst.dst == root { give true }
+    when cfgHasDst(inst) && inst.dst == root { give true }
     give cfgLoanKilledBy(p, f, inst, variable)
 }
 
@@ -79,7 +79,7 @@ flow cfgTransferVar(p: view CfgProgram, f: Int, block: view CfgBlock, variable: 
         hold inst = view p.insts[i]
         when cfgMoves(p, f, view inst, variable) { live = false }
         when cfgLoanDies(p, f, view inst, variable) { live = false }
-        when cfgHasDst(inst) &view  inst.dst == variable { live = true }
+        when cfgHasDst(inst) && inst.dst == variable { live = true }
     }
     give live
 }
@@ -95,15 +95,15 @@ flow cfgTakeOperand(p: view CfgProgram, f: Int, op: view NativeOperand, live: ed
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live: edit List<Bool>) => Int {
-    when inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || ((inst.kind == 13 || inst.kind == 17) &view  inst.op < 0) {
+    when inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { give 57 }
     }
     // The index variables of a place are read before the instruction runs.
     when !cfgExtLive(p, inst.place_ext, live) || !cfgExtLive(p, inst.src_ext, live) { give 57 }
-    when inst.kind == 1 &view  inst.a.is_var &view  inst.a.value == inst.dst &view  cfgOperandType(p, f, view inst.a) >= 2 {
+    when inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, view inst.a) >= 2 {
         give 58
     }
-    when (inst.kind == 10 || inst.kind == 12 || inst.kind == 13 || inst.kind == 17) &view  inst.op >= 0 {
+    when (inst.kind == 10 || inst.kind == 12 || inst.kind == 13 || inst.kind == 17) && inst.op >= 0 {
         // A referenced source, or a drop flag, is read and stays live.
         when !live[inst.op] { give 57 }
     }
@@ -124,7 +124,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
             }
         }
     }
-    when (inst.kind == 10 || inst.kind == 12) &view  inst.op < 0 &view  inst.a.is_var {
+    when (inst.kind == 10 || inst.kind == 12) && inst.op < 0 && inst.a.is_var {
         // `print` and `append` read their source without consuming it.
         when inst.a.value < 0 || inst.a.value >= p.functions[f].vars { give 57 }
         when !live[inst.a.value] { give 57 }
@@ -138,7 +138,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         }
     }
     hold reads_a = inst.kind == 1 || inst.kind == 2 || inst.kind == 6 || inst.kind == 15 || inst.kind == 16 || inst.kind == 19 || inst.kind == 20
-    when reads_a || (inst.kind == 7 &view  inst.argc == 1) {
+    when reads_a || (inst.kind == 7 && inst.argc == 1) {
         hold a = cfgTakeOperand(p, f, view inst.a, edit live)
         when a != 0 { give a }
     }
@@ -150,7 +150,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         // Overwriting a live owned Text or list would leak its buffer. A
         // reference owns nothing: a loop may take its loan again.
         hold dst_slot = p.functions[f].first_var + inst.dst
-        when live[inst.dst] && !p.var_ref[dst_slot] &view  cfgHeapDirect(p, p.types_code[dst_slot]) { give 59 }
+        when live[inst.dst] && !p.var_ref[dst_slot] && cfgHeapDirect(p, p.types_code[dst_slot]) { give 59 }
         live[inst.dst] = true
     }
     give 0
@@ -187,17 +187,17 @@ flow cfgPathAfter(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view C
     when cfgLoanDies(p, f, view inst, v) { live = false }
     // Moving a field out of an owned shape, or releasing its Text, kills
     // the paths inside it. Through a reference a read is a copy.
-    when inst.kind == 5 &view  inst.place_ext < 0 &view  inst.place_var == v &view  inst.place_field >= 0 && !p.var_ref[p.functions[f].first_var + v] {
+    when inst.kind == 5 && inst.place_ext < 0 && inst.place_var == v && inst.place_field >= 0 && !p.var_ref[p.functions[f].first_var + v] {
         hold place = CfgPlace(variable: v, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
         hold moved = cfgPlaceType(p, f, view place)
-        when (moved >= 2 || moved == cfgTextType()) &view  cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
+        when (moved >= 2 || moved == cfgTextType()) && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     }
-    when inst.kind == 17 &view  inst.place_var == v &view  cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
+    when inst.kind == 17 && inst.place_var == v && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     // A store through an extension writes inside a list, not the path.
-    when inst.kind == 6 &view  inst.place_ext < 0 &view  inst.place_var == v &view  inst.place_field >= 0 {
+    when inst.kind == 6 && inst.place_ext < 0 && inst.place_var == v && inst.place_field >= 0 {
         when cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = true }
     }
-    when cfgHasDst(inst) &view  inst.dst == v { live = true }
+    when cfgHasDst(inst) && inst.dst == v { live = true }
     give live
 }
 
@@ -241,15 +241,15 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
     }
     // A place with an extension needs its whole static prefix: the list that
     // is indexed must still be there, also for a store.
-    hold reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 &view  inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || (inst.kind == 6 &view  inst.place_ext >= 0)
+    hold reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || (inst.kind == 6 && inst.place_ext >= 0)
     when reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { give false }
     hold whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
     when whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { give false }
-    hold projected_source = (inst.kind == 10 || inst.kind == 12) &view  inst.op >= 0
+    hold projected_source = (inst.kind == 10 || inst.kind == 12) && inst.op >= 0
     when projected_source && !cfgPathsLive(paths, vars, live, inst.op, inst.src_field, inst.src_sub) { give false }
-    when inst.kind == 6 &view  inst.place_ext < 0 &view  inst.place_subfield >= 0 {
+    when inst.kind == 6 && inst.place_ext < 0 && inst.place_subfield >= 0 {
         each k among 0..paths.var_of.length {
-            hold enclosing = paths.var_of[k] == inst.place_var &view  paths.field[k] == inst.place_field &view  paths.sub[k] < 0
+            hold enclosing = paths.var_of[k] == inst.place_var && paths.field[k] == inst.place_field && paths.sub[k] < 0
             when enclosing && !live[vars + k] { give false }
         }
     }
@@ -294,8 +294,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     each b among 0..blocks {
         each v among 0..bits {
             change initial = true
-            when b == 0 &view  v < vars { initial = v < func.params }
-            when b == 0 &view  v >= vars { initial = paths.var_of[v - vars] < func.params }
+            when b == 0 && v < vars { initial = v < func.params }
+            when b == 0 && v >= vars { initial = paths.var_of[v - vars] < func.params }
             inputs@push(initial)
             outputs@push(true)
         }
@@ -310,8 +310,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             hold block = view p.blocks[func.first_block + b]
             each v among 0..bits {
                 change is_init = true
-                when b == 0 &view  v < vars { is_init = v < func.params }
-                when b == 0 &view  v >= vars { is_init = paths.var_of[v - vars] < func.params }
+                when b == 0 && v < vars { is_init = v < func.params }
+                when b == 0 && v >= vars { is_init = paths.var_of[v - vars] < func.params }
                 // Entry can also have backedges. Intersect with their
                 // states rather than assuming every iteration begins with
                 // fresh parameters; moving a parameter in a loop must not
@@ -344,8 +344,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             when !cfgPathUses(p, f, view paths, view inst, view live) { give 57 }
             // Storing over a live Text, or giving a new value to a variable
             // that still owns one in a field, would leak it.
-            when inst.kind == 6 &view  inst.place_ext < 0 &view  cfgTextLiveWithin(view paths, vars, view live, inst.place_var, inst.place_field, inst.place_subfield) { give 59 }
-            when cfgHasDst(inst) &view  live[inst.dst] && !p.var_ref[func.first_var + inst.dst] &view  cfgTextLiveWithin(view paths, vars, view live, inst.dst, -1, -1) { give 59 }
+            when inst.kind == 6 && inst.place_ext < 0 && cfgTextLiveWithin(view paths, vars, view live, inst.place_var, inst.place_field, inst.place_subfield) { give 59 }
+            when cfgHasDst(inst) && live[inst.dst] && !p.var_ref[func.first_var + inst.dst] && cfgTextLiveWithin(view paths, vars, view live, inst.dst, -1, -1) { give 59 }
             each k among 0..paths.var_of.length {
                 live[vars + k] = cfgPathAfter(p, f, view paths, view inst, k, live[vars + k])
             }
@@ -353,7 +353,7 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             when error != 0 { give error }
             // References into storage that this instruction moved or wrote die.
             each v among func.params..vars {
-                when live[v] &view  cfgLoanDies(p, f, view inst, v) { live[v] = false }
+                when live[v] && cfgLoanDies(p, f, view inst, v) { live[v] = false }
             }
         }
         when block.term == 1 || block.term == 3 {
@@ -366,13 +366,13 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             // must be given back whole.
             each k among 0..paths.var_of.length {
                 hold root = paths.var_of[k]
-                when paths.text[k] &view  root < func.params &view  p.var_ref[func.first_var + root] && !live[vars + k] { give 95 }
-                when paths.text[k] && !p.var_ref[func.first_var + root] &view  live[root] &view  live[vars + k] { give 59 }
+                when paths.text[k] && root < func.params && p.var_ref[func.first_var + root] && !live[vars + k] { give 95 }
+                when paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { give 59 }
             }
             // Every owned Text or list must have been moved out or dropped by now.
             // A reference parameter does not own its referent.
             each v among 0..vars {
-                when live[v] && !p.var_ref[func.first_var + v] &view  cfgHeapDirect(p, p.types_code[func.first_var + v]) { give 59 }
+                when live[v] && !p.var_ref[func.first_var + v] && cfgHeapDirect(p, p.types_code[func.first_var + v]) { give 59 }
             }
         }
     }

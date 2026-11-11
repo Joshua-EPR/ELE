@@ -48,7 +48,7 @@ flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeRead
         hold expected = p.functions[f].result_type
         when cfgOperandType(p, f, view value) != expected { p.error = 41 }
     }
-    when kind == 3 &view  cfgOperandType(p, f, view value) != 1 { p.error = 42 }
+    when kind == 3 && cfgOperandType(p, f, view value) != 1 { p.error = 42 }
     when (kind == 2 || kind == 3) && (yes < 0 || yes >= p.functions[f].blocks) { p.error = 43 }
     when kind == 3 && (no < 0 || no >= p.functions[f].blocks) { p.error = 43 }
     when p.error == 0 {
@@ -71,14 +71,14 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
     nativeExpect(source, edit reader, "blocks")
     hold blocks = nativeNumber(source, edit reader)
     nativeEndLine(source, edit reader)
-    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 &view  result_type != cfgUnitType() &view  result_type != cfgTextType()) {
+    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
         p.error = 44
         give
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     // Aggregate results travel through a hidden pointer (see native_cfg_emit).
-    when result_type >= 2 &view  cfgTypeSize(p, result_type) > 512 { p.error = 68; give }
+    when result_type >= 2 && cfgTypeSize(p, result_type) > 512 { p.error = 68; give }
     p.functions@push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType(), result_type: result_type))
     change next_slot = 0
     each i among 0..vars {
@@ -91,9 +91,9 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         nativeEndLine(source, edit reader)
         hold unit_var = ty == cfgUnitType()
         hold text_var = ty == cfgTextType()
-        when reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref &view  unit_var) { p.error = 45; leave }
+        when reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && unit_var) { p.error = 45; leave }
         // A local reference is defined by a `loan` (native_cfg_loan).
-        when is_ref &view  unit_var { p.error = 96; leave }
+        when is_ref && unit_var { p.error = 96; leave }
         change size = cfgTypeSize(p, ty)
         when is_ref { size = 8 }
         hold count_slots = (size + 7) / 8

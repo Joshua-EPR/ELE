@@ -75,11 +75,11 @@ class NestedStructFixtureContract(unittest.TestCase):
         self.assertIn("cfgCopyValue(&mut code, p, member.ty,", copy)
         # Struct moves must use the computed destination address, including
         # through a reference, and preserve the recursive copy helper.
-        self.assertIn("cfgCopyValue(&mut code, p, ty, at.base, at.disp, 5, cfgVarBase(", code)
-        self.assertIn("cfgCopyValue(&mut code, p, ty, 5, cfgVarBase(", code)
+        self.assertIn("cfgCopyValue(edit code, p, ty, at.base, at.disp, 5, cfgVarBase(", code)
+        self.assertIn("cfgCopyValue(edit code, p, ty, 5, cfgVarBase(", code)
         verifier=(ROOT / "compiler-l/src/codegen/native_cfg_verify.l").read_text()
-        self.assertIn("fn cfgMoves(",verifier)
-        self.assertIn("fn cfgTakeOperand(",verifier)
+        self.assertIn("flow cfgMoves(",verifier)
+        self.assertIn("flow cfgTakeOperand(",verifier)
         self.assertIn("live[op.value] = false",verifier)
 
 if __name__ == "__main__":

@@ -148,24 +148,24 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         p.error = 31
     }
     nativeEndLineSpan(source, edit reader)
-    hold has_dst = inst.kind != 6 &view  inst.kind != 10 &view  inst.kind != 12 &view  inst.kind != 13 &view  inst.kind != 17 &view  inst.kind != 19 &view  inst.kind != 20
+    hold has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17 && inst.kind != 19 && inst.kind != 20
     when reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
         p.error = 33
     }
     when p.error != 0 { give }
     when inst.kind == 22 {
         p.error = cfgCheckLoan(edit p, f, view inst)
-    } otherwise when has_dst &view  cfgIsRef(p, f, inst.dst) {
+    } otherwise when has_dst && cfgIsRef(p, f, inst.dst) {
         p.error = 96
     }
     when p.error != 0 { give }
-    when inst.kind == 13 &view  inst.place_var >= 0 &view  inst.place_var < p.functions[f].vars {
+    when inst.kind == 13 && inst.place_var >= 0 && inst.place_var < p.functions[f].vars {
         when cfgIsRef(p, f, inst.place_var) { p.error = 95 }
     }
     when inst.kind == 14 || inst.kind == 15 { p.error = cfgCheckTextQuery(p, f, view inst) }
     when inst.kind == 16 { p.error = cfgCheckUnary(p, f, view inst) }
     when inst.kind == 17 { p.error = cfgCheckDropField(p, f, view inst) }
-    when inst.kind >= 18 &view  inst.kind <= 21 { p.error = cfgCheckListInst(p, f, view inst) }
+    when inst.kind >= 18 && inst.kind <= 21 { p.error = cfgCheckListInst(p, f, view inst) }
     when p.error != 0 { give }
     change dest_type = -1
     when has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
@@ -175,10 +175,10 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         // reference: by value it would be consumed, which is not lowered.
         change source_type = first_type
         when inst.op >= 0 { source_type = cfgSourcePlaceType(p, f, view inst) }
-        when source_type != 0 &view  source_type != 1 &view  source_type != cfgTextType() { p.error = 90 }
-        when inst.kind == 12 &view  inst.op < 0 &view  inst.a.is_var &view  source_type == cfgTextType() { p.error = 90 }
+        when source_type != 0 && source_type != 1 && source_type != cfgTextType() { p.error = 90 }
+        when inst.kind == 12 && inst.op < 0 && inst.a.is_var && source_type == cfgTextType() { p.error = 90 }
     }
-    when inst.kind == 11 &view  dest_type != cfgTextType() { p.error = 91 }
+    when inst.kind == 11 && dest_type != cfgTextType() { p.error = 91 }
     when inst.kind == 12 || inst.kind == 13 {
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars {
             p.error = 92
@@ -188,22 +188,22 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
             when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
         }
         // Appending a buffer to itself would read storage that growth moves.
-        when inst.kind == 12 &view  inst.op == inst.place_var { p.error = 93 }
+        when inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
     }
-    when inst.kind == 13 &view  inst.op >= 0 {
+    when inst.kind == 13 && inst.op >= 0 {
         when inst.op >= p.functions[f].vars {
             p.error = 94
         } otherwise when p.types_code[p.functions[f].first_var + inst.op] != 1 {
             p.error = 94
         }
     }
-    when inst.kind == 1 &view  first_type != dest_type { p.error = 34 }
+    when inst.kind == 1 && first_type != dest_type { p.error = 34 }
     when inst.kind == 2 {
         hold second_type = cfgOperandType(p, f, view inst.b)
         when inst.op == 0 || first_type < 0 || second_type < 0 { p.error = 35 }
         when (inst.op <= 3 || inst.op >= 10) && (dest_type != 0 || first_type != 0 || second_type != 0) { p.error = 36 }
-        when inst.op >= 4 &view  inst.op <= 9 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
-        when inst.op >= 6 &view  inst.op <= 9 &view  first_type != 0 { p.error = 36 }
+        when inst.op >= 4 && inst.op <= 9 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
+        when inst.op >= 6 && inst.op <= 9 && first_type != 0 { p.error = 36 }
     }
     when inst.kind == 4 {
         when inst.op < 0 || inst.op >= p.structs.length || dest_type != inst.op + 2 { p.error = 65 }
@@ -231,7 +231,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
                 hold variant = view p.variants[item.first_variant + inst.place_field]
                 change required = 0
                 when variant.payload_type >= 0 { required = 1 }
-                when inst.argc != required || (required == 1 &view  first_type != variant.payload_type) { p.error = 86 }
+                when inst.argc != required || (required == 1 && first_type != variant.payload_type) { p.error = 86 }
             }
         }
     }
@@ -264,21 +264,21 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: inst.place_ext)
         hold ty = cfgPlaceType(p, f, view place)
         when ty == -1 { p.error = 67 }
-        when inst.kind == 5 &view  dest_type != ty { p.error = 67 }
-        when inst.kind == 6 &view  first_type != ty { p.error = 67 }
+        when inst.kind == 5 && dest_type != ty { p.error = 67 }
+        when inst.kind == 6 && first_type != ty { p.error = 67 }
         // A bare `pN` is a place only through a reference; plain variables
         // are read and written with `use`.
-        when inst.place_field < 0 &view  inst.place_ext < 0 && !cfgIsRef(p, f, inst.place_var) { p.error = 67 }
+        when inst.place_field < 0 && inst.place_ext < 0 && !cfgIsRef(p, f, inst.place_var) { p.error = 67 }
         // Moving a Text or a list out of a referent would duplicate its
         // buffer. A field of an owned shape moves out, and a store may refill
         // a field whose value was moved or released (native_cfg_paths).
-        when inst.kind == 5 &view  cfgOwnsHeap(p, ty) &view  cfgIsRef(p, f, inst.place_var) { p.error = 95 }
-        when inst.place_field < 0 &view  inst.place_ext < 0 &view  cfgOwnsHeap(p, ty) { p.error = 95 }
+        when inst.kind == 5 && cfgOwnsHeap(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
+        when inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) { p.error = 95 }
         // Moving an owner out of an indexed place is not tracked by move
         // paths. A store releases the old element before transferring its
         // replacement; the source cannot be the collection itself.
-        when p.error == 0 &view  inst.kind == 5 &view  inst.place_ext >= 0 &view  cfgOwnsHeap(p, ty) { p.error = 103 }
-        when p.error == 0 &view  inst.kind == 6 &view  inst.place_ext >= 0 &view  cfgOwnsHeap(p, ty) &view  inst.a.is_var &view  inst.a.value == inst.place_var { p.error = 104 }
+        when p.error == 0 && inst.kind == 5 && inst.place_ext >= 0 && cfgOwnsHeap(p, ty) { p.error = 103 }
+        when p.error == 0 && inst.kind == 6 && inst.place_ext >= 0 && cfgOwnsHeap(p, ty) && inst.a.is_var && inst.a.value == inst.place_var { p.error = 104 }
     }
     when p.error == 0 { p.insts@push(inst) }
 }

@@ -29,7 +29,7 @@ flow cfgPlaceKind(p: view CfgProgram, f: Int, variable: Int, field: Int, subfiel
 // The place may be reached through a reference parameter or a list index.
 flow cfgStoreField(code: edit X64Code, p: view CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: view NativeOperand, fix: edit CfgFix) {
     hold ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
-    when ext >= 0 &view  cfgOwnsHeap(p, ty) {
+    when ext >= 0 && cfgOwnsHeap(p, ty) {
         // Indexed owners have no partial-move flag: the old element is live.
         // Drop it before loading the source, then recompute the address since
         // drop glue may clobber caller-saved registers.
@@ -210,7 +210,7 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } otherwise when inst.kind == 16 {
         cfgEmitUnary(edit code, p, f, inst, edit fix)
-    } otherwise when inst.kind >= 18 &view  inst.kind <= 21 {
+    } otherwise when inst.kind >= 18 && inst.kind <= 21 {
         cfgEmitList(edit code, p, f, inst, edit fix)
     } otherwise when inst.kind == 22 {
         // loan: the address of the place becomes the local reference.
@@ -276,7 +276,7 @@ flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     // Text elements through the runtime.
     when p.decl_lists > 0 { give true }
     each i among 0..p.insts.length {
-        when (p.insts[i].kind >= 10 &view  p.insts[i].kind <= 13) || p.insts[i].kind == 17 { give true }
+        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { give true }
     }
     give false
 }

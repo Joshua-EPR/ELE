@@ -6,19 +6,19 @@ expose flow cfgType(p: view CfgProgram, source: view Text, reader: edit NativeRe
     hold w = nativeWord(source, edit reader)
     when nativeEquals(source, view w, "i") { give 0 }
     when nativeEquals(source, view w, "b") { give 1 }
-    when w.start < w.end &view  source@byteAt(w.start) == 115 {
+    when w.start < w.end && source@byteAt(w.start) == 115 {
         hold id = nativeDecimal(source, edit reader, view w, 1)
-        when id >= 0 &view  id < p.structs.length { give 2 + id }
+        when id >= 0 && id < p.structs.length { give 2 + id }
     }
-    when w.start < w.end &view  source@byteAt(w.start) == 101 {
+    when w.start < w.end && source@byteAt(w.start) == 101 {
         hold id = nativeDecimal(source, edit reader, view w, 1)
-        when id >= 0 &view  id < p.enums.length { give 2 + p.structs.length + id }
+        when id >= 0 && id < p.enums.length { give 2 + p.structs.length + id }
     }
-    when w.start < w.end &view  source@byteAt(w.start) == 108 {
+    when w.start < w.end && source@byteAt(w.start) == 108 {
         // A list is three words whatever its element, so `lK` is usable
         // before `list lK` is read; only the declared count matters.
         hold id = nativeDecimal(source, edit reader, view w, 1)
-        when id >= 0 &view  id < p.decl_lists { give 2 + p.decl_structs + p.decl_enums + id }
+        when id >= 0 && id < p.decl_lists { give 2 + p.decl_structs + p.decl_enums + id }
     }
     reader.error = 30
     give -1
@@ -59,9 +59,9 @@ expose flow cfgTypeSize(p: view CfgProgram, ty: Int) => Int {
     when ty == cfgUnitType() { give 8 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 24 }
     when ty == 1 { give 1 }
-    when ty >= 2 &view  ty - 2 < p.structs.length { give p.structs[ty - 2].size }
+    when ty >= 2 && ty - 2 < p.structs.length { give p.structs[ty - 2].size }
     hold enum_id = ty - 2 - p.structs.length
-    when enum_id >= 0 &view  enum_id < p.enums.length { give p.enums[enum_id].size }
+    when enum_id >= 0 && enum_id < p.enums.length { give p.enums[enum_id].size }
     give -1
 }
 
@@ -69,9 +69,9 @@ expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
     when ty == 0 { give 8 }
     when ty == 1 { give 1 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 8 }
-    when ty >= 2 &view  ty - 2 < p.structs.length { give p.structs[ty - 2].align }
+    when ty >= 2 && ty - 2 < p.structs.length { give p.structs[ty - 2].align }
     hold enum_id = ty - 2 - p.structs.length
-    when enum_id >= 0 &view  enum_id < p.enums.length { give p.enums[enum_id].align }
+    when enum_id >= 0 && enum_id < p.enums.length { give p.enums[enum_id].align }
     give -1
 }
 
@@ -100,7 +100,7 @@ expose flow cfgReadStruct(p: edit CfgProgram, source: view Text, reader: edit Na
         // A field may own a Text (three words); see native_cfg_paths.
         hold ty = cfgTypeOrUnit(p, source, edit reader)
         nativeEndLine(source, edit reader)
-        when reader.error != 0 || !cfgEncodedName(source, view fname) || (ty < 0 &view  ty != cfgTextType()) {
+        when reader.error != 0 || !cfgEncodedName(source, view fname) || (ty < 0 && ty != cfgTextType()) {
             p.error = 61
             leave
         }
@@ -162,7 +162,7 @@ flow cfgBadPlace(reader: edit NativeReader) => CfgPlace {
 flow cfgPlaceDigits(source: view Text, at: Int, end: Int, out: edit NativeWord) => Int {
     change pos = at
     change value = 0
-    during pos < end &view  pos - at < 7 {
+    during pos < end && pos - at < 7 {
         hold b = source@byteAt(pos)
         when b < 48 || b > 57 { leave }
         value = value * 10 + b - 48
@@ -204,9 +204,9 @@ expose flow cfgReadPlace(p: edit CfgProgram, f: Int, source: view Text, reader: 
             hold k = number.start
             when number.end == 0 || ty < 2 || ty - 2 >= p.structs.length || k >= p.structs[ty - 2].fields { give cfgBadPlace(edit reader) }
             ty = p.fields[p.structs[ty - 2].first_field + k].ty
-            when ext < 0 &view  field < 0 {
+            when ext < 0 && field < 0 {
                 field = k
-            } otherwise when ext < 0 &view  subfield < 0 {
+            } otherwise when ext < 0 && subfield < 0 {
                 subfield = k
             } otherwise {
                 when ext < 0 {
@@ -394,7 +394,7 @@ flow cfgReadTextLiteral(p: edit CfgProgram, source: view Text, reader: edit Nati
 expose flow cfgOperand(p: edit CfgProgram, source: view Text, reader: edit NativeReader) => NativeOperand {
     change probe = NativeReader(offset: reader.offset, error: 0)
     hold w = nativeWord(source, edit probe)
-    when w.end - w.start >= 4 &view  source@byteAt(w.start) == 99 &view  source@byteAt(w.start + 1) == 116 {
+    when w.end - w.start >= 4 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 116 {
         reader.offset = probe.offset
         hold index = cfgReadTextLiteral(edit p, source, edit reader, view w)
         give NativeOperand(is_var: false, value: index, is_bool: false, is_unit: false, is_text: index >= 0)
