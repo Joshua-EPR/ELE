@@ -2,6 +2,7 @@ import native_cfg_defs
 import native_cfg_verify
 import x86_64
 import elf64
+import native_rt_print
 
 // x86-64 ELF64 lowering for CFG with move-only drop-free structs.
 // The ENTRY stub invokes main using an ELE-internal two-register convention.
@@ -218,6 +219,16 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
             x64LoadMem64(&mut code, 0, 5, owner + 8)
         }
         x64StoreSlot(&mut code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
+    } else if inst.kind == 10 {
+        // Runtime routines are addressed by negative call targets:
+        // -1 print Int, -2 print Bool. Value travels in RDI.
+        cfgLoadOperand(&mut code, p, f, &inst.a, 7)
+        call_at.push(x64CallPlaceholder(&mut code))
+        if cfgOperandType(p, f, &inst.a) == 1 {
+            call_target.push(-2)
+        } else {
+            call_target.push(-1)
+        }
     } else {
         code.error = 10
     }
@@ -225,7 +236,12 @@ fn cfgEmitInstruction(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst
 
 fn cfgEmitTerm(code: &mut X64Code, p: &CfgProgram, f: Int, block: &CfgBlock, func: &CfgFunc, jump_at: &mut List<Int>, jump_target: &mut List<Int>) {
     if block.term == 1 {
-        cfgLoadOperand(&mut code, p, f, &block.value, 0)
+        if func.result_unit {
+            // Unit has no representation; a unit `main` exits with status 0.
+            x64MovImm64(&mut code, 0, 0)
+        } else {
+            cfgLoadOperand(&mut code, p, f, &block.value, 0)
+        }
         x64FrameEnd(&mut code)
     } else if block.term == 2 {
         jump_at.push(x64JumpPlaceholder(&mut code))
@@ -280,6 +296,21 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
     x64MovImm64(&mut code, 0, 60)
     x64Syscall(&mut code)
 
+    // The print runtime is emitted only for programs that print, so images
+    // of programs without output keep their previous exact bytes.
+    var prints = false
+    for i in 0..p.insts.length {
+        if p.insts[i].kind == 10 { prints = true }
+    }
+    var print_int_at = -1
+    var print_bool_at = -1
+    if prints {
+        print_int_at = code.bytes.length
+        rtEmitPrintInt(&mut code)
+        print_bool_at = code.bytes.length
+        rtEmitPrintBool(&mut code)
+    }
+
     for f in 0..p.functions.length {
         let func = &p.functions[f]
         func_at[f] = code.bytes.length
@@ -307,7 +338,14 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
         return result
     }
     for i in 0..call_at.length {
-        x64PatchRelative(&mut code, call_at[i], func_at[call_to[i]])
+        let target = call_to[i]
+        if target == -1 {
+            x64PatchRelative(&mut code, call_at[i], print_int_at)
+        } else if target == -2 {
+            x64PatchRelative(&mut code, call_at[i], print_bool_at)
+        } else {
+            x64PatchRelative(&mut code, call_at[i], func_at[target])
+        }
     }
     for i in 0..jump_at.length {
         x64PatchRelative(&mut code, jump_at[i], block_at[jump_to[i]])

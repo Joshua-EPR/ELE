@@ -4,11 +4,15 @@ import lir_tokens
 // independent ELE-written x86-64 bootstrap backend. Supports move-only,
 // drop-free structs with primitive fields (including nested structs).
 // Also supports tagged enums with zero or one primitive payload per variant.
-// Text, loans, floats, arrays and side effects are explicitly rejected.
+// Text, loans, floats and arrays are explicitly rejected. The only side
+// effect accepted is `print` of an Int or Bool value.
 // Type IDs: 0 = Int, 1 = Bool, 2+s = nominal struct s,
 // 2+struct_count+e = nominal enum e.
 // Instruction kinds: 1 use, 2 binary, 3 call, 4 struct, 5 read,
-// 6 store, 7 variant, 8 discriminant, 9 checked primitive payload.
+// 6 store, 7 variant, 8 discriminant, 9 checked primitive payload,
+// 10 print (Int or Bool operand, no destination; runtime in native_rt_print).
+// Unit is type code -2: valid only as a function result, as the `cu`
+// constant and as a non-parameter variable that receives a unit call.
 // Binary operations: 1 add, 2 sub, 3 mul, 4 eq, 5 ne, 6 lt,
 // 7 le, 8 gt, 9 ge. Terminators: 1 return, 2 jump, 3 branch.
 
@@ -76,6 +80,7 @@ pub struct CfgFunc {
     blocks: Int
     params: Int
     result_bool: Bool
+    result_unit: Bool
 }
 
 pub struct CfgProgram {
@@ -95,7 +100,7 @@ pub struct CfgProgram {
 }
 
 pub fn cfgEmptyOperand() -> NativeOperand {
-    return NativeOperand(is_var: false, value: 0, is_bool: false)
+    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false)
 }
 
 pub fn cfgEmpty() -> CfgProgram {

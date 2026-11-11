@@ -12,10 +12,15 @@ pub fn build(entry: &str, trace: bool) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     let source = root.join("compiler-l/src").join(format!("{entry}.l"));
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_l"));
-    cmd.current_dir(&dir)
-        .arg("build")
-        .arg(source)
-        .args(["--backend", "cranelift"]);
+    cmd.current_dir(&dir).arg("build").arg(source);
+    // Stage 0's Cranelift backend only targets Windows x86-64. On other
+    // hosts Stage 1 is built through the reference rustc backend so that the
+    // same Stage 1 sources, and the ELF64 images they produce, are exercised
+    // there too. Allocation tracing exists only in the Cranelift runtime, so
+    // traced builds keep requesting it and fail loudly where it is missing.
+    if cfg!(windows) || trace {
+        cmd.args(["--backend", "cranelift"]);
+    }
     if trace {
         cmd.arg("--trace-alloc");
     }

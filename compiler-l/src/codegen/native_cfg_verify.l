@@ -45,7 +45,7 @@ fn cfgTransferVar(p: &CfgProgram, f: Int, block: &CfgBlock, variable: Int, initi
     for i in block.first..(block.first + block.count) {
         let inst = &p.insts[i]
         if cfgMoves(p, f, &inst, variable) { live = false }
-        if inst.kind != 6 && inst.dst == variable { live = true }
+        if inst.kind != 6 && inst.kind != 10 && inst.dst == variable { live = true }
     }
     return live
 }
@@ -67,7 +67,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
     if inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, &inst.a) >= 2 {
         return 58
     }
-    if inst.kind == 1 || inst.kind == 2 || inst.kind == 3 || inst.kind == 4 || inst.kind == 6 || (inst.kind == 7 && inst.argc == 1) {
+    if inst.kind == 1 || inst.kind == 2 || inst.kind == 3 || inst.kind == 4 || inst.kind == 6 || inst.kind == 10 || (inst.kind == 7 && inst.argc == 1) {
         let a = cfgTakeOperand(p, f, &inst.a, &mut live)
         if a != 0 { return a }
     }
@@ -83,7 +83,7 @@ fn cfgValidateInstruction(p: &CfgProgram, f: Int, inst: &CfgInst, live: &mut Lis
         let d = cfgTakeOperand(p, f, &inst.d, &mut live)
         if d != 0 { return d }
     }
-    if inst.kind != 6 { live[inst.dst] = true }
+    if inst.kind != 6 && inst.kind != 10 { live[inst.dst] = true }
     return 0
 }
 
@@ -102,6 +102,7 @@ fn cfgCheckCalls(p: &CfgProgram) -> Int {
                     let dst_type = p.types_code[func.first_var + inst.dst]
                     var ret_type = 0
                     if target.result_bool { ret_type = 1 }
+                    if target.result_unit { ret_type = cfgUnitType() }
                     if dst_type != ret_type { return 53 }
                     if inst.argc >= 1 && cfgOperandType(p, f, &inst.a) != cfgParamType(p, callee, 0) { return 54 }
                     if inst.argc == 2 && cfgOperandType(p, f, &inst.b) != cfgParamType(p, callee, 1) { return 54 }

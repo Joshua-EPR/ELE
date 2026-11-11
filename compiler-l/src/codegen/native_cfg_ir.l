@@ -46,6 +46,7 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
     if kind == 1 {
         var expected = 0
         if p.functions[f].result_bool { expected = 1 }
+        if p.functions[f].result_unit { expected = cfgUnitType() }
         if cfgOperandType(p, f, &value) != expected { p.error = 41 }
     }
     if kind == 3 && cfgOperandType(p, f, &value) != 1 { p.error = 42 }
@@ -63,7 +64,7 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     nativeExpect(source, &mut reader, "params")
     let params = nativeNumber(source, &mut reader)
     nativeExpect(source, &mut reader, "result")
-    let result_type = cfgType(p, source, &mut reader)
+    let result_type = cfgTypeOrUnit(p, source, &mut reader)
     let returned_ref = nativeNumber(source, &mut reader)
     let returned_mut = nativeNumber(source, &mut reader)
     nativeExpect(source, &mut reader, "vars")
@@ -71,22 +72,23 @@ fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     nativeExpect(source, &mut reader, "blocks")
     let blocks = nativeNumber(source, &mut reader)
     nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != f || !cfgEncodedName(source, &name) || params < 0 || params > 2 || vars < params || vars > 64 || blocks < 1 || blocks > 32 || returned_ref != 0 || returned_mut != 0 || result_type < 0 {
+    if reader.error != 0 || id != f || !cfgEncodedName(source, &name) || params < 0 || params > 2 || vars < params || vars > 64 || blocks < 1 || blocks > 32 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType()) {
         p.error = 44
         return
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     if result_type >= 2 { p.error = 68; return }
-    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1))
+    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType()))
     var next_slot = 0
     for i in 0..vars {
         nativeExpect(source, &mut reader, "var")
         let vid = nativeId(source, &mut reader, 118)
         nativeExpect(source, &mut reader, "val")
-        let ty = cfgType(p, source, &mut reader)
+        let ty = cfgTypeOrUnit(p, source, &mut reader)
         nativeEndLine(source, &mut reader)
-        if reader.error != 0 || vid != i || ty < 0 || (i < params && ty >= 2) { p.error = 45; break }
+        let unit_var = ty == cfgUnitType()
+        if reader.error != 0 || vid != i || (ty < 0 && !unit_var) || (i < params && (ty >= 2 || unit_var)) { p.error = 45; break }
         let size = cfgTypeSize(p, ty)
         let count_slots = (size + 7) / 8
         if size < 1 || count_slots < 1 || next_slot + count_slots > 64 { p.error = 69; break }

@@ -299,3 +299,25 @@ pub fn x64Unreachable(code: &mut X64Code) {
     x64Put(&mut code, 15)
     x64Put(&mut code, 11) // ud2: deterministic invalid-op trap
 }
+
+// NEG r/m64 (REX.W F7 /3). Negating the minimum Int leaves the same bit
+// pattern, which is its magnitude when read as unsigned.
+pub fn x64NegReg(code: &mut X64Code, reg: Int) {
+    if !x64RegisterValid(reg) { code.error = 3; return }
+    var rex = 72
+    if reg >= 8 { rex += 1 }
+    x64Put(&mut code, rex)
+    x64Put(&mut code, 247)
+    x64Put(&mut code, 216 + reg % 8)
+}
+
+// DIV r/m64 (REX.W F7 /6): unsigned RDX:RAX / reg -> RAX quotient, RDX
+// remainder. The caller must zero RDX and guarantee a nonzero divisor.
+pub fn x64DivUnsignedReg(code: &mut X64Code, reg: Int) {
+    if !x64RegisterValid(reg) { code.error = 3; return }
+    var rex = 72
+    if reg >= 8 { rex += 1 }
+    x64Put(&mut code, rex)
+    x64Put(&mut code, 247)
+    x64Put(&mut code, 240 + reg % 8)
+}

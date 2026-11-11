@@ -81,17 +81,27 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.place_var = nativeId(source, &mut reader, 112)
         inst.op = nativeId(source, &mut reader, 101)
         inst.place_field = nativeNumber(source, &mut reader)
+    } else if nativeEquals(source, &kind, "print") {
+        // i print val <operand>: writes the decimal Int or `true`/`false`
+        // followed by a newline to stdout. It has no destination.
+        inst.kind = 10
+        nativeExpect(source, &mut reader, "val")
+        inst.a = nativeOperand(source, &mut reader)
     } else {
         p.error = 31
     }
     nativeEndLineSpan(source, &mut reader)
-    if reader.error != 0 || (inst.kind != 6 && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
+    let has_dst = inst.kind != 6 && inst.kind != 10
+    if reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
         p.error = 33
     }
     if p.error != 0 { return }
     var dest_type = -1
-    if inst.kind != 6 { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
+    if has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
     let first_type = cfgOperandType(p, f, &inst.a)
+    // Text and aggregate printing need the heap runtime; reject them here
+    // instead of emitting code that the backend cannot implement.
+    if inst.kind == 10 && first_type != 0 && first_type != 1 { p.error = 90 }
     if inst.kind == 1 && first_type != dest_type { p.error = 34 }
     if inst.kind == 2 {
         let second_type = cfgOperandType(p, f, &inst.b)

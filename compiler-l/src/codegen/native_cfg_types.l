@@ -18,8 +18,25 @@ pub fn cfgType(p: &CfgProgram, source: &Text, reader: &mut NativeReader) -> Int 
     return -1
 }
 
+pub fn cfgUnitType() -> Int {
+    return -2
+}
+
+// Value types plus `u`. Callers decide where unit is acceptable.
+pub fn cfgTypeOrUnit(p: &CfgProgram, source: &Text, reader: &mut NativeReader) -> Int {
+    var probe = NativeReader(offset: reader.offset, error: 0)
+    let w = nativeWord(source, &mut probe)
+    if nativeEquals(source, &w, "u") {
+        reader.offset = probe.offset
+        return cfgUnitType()
+    }
+    return cfgType(p, source, &mut reader)
+}
+
 pub fn cfgTypeSize(p: &CfgProgram, ty: Int) -> Int {
     if ty == 0 { return 8 }
+    // A unit variable owns one never-read slot so that slot math stays uniform.
+    if ty == cfgUnitType() { return 8 }
     if ty == 1 { return 1 }
     if ty >= 2 && ty - 2 < p.structs.length { return p.structs[ty - 2].size }
     let enum_id = ty - 2 - p.structs.length
@@ -226,6 +243,7 @@ pub fn cfgBinaryOp(source: &Text, w: &NativeWord) -> Int {
 
 pub fn cfgOperandType(p: &CfgProgram, f: Int, op: &NativeOperand) -> Int {
     if !op.is_var {
+        if op.is_unit { return cfgUnitType() }
         if op.is_bool { return 1 }
         return 0
     }
