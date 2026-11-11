@@ -8,13 +8,13 @@ shape Ficha {
     lote: Int
 }
 
-flow crear() => Ficha {
-    give Ficha(codigo: 7, nombre: "Ana", nivel: 2, activa: true,
-        etiqueta: "caja", lote: 9)
+flow crear(codigo: Int) => Ficha {
+    give Ficha(codigo: codigo, nombre: "Ana{codigo}", nivel: 2, activa: true,
+        etiqueta: "caja{codigo}", lote: 9)
 }
 
 flow main() {
-    hold ficha = crear()
+    hold ficha = crear(7)
     print(ficha.codigo)
     print(ficha.nombre)
     print(ficha.activa)
