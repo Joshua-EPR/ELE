@@ -76,6 +76,47 @@ fn enum_payload_match_from_source_compiles_to_native_elf() {
 }
 
 #[test]
+fn canonical_ele_syntax_compiles_real_stage1_lir_to_native_elf() {
+    let base = root();
+    let source = base.join("examples/ele_original_syntax.l");
+    let temp = base.join("target/stage1-tests/ele-syntax-v2");
+    fs::create_dir_all(&temp).unwrap();
+    let lir_file = temp.join("syntax.lir");
+    let elf_file = temp.join("syntax.elf");
+
+    let emitted = Command::new(sema())
+        .arg(&source)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "new ELE spelling must be understood by Stage 1: {}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let lir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(lir.contains("module structs 0 enums 1"), "{lir}");
+    assert!(lir.contains("i variant ") && lir.contains("i payload "), "{lir}");
+    let parsed = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&parsed).unwrap();
+    fs::write(&lir_file, &lir).unwrap();
+
+    let compiled = Command::new(native())
+        .arg(&lir_file)
+        .arg(&elf_file)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "backend ELE: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let bytes = fs::read(&elf_file).unwrap();
+    assert!(bytes.len() > 4096);
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
+}
+
+#[test]
 fn enum_payload_wrong_constructor_type_is_rejected_by_stage1() {
     let base = root();
     let temp = base.join("target/stage1-tests/enum-payload-negative");
