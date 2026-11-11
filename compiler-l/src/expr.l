@@ -160,7 +160,8 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
                         }
                         parserSkipNewlines(&mut cursor, tokens)
                         if cursor.pos < tokens.length {
-                            match tokenKindValue(&tokens[cursor.pos].kind) {
+                            let current_kind_token = &tokens[cursor.pos]
+                            match tokenKindValue(&current_kind_token.kind) {
                                 LexKind.InterpolationEnd => { cursor.pos += 1 }
                                 _ => {
                                     astAddError(&mut tree, ParseProblem.UnclosedInterpolation, "}}", tokens[cursor.pos].start, tokens[cursor.pos].end)

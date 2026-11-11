@@ -70,7 +70,8 @@ fn parserParseDecimalInt(source: &Text, start: Int, end: Int) -> Int {
 
 fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     while cursor.pos < tokens.length {
-        match tokenKindValue(&tokens[cursor.pos].kind) {
+        let current_kind_token = &tokens[cursor.pos]
+        match tokenKindValue(&current_kind_token.kind) {
             LexKind.Newline => { cursor.pos += 1 }
             _ => { return }
         }

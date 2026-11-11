@@ -32,8 +32,8 @@ fn fixture_hex(entry: &str, prefix: &str) -> Vec<u8> {
     value
         .as_bytes()
         .as_chunks::<2>()
-    .0
-    .iter()
+        .0
+        .iter()
         .map(|pair| {
             let s = std::str::from_utf8(pair).unwrap();
             u8::from_str_radix(s, 16).expect("valid hex byte")
@@ -151,8 +151,8 @@ fn ele_lir_subset_backend_compiles_real_protocol_to_native_elf() {
     .concat()
     .as_bytes()
     .as_chunks::<2>()
-        .0
-        .iter()
+    .0
+    .iter()
     .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
     .collect();
     assert_eq!(&bytes[4096..], expected.as_slice());

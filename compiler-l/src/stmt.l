@@ -26,7 +26,8 @@ fn parseBlock(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, token
     parserSkipSeparators(source, &mut cursor, tokens)
 
     while !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
-        match tokenKindValue(&tokens[cursor.pos].kind) {
+        let current_kind_token = &tokens[cursor.pos]
+        match tokenKindValue(&current_kind_token.kind) {
             LexKind.Eof => {
                 astAddError(&mut tree, ParseProblem.UnclosedBlock, "}}", openTok.start, openTok.end)
                 return -1
@@ -105,7 +106,8 @@ fn parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
         if parserAtSymbol(source, cursor, tokens, ";") || parserAtSymbol(source, cursor, tokens, "}}") || cursor.pos >= tokens.length {
             return astAddStmt(&mut tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
         }
-        match tokenKindValue(&tokens[cursor.pos].kind) {
+        let current_kind_token = &tokens[cursor.pos]
+        match tokenKindValue(&current_kind_token.kind) {
             LexKind.Newline => {
                 return astAddStmt(&mut tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
             }
