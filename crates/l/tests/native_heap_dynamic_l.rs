@@ -90,3 +90,19 @@ fn linux_mremap_preserves_bytes_across_grow_shrink_and_owner_transfer() {
         );
     }
 }
+
+fn list_generator() -> &'static Path {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| stage1_support::build("native_list_cases", false))
+}
+
+#[test]
+fn native_int_buffer_push_grow_read_pop_and_drop_are_checked_in_elf() {
+    for mode in ["p", "g", "t", "o", "e", "d", "b", "c", "k", "q"] {
+        let image = export_case(list_generator(), "list", mode);
+        assert!(
+            image[4096..].windows(2).any(|b| b == [0x0f, 0x05]),
+            "missing native Linux syscall for List<Int> case {mode}"
+        );
+    }
+}

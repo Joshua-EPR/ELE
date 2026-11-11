@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, feat/ele-original-syntax-v2]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-native-heap-mmap-bootstrap, feat/ele-native-heap-dynamic-ownership]
+    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-native-heap-mmap-bootstrap, feat/ele-native-heap-dynamic-ownership, feat/ele-native-heap-resize]
   workflow_dispatch:
 
 concurrency:
@@ -125,6 +125,16 @@ jobs:
               ("resize-z.elf", 122),
               ("resize-h.elf", 122),
               ("resize-m.elf", 121),
+              ("list-p.elf", 42),
+              ("list-g.elf", 42),
+              ("list-t.elf", 42),
+              ("list-o.elf", 127),
+              ("list-e.elf", 127),
+              ("list-d.elf", 121),
+              ("list-b.elf", 121),
+              ("list-c.elf", 127),
+              ("list-k.elf", 127),
+              ("list-q.elf", 127),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"
