@@ -1,5 +1,6 @@
 import tokens
 import sema_borrow_syntax
+import sema_expr_temp
 import ast
 import sema_types
 import symbols
@@ -112,15 +113,6 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
 
 // A value read by print or an interpolation that is not a place and not a
 // literal is an owned temporary of the enclosing statement.
-fn semaReadTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int, mark: Int) {
-    if ctx.expression_path >= 0 || expr_id < 0 { return }
-    match tree.expressions[expr_id].kind {
-        AstExprKind.TextLit => { return }
-        _ => {}
-    }
-    semaTempAt(&mut ctx, source, tree, ty, tree.expressions[expr_id].start, tree.expressions[expr_id].end, mark)
-}
-
 fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
     ctx.expression_path = -1
     if expr_id < 0 || expr_id >= tree.expressions.length {
