@@ -17,14 +17,13 @@ var v2 ref i
 var v3 val u
 var v4 val i
 var v5 val i
-block 0 7
+block 0 6
 i struct v0 s0 2 ci0 ci0
 i loan v1 p0.0 1
 i loan v2 p0.1 0
 i call v3 f0 2 ref p1 1 ref p2 0
 i read v4 p0.0
 i binary v5 add v4 ci1
-i drop v0 -
 t return v5
 endfunc
 end
