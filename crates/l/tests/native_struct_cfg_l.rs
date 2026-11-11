@@ -116,6 +116,10 @@ fn stage1_emitted_struct_lir_is_accepted_by_ele_native_backend() {
     let file = temporary("stage1", "lir");
     fs::write(&file, lir).unwrap();
     let generated = generate(&file);
+    // Export the genuine Stage 1 .l -> LIR -> ELE ELF64 result to Linux CI.
+    let artifact = root().join("target/stage1-tests/native-struct-source/struct.elf");
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::write(&artifact, &generated.0).unwrap();
     fs::remove_file(file).unwrap();
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     assert_eq!(exec_elf(&generated.1), 42);
