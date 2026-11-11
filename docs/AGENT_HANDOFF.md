@@ -1369,3 +1369,14 @@ Se mantienen límites de 512 bytes por layout y 512 slots por función.
 Fixtures de seis, diecisiete y sesenta y cuatro campos, con Text,
 pruebas negativas y ejecución cruzada ELF en CI.
 No existe Stage 2 ni PE64. Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_10.md.
+
+
+### Ejemplos ELE v2 (migración de superficie, pendiente de CI)
+
+Rama `chore/examples-ele-v2-canonical`: 25 archivos de `examples/`
+convertidos desde la sintaxis histórica de Rust a ELE v2, incluidos los
+casos negativos; los otros 15 ejemplos `.l` ya eran canónicos. Los 117
+fixtures `.lir` se mantienen intactos. Se añadió una prueba que analiza
+los 40 ejemplos, preserva los rechazos y comprueba la salida de varios
+programas. Véase `docs/EXAMPLES_ELE_V2_MIGRATION.md`. Esta migración no
+completa el compilador ni sustituye el self-hosting Stage 2/3.

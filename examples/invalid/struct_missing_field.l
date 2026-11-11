@@ -1,8 +1,8 @@
-struct Punto {
+shape Punto {
     x: Int
     y: Int
 }
 
-fn main() {
-    let p = Punto(x: 1)
+flow main() {
+    hold p = Punto(x: 1)
 }

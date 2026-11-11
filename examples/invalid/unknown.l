@@ -1,1 +1,1 @@
-fn main() { print(noExiste) }
+flow main() { print(noExiste) }

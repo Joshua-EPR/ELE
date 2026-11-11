@@ -1,1 +1,1 @@
-fn main() { let x = 1; x = 2 }
+flow main() { hold x = 1; x = 2 }

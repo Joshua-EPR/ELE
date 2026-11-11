@@ -1556,3 +1556,14 @@ y máximo de 512 bytes por layout. El verificador recorre y consume
 todos los operandos, preservando ownership. Añade pruebas de 6/17/64
 campos y rechazos. Sin soporte completo de List, préstamos locales,
 Stage 2, Stage 3 ni PE64. No declarar el compilador completo.
+
+
+### Ejemplos ELE v2 (migración de superficie, pendiente de CI)
+
+Rama `chore/examples-ele-v2-canonical`: 25 archivos de `examples/`
+convertidos desde la sintaxis histórica de Rust a ELE v2, incluidos los
+casos negativos; los otros 15 ejemplos `.l` ya eran canónicos. Los 117
+fixtures `.lir` se mantienen intactos. Se añadió una prueba que analiza
+los 40 ejemplos, preserva los rechazos y comprueba la salida de varios
+programas. Véase `docs/EXAMPLES_ELE_V2_MIGRATION.md`. Esta migración no
+completa el compilador ni sustituye el self-hosting Stage 2/3.

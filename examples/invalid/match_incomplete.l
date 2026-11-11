@@ -1,16 +1,16 @@
-enum Estado {
-    Pendiente
-    Completado
-    Error(Text)
+choice Estado {
+    Pendiente,
+    Completado,
+    Error(Text),
 }
 
-fn mostrar(estado: Estado) {
-    match estado {
-        Estado.Pendiente => print("Pendiente"),
-        Estado.Error(mensaje) => print(mensaje),
+flow mostrar(estado: Estado) {
+    choose estado {
+        Estado.Pendiente: print("Pendiente"),
+        Estado.Error(mensaje): print(mensaje),
     }
 }
 
-fn main() {
+flow main() {
     mostrar(Estado.Completado)
 }

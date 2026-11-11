@@ -1,2 +1,2 @@
-const ERROR = 9223372036854775807 + 1
-fn main() {}
+fixed ERROR = 9223372036854775807 + 1
+flow main() {}

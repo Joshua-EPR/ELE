@@ -1,10 +1,10 @@
-fn main() {
-    var total = 0
-    var i = 0
-    loop {
+flow main() {
+    change total = 0
+    change i = 0
+    repeat {
         i += 1
-        if i > 5 { break }
-        if i == 3 { continue }
+        when i > 5 { leave }
+        when i == 3 { proceed }
         total += i
     }
     print(total)

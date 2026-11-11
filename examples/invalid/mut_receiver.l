@@ -1,14 +1,14 @@
-struct Contador {
+shape Contador {
     valor: Int = 0
 }
 
-impl Contador {
-    mut fn incrementar() {
-        self.valor += 1
+extend Contador {
+    exclusive flow incrementar() {
+        this.valor += 1
     }
 }
 
-fn main() {
-    let contador = Contador()
-    contador.incrementar()
+flow main() {
+    hold contador = Contador()
+    contador@incrementar()
 }

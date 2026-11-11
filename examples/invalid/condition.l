@@ -1,1 +1,1 @@
-fn main() { if 10 { print(1) } }
+flow main() { when 10 { print(1) } }

@@ -30,6 +30,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Verify original ELE surface syntax in Stage 0
         run: cargo test -p project-l --test ele_syntax_v2 -- --test-threads=1
+      - name: Verificar todos los ejemplos con sintaxis ELE v2
+        run: cargo test -p project-l --test examples_ele_v2 -- --test-threads=1
       - name: Verify ELE of[T] generic grammar and semantic checks
         run: cargo test -p project-l --test ele_generics_v2 -- --test-threads=1
       - name: Execute ELE generic of[T] through both native backends
