@@ -98,7 +98,7 @@ corren en Windows); CI no ejecuta estos binarios. Clasificación:
 
 | Binario | Fallas | Causa |
 |---|---|---|
-| `cfg` | 1 | recorre `differential/unsupported`, que nunca existió en git (corregido en la rama `fix/stage0-diagnostic-files-token-limit`) |
+| `cfg` | 1 | recorre `differential/unsupported`, que nunca existió en git (corregido en la rama `fix/stage0-diagnostics-stacked`) |
 | `differential` | 1 | misma carpeta inexistente; un caso real requiere superar el límite de 4096 tokens (defecto 2 de Stage 0) |
 | `references` | 7 | fuentes de prueba con identificadores que la sintaxis v2 reservó (`se esperaba identificador, no palabra reservada`) |
 | `regions` | 1 | misma causa |
@@ -106,7 +106,7 @@ corren en Windows); CI no ejecuta estos binarios. Clasificación:
 | `self_hosting` | 1 | `tokenKindValue` ya no existe en las fuentes de Stage 1 |
 | `conformance` | aborta | 200 paréntesis anidados desbordan la pila del hilo de prueba en debug antes del límite de anidamiento 128 |
 
-La rama `fix/stage0-diagnostic-files-token-limit` corrige `cfg`,
+La rama `fix/stage0-diagnostics-stacked` corrige `cfg`,
 `conformance`, `differential`, `references`, `regions` y `borrow_l`
 ([detalle](STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md)). El resto queda como trabajo pendiente
 documentado; no se desactivó ninguna prueba.

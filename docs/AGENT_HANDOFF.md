@@ -1333,7 +1333,7 @@ valor, `List of[T]` en el lowering CFG reutilizando `native_list_int.l` /
 
 ### Defectos de Stage 0 corregidos (2026-11-11)
 
-Rama `fix/stage0-diagnostic-files-token-limit`, apilada sobre
+Rama `fix/stage0-diagnostics-stacked`, apilada sobre
 `feat/native-refs-text-ops`; resuelve el último punto del párrafo anterior.
 Detalle en [STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md](STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md):
 diagnósticos con el archivo real de cada módulo (`Span.file`) y fin del

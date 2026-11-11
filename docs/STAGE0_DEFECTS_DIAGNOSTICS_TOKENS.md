@@ -68,7 +68,7 @@ de 5000 componentes que Cranelift rechaza con L0008 y rustc ejecuta).
 
 | | `main` `f19ec01` | esta rama |
 |---|---|---|
-| Aprobadas | 479 | 497 |
+| Aprobadas | 479 | 501 (con las 4 de `native_refs_l`) |
 | Fallidas | 15 | 5 |
 | Binarios que abortan | `conformance` | ninguno |
 
