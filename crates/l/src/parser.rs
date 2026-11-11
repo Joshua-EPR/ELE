@@ -655,7 +655,7 @@ impl Parser {
                 ExprKind::ListLit(self.elements()?)
             }
             Kind::Sym(ref s) if s == "[" => ExprKind::ArrayLit(self.elements()?),
-            Kind::Word(s) => {
+            Kind::Word(_s) => {
                 self.pos -= 1;
                 let name = self.name_or_self()?;
                 if self.at("<") {
