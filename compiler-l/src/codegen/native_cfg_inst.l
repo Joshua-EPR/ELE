@@ -2,16 +2,28 @@ import lir_tokens
 import native_cfg_defs
 import native_cfg_types
 
+// Source of `print` and `append`: `val <operand>` fills `inst.a` and returns
+// -1; `ref p<N> 0` returns the referenced variable.
+fn cfgReadSource(p: &mut CfgProgram, f: Int, source: &Text, reader: &mut NativeReader, inst: &mut CfgInst) -> Int {
+    let mode = nativeWord(source, &mut reader)
+    if nativeEquals(source, &mode, "ref") {
+        return cfgSharedVar(p, f, source, &mut reader)
+    }
+    if !nativeEquals(source, &mode, "val") { reader.error = 14 }
+    inst.a = cfgOperand(&mut p, source, &mut reader)
+    return -1
+}
+
 pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f: Int) {
     nativeExpect(source, &mut reader, "i")
     let kind = nativeWord(source, &mut reader)
     var inst = CfgInst(kind: 0, dst: -1, op: 0, callee: -1, argc: 0,
         a: cfgEmptyOperand(), b: cfgEmptyOperand(), c: cfgEmptyOperand(), d: cfgEmptyOperand(),
-        place_var: -1, place_field: -1, place_subfield: -1)
+        place_var: -1, place_field: -1, place_subfield: -1, arg_first: -1)
     if nativeEquals(source, &kind, "use") {
         inst.kind = 1
         inst.dst = nativeId(source, &mut reader, 118)
-        inst.a = nativeOperand(source, &mut reader)
+        inst.a = cfgOperand(&mut p, source, &mut reader)
     } else if nativeEquals(source, &kind, "binary") {
         inst.kind = 2
         inst.dst = nativeId(source, &mut reader, 118)
@@ -24,14 +36,17 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         inst.dst = nativeId(source, &mut reader, 118)
         inst.callee = nativeId(source, &mut reader, 102)
         inst.argc = nativeNumber(source, &mut reader)
-        if inst.argc < 0 || inst.argc > 2 { p.error = 32 }
-        if inst.argc >= 1 && inst.argc <= 2 {
-            nativeExpect(source, &mut reader, "val")
-            inst.a = nativeOperand(source, &mut reader)
-        }
-        if inst.argc == 2 {
-            nativeExpect(source, &mut reader, "val")
-            inst.b = nativeOperand(source, &mut reader)
+        if inst.argc < 0 || inst.argc > 16 { p.error = 32 }
+        inst.arg_first = p.call_args.length
+        if p.error == 0 {
+            // Only by-value arguments: reference parameters are not lowered.
+            for n in 0..inst.argc {
+                nativeExpect(source, &mut reader, "val")
+                let arg = cfgOperand(&mut p, source, &mut reader)
+                let arg_type = cfgOperandType(p, f, &arg)
+                if reader.error != 0 || (arg_type != 0 && arg_type != 1 && arg_type != cfgTextType()) { p.error = 37 }
+                p.call_args.push(arg)
+            }
         }
     } else if nativeEquals(source, &kind, "struct") {
         inst.kind = 4
@@ -85,13 +100,37 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         // i print val <operand>: writes the decimal Int or `true`/`false`
         // followed by a newline to stdout. It has no destination.
         inst.kind = 10
-        nativeExpect(source, &mut reader, "val")
-        inst.a = nativeOperand(source, &mut reader)
+        let referenced = cfgReadSource(&mut p, f, source, &mut reader, &mut inst)
+        inst.op = referenced
+    } else if nativeEquals(source, &kind, "textbuf") {
+        // i textbuf vD <capacity>: a new empty owned Text.
+        inst.kind = 11
+        inst.dst = nativeId(source, &mut reader, 118)
+        inst.callee = nativeNumber(source, &mut reader)
+        if inst.callee < 0 { p.error = 91 }
+    } else if nativeEquals(source, &kind, "append") {
+        // i append vD <val operand | ref place>: vD stays live and owned.
+        inst.kind = 12
+        inst.place_var = nativeId(source, &mut reader, 118)
+        let referenced = cfgReadSource(&mut p, f, source, &mut reader, &mut inst)
+        inst.op = referenced
+    } else if nativeEquals(source, &kind, "drop") {
+        // i drop vD <vFlag | ->: releases vD, only when the flag is true.
+        inst.kind = 13
+        inst.place_var = nativeId(source, &mut reader, 118)
+        var probe = NativeReader(offset: reader.offset, error: 0)
+        let flag = nativeWord(source, &mut probe)
+        if nativeEquals(source, &flag, "-") {
+            reader.offset = probe.offset
+            inst.op = -1
+        } else {
+            inst.op = nativeId(source, &mut reader, 118)
+        }
     } else {
         p.error = 31
     }
     nativeEndLineSpan(source, &mut reader)
-    let has_dst = inst.kind != 6 && inst.kind != 10
+    let has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13
     if reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
         p.error = 33
     }
@@ -99,9 +138,31 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
     var dest_type = -1
     if has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
     let first_type = cfgOperandType(p, f, &inst.a)
-    // Text and aggregate printing need the heap runtime; reject them here
-    // instead of emitting code that the backend cannot implement.
-    if inst.kind == 10 && first_type != 0 && first_type != 1 { p.error = 90 }
+    if inst.kind == 10 || inst.kind == 12 {
+        // The source is Int, Bool or Text. A Text variable must come by
+        // reference: by value it would be consumed, which is not lowered.
+        var source_type = first_type
+        if inst.op >= 0 { source_type = p.types_code[p.functions[f].first_var + inst.op] }
+        if source_type != 0 && source_type != 1 && source_type != cfgTextType() { p.error = 90 }
+        if inst.kind == 12 && inst.op < 0 && inst.a.is_var && source_type == cfgTextType() { p.error = 90 }
+    }
+    if inst.kind == 11 && dest_type != cfgTextType() { p.error = 91 }
+    if inst.kind == 12 || inst.kind == 13 {
+        if inst.place_var < 0 || inst.place_var >= p.functions[f].vars {
+            p.error = 92
+        } else if p.types_code[p.functions[f].first_var + inst.place_var] != cfgTextType() {
+            p.error = 92
+        }
+        // Appending a buffer to itself would read storage that growth moves.
+        if inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
+    }
+    if inst.kind == 13 && inst.op >= 0 {
+        if inst.op >= p.functions[f].vars {
+            p.error = 94
+        } else if p.types_code[p.functions[f].first_var + inst.op] != 1 {
+            p.error = 94
+        }
+    }
     if inst.kind == 1 && first_type != dest_type { p.error = 34 }
     if inst.kind == 2 {
         let second_type = cfgOperandType(p, f, &inst.b)
@@ -110,8 +171,6 @@ pub fn cfgReadInst(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader,
         if inst.op >= 4 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
         if inst.op >= 6 && first_type != 0 { p.error = 36 }
     }
-    if inst.kind == 3 && inst.argc >= 1 && (first_type < 0 || first_type >= 2) { p.error = 37 }
-    if inst.kind == 3 && inst.argc == 2 && (cfgOperandType(p, f, &inst.b) < 0 || cfgOperandType(p, f, &inst.b) >= 2) { p.error = 37 }
     if inst.kind == 4 {
         if inst.op < 0 || inst.op >= p.structs.length || dest_type != inst.op + 2 { p.error = 65 }
         if p.error == 0 {

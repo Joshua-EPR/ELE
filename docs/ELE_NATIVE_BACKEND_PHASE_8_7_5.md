@@ -1,3 +1,7 @@
+> La fase 8.7.6 sustituye `native_rt_print.l` por `native_rt.l`, cambia la
+> convención de llamada y añade Text; ver
+> [ELE_NATIVE_BACKEND_PHASE_8_7_6.md](ELE_NATIVE_BACKEND_PHASE_8_7_6.md).
+
 # Fase 8.7.5 — `print`, funciones sin retorno e Int completo en el backend nativo ELE
 
 Estado: **implementado y ejecutado en Linux x86-64** (2026-11-11). No cierra

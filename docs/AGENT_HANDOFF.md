@@ -1274,23 +1274,33 @@ aprobadas y 243 fallidas (todas las fallidas requieren Cranelift/MSVC),
 frente a 141/350 antes; fmt y clippy limpios. **No verificado:** Windows y
 GitHub Actions (la sesión no tenía acceso de escritura al repositorio).
 
+### Fase 8.7.6 — Text propio y llamadas por pila (misma rama)
+
+Detalle en [ELE_NATIVE_BACKEND_PHASE_8_7_6.md](ELE_NATIVE_BACKEND_PHASE_8_7_6.md).
+Verificado en Linux: `native_print_l` 7/7, suite 256 aprobadas / 242
+fallidas (Cranelift/MSVC), fmt y clippy limpios. `fibonacci.l`, `text.l` e
+`interpolation.l` ya compilan y ejecutan por la ruta nativa ELE.
+
+Defectos de Stage 0 observados y sin corregir: un diagnóstico de un módulo
+importado se informa con la ruta del archivo raíz; el límite CORE-1 de 4096
+tokens por archivo obliga a partir módulos.
+
 Estado del objetivo final: **COMPILADOR AÚN NO COMPLETO.** Bloqueos por
 orden de dependencia:
 
-1. Texto y heap en la ruta `.l` → ELF: `textbuf`, `append`, `drop`, `ct…`,
-   `print` de Text. Los módulos `native_heap*.l` y `native_list_int.l` solo
-   se usan desde casos manuales, no desde el lowering CFG.
-2. Límites del lowering CFG (2 parámetros, 64 variables, 32 bloques, 16
-   funciones, sin retorno de agregados, sin préstamos, sin `List`).
+1. Parámetros por referencia, Text en agregados, operaciones de Text
+   (`byteLength`, `byteAt`, comparación) y `List` en el lowering CFG. Los
+   módulos `native_heap*.l` y `native_list_int.l` siguen sin usarse desde él.
+2. Retorno y paso de structs/enums por valor; `unary`, `div`, `rem`.
 3. Stage 1 no se analiza a sí mismo: faltan imports entre módulos en la
    LIR, métodos de `List`/`Text`, índices, `Option`/`Result` y `?`
    (ver SELF_HOSTING_GAP_ANALYSIS.md). Sin esto no hay Stage 2.
 4. E/S de archivos y argumentos en el runtime nativo ELE (hoy vienen del
    bootstrap).
 5. Backend PE64 y runtime Windows: no existe código.
-6. Fuentes de `compiler-l/src` todavía en la sintaxis histórica.
+6. Fuentes de `compiler-l/src` todavía en la sintaxis histórica (los
+   módulos nuevos `native_rt.l` y `native_heap_owner.l` ya usan la canónica).
 7. CLI en ELE (`ele check|build|run|test|fmt`), optimizador y benchmarks.
 
-Siguiente trabajo concreto: punto 1, empezando por constantes `ct` en una
-sección de datos de solo lectura y `print` de Text literal; después
-`textbuf`/`append`/`drop` sobre `native_heap_owner.l`.
+Siguiente trabajo concreto: punto 1, empezando por `ref` en parámetros y
+`i len`/`byteAt` de Text, que son las operaciones que más usa `compiler-l`.

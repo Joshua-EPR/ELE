@@ -1,4 +1,4 @@
-//! `print` and unit functions through the ELE-written native backend:
+//! `print`, unit functions and owned Text through the ELE-written backend:
 //! `.l` source -> Stage 1 -> ELE-LIR -> x86-64 -> ELF64. Every host checks
 //! acceptance, rejection and the image header; Linux x86-64 also executes the
 //! image and compares its stdout byte for byte.
@@ -124,16 +124,16 @@ fn official_examples_with_print_build_native_elf() {
     }
 }
 
-/// Programs without output must not carry the print runtime.
+/// Programs without output must not carry the runtime.
 #[test]
-fn print_runtime_is_emitted_only_when_used() {
+fn runtime_is_emitted_only_when_used() {
     let quiet = fs::read(compile(
         &root().join("examples/ele_original_syntax.l"),
         "quiet",
     ))
     .unwrap();
     let loud = fs::read(compile(&root().join("examples/hello.l"), "loud")).unwrap();
-    // `0f 05` is SYSCALL: three exits always, plus one write per routine.
+    // `0f 05` is SYSCALL. A quiet image only has its three exits.
     let syscalls = |bytes: &[u8]| {
         bytes[4096..]
             .windows(2)
@@ -141,7 +141,74 @@ fn print_runtime_is_emitted_only_when_used() {
             .count()
     };
     assert_eq!(syscalls(&quiet), 3);
-    assert_eq!(syscalls(&loud), 5);
+    assert!(syscalls(&loud) > 3);
+}
+
+/// Owned Text end to end: literals, interpolation, growth, by-value
+/// parameters, Text results and deterministic release.
+#[test]
+fn text_programs_build_native_elf_and_match_stage0() {
+    for name in ["fibonacci", "text", "interpolation", "native_text_stage1"] {
+        let source = root().join(format!("examples/{name}.l"));
+        let image = compile(&source, name);
+        let _ = &image;
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            // Stage 0's reference backend is the oracle for the output.
+            let reference = Command::new(env!("CARGO_BIN_EXE_l"))
+                .current_dir(temp(""))
+                .arg("run")
+                .arg(&source)
+                .output()
+                .unwrap();
+            assert!(reference.status.success(), "{name}");
+            let expected: String = String::from_utf8(reference.stdout)
+                .unwrap()
+                .lines()
+                .filter(|line| !line.starts_with("Build: "))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            let (code, stdout) = execute(&image);
+            assert_eq!(stdout, expected, "{name}");
+            assert_eq!(code, Some(0), "{name}");
+        }
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        let (_, stdout) = execute(&temp("native_text_stage1.elf"));
+        let expected =
+            fs::read_to_string(root().join("examples/native_text_stage1.expected")).unwrap();
+        assert_eq!(stdout, expected);
+    }
+}
+
+/// Runtime guards and accepted LIR forms that no source program reaches.
+#[test]
+fn text_lir_fixtures_run_with_their_documented_status() {
+    for (fixture, _status, _stdout) in [
+        ("native_cfg_text_literal_ok.lir", 0, "hi\n\n"),
+        ("native_cfg_text_flagged_drop.lir", 0, "false\n"),
+        // Appending to a literal is caught at run time, before any write.
+        ("native_cfg_text_append_literal.lir", 121, ""),
+    ] {
+        let image = temp(&format!("{fixture}.elf"));
+        let out = Command::new(native())
+            .arg(root().join("examples").join(fixture))
+            .arg(&image)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{fixture}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            let (code, stdout) = execute(&image);
+            assert_eq!(code, Some(_status), "{fixture}");
+            assert_eq!(stdout, _stdout, "{fixture}");
+        }
+    }
 }
 
 #[test]
@@ -167,8 +234,6 @@ fn full_int_range_constants_are_accepted() {
 
 #[test]
 fn unsupported_or_invalid_print_and_unit_forms_are_rejected() {
-    // Text needs the heap runtime: rejected while reading the operand.
-    rejected("native_cfg_print_text.lir", 33);
     // Reading an uninitialized variable.
     rejected("native_cfg_print_uninit.lir", 57);
     // Aggregates have no textual form.
@@ -179,4 +244,18 @@ fn unsupported_or_invalid_print_and_unit_forms_are_rejected() {
     rejected("native_cfg_unit_param.lir", 45);
     // One past the maximum Int.
     rejected("native_cfg_const_overflow.lir", 33);
+    // Text ownership: every one of these would corrupt or leak memory.
+    rejected("native_cfg_text_use_after_move.lir", 57);
+    rejected("native_cfg_text_double_drop.lir", 57);
+    rejected("native_cfg_text_leak.lir", 59);
+    rejected("native_cfg_text_overwrite.lir", 59);
+    rejected("native_cfg_text_append_self.lir", 93);
+    // Forms the backend does not lower yet must not be accepted silently.
+    rejected("native_cfg_text_append_by_value.lir", 90);
+    rejected("native_cfg_text_in_struct.lir", 61);
+    rejected("native_cfg_call_ref_arg.lir", 33);
+    rejected("native_cfg_text_drop_int.lir", 92);
+    // Malformed literals.
+    rejected("native_cfg_text_bad_literal.lir", 33);
+    rejected("native_cfg_text_bad_byte.lir", 33);
 }

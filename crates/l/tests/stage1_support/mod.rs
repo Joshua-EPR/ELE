@@ -4,6 +4,12 @@ pub mod drop_cases;
 use std::{fs, path::PathBuf, process::Command};
 
 pub fn build(entry: &str, trace: bool) -> PathBuf {
+    // Tests of one binary run in parallel and may ask for the same entry;
+    // two compilers writing the same output directory corrupt each other.
+    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = BUILDING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir =
         root.join("target/stage1-tests")

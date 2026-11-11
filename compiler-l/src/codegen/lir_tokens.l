@@ -123,33 +123,35 @@ pub struct NativeOperand {
     value: Int
     is_bool: Bool
     is_unit: Bool
+    // Text literal: `value` indexes the literal table of the program.
+    is_text: Bool
 }
 
 pub fn nativeOperand(source: &Text, reader: &mut NativeReader) -> NativeOperand {
     let w = nativeWord(source, &mut reader)
     if w.start >= w.end {
         reader.error = 7
-        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false)
+        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
     }
     if source.byteAt(w.start) == 118 {
         let index = nativeDecimal(source, &mut reader, &w, 1)
-        return NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false)
+        return NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false)
     }
     if w.end - w.start >= 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 105 {
         let value = nativeDecimal64(source, &mut reader, &w, 2)
-        return NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false)
+        return NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false)
     }
     if w.end - w.start == 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 98 {
         let value = source.byteAt(w.start + 2)
-        if value == 48 { return NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false) }
-        if value == 49 { return NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false) }
+        if value == 48 { return NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false) }
+        if value == 49 { return NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false) }
     }
     // `cu` is the only unit constant. It carries no runtime value.
     if w.end - w.start == 2 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 117 {
-        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true)
+        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false)
     }
     reader.error = 7
-    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false)
+    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
 }
 
 pub fn nativeAtEnd(source: &Text, reader: &NativeReader) -> Bool {

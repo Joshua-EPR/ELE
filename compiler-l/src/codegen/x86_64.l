@@ -184,7 +184,7 @@ pub fn x64CallPlaceholder(code: &mut X64Code) -> Int {
 }
 
 pub fn x64FrameBegin(code: &mut X64Code, slots: Int) {
-    if slots < 0 || slots > 64 { code.error = 6; return }
+    if slots < 0 || slots > 512 { code.error = 6; return }
     x64Put(&mut code, 85) // push rbp
     x64MovReg(&mut code, 5, 4) // mov rbp,rsp
     var size = slots * 8
@@ -261,12 +261,12 @@ pub fn x64StoreMem8(code: &mut X64Code, base: Int, displacement: Int, src: Int) 
 }
 
 pub fn x64LoadSlot(code: &mut X64Code, dst: Int, slot: Int) {
-    if slot < 0 || slot >= 64 { code.error = 7; return }
+    if slot < 0 || slot >= 512 { code.error = 7; return }
     x64LoadMem64(&mut code, dst, 5, -8 * (slot + 1))
 }
 
 pub fn x64StoreSlot(code: &mut X64Code, slot: Int, src: Int) {
-    if slot < 0 || slot >= 64 { code.error = 7; return }
+    if slot < 0 || slot >= 512 { code.error = 7; return }
     x64StoreMem64(&mut code, 5, -8 * (slot + 1), src)
 }
 
@@ -320,4 +320,31 @@ pub fn x64DivUnsignedReg(code: &mut X64Code, reg: Int) {
     x64Put(&mut code, rex)
     x64Put(&mut code, 247)
     x64Put(&mut code, 240 + reg % 8)
+}
+
+// PUSH r64 (50+r, REX.B for R8-R15).
+pub fn x64PushReg(code: &mut X64Code, reg: Int) {
+    if !x64RegisterValid(reg) { code.error = 3; return }
+    if reg >= 8 { x64Put(&mut code, 65) }
+    x64Put(&mut code, 80 + reg % 8)
+}
+
+// REP MOVSB: copies RCX bytes from [RSI] to [RDI], ascending. The direction
+// flag is clear at process entry and this backend never sets it.
+pub fn x64RepMovsb(code: &mut X64Code) {
+    x64Put(&mut code, 243)
+    x64Put(&mut code, 164)
+}
+
+// Overwrites the 8-byte immediate of an earlier MOV r64,imm64.
+pub fn x64PatchAbsolute64(code: &mut X64Code, at: Int, value: Int) {
+    if at < 0 || at + 8 > code.bytes.length || value < 0 {
+        code.error = 4
+        return
+    }
+    var n = value
+    for i in 0..8 {
+        code.bytes[at + i] = n % 256
+        n = n / 256
+    }
 }

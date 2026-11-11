@@ -22,13 +22,27 @@ pub fn cfgUnitType() -> Int {
     return -2
 }
 
-// Value types plus `u`. Callers decide where unit is acceptable.
+pub fn cfgTextType() -> Int {
+    return -3
+}
+
+// Values whose assignment transfers ownership instead of copying.
+pub fn cfgIsMove(ty: Int) -> Bool {
+    return ty >= 2 || ty == cfgTextType()
+}
+
+// Value types plus `u` and `t`. Callers decide where each is acceptable;
+// aggregates keep using cfgType, so Text cannot appear inside them.
 pub fn cfgTypeOrUnit(p: &CfgProgram, source: &Text, reader: &mut NativeReader) -> Int {
     var probe = NativeReader(offset: reader.offset, error: 0)
     let w = nativeWord(source, &mut probe)
     if nativeEquals(source, &w, "u") {
         reader.offset = probe.offset
         return cfgUnitType()
+    }
+    if nativeEquals(source, &w, "t") {
+        reader.offset = probe.offset
+        return cfgTextType()
     }
     return cfgType(p, source, &mut reader)
 }
@@ -37,6 +51,7 @@ pub fn cfgTypeSize(p: &CfgProgram, ty: Int) -> Int {
     if ty == 0 { return 8 }
     // A unit variable owns one never-read slot so that slot math stays uniform.
     if ty == cfgUnitType() { return 8 }
+    if ty == cfgTextType() { return 24 }
     if ty == 1 { return 1 }
     if ty >= 2 && ty - 2 < p.structs.length { return p.structs[ty - 2].size }
     let enum_id = ty - 2 - p.structs.length
@@ -244,6 +259,7 @@ pub fn cfgBinaryOp(source: &Text, w: &NativeWord) -> Int {
 pub fn cfgOperandType(p: &CfgProgram, f: Int, op: &NativeOperand) -> Int {
     if !op.is_var {
         if op.is_unit { return cfgUnitType() }
+        if op.is_text { return cfgTextType() }
         if op.is_bool { return 1 }
         return 0
     }
@@ -252,3 +268,71 @@ pub fn cfgOperandType(p: &CfgProgram, f: Int, op: &NativeOperand) -> Int {
     return p.types_code[slot]
 }
 
+
+// Reads `ct<n>:<b>,<b>,...` (n bytes, each 0..255) into the literal table.
+// Returns the literal index, or -1 after setting a reader error.
+fn cfgReadTextLiteral(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, w: &NativeWord) -> Int {
+    var pos = w.start + 2
+    var declared = 0
+    var digits = 0
+    while pos < w.end {
+        let b = source.byteAt(pos)
+        if b == 58 { break }
+        if b < 48 || b > 57 || declared > 65536 { reader.error = 12; return -1 }
+        declared = declared * 10 + b - 48
+        digits += 1
+        pos += 1
+    }
+    if digits == 0 || declared > 65536 || pos >= w.end { reader.error = 12; return -1 }
+    pos += 1
+    let first = p.text_bytes.length
+    var seen = 0
+    while pos < w.end {
+        var number = 0
+        var length = 0
+        while pos < w.end {
+            let b = source.byteAt(pos)
+            if b == 44 { break }
+            if b < 48 || b > 57 || length == 3 { reader.error = 12; return -1 }
+            number = number * 10 + b - 48
+            length += 1
+            pos += 1
+        }
+        if length == 0 || number > 255 || seen == declared { reader.error = 12; return -1 }
+        p.text_bytes.push(number)
+        seen += 1
+        if pos < w.end {
+            pos += 1
+            if pos == w.end { reader.error = 12; return -1 }
+        }
+    }
+    if seen != declared { reader.error = 12; return -1 }
+    p.text_start.push(first)
+    p.text_length.push(declared)
+    return p.text_start.length - 1
+}
+
+// Any operand, including Text literals, which need the program to store
+// their bytes. Positions that cannot hold Text keep using nativeOperand.
+pub fn cfgOperand(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader) -> NativeOperand {
+    var probe = NativeReader(offset: reader.offset, error: 0)
+    let w = nativeWord(source, &mut probe)
+    if w.end - w.start >= 4 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 116 {
+        reader.offset = probe.offset
+        let index = cfgReadTextLiteral(&mut p, source, &mut reader, &w)
+        return NativeOperand(is_var: false, value: index, is_bool: false, is_unit: false, is_text: index >= 0)
+    }
+    return nativeOperand(source, &mut reader)
+}
+
+// `ref p<N> 0`: a shared reference to a whole variable. Projections and
+// exclusive references are not lowered yet and are rejected.
+pub fn cfgSharedVar(p: &CfgProgram, f: Int, source: &Text, reader: &mut NativeReader) -> Int {
+    let variable = nativeId(source, &mut reader, 112)
+    let exclusive = nativeNumber(source, &mut reader)
+    if reader.error != 0 || exclusive != 0 || variable < 0 || variable >= p.functions[f].vars {
+        reader.error = 13
+        return -1
+    }
+    return variable
+}
