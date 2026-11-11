@@ -56,7 +56,12 @@ pub fn semaEnumMatchCovered(ctx: &mut SemaContext, source: &Text, tree: &AstTree
         var same_enum = false
         if qualifier >= 0 {
             let sym = &ctx.symbols.symbols[qualifier]
-            if sym.kind == SymbolKind.Enum && sym.decl_id == enum_decl { same_enum = true }
+            match sym.kind {
+                SymbolKind.Enum => {
+                    if sym.decl_id == enum_decl { same_enum = true }
+                }
+                _ => {}
+            }
         }
         if !same_enum {
             semaAddError(&mut ctx, "L0004", "el patrón pertenece a otro enum o tiene un calificador inválido", p_start, p_end)
