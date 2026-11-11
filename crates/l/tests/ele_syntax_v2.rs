@@ -48,7 +48,8 @@ flow main() => Int {
 
 #[test]
 fn view_and_edit_are_explicit_borrow_syntax() {
-    check(r#"
+    check(
+        r#"
 flow value_of(value: view Int) => Int {
     give 42
 }
@@ -56,7 +57,9 @@ flow main() => Int {
     hold n = 1
     give value_of(view n)
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 }
 
 #[test]
