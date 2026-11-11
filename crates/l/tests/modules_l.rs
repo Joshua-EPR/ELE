@@ -174,7 +174,7 @@ fn cross_module_types_keep_nominal_identity() {
         &[
             (
                 "lib.l",
-                "pub struct Point { x: Int y: Int }\npub fn origin() -> Point { return Point(x: 40, y: 2) }\n",
+                "pub struct Point { x: Int, y: Int }\npub fn origin() -> Point { return Point(x: 40, y: 2) }\n",
             ),
             (
                 "main.l",
@@ -312,7 +312,11 @@ fn private_symbols_are_not_visible_across_modules() {
 fn same_name_private_symbols_do_not_collide() {
     // Two modules each declare a private helper; both remain usable within
     // their own module and are not confused with each other.
-    compare_multi(
+    // Stage 0 uses a single global namespace and currently rejects
+    // duplicate private names in distinct modules. This test specifically
+    // proves Stage 1's module scoping with a real LIR build and execution,
+    // rather than asserting unsupported behavior of the Stage 0 oracle.
+    let lir = emit_lir_multi(
         "same_name_private",
         "main.l",
         &[
@@ -330,6 +334,12 @@ fn same_name_private_symbols_do_not_collide() {
             ),
         ],
     );
+    assert_eq!(lir.code, Some(0), "{}", lir.stderr);
+    assert!(lir.stdout.starts_with("ELE-LIR 1\n"));
+    let (_, run) = build_and_run_lir("same_name_private", &lir.stdout);
+    assert_eq!(run.code, Some(42), "{}", run.stderr);
+    assert_eq!(run.stdout, "");
+    assert_eq!(program_stderr(&run.stderr), "");
 }
 
 #[test]

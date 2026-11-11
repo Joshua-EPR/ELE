@@ -1571,3 +1571,12 @@ completa el compilador ni sustituye el self-hosting Stage 2/3.
 Validación de la migración: GitHub Actions 43072044595 con tres trabajos
 aprobados (Ubuntu, Windows y ELF64 cruzado). La suite total histórica
 de Stage 0 no se declara íntegramente corregida por esta migración.
+
+
+## Bloqueo de regresiones Stage 1 — módulos y cursor
+Suite ampliada en Windows/MSVC que ejecuta realmente `modules_l` y
+`self_hosting` con `--no-fail-fast`. La línea base era de 13 pruebas
+de módulos (4 fallas) y 8 de self-hosting (1 falla), ahora con correcciones
+específicas: rutas y códigos de imports, fixture nominal y carga de
+dependencias del cursor. Verificación del resultado **pendiente de CI**.
+La limitación del namespace global de Stage 0 sigue explícita.

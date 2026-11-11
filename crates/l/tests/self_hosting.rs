@@ -5,6 +5,7 @@ use std::{
 };
 
 const LEXER: &str = include_str!("../../../compiler-l/src/lexer.l");
+const TOKENS: &str = include_str!("../../../compiler-l/src/tokens.l");
 const CURSOR: &str = include_str!("../../../compiler-l/src/cursor.l");
 
 fn execute(case: &str, source: &str, backend: &str, trace: bool) -> Output {
@@ -362,7 +363,7 @@ fn main() {
 "#;
     check(
         "cursor",
-        &format!("{LEXER}\n{CURSOR}\n{driver}"),
+        &format!("{LEXER}\n{TOKENS}\n{CURSOR}\n{driver}"),
         "false\n0\n0\n4\ntrue\n5\nfalse\n",
         None,
     );
