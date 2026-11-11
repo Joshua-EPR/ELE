@@ -103,7 +103,7 @@ flow main() => Int {
 #[test]
 fn old_angle_generics_remain_available_for_bootstrap() {
     check(
-        "fn identity<T>(value: T) -> T = value\\nfn main() -> Int { return identity<Int>(42) }",
+        "fn identity<T>(value: T) -> T = value\nfn main() -> Int { return identity<Int>(42) }",
     )
     .unwrap();
 }
