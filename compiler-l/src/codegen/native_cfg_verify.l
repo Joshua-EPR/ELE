@@ -138,7 +138,14 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             }
         }
     }
-    for b in 0..blocks { if !reachable[b] { return 55 } }
+    // Stage 1 emits an empty synthetic block terminated by `unreachable`
+    // after paths that already returned. No other disconnected block is valid.
+    for b in 0..blocks {
+        if !reachable[b] {
+            let dead = &p.blocks[func.first_block + b]
+            if dead.term != 4 || dead.count != 0 { return 55 }
+        }
+    }
 
     var inputs: List<Bool> = List[]
     var outputs: List<Bool> = List[]

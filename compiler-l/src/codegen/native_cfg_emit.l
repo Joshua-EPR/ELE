@@ -237,6 +237,8 @@ fn cfgEmitTerm(code: &mut X64Code, p: &CfgProgram, f: Int, block: &CfgBlock, fun
         jump_target.push(func.first_block + block.yes)
         jump_at.push(x64JumpPlaceholder(&mut code))
         jump_target.push(func.first_block + block.no)
+    } else if block.term == 4 {
+        x64Unreachable(&mut code)
     } else {
         code.error = 11
     }

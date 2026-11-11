@@ -36,6 +36,8 @@ fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f:
         value = nativeOperand(source, &mut reader)
         yes = nativeNumber(source, &mut reader)
         no = nativeNumber(source, &mut reader)
+    } else if nativeEquals(source, &keyword, "unreachable") {
+        kind = 4
     } else {
         p.error = 39
     }
