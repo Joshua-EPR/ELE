@@ -1371,7 +1371,7 @@ pruebas negativas y ejecución cruzada ELF en CI.
 No existe Stage 2 ni PE64. Ver docs/ELE_NATIVE_BACKEND_PHASE_8_7_10.md.
 
 
-### Ejemplos ELE v2 (migración de superficie, pendiente de CI)
+### Ejemplos ELE v2 (migración de superficie, CI 3/3 aprobado)
 
 Rama `chore/examples-ele-v2-canonical`: 25 archivos de `examples/`
 convertidos desde la sintaxis histórica de Rust a ELE v2, incluidos los
@@ -1380,3 +1380,7 @@ fixtures `.lir` se mantienen intactos. Se añadió una prueba que analiza
 los 40 ejemplos, preserva los rechazos y comprueba la salida de varios
 programas. Véase `docs/EXAMPLES_ELE_V2_MIGRATION.md`. Esta migración no
 completa el compilador ni sustituye el self-hosting Stage 2/3.
+
+Validación registrada en GitHub Actions: ejecución 43072044595 (Ubuntu,
+Windows y ELF64 cruzado, tres trabajos aprobados). No es una verificación
+de self-hosting Stage 2 ni de la suite histórica completa.

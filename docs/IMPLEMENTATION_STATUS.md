@@ -1567,3 +1567,7 @@ fixtures `.lir` se mantienen intactos. Se añadió una prueba que analiza
 los 40 ejemplos, preserva los rechazos y comprueba la salida de varios
 programas. Véase `docs/EXAMPLES_ELE_V2_MIGRATION.md`. Esta migración no
 completa el compilador ni sustituye el self-hosting Stage 2/3.
+
+Validación de la migración: GitHub Actions 43072044595 con tres trabajos
+aprobados (Ubuntu, Windows y ELF64 cruzado). La suite total histórica
+de Stage 0 no se declara íntegramente corregida por esta migración.

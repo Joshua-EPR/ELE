@@ -1,7 +1,10 @@
 # Migración de ejemplos de ELE a sintaxis v2
 
-**Estado:** cambios preparados en la rama `chore/examples-ele-v2-canonical`.
-La aceptación depende del CI de GitHub Actions y sus pruebas de ejecución.
+**Estado:** cambios implementados y verificados en la rama
+`chore/examples-ele-v2-canonical`. GitHub Actions
+[43072044595](https://github.com/Joshua-EPR/ELE/actions/runs/43072044595)
+aprobó los tres trabajos configurados: Ubuntu, Windows y ejecución de
+ELF64 generado en Windows sobre Linux.
 
 ## Alcance
 
