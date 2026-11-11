@@ -84,6 +84,15 @@ pub fn x64AddReg(code: &mut X64Code, dst: Int, src: Int) {
     x64ModRmRegisters(&mut code, src, dst)
 }
 
+// AND r/m64,r64, needed for page alignment in the native heap.
+// Emitted opcode 0x21: destination is ModRM.r/m.
+pub fn x64AndReg(code: &mut X64Code, dst: Int, src: Int) {
+    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
+    x64RexRegRm(&mut code, src, dst)
+    x64Put(&mut code, 33)
+    x64ModRmRegisters(&mut code, src, dst)
+}
+
 pub fn x64SubReg(code: &mut X64Code, dst: Int, src: Int) {
     if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
     x64RexRegRm(&mut code, src, dst)
