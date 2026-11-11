@@ -1599,3 +1599,25 @@ Resultados verificados en [Actions 43081976701](https://github.com/Joshua-EPR/EL
 Nueva puerta de calidad: suite completa Windows/MSVC con `--no-fail-fast`
 en todos los PR; está pendiente de validarse sobre el commit nuevo.
 Issue #31 conserva el defecto de namespacing privado de Stage 0.
+
+### Corrección de seguridad: aliasing de préstamos locales
+## Corrección del verificador de préstamos locales — 2026-11-11
+
+El backend ELE ya no identifica la independencia de dos argumentos de
+referencia por tener IDs de variables distintos. El análisis de llamadas
+resuelve préstamos locales a `ref_root` y proyecciones estáticas, y trata
+índices dinámicos de listas como potencialmente iguales. Se preserva el
+paso de préstamos sobre campos disjuntos.
+
+Al crear un préstamo compartido solapado con otro exclusivo vivo, el
+verificador invalida el exclusivo previo; usarlo después se rechaza con 57.
+La regla incluye préstamos derivados directamente de referencias locales.
+
+Se añadieron fixtures negativos de dos referencias locales en una llamada
+(99), referencia local y acceso directo (99) y préstamo compartido
+posterior al exclusivo con uso del original (57). Se añadió un fixture
+positivo de dos campos disjuntos de un shape, cuyo ELF debe salir con 42.
+
+**Estado de este incremento:** pendiente de verificación CI sobre el
+commit que contiene la corrección y estos fixtures. No modifica Stage 2,
+`listpop` ni `dropfield` mediante referencias locales.

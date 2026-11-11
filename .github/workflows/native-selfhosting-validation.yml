@@ -280,6 +280,7 @@ jobs:
               ("native_cfg_list_index_ok.elf", 2),
               ("native_cfg_list_elem_ref_ok.elf", 42),
               ("native_cfg_loan_ok.elf", 42),
+              ("native_cfg_loan_disjoint_fields.elf", 42),
               ("native_cfg_list_index_oob.elf", 127),
               ("native_cfg_list_index_negative.elf", 127),
               ("native_cfg_list_reserve_negative.elf", 123),
