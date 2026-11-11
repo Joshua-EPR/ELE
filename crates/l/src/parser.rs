@@ -403,10 +403,10 @@ impl Parser {
             let span = self.token().span;
             let name = self.name()?;
             let mut args = Vec::new();
-            if self.take("<") {
+            if let Some(close) = self.generic_open() {
                 loop {
                     args.push(self.ty()?);
-                    if self.take(">") {
+                    if self.take(close) {
                         break;
                     }
                     self.need(",")?;
@@ -424,9 +424,31 @@ impl Parser {
         Ok(TypeExpr::Prim(prim))
     }
 
+    /// ELE v2 spells a generic application as `of[T]`. Keeping the
+    /// delimiter explicit avoids confusing it with list indexing or a
+    /// comparison. `<T>` remains a bootstrap-only compatibility spelling.
+    fn generic_of_next(&self) -> bool {
+        self.at("of")
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|token| &token.kind),
+                Some(Kind::Sym(symbol)) if symbol == "["
+            )
+    }
+
+    fn generic_open(&mut self) -> Option<&'static str> {
+        if self.take("<") {
+            Some(">")
+        } else if self.generic_of_next() {
+            self.pos += 2;
+            Some("]")
+        } else {
+            None
+        }
+    }
+
     fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, Diagnostic> {
         let mut params = Vec::new();
-        if self.take("<") {
+        if let Some(close) = self.generic_open() {
             loop {
                 self.nl();
                 let span = self.token().span;
@@ -439,12 +461,12 @@ impl Parser {
                 };
                 params.push(TypeParam { name, bound, span });
                 self.nl();
-                if self.take(">") {
+                if self.take(close) {
                     break;
                 }
                 self.need(",")?;
                 self.nl();
-                if self.take(">") {
+                if self.take(close) {
                     break;
                 }
             }
@@ -506,9 +528,7 @@ impl Parser {
     fn try_type_args_call(&mut self) -> Option<Vec<TypeExpr>> {
         let saved_pos = self.pos;
         let saved_parens = self.parens;
-        if !self.take("<") {
-            return None;
-        }
+        let close = self.generic_open()?;
         let mut args = Vec::new();
         loop {
             let ty = match self.ty() {
@@ -520,7 +540,7 @@ impl Parser {
                 }
             };
             args.push(ty);
-            if self.take(">") {
+            if self.take(close) {
                 break;
             }
             if !self.take(",") {
@@ -658,7 +678,7 @@ impl Parser {
             Kind::Word(_s) => {
                 self.pos -= 1;
                 let name = self.name_or_self()?;
-                if self.at("<") {
+                if self.at("<") || self.generic_of_next() {
                     if let Some(type_args) = self.try_type_args_call() {
                         self.need("(")?;
                         ExprKind::GenericCall(name, type_args, self.arguments()?)
@@ -740,7 +760,7 @@ impl Parser {
                 self.need(".")?;
             }
             let member = self.member()?;
-            let kind = if self.at("<")
+            let kind = if (self.at("<") || self.generic_of_next())
                 && let Some(type_args) = self.try_type_args_call()
             {
                 self.need("(")?;
@@ -1281,10 +1301,10 @@ impl Parser {
         self.need("enum")?;
         let name = self.name()?;
         let mut params = Vec::new();
-        if self.take("<") {
+        if let Some(close) = self.generic_open() {
             loop {
                 params.push(self.name()?);
-                if self.take(">") {
+                if self.take(close) {
                     break;
                 }
                 self.need(",")?;
@@ -1469,10 +1489,10 @@ impl Parser {
         let (trait_name, target, target_args) = if self.take("for") {
             let target = self.name()?;
             let mut target_args = Vec::new();
-            if self.take("<") {
+            if let Some(close) = self.generic_open() {
                 loop {
                     target_args.push(self.ty()?);
-                    if self.take(">") {
+                    if self.take(close) {
                         break;
                     }
                     self.need(",")?;
@@ -1481,10 +1501,10 @@ impl Parser {
             (Some(first), target, target_args)
         } else {
             let mut target_args = Vec::new();
-            if self.take("<") {
+            if let Some(close) = self.generic_open() {
                 loop {
                     target_args.push(self.ty()?);
-                    if self.take(">") {
+                    if self.take(close) {
                         break;
                     }
                     self.need(",")?;
