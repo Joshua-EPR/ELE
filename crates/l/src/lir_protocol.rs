@@ -503,6 +503,15 @@ impl FnCtx<'_> {
             "disc" => {
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
+                // The ELE-native reader implements `disc` for direct enum
+                // values only. A reference or projected field must not be
+                // silently accepted by the Rust protocol consumer.
+                if !place.proj.is_empty()
+                    || !matches!(self.vars[place.var], VarTy::Value(Type::Enum(_)))
+                    || self.vars[d] != VarTy::Value(Type::Int)
+                {
+                    return line.fail("disc requiere un enum directo y un destino Int");
+                }
                 InstKind::Assign(d, Rvalue::Discriminant(place))
             }
             "payload" => {
@@ -513,9 +522,8 @@ impl FnCtx<'_> {
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
                 let enum_id = line.id('e', self.enums.len())?;
-                let variant_id = line.count(
-                    self.enums[enum_id].variants.len().saturating_sub(1),
-                )?;
+                let variant_id =
+                    line.count(self.enums[enum_id].variants.len().saturating_sub(1))?;
                 if variant_id >= self.enums[enum_id].variants.len() {
                     return line.fail("variante inexistente para payload");
                 }
@@ -526,7 +534,8 @@ impl FnCtx<'_> {
                 if !place.proj.is_empty()
                     || self.vars[place.var] != VarTy::Value(Type::Enum(enum_id))
                 {
-                    return line.fail("payload requiere un enum directo por valor del tipo indicado");
+                    return line
+                        .fail("payload requiere un enum directo por valor del tipo indicado");
                 }
                 let payload = &self.enums[enum_id].variants[variant_id].1;
                 if payload.len() != 1
@@ -756,6 +765,9 @@ pub fn parse(text: &str) -> Result<Module, ProtocolError> {
         let name = bytes_text(&mut e)?;
         e.expect("variants")?;
         let n = e.count(MAX_ITEMS)?;
+        if n == 0 {
+            return e.fail("un enum debe declarar al menos una variante");
+        }
         e.done()?;
         let mut variants = Vec::new();
         for _ in 0..n {

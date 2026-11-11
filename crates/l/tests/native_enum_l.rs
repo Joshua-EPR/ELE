@@ -1,5 +1,5 @@
 //! ELE-written native backend enum slice; Stage 0 builds the .l backend.
-//! The Stage 1 source emitter does not yet serialize variant/disc.
+//! Runtime payload guards are also verified by executing exported ELF64 on Linux.
 mod stage1_support;
 
 use std::{
@@ -65,6 +65,46 @@ fn enum_unit_and_primitive_payload_emit_real_elf64_from_ele_backend() {
             );
         }
         fs::remove_file(output).unwrap();
+    }
+}
+
+#[test]
+fn enum_payload_wrong_active_is_guarded_before_read() {
+    // This LIR is structurally well-typed, but requests Some(Int) from None.
+    // The ELE-written backend must emit a checked extraction: Linux exit 126,
+    // not a read of the inactive payload slot.
+    let input = root().join("examples/native_cfg_enum_payload_wrong_active.lir");
+    let output = root().join("target/stage1-tests/native-enum-wrong-active/wrong-active.elf");
+    fs::create_dir_all(output.parent().unwrap()).unwrap();
+    if output.exists() {
+        fs::remove_file(&output).unwrap();
+    }
+    let built = Command::new(compiler())
+        .arg(&input)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "wrong-active fixture should compile with a runtime guard: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let bytes = fs::read(&output).unwrap();
+    assert!(bytes.len() > 4096, "missing native instructions");
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&output).unwrap().permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&output, perms).unwrap();
+        let run = Command::new(&output).output().unwrap();
+        assert_eq!(
+            run.status.code(),
+            Some(126),
+            "wrong active variant must trap before payload read"
+        );
     }
 }
 

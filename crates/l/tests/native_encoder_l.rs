@@ -31,7 +31,9 @@ fn fixture_hex(entry: &str, prefix: &str) -> Vec<u8> {
     assert!(value.len() % 2 == 0, "hex string must contain byte pairs");
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let s = std::str::from_utf8(pair).unwrap();
             u8::from_str_radix(s, 16).expect("valid hex byte")
@@ -51,7 +53,7 @@ fn ele_x86_64_encoder_emits_correct_bytes_for_extended_registers() {
             0x4d, 0x29, 0xc1, // sub r9,r8
             0x4d, 0x39, 0xc1, // cmp r9,r8
             0x4d, 0x0f, 0xaf, 0xc8, // imul r9,r8
-            0xe9, 0x01, 0, 0, 0, // jmp after ret
+            0xe9, 0x01, 0, 0, 0,    // jmp after ret
             0xc3, // ret
         ]
     );
@@ -63,13 +65,19 @@ fn ele_elf64_writer_emits_loadable_syscall_image() {
     assert_eq!(&elf[0..7], b"\x7fELF\x02\x01\x01");
     assert_eq!(u16::from_le_bytes(elf[16..18].try_into().unwrap()), 2); // ET_EXEC
     assert_eq!(u16::from_le_bytes(elf[18..20].try_into().unwrap()), 62); // x86-64
-    assert_eq!(u64::from_le_bytes(elf[24..32].try_into().unwrap()), 0x401000);
+    assert_eq!(
+        u64::from_le_bytes(elf[24..32].try_into().unwrap()),
+        0x401000
+    );
     assert_eq!(u64::from_le_bytes(elf[32..40].try_into().unwrap()), 64);
     assert_eq!(u16::from_le_bytes(elf[54..56].try_into().unwrap()), 56);
     assert_eq!(u16::from_le_bytes(elf[56..58].try_into().unwrap()), 1);
     assert_eq!(u32::from_le_bytes(elf[64..68].try_into().unwrap()), 1); // PT_LOAD
     assert_eq!(u32::from_le_bytes(elf[68..72].try_into().unwrap()), 5); // R-X
-    assert_eq!(u64::from_le_bytes(elf[96..104].try_into().unwrap()), elf.len() as u64);
+    assert_eq!(
+        u64::from_le_bytes(elf[96..104].try_into().unwrap()),
+        elf.len() as u64
+    );
     assert_eq!(
         &elf[4096..],
         &[
@@ -114,11 +122,16 @@ fn ele_lir_subset_backend_compiles_real_protocol_to_native_elf() {
     assert!(hex.len() % 2 == 0);
     let bytes: Vec<u8> = hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect();
     assert_eq!(&bytes[0..4], b"\x7fELF");
-    assert_eq!(u64::from_le_bytes(bytes[24..32].try_into().unwrap()), 0x401000);
+    assert_eq!(
+        u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
+        0x401000
+    );
     // v0 = 40; v1 = v0 + 2; return v1 via Linux sys_exit.
     assert_eq!(&bytes[4096..4106], &[0x49, 0xb8, 40, 0, 0, 0, 0, 0, 0, 0]);
     // Exact bytes, including a JO rel32 patched to an overflow exit path.
@@ -137,7 +150,9 @@ fn ele_lir_subset_backend_compiles_real_protocol_to_native_elf() {
     ]
     .concat()
     .as_bytes()
-    .chunks_exact(2)
+    .as_chunks::<2>()
+    .0
+    .iter()
     .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
     .collect();
     assert_eq!(&bytes[4096..], expected.as_slice());
@@ -175,10 +190,7 @@ fn unique_output(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!(
-        "ele-{name}-{}-{nanos}.bin",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("ele-{name}-{}-{nanos}.bin", std::process::id()))
 }
 
 #[test]
@@ -186,7 +198,11 @@ fn ele_write_bytes_persists_binary_values_without_utf8_conversion() {
     let exe = stage1_support::build("native_binary_io", false);
     let path = unique_output("bytes");
     let output = Command::new(exe).arg(&path).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(std::fs::read(&path).unwrap(), [0, 127, 128, 255, 10]);
     std::fs::remove_file(path).unwrap();
 }
@@ -195,9 +211,20 @@ fn ele_write_bytes_persists_binary_values_without_utf8_conversion() {
 fn ele_write_bytes_rejects_invalid_byte_before_creating_file() {
     let exe = stage1_support::build("native_binary_io", false);
     let path = unique_output("invalid-byte");
-    let output = Command::new(exe).arg(&path).arg("invalid").output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(!path.exists(), "invalid bytes must not create or truncate a file");
+    let output = Command::new(exe)
+        .arg(&path)
+        .arg("invalid")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !path.exists(),
+        "invalid bytes must not create or truncate a file"
+    );
 }
 
 #[test]
@@ -205,12 +232,23 @@ fn ele_elf64_is_written_as_executable_bytes_by_ele_source() {
     let exe = stage1_support::build("native_elf_demo", false);
     let path = unique_output("elf64");
     let output = Command::new(exe).arg(&path).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(&bytes[0..4], b"\x7fELF");
-    assert_eq!(u64::from_le_bytes(bytes[24..32].try_into().unwrap()), 0x401000);
-    assert_eq!(&bytes[4096..], &[0x48, 0xb8, 60, 0, 0, 0, 0, 0, 0, 0,
-                                   0x48, 0xbf, 42, 0, 0, 0, 0, 0, 0, 0, 0x0f, 0x05]);
+    assert_eq!(
+        u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
+        0x401000
+    );
+    assert_eq!(
+        &bytes[4096..],
+        &[
+            0x48, 0xb8, 60, 0, 0, 0, 0, 0, 0, 0, 0x48, 0xbf, 42, 0, 0, 0, 0, 0, 0, 0, 0x0f, 0x05
+        ]
+    );
     std::fs::remove_file(path).unwrap();
 }
 
@@ -224,7 +262,11 @@ fn ele_lir_subset_can_write_elf64_directly() {
         .arg(&path)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(&bytes[..4], b"\x7fELF");
     // The original LIR computes 40+2 and the encoder returns through Linux exit.

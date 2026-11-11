@@ -6,30 +6,28 @@ field 6:97,99,116,105,118,101 b
 struct s1 5:79,117,116,101,114 fields 2
 field 5:105,110,110,101,114 s0
 field 5:101,120,116,114,97 i
-func f0 4:109,97,105,110 params 0 result i 0 0 vars 9 blocks 3
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 8 blocks 3
 var v0 val s0
 var v1 val s0
 var v2 val s1
 var v3 val s1
-var v4 val s0
+var v4 val i
 var v5 val i
 var v6 val i
-var v7 val i
-var v8 val b
-block 0 10
+var v7 val b
+block 0 9
 i struct v0 s0 2 ci19 cb0
 i struct v1 s0 2 ci22 cb0
 i struct v2 s1 2 v0 ci20
 i store p2.0 v1
 i use v3 v2
 i read v4 p3.0.0
-i read v5 p3.0.0
-i read v6 p3.1
-i read v8 p3.0.1
-i binary v7 add v5 v6
-t branch v8 1 2
+i read v5 p3.1
+i read v7 p3.0.1
+i binary v6 add v4 v5
+t branch v7 1 2
 block 1 0
-t return v7
+t return v6
 block 2 0
 t return ci0
 endfunc

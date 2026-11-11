@@ -161,7 +161,7 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
             for i in 0..payload_count {
                 let ty = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index + i])
                 let code = lirTypeCode(&ctx.types, &ctx.lir_module, ty)
-                if code == "?" {
+                if code.byteLength == 1 && code.byteAt(0) == 63 {
                     semaAddError(&mut ctx, "L0016", "payload de enum no representable en ELE-LIR 1", variant.start, variant.end)
                 }
                 line = "{line} {code}"

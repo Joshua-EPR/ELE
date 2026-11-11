@@ -8,28 +8,38 @@ import types
 import stmt
 import decl
 
+// Stage 0 allows a borrowed enum to be inspected through a reference
+// parameter, but does not allow taking a fresh borrow as a match scrutinee.
+// Encode only the three token categories needed for error recovery.
+fn parserRecoveryKind(kind: &LexKind) -> Int {
+    match kind {
+        LexKind.Eof => { return 0 }
+        LexKind.Symbol => { return 1 }
+        LexKind.Word => { return 2 }
+        _ => { return 3 }
+    }
+}
+
 fn parserSynchronize(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     cursor.pos += 1
     while cursor.pos < tokens.length {
         let tok = &tokens[cursor.pos]
-        match tok.kind {
-            LexKind.Eof => { return }
-            LexKind.Symbol => {
-                let len = tok.end - tok.start
-                if len == 1 {
-                    let b = source.byteAt(tok.start)
-                    if b == 59 || b == 125 {
-                        cursor.pos += 1
-                        return
-                    }
-                }
-            }
-            LexKind.Word => {
-                if parserIsWord(source, tok, "fn") || parserIsWord(source, tok, "let") || parserIsWord(source, tok, "var") || parserIsWord(source, tok, "struct") || parserIsWord(source, tok, "enum") || parserIsWord(source, tok, "const") || parserIsWord(source, tok, "import") {
+        let kind = parserRecoveryKind(&tok.kind)
+        if kind == 0 { return }
+        if kind == 1 {
+            let len = tok.end - tok.start
+            if len == 1 {
+                let b = source.byteAt(tok.start)
+                if b == 59 || b == 125 {
+                    cursor.pos += 1
                     return
                 }
             }
-            _ => {}
+        }
+        if kind == 2 {
+            if parserIsWord(source, tok, "fn") || parserIsWord(source, tok, "let") || parserIsWord(source, tok, "var") || parserIsWord(source, tok, "struct") || parserIsWord(source, tok, "enum") || parserIsWord(source, tok, "const") || parserIsWord(source, tok, "import") {
+                return
+            }
         }
         cursor.pos += 1
     }

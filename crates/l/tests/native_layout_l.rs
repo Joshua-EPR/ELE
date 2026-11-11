@@ -7,7 +7,9 @@ use std::process::Command;
 #[test]
 fn ele_native_layout_aligns_nests_and_plans_drops() {
     let exe = stage1_support::build("native_layout_cases", false);
-    let out = Command::new(exe).output().expect("run native-layout ELE fixture");
+    let out = Command::new(exe)
+        .output()
+        .expect("run native-layout ELE fixture");
     assert!(
         out.status.success(),
         "stderr={} stdout={}",

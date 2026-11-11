@@ -1,4 +1,6 @@
 import tokens
+import sema_borrow_syntax
+import sema_expr_temp
 import ast
 import sema_types
 import symbols
@@ -38,7 +40,7 @@ fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
 // or a borrowed return may hold a borrow (Stage 0 rules).
 fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, site: Int) -> Int {
     let expr = &tree.expressions[expr_id]
-    let is_mut = expr.c - expr.b >= 4
+    let is_mut = semaBorrowSyntaxKind(source, expr.b, expr.c) == 2
     if site == SITE_VAR || semaPlaceRoot(tree, expr.a) < 0 {
         semaAddError(&mut ctx, "L0012", "use let para prestar una variable, campo o elemento con un origen fijo", expr.start, expr.end)
         return 7
@@ -71,9 +73,10 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
     var arg_mut = false
     match arg.kind {
         AstExprKind.Unary => {
-            if arg.b >= 0 && arg.b < source.byteLength && source.byteAt(arg.b) == 38 {
+            let kind = semaBorrowSyntaxKind(source, arg.b, arg.c)
+            if kind > 0 {
                 explicit = true
-                arg_mut = arg.c - arg.b >= 4
+                arg_mut = kind == 2
             }
         }
         _ => {}
@@ -110,15 +113,6 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
 
 // A value read by print or an interpolation that is not a place and not a
 // literal is an owned temporary of the enclosing statement.
-fn semaReadTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int, mark: Int) {
-    if ctx.expression_path >= 0 || expr_id < 0 { return }
-    match tree.expressions[expr_id].kind {
-        AstExprKind.TextLit => { return }
-        _ => {}
-    }
-    semaTempAt(&mut ctx, source, tree, ty, tree.expressions[expr_id].start, tree.expressions[expr_id].end, mark)
-}
-
 fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
     ctx.expression_path = -1
     if expr_id < 0 || expr_id >= tree.expressions.length {
@@ -195,7 +189,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
         AstExprKind.Unary => {
             if expr.b >= 0 && expr.b < source.byteLength {
                 let op = source.byteAt(expr.b)
-                if op == 38 {
+                if semaBorrowSyntaxKind(source, expr.b, expr.c) > 0 {
                     return semaBorrowExpr(&mut ctx, source, tree, expr_id, site)
                 }
                 if op == 42 {

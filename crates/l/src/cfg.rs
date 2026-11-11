@@ -1139,8 +1139,7 @@ impl Builder<'_> {
                     .iter()
                     .map(|value| {
                         if value.ty != Type::Text
-                            && !(*op == PlatformOp::WriteBytes
-                                && matches!(value.ty, Type::List(_)))
+                            && !(*op == PlatformOp::WriteBytes && matches!(value.ty, Type::List(_)))
                         {
                             return Arg::Value(self.value(value));
                         }
@@ -1149,10 +1148,8 @@ impl Builder<'_> {
                         // Platform operations also borrow List<Int> for writeBytes.
                         // Preserve the actual referent type instead of constructing
                         // an invalid `Loan(List<Int>, Text)` in ELE-LIR.
-                        let var = self.assign(
-                            VarTy::Ref(value.ty),
-                            Rvalue::Loan(place, false, value.ty),
-                        );
+                        let var =
+                            self.assign(VarTy::Ref(value.ty), Rvalue::Loan(place, false, value.ty));
                         Arg::Ref(
                             Place {
                                 var,

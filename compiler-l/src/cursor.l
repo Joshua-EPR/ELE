@@ -9,7 +9,8 @@ fn cursorNew(fileId: Int) -> TokenCursor {
 
 fn cursorIsAtEnd(cursor: &TokenCursor, tokens: &List<LexToken>) -> Bool {
     if cursor.pos >= tokens.length { return true }
-    match tokens[cursor.pos].kind {
+    let current_kind_token = &tokens[cursor.pos]
+    match tokenKindValue(&current_kind_token.kind) {
         LexKind.Eof => { return true }
         _ => { return false }
     }

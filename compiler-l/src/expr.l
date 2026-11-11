@@ -15,7 +15,7 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
     var lhs = parsePrimaryExpr(&mut tree, source, &mut cursor, tokens, parens, depth + 1)
     if lhs < 0 { return -1 }
 
-    while parserAtSymbol(source, cursor, tokens, ".") || parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "[") {
+    while parserAtSymbol(source, cursor, tokens, ".") || parserAtSymbol(source, cursor, tokens, "@") || parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "[") {
         let tok = &tokens[cursor.pos]
         if parserTakeSymbol(source, &mut cursor, tokens, "[") {
             parserSkipNewlines(&mut cursor, tokens)
@@ -31,7 +31,8 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             continue
         }
 
-        parserTakeSymbol(source, &mut cursor, tokens, ".")
+        let method_only = parserTakeSymbol(source, &mut cursor, tokens, "@")
+        if !method_only { parserTakeSymbol(source, &mut cursor, tokens, ".") }
         if cursor.pos >= tokens.length {
             astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
             break
@@ -67,6 +68,10 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             let end_pos = cursorPrevEnd(cursor, tokens, m_end)
             lhs = astAddExpr(&mut tree, AstExprKind.MethodCall, tree.expressions[lhs].start, end_pos, lhs, m_start, m_end, first_call)
         } else {
+            if method_only {
+                astAddError(&mut tree, ParseProblem.ExpectedToken, "(", m_start, m_end)
+                return -1
+            }
             lhs = astAddExpr(&mut tree, AstExprKind.Field, tree.expressions[lhs].start, m_end, lhs, m_start, m_end, 0)
         }
     }
@@ -122,7 +127,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
     }
     let tok = &tokens[cursor.pos]
 
-    match tok.kind {
+    match tokenKindValue(&tok.kind) {
         LexKind.Integer => {
             let val = parserParseDecimalInt(source, tok.start, tok.end)
             cursor.pos += 1
@@ -141,7 +146,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
             var children: List<Int> = List[]
             while cursor.pos < tokens.length {
                 let partTok = &tokens[cursor.pos]
-                match partTok.kind {
+                match tokenKindValue(&partTok.kind) {
                     LexKind.TextEnd => {
                         cursor.pos += 1
                         break
@@ -160,7 +165,8 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
                         }
                         parserSkipNewlines(&mut cursor, tokens)
                         if cursor.pos < tokens.length {
-                            match tokens[cursor.pos].kind {
+                            let current_kind_token = &tokens[cursor.pos]
+                            match tokenKindValue(&current_kind_token.kind) {
                                 LexKind.InterpolationEnd => { cursor.pos += 1 }
                                 _ => {
                                     astAddError(&mut tree, ParseProblem.UnclosedInterpolation, "}}", tokens[cursor.pos].start, tokens[cursor.pos].end)
@@ -188,6 +194,14 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
             }
             if parserTakeWord(source, &mut cursor, tokens, "None") {
                 return astAddExpr(&mut tree, AstExprKind.Name, tok.start, tok.end, tok.start, tok.end, 0, 0)
+            }
+            let is_view = parserTakeWord(source, &mut cursor, tokens, "view")
+            let is_edit = parserTakeWord(source, &mut cursor, tokens, "edit")
+            if is_view || is_edit {
+                parserSkipNewlines(&mut cursor, tokens)
+                let operand = parseExpr(&mut tree, source, &mut cursor, tokens, 8, parens, depth + 1)
+                let end_pos = astExprEnd(&tree, operand, tok.end)
+                return astAddExpr(&mut tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, tok.end, 0)
             }
             if parserTakeWord(source, &mut cursor, tokens, "await") {
                 parserSkipNewlines(&mut cursor, tokens)
@@ -245,7 +259,7 @@ fn parsePrimaryExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
                             let t0 = &tokens[cursor.pos]
                             let t1 = &tokens[cursor.pos + 1]
                             if parserIsSymbol(source, t1, ":") {
-                                match t0.kind {
+                                match tokenKindValue(&t0.kind) {
                                     LexKind.Word => { is_named = true }
                                     _ => {}
                                 }

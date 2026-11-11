@@ -1,3 +1,4 @@
+import native_cfg_defs
 import native_cfg_verify
 import x86_64
 import elf64
@@ -71,7 +72,7 @@ fn cfgLoadOperand(code: &mut X64Code, p: &CfgProgram, f: Int, op: &NativeOperand
 // each nested field is an already-declared struct, so recursion terminates.
 // Primitive fields are emitted with their exact declared width (Bool=1,
 // Int=8); fields of a nested struct are copied recursively by layout.
-fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_disp: Int, src_disp: Int) {
+fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_disp: Int, src_disp: Int) -> () {
     if ty == 0 {
         x64LoadMem64(&mut code, 0, 5, src_disp)
         x64StoreMem64(&mut code, 5, dst_disp, 0)
@@ -236,6 +237,8 @@ fn cfgEmitTerm(code: &mut X64Code, p: &CfgProgram, f: Int, block: &CfgBlock, fun
         jump_target.push(func.first_block + block.yes)
         jump_at.push(x64JumpPlaceholder(&mut code))
         jump_target.push(func.first_block + block.no)
+    } else if block.term == 4 {
+        x64Unreachable(&mut code)
     } else {
         code.error = 11
     }
@@ -288,7 +291,8 @@ pub fn cfgBuild(p: &CfgProgram) -> CfgImage {
             block_at[index] = code.bytes.length
             let block = &p.blocks[index]
             for i in block.first..(block.first + block.count) {
-                cfgEmitInstruction(&mut code, p, f, &p.insts[i], &mut call_at, &mut call_to, &mut overflow_at, &mut bad_variant_at)
+                let inst = &p.insts[i]
+            cfgEmitInstruction(&mut code, p, f, &inst, &mut call_at, &mut call_to, &mut overflow_at, &mut bad_variant_at)
                 if code.error != 0 { break }
             }
             if code.error != 0 { break }

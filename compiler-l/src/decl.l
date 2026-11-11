@@ -127,6 +127,7 @@ fn parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             let end_p = cursorPrevEnd(cursor, tokens, vTok.end)
             astAddVariant(&mut tree, vTok.start, vTok.end, first_payload, payload_count, vTok.start, end_p)
             variant_count += 1
+            parserTakeSymbol(source, &mut cursor, tokens, ",")
             parserSkipSeparators(source, &mut cursor, tokens)
         }
 

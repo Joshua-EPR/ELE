@@ -75,7 +75,13 @@ fn build_and_run_lir(name: &str, lir: &str) -> (Output, Output) {
             .arg(&file)
             .arg("--trace-alloc"),
     );
-    assert_eq!(build.code, Some(0), "{name}: {}{}", build.stdout, build.stderr);
+    assert_eq!(
+        build.code,
+        Some(0),
+        "{name}: {}{}",
+        build.stdout,
+        build.stderr
+    );
     let exe = dir.join(
         build
             .stdout
@@ -113,12 +119,20 @@ fn run_stage0(name: &str, entry: &str, files: &[(&str, &str)]) -> Output {
 fn compare_multi(name: &str, entry: &str, files: &[(&str, &str)]) {
     let lir = emit_lir_multi(name, entry, files);
     assert_eq!(lir.code, Some(0), "{name}: {}", lir.stderr);
-    assert!(lir.stdout.starts_with("ELE-LIR 1\n"), "{name}: {}", lir.stdout);
+    assert!(
+        lir.stdout.starts_with("ELE-LIR 1\n"),
+        "{name}: {}",
+        lir.stdout
+    );
     let (_, one) = build_and_run_lir(name, &lir.stdout);
     let zero = run_stage0(name, entry, files);
     assert_eq!(one.code, zero.code, "{name}: exit code");
     assert_eq!(one.stdout, zero.stdout, "{name}: stdout");
-    assert_eq!(program_stderr(&one.stderr), program_stderr(&zero.stderr), "{name}: stderr");
+    assert_eq!(
+        program_stderr(&one.stderr),
+        program_stderr(&zero.stderr),
+        "{name}: stderr"
+    );
 }
 
 #[test]
@@ -128,7 +142,10 @@ fn two_modules_resolve_and_run_natively() {
         "main.l",
         &[
             ("lib.l", "pub fn double(x: Int) -> Int { return x * 2 }\n"),
-            ("main.l", "import lib\nfn main() -> Int { return double(21) }\n"),
+            (
+                "main.l",
+                "import lib\nfn main() -> Int { return double(21) }\n",
+            ),
         ],
     );
 }
@@ -140,7 +157,10 @@ fn transitive_imports_resolve_in_dependency_order() {
         "a.l",
         &[
             ("c.l", "pub fn three() -> Int { return 3 }\n"),
-            ("b.l", "import c\npub fn six() -> Int { return three() * 2 }\n"),
+            (
+                "b.l",
+                "import c\npub fn six() -> Int { return three() * 2 }\n",
+            ),
             ("a.l", "import b\nfn main() -> Int { return six() * 7 }\n"),
         ],
     );
@@ -156,7 +176,10 @@ fn cross_module_types_keep_nominal_identity() {
                 "lib.l",
                 "pub struct Point { x: Int y: Int }\npub fn origin() -> Point { return Point(x: 40, y: 2) }\n",
             ),
-            ("main.l", "import lib\nfn main() -> Int { let p = origin(); return p.x + p.y }\n"),
+            (
+                "main.l",
+                "import lib\nfn main() -> Int { let p = origin(); return p.x + p.y }\n",
+            ),
         ],
     );
 }
@@ -168,9 +191,18 @@ fn transitive_diamond_imports_deduplicate_and_resolve() {
         "main.l",
         &[
             ("common.l", "pub fn answer() -> Int { return 42 }\n"),
-            ("a.l", "import common\npub fn left() -> Int { return answer() }\n"),
-            ("b.l", "import common\npub fn right() -> Int { return answer() }\n"),
-            ("main.l", "import a\nimport b\nfn main() -> Int { return left() + right() }\n"),
+            (
+                "a.l",
+                "import common\npub fn left() -> Int { return answer() }\n",
+            ),
+            (
+                "b.l",
+                "import common\npub fn right() -> Int { return answer() }\n",
+            ),
+            (
+                "main.l",
+                "import a\nimport b\nfn main() -> Int { return left() + right() }\n",
+            ),
         ],
     );
 }
@@ -182,8 +214,14 @@ fn imported_function_can_reference_a_type_declared_later() {
         "forward_type",
         "main.l",
         &[
-            ("lib.l", "pub fn origin() -> Point { return Point(x: 42) }\npub struct Point { x: Int }\n"),
-            ("main.l", "import lib\nfn main() -> Int { let p = origin(); return p.x }\n"),
+            (
+                "lib.l",
+                "pub fn origin() -> Point { return Point(x: 42) }\npub struct Point { x: Int }\n",
+            ),
+            (
+                "main.l",
+                "import lib\nfn main() -> Int { let p = origin(); return p.x }\n",
+            ),
         ],
     );
 }
@@ -196,7 +234,10 @@ fn imported_public_types_with_same_name_are_ambiguous() {
         &[
             ("a.l", "pub struct Item { x: Int }\n"),
             ("b.l", "pub struct Item { y: Int }\n"),
-            ("main.l", "import a\nimport b\nfn make(x: Item) -> Int { return 0 }\nfn main() -> Int { return 0 }\n"),
+            (
+                "main.l",
+                "import a\nimport b\nfn make(x: Item) -> Int { return 0 }\nfn main() -> Int { return 0 }\n",
+            ),
         ],
     );
     assert_eq!(out.code, Some(1), "{}", out.stderr);
@@ -214,7 +255,10 @@ fn unrelated_sibling_public_symbol_is_not_implicitly_imported() {
         &[
             ("a.l", "pub fn call() -> Int { return hidden_from_a() }\n"),
             ("b.l", "pub fn hidden_from_a() -> Int { return 42 }\n"),
-            ("main.l", "import a\nimport b\nfn main() -> Int { return call() }\n"),
+            (
+                "main.l",
+                "import a\nimport b\nfn main() -> Int { return call() }\n",
+            ),
         ],
     );
     assert_eq!(out.code, Some(1), "{}", out.stderr);
@@ -230,7 +274,10 @@ fn two_public_imports_with_the_same_name_are_ambiguous() {
         &[
             ("a.l", "pub fn clash() -> Int { return 1 }\n"),
             ("b.l", "pub fn clash() -> Int { return 2 }\n"),
-            ("main.l", "import a\nimport b\nfn main() -> Int { return clash() }\n"),
+            (
+                "main.l",
+                "import a\nimport b\nfn main() -> Int { return clash() }\n",
+            ),
         ],
     );
     assert_eq!(out.code, Some(1), "{}", out.stderr);
@@ -245,7 +292,10 @@ fn private_symbols_are_not_visible_across_modules() {
         "main.l",
         &[
             ("lib.l", "fn secret() -> Int { return 1 }\n"),
-            ("main.l", "import lib\nfn main() -> Int { return secret() }\n"),
+            (
+                "main.l",
+                "import lib\nfn main() -> Int { return secret() }\n",
+            ),
         ],
     );
     assert_eq!(out.code, Some(1), "{}", out.stderr);
@@ -266,9 +316,18 @@ fn same_name_private_symbols_do_not_collide() {
         "same_name_private",
         "main.l",
         &[
-            ("a.l", "fn helper() -> Int { return 1 }\npub fn from_a() -> Int { return helper() }\n"),
-            ("b.l", "fn helper() -> Int { return 41 }\npub fn from_b() -> Int { return helper() }\n"),
-            ("main.l", "import a\nimport b\nfn main() -> Int { return from_a() + from_b() }\n"),
+            (
+                "a.l",
+                "fn helper() -> Int { return 1 }\npub fn from_a() -> Int { return helper() }\n",
+            ),
+            (
+                "b.l",
+                "fn helper() -> Int { return 41 }\npub fn from_b() -> Int { return helper() }\n",
+            ),
+            (
+                "main.l",
+                "import a\nimport b\nfn main() -> Int { return from_a() + from_b() }\n",
+            ),
         ],
     );
 }

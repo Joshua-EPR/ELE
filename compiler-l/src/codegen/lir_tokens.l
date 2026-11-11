@@ -31,7 +31,9 @@ pub fn nativeWord(source: &Text, reader: &mut NativeReader) -> NativeWord {
     return NativeWord(start: start, end: p)
 }
 
-pub fn nativeEquals(source: &Text, word: &NativeWord, literal: &Text) -> Bool {
+// Literal tokens are passed by value: a string literal is not an addressable
+// place and cannot be implicitly borrowed as &Text in Stage 0.
+pub fn nativeEquals(source: &Text, word: &NativeWord, literal: Text) -> Bool {
     if word.end - word.start != literal.byteLength { return false }
     for i in 0..literal.byteLength {
         if source.byteAt(word.start + i) != literal.byteAt(i) { return false }
@@ -39,7 +41,7 @@ pub fn nativeEquals(source: &Text, word: &NativeWord, literal: &Text) -> Bool {
     return true
 }
 
-pub fn nativeExpect(source: &Text, reader: &mut NativeReader, literal: &Text) {
+pub fn nativeExpect(source: &Text, reader: &mut NativeReader, literal: Text) {
     let w = nativeWord(source, &mut reader)
     if !nativeEquals(source, &w, literal) { reader.error = 2 }
 }

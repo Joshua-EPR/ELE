@@ -1,3 +1,5 @@
+import native_cfg_types
+import native_cfg_defs
 import native_cfg_ir
 
 // Flow-sensitive definedness and whole-value move validation for the
@@ -15,7 +17,7 @@ fn cfgEdge(p: &CfgProgram, f: Int, from: Int, to: Int) -> Bool {
 }
 
 fn cfgMoveOperand(p: &CfgProgram, f: Int, op: &NativeOperand, variable: Int) -> Bool {
-    return op.is_var && op.value == variable && cfgOperandType(p, f, op) >= 2
+    return op.is_var && op.value == variable && cfgOperandType(p, f, &op) >= 2
 }
 
 // A whole-value move occurs in a struct assignment, struct constructor or
@@ -42,7 +44,7 @@ fn cfgTransferVar(p: &CfgProgram, f: Int, block: &CfgBlock, variable: Int, initi
     var live = initial
     for i in block.first..(block.first + block.count) {
         let inst = &p.insts[i]
-        if cfgMoves(p, f, inst, variable) { live = false }
+        if cfgMoves(p, f, &inst, variable) { live = false }
         if inst.kind != 6 && inst.dst == variable { live = true }
     }
     return live
@@ -52,7 +54,7 @@ fn cfgTakeOperand(p: &CfgProgram, f: Int, op: &NativeOperand, live: &mut List<Bo
     if !op.is_var { return 0 }
     if op.value < 0 || op.value >= p.functions[f].vars { return 57 }
     if !live[op.value] { return 57 }
-    if cfgOperandType(p, f, op) >= 2 { live[op.value] = false }
+    if cfgOperandType(p, f, &op) >= 2 { live[op.value] = false }
     return 0
 }
 
@@ -136,7 +138,14 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
             }
         }
     }
-    for b in 0..blocks { if !reachable[b] { return 55 } }
+    // Stage 1 emits an empty synthetic block terminated by `unreachable`
+    // after paths that already returned. No other disconnected block is valid.
+    for b in 0..blocks {
+        if !reachable[b] {
+            let dead = &p.blocks[func.first_block + b]
+            if dead.term != 4 || dead.count != 0 { return 55 }
+        }
+    }
 
     var inputs: List<Bool> = List[]
     var outputs: List<Bool> = List[]
@@ -170,7 +179,7 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
                 }
                 let slot = b * vars + v
                 if inputs[slot] != is_init { inputs[slot] = is_init; changing = true }
-                let after = cfgTransferVar(p, f, block, v, is_init)
+                let after = cfgTransferVar(p, f, &block, v, is_init)
                 if outputs[slot] != after { outputs[slot] = after; changing = true }
             }
         }
@@ -181,7 +190,8 @@ fn cfgCheckFunction(p: &CfgProgram, f: Int) -> Int {
         var live: List<Bool> = List[]
         for v in 0..vars { live.push(inputs[b * vars + v]) }
         for i in block.first..(block.first + block.count) {
-            let error = cfgValidateInstruction(p, f, &p.insts[i], &mut live)
+            let inst = &p.insts[i]
+            let error = cfgValidateInstruction(p, f, &inst, &mut live)
             if error != 0 { return error }
         }
         if block.term == 1 || block.term == 3 {

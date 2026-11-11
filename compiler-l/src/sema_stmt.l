@@ -12,105 +12,9 @@ import lir_build
 import sema_lower
 import stmt_lower
 import sema_expr
-
-// Verify enum arm coverage before lowering: a named final arm may be
-// treated as a fallthrough only if every declared variant occurs once.
-// Unknown/duplicate patterns and incomplete matches cannot silently turn
-// into an unchecked default branch.
-fn semaEnumMatchCovered(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, enum_decl: Int) -> Bool {
-    if enum_decl < 0 || enum_decl >= tree.declarations.length { return false }
-    let decl = &tree.declarations[enum_decl]
-    var seen: List<Bool> = List[]
-    for v in 0..decl.d { seen.push(false) }
-    var wildcard = false
-    var valid = true
-    for arm in 0..expr.c {
-        let p_start = tree.extra[expr.b + 3 * arm]
-        let p_end = tree.extra[expr.b + 3 * arm + 1]
-        if p_end == p_start + 1 && source.byteAt(p_start) == 95 {
-            if arm != expr.c - 1 { valid = false }
-            wildcard = true
-            continue
-        }
-        if wildcard { valid = false }
-        // A user-defined variant must be qualified (`Estado.Si`). The
-        // qualifier is resolved to the *nominal enum declaration*, not
-        // matched merely by the variant's textual spelling. Otherwise a
-        // pattern like `OtroEstado.Si(v)` could be accepted for `Estado`.
-        var name_start = p_start
-        var name_end = p_end
-        var qualifier_end = -1
-        var open = -1
-        var dot_count = 0
-        for i in p_start..p_end {
-            let byte = source.byteAt(i)
-            if byte == 40 && open < 0 {
-                open = i
-                name_end = i
-            }
-            if byte == 46 && open < 0 {
-                qualifier_end = i
-                name_start = i + 1
-                dot_count += 1
-            }
-        }
-        if dot_count != 1 || qualifier_end <= p_start || name_start >= name_end {
-            // An unqualified name may denote a whole-value binding in ELE,
-            // but Stage 1's restricted native match does not lower it yet.
-            // Reject its LIR rather than misreading it as an enum variant.
-            lirMarkUnsupported(&mut ctx.lir, p_start)
-            valid = false
-            continue
-        }
-        let qualifier = semaLookupVisible(&mut ctx, source, p_start, qualifier_end)
-        var same_enum = false
-        if qualifier >= 0 {
-            let sym = &ctx.symbols.symbols[qualifier]
-            if sym.kind == SymbolKind.Enum && sym.decl_id == enum_decl { same_enum = true }
-        }
-        if !same_enum {
-            semaAddError(&mut ctx, "L0004", "el patrón pertenece a otro enum o tiene un calificador inválido", p_start, p_end)
-            valid = false
-            continue
-        }
-        var found = -1
-        for v in 0..decl.d {
-            let variant = &tree.variants[decl.c + v]
-            if symbolNamesEqual(source, variant.name_start, variant.name_end, name_start, name_end) { found = v }
-        }
-        if found < 0 {
-            semaAddError(&mut ctx, "L0004", "patrón de enum desconocido", p_start, p_end)
-            valid = false
-        } else if seen[found] {
-            semaAddError(&mut ctx, "L0004", "variante repetida en match", p_start, p_end)
-            valid = false
-        } else {
-            let variant = &tree.variants[decl.c + found]
-            // A unit variant cannot have a payload pattern, and a payload
-            // variant must explicitly match its payload. This also prevents
-            // silently treating a missing payload binder as a unit variant.
-            if (variant.payload_count == 0 && open >= 0) || (variant.payload_count > 0 && open < 0) {
-                semaAddError(&mut ctx, "L0004", "aridad incorrecta del patrón de variante", p_start, p_end)
-                valid = false
-            } else {
-                seen[found] = true
-            }
-            if open >= 0 && (p_end <= open + 1 || source.byteAt(p_end - 1) != 41) {
-                semaAddError(&mut ctx, "L0004", "patrón de payload mal formado", p_start, p_end)
-                valid = false
-            }
-        }
-    }
-    if !wildcard {
-        for v in 0..decl.d {
-            if !seen[v] { valid = false }
-        }
-    }
-    if !valid {
-        semaAddError(&mut ctx, "L0004", "match de enum no exhaustivo o con patrones inválidos", expr.start, expr.end)
-    }
-    return valid
-}
+import sema_match_coverage
+import sema_loop_jump
+import sema_stmt_values
 
 fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) {
     let expr = &tree.expressions[expr_id]
@@ -172,63 +76,7 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
     let stmt = &tree.statements[stmt_id]
     ctx.lir.at = stmt.start
     match stmt.kind {
-        AstStmtKind.Let => {
-            let is_mut = stmt.c == 1
-            let annot_t = stmt.d
-            let val_e = stmt.e
-            let existing = scopeLookupCurrent(&ctx.scopes, &ctx.symbols, source, stmt.a, stmt.b)
-            if existing >= 0 {
-                semaAddError(&mut ctx, "L0002", "variable duplicada en el mismo ámbito", stmt.start, stmt.end)
-                return 0
-            }
-            ctx.borrow_site = SITE_LET
-            if is_mut { ctx.borrow_site = SITE_VAR }
-            ctx.pending_loan = -1
-            ctx.expected_list_type = -1
-            if annot_t >= 0 && val_e >= 0 && val_e < tree.expressions.length {
-                match tree.expressions[val_e].kind {
-                    AstExprKind.ListLit => { ctx.expected_list_type = semaResolveAstType(&mut ctx, source, tree, annot_t) }
-                    _ => {}
-                }
-            }
-            var val_type = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
-            ctx.expected_list_type = -1
-            let loan = ctx.pending_loan
-            ctx.pending_loan = -1
-            if annot_t >= 0 {
-                let expected = semaResolveAstType(&mut ctx, source, tree, annot_t)
-                if loan >= 0 && !semTypeEquals(&ctx.types, val_type, expected) {
-                    match tree.expressions[val_e].kind {
-                        AstExprKind.Call => {
-                            semaAddError(&mut ctx, "L0013", "el resultado prestado requiere let y una anotación de referencia compatible", stmt.start, stmt.end)
-                        }
-                        _ => {
-                            semaAddError(&mut ctx, "L0012", "la anotación debe coincidir con el modo & o &mut del préstamo", stmt.start, stmt.end)
-                        }
-                    }
-                } else if semaRefElem(ctx, expected) >= 0 && loan < 0 {
-                    semaAddError(&mut ctx, "L0012", "una referencia local se inicializa con un préstamo de un lugar", stmt.start, stmt.end)
-                } else if !semTypeEquals(&ctx.types, val_type, expected) {
-                    let exp_n = semTypeName(&ctx.types, source, expected)
-                    let act_n = semTypeName(&ctx.types, source, val_type)
-                    semaAddError(&mut ctx, "L0003", "discrepancia de tipos en 'let': esperado '{exp_n}', recibido '{act_n}'", stmt.start, stmt.end)
-                } else {
-                    val_type = expected
-                }
-            }
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, val_type, ctx.scopes.current_scope, is_mut, false, -1, stmt.start, stmt.end)
-            scopeAddSymbol(&mut ctx.scopes, sym_id)
-            semaInitPath(&mut ctx, sym_id, stmt.start, stmt.end)
-            let own_path = ctx.symbols.symbols[sym_id].move_path
-            lirLetBind(&mut ctx, own_path, val_type, loan >= 0)
-            if loan >= 0 {
-                loanBind(&mut ctx.flow, own_path, loan)
-                semaOrigin(&mut ctx, own_path, semaValueOrigin(source, tree, val_e))
-            } else {
-                semaOwn(&mut ctx, source, tree, own_path, val_type, semaValueOrigin(source, tree, val_e))
-            }
-            semaFlushTemps(&mut ctx, stmt.start, stmt.end)
-        }
+        AstStmtKind.Let => { return semaStmtLet(&mut ctx, source, tree, stmt_id) }
         AstStmtKind.Assign => {
             let target_e = stmt.a
             let val_e = stmt.d
@@ -503,12 +351,3 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
     return 0
 }
 
-fn semaJumpLoop(ctx: &mut SemaContext, target: Int, start: Int, end: Int) {
-    if target < 0 {
-        semaAddError(&mut ctx, "L0001", "salto fuera de un bucle", start, end)
-    } else {
-        flowLink(&mut ctx.flow, target, -1)
-        let detached = flowBlock(&mut ctx.flow)
-        ctx.flow.current = detached
-    }
-}

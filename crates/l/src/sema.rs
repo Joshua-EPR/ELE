@@ -2774,7 +2774,10 @@ impl Checker<'_> {
         }
         if n == "writeBytes" {
             if args.len() != 2 || type_args.is_some() {
-                return Err(err(span, "writeBytes requiere (ruta: Text, bytes: List<Int>)"));
+                return Err(err(
+                    span,
+                    "writeBytes requiere (ruta: Text, bytes: List<Int>)",
+                ));
             }
             let args = self.args(args, depth, &[], false)?;
             env.same(Type::Text, args[0].ty, args[0].span)?;
@@ -2783,7 +2786,10 @@ impl Checker<'_> {
                 _ => false,
             };
             if !valid_bytes {
-                return Err(err(args[1].span, "writeBytes requiere una lista List<Int> de bytes"));
+                return Err(err(
+                    args[1].span,
+                    "writeBytes requiere una lista List<Int> de bytes",
+                ));
             }
             return Ok((Type::Int, ValueKind::Platform(PlatformOp::WriteBytes, args)));
         }
