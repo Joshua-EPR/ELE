@@ -443,8 +443,8 @@ fn regional_list_and_array_element_loans() {
         "element_loans",
         r#"
 fn display(xs: &[Int]) {
- let view = &xs
- let first = &view[0]
+ let vista = &xs
+ let first = &vista[0]
  print(first)
 }
 fn main() {
@@ -541,9 +541,9 @@ fn main() {
   var xs = r.list<Int>()
   xs.push(7)
   xs.push(8)
-  let view: &mut [Int] = &mut xs
-  view[0] = 9
-  let read: &[Int] = &view
+  let vista: &mut [Int] = &mut xs
+  vista[0] = 9
+  let read: &[Int] = &vista
   print(read.length)
   print(read[0])
   xs.push(10)
@@ -554,7 +554,7 @@ fn main() {
         "2\n9\n3\n",
     );
     let source =
-        "fn main() { var xs = List[1]\n let view: &[Int] = &xs\n xs.push(2)\n print(view[0]) }";
+        "fn main() { var xs = List[1]\n let vista: &[Int] = &xs\n xs.push(2)\n print(vista[0]) }";
     assert_eq!(check(source).unwrap_err().code, "L0012");
 }
 
@@ -803,12 +803,12 @@ fn multiple_origins_survive_recursion_and_disjoint_field_reborrows() {
         "escape_multi",
         r#"
 struct Pair { first: Int, second: Int }
-fn choose(a: &Int, b: &Int, first: Bool) -> &Int {
+fn elegir(a: &Int, b: &Int, first: Bool) -> &Int {
  if first { return a }
  return b
 }
 fn left(a: &Int, b: &Int, n: Int) -> &Int {
- if n == 0 { return choose(a, b, false) }
+ if n == 0 { return elegir(a, b, false) }
  return right(b, a, n - 1)
 }
 fn right(a: &Int, b: &Int, n: Int) -> &Int = left(a, b, n)
@@ -838,7 +838,7 @@ fn returned_slices_borrow_heap_and_regional_lists() {
     check_native_program(
         "escape_slices",
         r#"
-fn view(a: &[Int], b: &[Int], first: Bool) -> &[Int] {
+fn vista(a: &[Int], b: &[Int], first: Bool) -> &[Int] {
  if first { return a }
  return b
 }
@@ -850,10 +850,10 @@ fn main() {
   regional.push(20)
   let a = write_view(&mut regional)
   a[0] = 21
-  let b = view(heap, a, false)
+  let b = vista(heap, a, false)
   print(b[0])
   regional.push(22)
-  let c = view(heap, regional, true)
+  let c = vista(heap, regional, true)
   print(c.length)
   print(c[1])
   heap.reserve(40)
@@ -866,21 +866,21 @@ fn main() {
 
 #[test]
 fn all_possible_origins_remain_live_and_must_outlive_the_result() {
-    let choose =
-        "fn choose(a: &Int, b: &Int, first: Bool) -> &Int { if first { return a }\n return b }\n";
+    let elegir =
+        "fn elegir(a: &Int, b: &Int, first: Bool) -> &Int { if first { return a }\n return b }\n";
     for source in [
-        "fn main() { var a = 1\n var b = 2\n let x = choose(a, b, true)\n b = 3\n print(x) }",
-        "fn main() { var a = 1\n var b = 2\n let x = choose(a, b, false)\n a = 3\n print(x) }",
+        "fn main() { var a = 1\n var b = 2\n let x = elegir(a, b, true)\n b = 3\n print(x) }",
+        "fn main() { var a = 1\n var b = 2\n let x = elegir(a, b, false)\n a = 3\n print(x) }",
     ] {
         assert_eq!(
-            check(&format!("{choose}{source}")).unwrap_err().code,
+            check(&format!("{elegir}{source}")).unwrap_err().code,
             "L0012"
         );
     }
-    let err = check(&format!("{choose}fn bad(a: &Int) -> &Int {{ let b = 3\n return choose(a, b, true) }}\nfn main() {{}}")).unwrap_err();
+    let err = check(&format!("{elegir}fn bad(a: &Int) -> &Int {{ let b = 3\n return elegir(a, b, true) }}\nfn main() {{}}")).unwrap_err();
     assert_eq!(err.code, "L0013");
     assert!(err.message.contains("posible origen"));
-    let overlap = "fn choose(a: &mut Int, b: &mut Int) -> &mut Int = a\nfn main() { var x = 1\n let a = &mut x\n let r = choose(&mut a, &mut x)\n print(r) }";
+    let overlap = "fn elegir(a: &mut Int, b: &mut Int) -> &mut Int = a\nfn main() { var x = 1\n let a = &mut x\n let r = elegir(&mut a, &mut x)\n print(r) }";
     assert_eq!(check(overlap).unwrap_err().code, "L0012");
     let regional = "fn pick(a: &[Int], b: &[Int]) -> &[Int] = a\nfn bad(a: &[Int]) -> &[Int] { region r { var xs = r.list<Int>()\n xs.push(1)\n return pick(a, xs) } }\nfn main() {}";
     assert_eq!(check(regional).unwrap_err().code, "L0013");
@@ -919,11 +919,11 @@ fn escape_summaries_distinguish_return_call_and_local_uses() {
     let ir = check(
         r#"
 fn read(x: &Int) -> Int = x
-fn choose(a: &Int, b: &Int, first: Bool) -> &Int {
+fn elegir(a: &Int, b: &Int, first: Bool) -> &Int {
  if first { return a }
  return b
 }
-fn forward(a: &Int, b: &Int, first: Bool) -> &Int = choose(a, b, first)
+fn forward(a: &Int, b: &Int, first: Bool) -> &Int = elegir(a, b, first)
 fn call_only(a: &Int, b: &Int) -> Int = read(a) + b
 struct P { left: Int, right: Int }
 fn field(p: &P) -> &Int = &p.right
@@ -945,8 +945,8 @@ fn main() {}
             .map(|o| o.parameter)
             .collect::<BTreeSet<_>>()
     };
-    assert_eq!(returned("choose"), BTreeSet::from([0, 1]));
-    assert!(summary("choose").forwarded_params.is_empty());
+    assert_eq!(returned("elegir"), BTreeSet::from([0, 1]));
+    assert!(summary("elegir").forwarded_params.is_empty());
     assert_eq!(returned("forward"), BTreeSet::from([0, 1]));
     assert_eq!(summary("forward").forwarded_params, BTreeSet::from([0, 1]));
     assert!(returned("call_only").is_empty());
@@ -1006,8 +1006,8 @@ fn show(x: Int) {
  let active = true
  let score = 1.25
  {
-  let view = View(label: &source, count: &x, active: &active, score: &score, owned: Owned(label: "owned {x}"))
-  let moved = view
+  let vista = View(label: &source, count: &x, active: &active, score: &score, owned: Owned(label: "owned {x}"))
+  let moved = vista
   print(moved.label)
   print(moved.count)
   print(moved.active)

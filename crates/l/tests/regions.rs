@@ -508,13 +508,13 @@ fn sum(xs: &[Int]) -> Int {
  for x in xs { result += x }
  return result
 }
-fn change(xs: &mut [Int]) { xs[0] = 10 }
+fn cambiar(xs: &mut [Int]) { xs[0] = 10 }
 fn main() {
  region r {
   var xs = r.list<Int>()
   print(xs.length)
   for i in 0..40 { xs.push(i) }
-  change(&mut xs)
+  cambiar(&mut xs)
   print(sum(xs))
   print(xs.capacity)
   let moved = xs
