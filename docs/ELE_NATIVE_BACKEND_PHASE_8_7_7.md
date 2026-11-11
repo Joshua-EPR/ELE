@@ -77,11 +77,7 @@ de rango, emitido solo si el programa usa `byteAt`.
   `native_cfg_text_byteat_bool.lir`, `native_cfg_unary_bad.lir`,
   `native_cfg_call_ref_arg.lir`, que ahora rechaza con 54).
 
-La suite `cfg` volvió a pasar: `all_repository_programs_lower_and_verify`
-recorría `crates/l/tests/differential/unsupported`, un directorio que nunca
-existió en git.
-
-CI: `native_refs_l` y `cfg` se ejecutan en Ubuntu y Windows; las 12 imágenes
+CI: `native_refs_l` se ejecuta en Ubuntu y Windows; las 12 imágenes
 ELF construidas en Windows se ejecutan en Linux con su estado esperado.
 
 ## Límites reales
@@ -102,7 +98,7 @@ corren en Windows); CI no ejecuta estos binarios. Clasificación:
 
 | Binario | Fallas | Causa |
 |---|---|---|
-| `cfg` | 1 | recorre `differential/unsupported`, que nunca existió en git (corregido en esta rama) |
+| `cfg` | 1 | recorre `differential/unsupported`, que nunca existió en git (corregido en la rama `fix/stage0-diagnostic-files-token-limit`) |
 | `differential` | 1 | misma carpeta inexistente; un caso real requiere superar el límite de 4096 tokens (defecto 2 de Stage 0) |
 | `references` | 7 | fuentes de prueba con identificadores que la sintaxis v2 reservó (`se esperaba identificador, no palabra reservada`) |
 | `regions` | 1 | misma causa |
@@ -110,5 +106,7 @@ corren en Windows); CI no ejecuta estos binarios. Clasificación:
 | `self_hosting` | 1 | `tokenKindValue` ya no existe en las fuentes de Stage 1 |
 | `conformance` | aborta | 200 paréntesis anidados desbordan la pila del hilo de prueba en debug antes del límite de anidamiento 128 |
 
-Con esta rama, `cfg` pasa (17/17). El resto queda como trabajo pendiente
+La rama `fix/stage0-diagnostic-files-token-limit` corrige `cfg`,
+`conformance`, `differential`, `references`, `regions` y `borrow_l`
+([detalle](STAGE0_DEFECTS_DIAGNOSTICS_TOKENS.md)). El resto queda como trabajo pendiente
 documentado; no se desactivó ninguna prueba.
