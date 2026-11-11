@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import sys
 
-IMPORT = re.compile(r"^\s*import[ \t]+([A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*)[ \t]*;?[ \t]*(?://.*)?$", re.MULTILINE)
+IMPORT = re.compile(r"^[ \t]*import[ \t]+([A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*)[ \t]*;?[ \t]*(?://[^\r\n]*)?\r?$", re.MULTILINE)
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
 
 

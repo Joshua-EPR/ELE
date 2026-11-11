@@ -1,5 +1,13 @@
 # Protocolo LIR de ELE, versión 1
 
+> Actualización 2026-11-11: el backend ELE de `feat/native-list-cfg`
+> verifica `list lN`, `i listlit`, `i listpush`, `i listreserve`, `i cap`,
+> lugares indexados y `i loan` en el subconjunto probado por
+> `crates/l/tests/native_list_l.rs`. `i listpop` se serializa desde Stage 1,
+> pero el backend ELE aún no lo acepta. Véase
+> [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md). Las notas
+> históricas inferiores describen el estado de fases anteriores.
+
 Formato textual con el que Stage 1 entrega la LIR al backend provisional.
 Lo escribe `sema-l archivo.l --emit-lir` (código ELE) y lo leen
 `l build-lir` / `l run-lir` (`crates/l/src/lir_protocol.rs`). Sustituye

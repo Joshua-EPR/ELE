@@ -50,10 +50,17 @@ class NativeEnumFixtureContracts(unittest.TestCase):
 
     def test_enum_ops_are_handled_in_real_backend_source(self):
         ir = (ROOT/'compiler-l/src/codegen/native_cfg_ir.l').read_text()
+        types = (ROOT/'compiler-l/src/codegen/native_cfg_types.l').read_text()
+        inst = (ROOT/'compiler-l/src/codegen/native_cfg_inst.l').read_text()
         emit = (ROOT/'compiler-l/src/codegen/native_cfg_emit.l').read_text()
         verify = (ROOT/'compiler-l/src/codegen/native_cfg_verify.l').read_text()
-        for token in ['cfgReadEnum(', '"variant"', '"disc"', 'inst.kind == 7', 'inst.kind == 8']:
-            self.assertIn(token, ir)
+        self.assertIn('cfgReadEnum(&mut p, source, &mut r, i)', ir)
+        self.assertIn('pub fn cfgReadEnum(', types)
+        self.assertIn('nativeExpect(source, &mut reader, "variant")', types)
+        self.assertIn('nativeEquals(source, &kind, "variant")', inst)
+        self.assertIn('nativeEquals(source, &kind, "disc")', inst)
+        self.assertIn('inst.kind = 7', inst)
+        self.assertIn('inst.kind = 8', inst)
         self.assertIn('inst.kind == 7', emit)
         self.assertIn('inst.kind == 8', emit)
         self.assertIn('inst.kind == 8', verify)

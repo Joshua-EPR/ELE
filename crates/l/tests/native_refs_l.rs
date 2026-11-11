@@ -168,30 +168,35 @@ fn arithmetic_and_index_failures_stop_with_their_status() {
 }
 
 #[test]
-fn exclusive_reference_fixture_writes_through_the_pointer() {
-    let image = temp("store_ok.elf");
-    let out = Command::new(native())
-        .arg(root().join("examples/native_cfg_ref_store_ok.lir"))
-        .arg(&image)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        let (code, stdout) = execute(&image);
-        assert_eq!(stdout, "");
-        assert_eq!(code, Some(7));
+fn reference_fixtures_with_valid_loans_build() {
+    for (fixture, _status, image_name) in [
+        ("native_cfg_ref_store_ok.lir", 7, "store_ok.elf"),
+        ("native_cfg_ref_local.lir", 1, "local_ref.elf"),
+    ] {
+        let image = temp(image_name);
+        let out = Command::new(native())
+            .arg(root().join("examples").join(fixture))
+            .arg(&image)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{fixture}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            let (code, stdout) = execute(&image);
+            assert_eq!(stdout, "");
+            assert_eq!(code, Some(_status), "{fixture}");
+        }
     }
 }
 
 #[test]
 fn unsound_reference_forms_are_rejected() {
-    // A reference outside the parameters would need a lifetime analysis.
-    rejected("native_cfg_ref_local.lir", 96);
+    // Local references require an explicit loan; malformed or missing loans
+    // are covered by native_list_l::unsound_list_and_loan_lir_is_rejected.
     // A reference is never assigned, copied, returned or dropped.
     rejected("native_cfg_ref_as_dst.lir", 96);
     rejected("native_cfg_ref_as_value.lir", 34);

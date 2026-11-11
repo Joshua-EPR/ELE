@@ -57,6 +57,7 @@ jobs:
           --test native_cfg_l
           --test native_struct_cfg_l
           --test native_nested_struct_l
+          --test native_list_l
           -- --test-threads=1
       # On Linux, Stage 1 is built through Stage 0's reference backend (see
       # tests/stage1_support). The ELE-written backend then compiles real .l
@@ -83,6 +84,7 @@ jobs:
           --test native_layout_l
           --test native_memory_l
           --test native_stack_layout_l
+          --test native_list_l
           -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
@@ -140,6 +142,10 @@ jobs:
             target/stage1-tests/native-aggregates/*.elf
             target/stage1-tests/native-text-fields/*.elf
             target/stage1-tests/native-wide-struct/*.elf
+            target/stage1-tests/native-list/*.elf
+            examples/native_list_int_stage1.expected
+            examples/native_list_owned_stage1.expected
+            examples/native_loans_stage1.expected
           if-no-files-found: error
           retention-days: 3
       - name: Comprobar mmap/munmap de Text en shape amplio (Linux)
@@ -166,9 +172,42 @@ jobs:
           assert len(maps) >= 2, "no se observaron reservas de los dos Text propios"
           assert len(maps) == len(unmaps), "el ejemplo no libera todas sus reservas"
           PY
+      - name: Comprobar reservas y liberaciones de listas nativas (Linux)
+        if: runner.os == 'Linux' && success()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          for name in (
+              "native_list_int_stage1",
+              "native_list_owned_stage1",
+              "native_loans_stage1",
+          ):
+              image = Path("target/stage1-tests/native-list") / f"{name}.elf"
+              trace = Path("target/stage1-tests/native-list") / f"{name}.strace"
+              image.chmod(image.stat().st_mode | 0o111)
+              run = subprocess.run(
+                  ["strace", "-qq", "-e", "trace=mmap,mremap,munmap",
+                   "-o", str(trace), str(image.resolve())],
+                  capture_output=True, timeout=60, check=False,
+              )
+              expected = (Path("examples") / f"{name}.expected").read_bytes()
+              assert run.returncode == 0, f"{name}: exit {run.returncode}: {run.stderr!r}"
+              assert run.stdout == expected, f"{name}: stdout differs from Stage 0"
+              lines = trace.read_text().splitlines()
+              maps = [s for s in lines if s.startswith("mmap(") and " = -1" not in s]
+              unmaps = [s for s in lines if s.startswith("munmap(") and s.rstrip().endswith("= 0")]
+              remaps = [s for s in lines if s.startswith("mremap(")]
+              assert maps and len(maps) == len(unmaps), f"{name}: mmap={len(maps)}, munmap={len(unmaps)}"
+              print(f"{name}: mmap={len(maps)}, mremap={len(remaps)}, munmap={len(unmaps)}")
+          PY
       - name: Run native backend contract tests
         if: runner.os == 'Linux' && always()
-        run: python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
+        run: |
+          python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
+          python3 tools/test_native_enum_contract.py
       - name: Check Rust diagnostics
         if: always()
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -232,11 +271,21 @@ jobs:
               ("list-c.elf", 127),
               ("list-k.elf", 127),
               ("list-q.elf", 127),
+              ("native_list_int_stage1.elf", 0),
+              ("native_list_owned_stage1.elf", 0),
+              ("native_loans_stage1.elf", 0),
+              ("native_cfg_list_index_ok.elf", 2),
+              ("native_cfg_list_elem_ref_ok.elf", 42),
+              ("native_cfg_loan_ok.elf", 42),
+              ("native_cfg_list_index_oob.elf", 127),
+              ("native_cfg_list_index_negative.elf", 127),
+              ("native_cfg_list_reserve_negative.elf", 123),
               # view/edit references, Text queries and checked arithmetic.
               ("native_refs_stage1.elf", 0),
               ("native_text_query_stage1.elf", 0),
               ("native_arith_stage1.elf", 0),
               ("store_ok.elf", 7),
+              ("local_ref.elf", 1),
               ("div_zero.elf", 125),
               ("rem_zero.elf", 125),
               ("div_min.elf", 125),
@@ -266,9 +315,17 @@ jobs:
               assert len(payload) > 4096, f"{name}: ELF64 image too short"
               assert payload.startswith(bytes([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1])), f"{name}: not ELF64 little-endian"
               binary.chmod(binary.stat().st_mode | 0o111)
-              result = subprocess.run([str(binary.resolve())], timeout=15, check=False)
+              result = subprocess.run([str(binary.resolve())], timeout=15, check=False, capture_output=True)
               assert result.returncode == expected, (
                   f"{name}: expected Linux exit {expected}, got {result.returncode}"
               )
+              if name in {
+                  "native_list_int_stage1.elf",
+                  "native_list_owned_stage1.elf",
+                  "native_loans_stage1.elf",
+              }:
+                  expected_output = next(directory.rglob(name.removesuffix(".elf") + ".expected")).read_bytes().replace(b"\r\n", b"\n")
+                  assert result.stdout == expected_output, f"{name}: stdout differs from Stage 0"
+                  assert not result.stderr, f"{name}: unexpected stderr"
               print(f"{name}: native Linux exit {expected} verified")
           PY

@@ -1,5 +1,17 @@
 # Estado de implementación — 2026-11-09
 
+> Actualización 2026-11-11: el encabezado y las fases inferiores son
+> históricos. En `feat/native-list-cfg` (`c8dfc81`) se verificaron 5/5
+> pruebas `native_list_l.rs` en MSVC para el subconjunto nativo de listas y
+> préstamos locales. `cargo fmt --all --check` y Clippy con `-D warnings`
+> pasan. La suite global Windows/MSVC terminó con 524 aprobadas, 0 fallidas
+> y 3 ignoradas. La matriz de autocobertura de 89 fuentes está en
+> [SELF_COVERAGE_MATRIX_2026-11-11.md](SELF_COVERAGE_MATRIX_2026-11-11.md).
+> `listpop`, sobrescritura de
+> elementos propietarios y `dropfield` a través de referencias locales
+> siguen sin soporte en el backend ELE. No hay Stage 2 ni Stage 3. Consulte
+> [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md).
+
 > Rama `dev/self-hosting-parser`. Parser autónomo completo en L con gramática Pratt,
 > AST tipado e indexado en arenas continuas (`List<T>`), manejo de expresiones, sentencias,
 > declaraciones, tipos y control de flujo; recuperación de errores sintácticos con sincronización;
