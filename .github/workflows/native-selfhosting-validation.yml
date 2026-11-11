@@ -50,6 +50,7 @@ jobs:
           --test ele_stage1_generic_types
           --test native_enum_stage1_payload_l
           --test native_heap_l
+          --test native_heap_dynamic_l
           --test native_enum_l
           --test native_cfg_l
           --test native_struct_cfg_l
@@ -73,6 +74,7 @@ jobs:
             target/stage1-tests/native-nested-struct/nested.elf
             target/stage1-tests/native-heap/heap-ok.elf
             target/stage1-tests/native-heap/heap-bad.elf
+            target/stage1-tests/native-heap-advanced/*.elf
           if-no-files-found: error
           retention-days: 3
       - name: Run native backend contract tests
@@ -115,6 +117,32 @@ jobs:
               ("nested.elf", 42),
               ("heap-ok.elf", 42),
               ("heap-bad.elf", 124),
+              ("dynamic-t.elf", 42),
+              ("dynamic-z.elf", 122),
+              ("dynamic-n.elf", 122),
+              ("dynamic-h.elf", 122),
+              ("dynamic-u.elf", 124),
+              ("owner-o.elf", 42),
+              ("owner-d.elf", 121),
+              ("owner-m.elf", 121),
+              ("owner-r.elf", 120),
+              ("owner-b.elf", 121),
+              ("resize-g.elf", 42),
+              ("resize-s.elf", 42),
+              ("resize-t.elf", 42),
+              ("resize-z.elf", 122),
+              ("resize-h.elf", 122),
+              ("resize-m.elf", 121),
+              ("list-p.elf", 42),
+              ("list-g.elf", 42),
+              ("list-t.elf", 42),
+              ("list-o.elf", 127),
+              ("list-e.elf", 127),
+              ("list-d.elf", 121),
+              ("list-b.elf", 121),
+              ("list-c.elf", 127),
+              ("list-k.elf", 127),
+              ("list-q.elf", 127),
           ]:
               matches = list(directory.rglob(name))
               assert len(matches) == 1, f"{name}: expected exactly one artifact, got {matches}"
