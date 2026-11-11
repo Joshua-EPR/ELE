@@ -15,45 +15,45 @@ flow main() => Int {
             hold kind = mode.byteAt(0)
             when kind != 116 && kind != 122 && kind != 110 && kind != 104 && kind != 117 { give 4 }
             change code = x64New()
-            x64FrameBegin(&edit code, 2)
+            x64FrameBegin(edit code, 2)
             when kind == 116 || kind == 117 {
                 when kind == 116 {
-                    x64MovImm64(&edit code, 7, 4097)
+                    x64MovImm64(edit code, 7, 4097)
                 } otherwise {
-                    x64MovImm64(&edit code, 7, 8)
+                    x64MovImm64(edit code, 7, 8)
                 }
-                when !heapEmitDynamicMap(&edit code) { give 5 }
-                x64StoreSlot(&edit code, 0, 0)
+                when !heapEmitDynamicMap(edit code) { give 5 }
+                x64StoreSlot(edit code, 0, 0)
                 when kind == 116 {
-                    x64MovImm64(&edit code, 2, 40)
-                    x64StoreMem64(&edit code, 0, 0, 2)
-                    x64MovImm64(&edit code, 2, 2)
-                    x64StoreMem64(&edit code, 0, 4096, 2)
-                    x64LoadMem64(&edit code, 2, 0, 0)
-                    x64LoadMem64(&edit code, 3, 0, 4096)
-                    x64AddReg(&edit code, 2, 3)
-                    x64StoreSlot(&edit code, 1, 2)
+                    x64MovImm64(edit code, 2, 40)
+                    x64StoreMem64(edit code, 0, 0, 2)
+                    x64MovImm64(edit code, 2, 2)
+                    x64StoreMem64(edit code, 0, 4096, 2)
+                    x64LoadMem64(edit code, 2, 0, 0)
+                    x64LoadMem64(edit code, 3, 0, 4096)
+                    x64AddReg(edit code, 2, 3)
+                    x64StoreSlot(edit code, 1, 2)
                 }
-                x64LoadSlot(&edit code, 7, 0)
+                x64LoadSlot(edit code, 7, 0)
                 when kind == 117 {
-                    x64MovImm64(&edit code, 1, 1)
-                    x64AddReg(&edit code, 7, 1)
-                    x64MovImm64(&edit code, 6, 8)
+                    x64MovImm64(edit code, 1, 1)
+                    x64AddReg(edit code, 7, 1)
+                    x64MovImm64(edit code, 6, 8)
                 } otherwise {
-                    x64MovImm64(&edit code, 6, 4097)
+                    x64MovImm64(edit code, 6, 4097)
                 }
-                when !heapEmitDynamicUnmap(&edit code) { give 6 }
-                x64LoadSlot(&edit code, 7, 1)
-                x64MovImm64(&edit code, 0, 60)
-                x64Syscall(&edit code)
+                when !heapEmitDynamicUnmap(edit code) { give 6 }
+                x64LoadSlot(edit code, 7, 1)
+                x64MovImm64(edit code, 0, 60)
+                x64Syscall(edit code)
             } otherwise {
-                when kind == 122 { x64MovImm64(&edit code, 7, 0) }
-                when kind == 110 { x64MovImm64(&edit code, 7, -1) }
-                when kind == 104 { x64MovImm64(&edit code, 7, 1048577) }
-                when !heapEmitDynamicMap(&edit code) { give 7 }
-                x64MovImm64(&edit code, 7, 90)
-                x64MovImm64(&edit code, 0, 60)
-                x64Syscall(&edit code)
+                when kind == 122 { x64MovImm64(edit code, 7, 0) }
+                when kind == 110 { x64MovImm64(edit code, 7, -1) }
+                when kind == 104 { x64MovImm64(edit code, 7, 1048577) }
+                when !heapEmitDynamicMap(edit code) { give 7 }
+                x64MovImm64(edit code, 7, 90)
+                x64MovImm64(edit code, 0, 60)
+                x64Syscall(edit code)
             }
             when code.error != 0 { give 8 }
             hold image = elf64Executable(&code.bytes)
