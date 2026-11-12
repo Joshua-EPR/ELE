@@ -193,11 +193,12 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
     return false
 }
 
-// Bind a primitive payload only in the matching arm. This produces an
-// explicit checked `payload` operation, never an unchecked `read` of the enum.
-// The value is Copy (Int/Bool); owned payload moves require move paths and
-// deterministic drops, and remain intentionally unsupported.
-fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int) {
+// Bind a payload only in the matching arm. This produces an explicit checked
+// `payload` operation, never an unchecked `read` of the enum. Int/Bool are
+// copied; a drop-free shape/choice payload (lirBuiltinPayloadOk) is moved out
+// of the scrutinee. Owned payloads (Text, lists) need drop elaboration and
+// remain intentionally unsupported (L0016).
+fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, scrut_path: Int) {
     if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
     // Primitive builtin unions reuse the exact checked LIR_PAYLOAD protocol
     // of nominal enums. Never bind before testing the active tag.
@@ -234,7 +235,14 @@ fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
         let finish = p_end - 1
         if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
         if finish == start + 1 && source.byteAt(start) == 95 { return }
-        if !lirBuiltinPrimitive(payload_ty) || !lirBuiltinSupported(&ctx.types, scrut_t) {
+        // Binding a non-Copy payload by value MOVES it out of the scrutinee
+        // (as in Stage 0): the whole union is consumed, so a later use of the
+        // scrutinee is a use after move, and moving out of a borrowed
+        // scrutinee is rejected (L0005). Primitive payloads stay copies.
+        if payload_ty >= 0 && payload_ty < ctx.types.types.length && !lirBuiltinPrimitive(payload_ty) {
+            semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)
+        }
+        if !lirBuiltinPayloadOk(&ctx.types, &ctx.lir_module, payload_ty) || !lirBuiltinSupported(&ctx.types, &ctx.lir_module, scrut_t) {
             // Stage 1 ownership must still see the source-level pattern
             // binder for non-native unions (e.g. Result<Int, LexError>).
             // The LIR remains explicitly unsupported: no unchecked payload

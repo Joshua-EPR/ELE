@@ -155,7 +155,10 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
     }
     for k in 0..enums {
         if ctx.lir_module.en_builtin[k] >= 0 {
-            lirBuiltinHeader(&mut ctx, k)
+            let first_variant = ctx.lir_module.en_first[k]
+            let first_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant])
+            let second_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
+            lirBuiltinHeader(&mut ctx, k, first_code, second_code)
             continue
         }
         let d = ctx.lir_module.en_decl[k]

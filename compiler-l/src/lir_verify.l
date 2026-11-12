@@ -125,7 +125,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         let count = lm.variant_payload[which]
         if count == 1 {
             let payload_ty = lm.variant_type[which]
-            if (payload_ty != 1 && payload_ty != 4) || lirOperandType(l, inst.c) != payload_ty { return 3 }
+            if !lirBuiltinPayloadOk(types, lm, payload_ty) || lirOperandType(l, inst.c) != payload_ty { return 3 }
             if !lirUse(&mut v, l, inst.c, check) { return 5 }
         } else if count != 0 { return 3 }
         else if inst.c != LIR_NONE { return 3 }
@@ -153,7 +153,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         let variant = lm.en_first[inst.b] + inst.c
         if variant < 0 || variant >= lm.variant_payload.length || lm.variant_payload[variant] != 1 { return 3 }
         let payload_ty = lm.variant_type[variant]
-        if payload_ty != 1 && payload_ty != 4 { return 3 }
+        if !lirBuiltinPayloadOk(types, lm, payload_ty) { return 3 }
         if inst.a < 0 || inst.a >= l.places.length || l.places[inst.a].parent >= 0 { return 8 }
         let root = l.places[inst.a].root
         if !lirVarOk(l, root) || l.vars[root].is_ref { return 8 }
