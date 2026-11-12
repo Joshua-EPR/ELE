@@ -30,6 +30,17 @@ pub fn semaStmtLet(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id
             if is_mut { ctx.borrow_site = SITE_VAR }
             ctx.pending_loan = -1
             ctx.expected_list_type = -1
+            ctx.expected_union_type = -1
+            if annot_t >= 0 {
+                let contextual = semaResolveAstType(&mut ctx, source, tree, annot_t)
+                if contextual >= 0 && contextual < ctx.types.types.length {
+                    match ctx.types.types[contextual].kind {
+                        SemTypeKind.Option => { ctx.expected_union_type = contextual }
+                        SemTypeKind.Result => { ctx.expected_union_type = contextual }
+                        _ => {}
+                    }
+                }
+            }
             if annot_t >= 0 && val_e >= 0 && val_e < tree.expressions.length {
                 match tree.expressions[val_e].kind {
                     AstExprKind.ListLit => { ctx.expected_list_type = semaResolveAstType(&mut ctx, source, tree, annot_t) }
@@ -38,6 +49,7 @@ pub fn semaStmtLet(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id
             }
             var val_type = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
             ctx.expected_list_type = -1
+            ctx.expected_union_type = -1
             let loan = ctx.pending_loan
             ctx.pending_loan = -1
             if annot_t >= 0 {
