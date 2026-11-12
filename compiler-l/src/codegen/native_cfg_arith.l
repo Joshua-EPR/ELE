@@ -47,7 +47,8 @@ expose flow cfgEmitDivRem(code: edit X64Code, fix: edit CfgFix, op: Int) {
     x64MovImm64(edit code, 10, -9223372036854775807 - 1)
     x64CmpReg(edit code, 0, 10)
     fix.overflow_at@push(x64ConditionalPlaceholder(edit code, true))
-    x64PatchRelative(edit code, not_minus_one, code.bytes.length)
+    hold after_overflow_check = code.bytes.length
+    x64PatchRelative(edit code, not_minus_one, after_overflow_check)
     x64Cqo(edit code)
     x64IdivReg(edit code, 1)
     when op == 11 { x64MovReg(edit code, 0, 2) }
