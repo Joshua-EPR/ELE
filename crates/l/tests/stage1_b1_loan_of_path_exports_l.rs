@@ -65,8 +65,5 @@ fn b1_read_only_loan_of_path_is_public_but_mutable_place_lookup_is_private() {
         false,
     );
     assert!(private.contains("error[L0001]"), "{private}");
-    assert!(
-        private.contains("private_loan_place.l:"),
-        "{private}"
-    );
+    assert!(private.contains("private_loan_place.l:"), "{private}");
 }
