@@ -229,6 +229,11 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if check && !v.defined[l.places[inst.a].root] { return 5 }
     } else if kind == LIR_PLATFORM {
         result = dst_t
+        if inst.a == LIR_PLATFORM_WRITE_BYTES {
+            let status = lirVerifyWriteBytes(&mut v, l, types, lm, inst.b, inst.c, check)
+            if status != 0 { return status }
+            result = 1
+        }
     } else {
         return 1
     }

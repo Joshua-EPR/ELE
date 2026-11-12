@@ -20,6 +20,31 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
     return 0
 }
 
+// `writeBytes` (platform op 4), Stage 0 contract: exactly two shared
+// borrows, a Text path and a List<Int> byte buffer; the result is an Int.
+pub fn lirVerifyWriteBytes(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, first: Int, count: Int, check: Bool) -> Int {
+    if count != 2 || first < 0 || first + count > l.operands.length { return 4 }
+    for i in 0..2 {
+        let arg = l.operands[first + i]
+        if arg < 0 || arg >= l.args.length { return 1 }
+        if !l.args[arg].by_ref || l.args[arg].mutable { return 4 }
+        let ty = lirArgType(l, types, lm, arg)
+        if ty == LIR_TY_ERR { return 1 }
+        if i == 0 && ty != 5 { return 3 }
+        if i == 1 {
+            if ty < 8 || ty >= types.types.length { return 3 }
+            match types.types[ty].kind {
+                SemTypeKind.List => {
+                    if types.types[ty].elem_type != 1 { return 3 }
+                }
+                _ => { return 3 }
+            }
+        }
+        if !lirArgDefined(&mut v, l, arg, check) { return 5 }
+    }
+    return 0
+}
+
 pub fn lirVerifyTerm(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, fn_index: Int, b: Int, blocks: Int, check: Bool) -> Int {
     let kind = body.term[b]
     if kind == LIR_T_JUMP {

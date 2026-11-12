@@ -289,6 +289,44 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
                 return 7
             }
+            // Stage 0 `writeBytes(ruta: Text, bytes: List<Int>) -> Int`: both
+            // arguments are read in place (the path and the byte list stay
+            // usable), a Text or List<Int> reference is read through, and a
+            // temporary lives until the end of its statement.
+            let name_write_bytes = "writeBytes"
+            if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere (ruta: Text, bytes: List<Int>)", expr.start, expr.end)
+                    return 7
+                }
+                let path_e = tree.extra[first_arg]
+                let path_mark = ctx.pending_temps.length
+                let path_t = semaCheckExpr(&mut ctx, source, tree, path_e)
+                if path_t != 5 {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere una ruta Text", tree.expressions[path_e].start, tree.expressions[path_e].end)
+                    return 7
+                }
+                // Even a literal path is lent from an owned temporary, as in
+                // Stage 0, so it is dropped with the statement's temporaries.
+                if ctx.expression_path < 0 {
+                    semaTempAt(&mut ctx, source, tree, path_t, tree.expressions[path_e].start, tree.expressions[path_e].end, path_mark)
+                }
+                var args: List<Int> = List[]
+                args.push(semaPlatformRefArg(&mut ctx, path_t))
+                let bytes_e = tree.extra[first_arg + 1]
+                let bytes_mark = ctx.pending_temps.length
+                let bytes_t = semaCheckExpr(&mut ctx, source, tree, bytes_e)
+                if !semaIsIntList(ctx, bytes_t) {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere una lista List<Int> de bytes", tree.expressions[bytes_e].start, tree.expressions[bytes_e].end)
+                    return 7
+                }
+                if ctx.expression_path < 0 {
+                    semaTempAt(&mut ctx, source, tree, bytes_t, tree.expressions[bytes_e].start, tree.expressions[bytes_e].end, bytes_mark)
+                }
+                args.push(semaPlatformRefArg(&mut ctx, bytes_t))
+                semaPlatformEmit(&mut ctx, LIR_PLATFORM_WRITE_BYTES, &args, 1, true)
+                return 1
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {

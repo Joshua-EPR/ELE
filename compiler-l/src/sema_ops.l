@@ -293,3 +293,28 @@ fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int
         lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
     }
 }
+
+// Shared borrow of the value channel for a platform operation (Stage 0
+// lowers every Text and writeBytes List<Int> argument to `&place`): a
+// place is lent in place, any other value is first held in a variable.
+fn semaPlatformRefArg(ctx: &mut SemaContext, ty: Int) -> Int {
+    var place = ctx.lir.place
+    if place >= 0 {
+        ctx.lir.place = -1
+    } else {
+        let slot = lirValueVar(&mut ctx, ty)
+        ctx.lir.val = LIR_NONE
+        if slot < 0 { return lirArg(&mut ctx.lir, false, LIR_NONE, false) }
+        place = lirPlaceVar(&mut ctx.lir, slot)
+    }
+    return lirArg(&mut ctx.lir, true, place, false)
+}
+
+// `List<Int>`: the byte buffer accepted by writeBytes.
+fn semaIsIntList(ctx: &SemaContext, ty: Int) -> Bool {
+    if ty < 8 || ty >= ctx.types.types.length { return false }
+    match ctx.types.types[ty].kind {
+        SemTypeKind.List => { return ctx.types.types[ty].elem_type == 1 }
+        _ => { return false }
+    }
+}
