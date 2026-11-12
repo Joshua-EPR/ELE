@@ -13,6 +13,7 @@ import sema_lower
 import stmt_lower
 import sema_expr
 import sema_match_coverage
+import lir_builtin_union
 import sema_loop_jump
 import sema_stmt_values
 
@@ -26,11 +27,11 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     if scrut_t >= 0 && scrut_t < ctx.types.types.length {
         match ctx.types.types[scrut_t].kind {
             SemTypeKind.Option => {
-                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                if !lirBuiltinSupported(&ctx.types, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                 match_covered = semaBuiltinMatchCovered(source, tree, expr, false)
             }
             SemTypeKind.Result => {
-                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                if !lirBuiltinSupported(&ctx.types, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                 match_covered = semaBuiltinMatchCovered(source, tree, expr, true)
             }
             SemTypeKind.Enum => {
