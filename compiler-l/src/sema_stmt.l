@@ -22,14 +22,20 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     let first_arm = expr.b
     let arm_count = expr.c
     let scrut_t = semaExprMode(&mut ctx, source, tree, scrut_e, ACCESS_READ)
-    var enum_covered = false
+    var match_covered = false
     if scrut_t >= 0 && scrut_t < ctx.types.types.length {
         match ctx.types.types[scrut_t].kind {
-            SemTypeKind.Option => { lirMarkUnsupported(&mut ctx.lir, expr.start) }
-            SemTypeKind.Result => { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+            SemTypeKind.Option => {
+                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                match_covered = semaBuiltinMatchCovered(source, tree, expr, false)
+            }
+            SemTypeKind.Result => {
+                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                match_covered = semaBuiltinMatchCovered(source, tree, expr, true)
+            }
             SemTypeKind.Enum => {
                 let nominal = ctx.types.types[scrut_t].nominal_id
-                enum_covered = semaEnumMatchCovered(&mut ctx, source, tree, expr, nominal)
+                match_covered = semaEnumMatchCovered(&mut ctx, source, tree, expr, nominal)
                 if nominal >= 0 && nominal < tree.declarations.length {
                     let decl = &tree.declarations[nominal]
                     for v in decl.c..(decl.c + decl.d) {
@@ -54,7 +60,7 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         let body_stmt = tree.extra[first_arm + 3 * i + 2]
         let arm_body = flowBlock(&mut ctx.flow)
         let next_test = flowBlock(&mut ctx.flow)
-        let is_wildcard = lirMatchArmTest(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, arm_body, next_test, i == arm_count - 1 && enum_covered)
+        let is_wildcard = lirMatchArmTest(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, arm_body, next_test, i == arm_count - 1 && match_covered)
         ctx.flow.current = arm_body
         scopePush(&mut ctx.scopes)
         semaScopeEnter(&mut ctx)

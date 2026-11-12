@@ -127,3 +127,66 @@ pub fn semaEnumMatchCovered(ctx: &mut SemaContext, source: &Text, tree: &AstTree
     return valid
 }
 
+// Only two correctly spelled, distinct builtin alternatives prove that a
+// tagged Option/Result has no third runtime case. A wildcard is already
+// handled by lirMatchArmTest; do not mistake a repeated or malformed payload
+// pattern for proof of exhaustiveness. This proof governs CFG reachability,
+// never bypasses ownership validation or enables unsupported LIR lowering.
+fn semaBuiltinBinderIsName(source: &Text, start: Int, end: Int) -> Bool {
+    if end <= start { return false }
+    for i in start..end {
+        let b = source.byteAt(i)
+        let alpha = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+        let digit = b >= 48 && b <= 57 && i > start
+        if !alpha && !digit { return false }
+    }
+    return true
+}
+
+pub fn semaBuiltinMatchCovered(source: &Text, tree: &AstTree, expr: &AstExpr, result_type: Bool) -> Bool {
+    if expr.c != 2 { return false }
+    // Stage 0 requires a variable/field at a &Text parameter. Keep these
+    // patterns as reusable Text bindings rather than temporary literals.
+    let ok_name = "Ok("
+    let err_name = "Err("
+    let some_name = "Some("
+    let none_name = "None"
+    var seen_zero = false
+    var seen_one = false
+    for arm in 0..expr.c {
+        let start = tree.extra[expr.b + 3 * arm]
+        let end = tree.extra[expr.b + 3 * arm + 1]
+        let count = end - start
+        var variant = -1
+        var bind_start = -1
+        if result_type {
+            if count >= 5 && symbolNameEqualsText(source, start, start + 3, ok_name) {
+                variant = 0
+                bind_start = start + 3
+            } else if count >= 6 && symbolNameEqualsText(source, start, start + 4, err_name) {
+                variant = 1
+                bind_start = start + 4
+            }
+        } else {
+            if count == 4 && symbolNameEqualsText(source, start, end, none_name) {
+                variant = 0
+            } else if count >= 7 && symbolNameEqualsText(source, start, start + 5, some_name) {
+                variant = 1
+                bind_start = start + 5
+            }
+        }
+        if variant < 0 { return false }
+        if bind_start >= 0 {
+            if source.byteAt(end - 1) != 41 { return false }
+            if !semaBuiltinBinderIsName(source, bind_start, end - 1) { return false }
+        }
+        if variant == 0 {
+            if seen_zero { return false }
+            seen_zero = true
+        } else {
+            if seen_one { return false }
+            seen_one = true
+        }
+    }
+    return seen_zero && seen_one
+}

@@ -581,3 +581,92 @@ fn stage1_resolves_list_type_annotations() {
         Err("L0016"),
     );
 }
+
+#[test]
+fn exhaustive_builtin_match_returns_on_all_paths() {
+    flow_case(
+        "exhaustive_result_return",
+        r#"
+fn readValue(input: Result<Int, Int>) -> Int {
+    match input {
+        Ok(value) => { return value }
+        Err(reason) => { return reason }
+    }
+}
+fn main() {}
+"#,
+        Ok(()),
+    );
+    flow_case(
+        "exhaustive_option_return",
+        r#"
+fn readOrDefault(input: Option<Int>) -> Int {
+    match input {
+        Some(value) => { return value }
+        None => { return 0 }
+    }
+}
+fn main() {}
+"#,
+        Ok(()),
+    );
+}
+
+#[test]
+fn incomplete_or_duplicate_builtin_matches_cannot_satisfy_return_analysis() {
+    flow_case(
+        "incomplete_result_return",
+        r#"
+fn readValue(input: Result<Int, Int>) -> Int {
+    match input {
+        Ok(value) => { return value }
+    }
+}
+fn main() {}
+"#,
+        Err("L0003"),
+    );
+    flow_case(
+        "duplicate_result_return",
+        r#"
+fn readValue(input: Result<Int, Int>) -> Int {
+    match input {
+        Ok(value) => { return value }
+        Ok(again) => { return again }
+    }
+}
+fn main() {}
+"#,
+        Err("L0003"),
+    );
+    flow_case(
+        "incomplete_option_return",
+        r#"
+fn readValue(input: Option<Int>) -> Int {
+    match input {
+        Some(value) => { return value }
+    }
+}
+fn main() {}
+"#,
+        Err("L0003"),
+    );
+}
+
+#[test]
+fn actual_lexer_scan_has_no_reachable_missing_return() {
+    // This checks the real compiler source including Result/Option matches,
+    // not a reduced fixture. It is not evidence of native LIR support.
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../compiler-l/src/lexer.l");
+    let output = Command::new(sema_exe_path())
+        .arg(&source)
+        .arg("--check-ownership")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "real lexer.l ownership: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

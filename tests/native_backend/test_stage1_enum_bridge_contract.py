@@ -42,8 +42,14 @@ class Stage1EnumBridgeContract(unittest.TestCase):
 
     def test_no_false_claim_of_option_result_support(self):
         front = src('compiler-l/src/sema_stmt.l')
-        self.assertIn('SemTypeKind.Option => { lirMarkUnsupported', front)
-        self.assertIn('SemTypeKind.Result => { lirMarkUnsupported', front)
+        # These arms must *still* mark LIR unsupported. Layout may change
+        # without silently broadening the backend's supported type set.
+        for name in ('Option', 'Result'):
+            self.assertRegex(
+                front,
+                rf'SemTypeKind\.{name}\s*=>\s*\{{\s*'
+                r'lirMarkUnsupported\(&mut ctx\.lir, expr\.start\)',
+            )
 
 
 if __name__ == '__main__':
