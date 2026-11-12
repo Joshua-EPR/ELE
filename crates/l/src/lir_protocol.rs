@@ -514,8 +514,10 @@ impl FnCtx<'_> {
             "payload" => {
                 // Conservative ELE-LIR 1 extension shared with the ELE-written
                 // bootstrap backend: `i payload vD pN eE V`. Only a direct,
-                // *Copy* primitive payload is exposed. The runtime performs a
-                // discriminant check on every access (not merely parsing it).
+                // DROP-FREE payload is exposed: Int, Bool, or a struct/enum whose
+                // parts are recursively drop-free (see `drop_free`). Text, lists,
+                // floats and anything owning a resource stay rejected. The
+                // runtime performs a discriminant check on every access.
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
                 let enum_id = line.id('e', self.enums.len())?;
@@ -536,10 +538,10 @@ impl FnCtx<'_> {
                 }
                 let payload = &self.enums[enum_id].variants[variant_id].1;
                 if payload.len() != 1
-                    || !matches!(payload[0], Type::Int | Type::Bool)
+                    || !drop_free(payload[0], self.structs, self.enums, 0)
                     || self.vars[d] != VarTy::Value(payload[0])
                 {
-                    return line.fail("payload solo admite un campo Int/Bool de tipo exacto");
+                    return line.fail("payload solo admite un campo Int/Bool o un agregado sin drop de tipo exacto");
                 }
                 InstKind::Assign(
                     d,
@@ -551,6 +553,34 @@ impl FnCtx<'_> {
             }
             other => return line.fail(format!("instrucción desconocida: '{other}'")),
         })
+    }
+}
+
+/// Whether a value of type `t` can be a `payload` result: Int, Bool, or a
+/// struct/enum whose fields and variant payloads are recursively drop-free.
+/// Text, floats, lists and every other type are rejected. The depth bound
+/// also rejects (malformed) types that contain themselves by value.
+fn drop_free(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    match t {
+        Type::Int | Type::Bool => true,
+        Type::Struct(s) => structs.get(s).is_some_and(|def| {
+            !def.fields.is_empty()
+                && def
+                    .fields
+                    .iter()
+                    .all(|(_, f)| drop_free(*f, structs, enums, depth + 1))
+        }),
+        Type::Enum(e) => enums.get(e).is_some_and(|def| {
+            def.variants.iter().all(|(_, payload)| {
+                payload
+                    .iter()
+                    .all(|p| drop_free(*p, structs, enums, depth + 1))
+            })
+        }),
+        _ => false,
     }
 }
 
