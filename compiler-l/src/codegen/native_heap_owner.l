@@ -25,7 +25,8 @@ flow heapOwnerRequireLive(code: edit X64Code, slot: Int) {
     x64CmpReg(edit code, 0, 1)
     hold ok = x64ConditionalPlaceholder(edit code, true)
     heapOwnerExit(edit code, 121)
-    x64PatchRelative(edit code, ok, code.bytes.length)
+    hold after_check = code.bytes.length
+    x64PatchRelative(edit code, ok, after_check)
 }
 
 // Accept only zero live flag in a destination owner.
@@ -34,7 +35,8 @@ flow heapOwnerRequireEmpty(code: edit X64Code, slot: Int) {
     x64TestRax(edit code)
     hold ok = x64ConditionalPlaceholder(edit code, true)
     heapOwnerExit(edit code, 120)
-    x64PatchRelative(edit code, ok, code.bytes.length)
+    hold after_check = code.bytes.length
+    x64PatchRelative(edit code, ok, after_check)
 }
 
 expose flow heapOwnerInit(code: edit X64Code, ptr: Int, bytes: Int, live: Int) {
