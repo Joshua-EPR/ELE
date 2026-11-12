@@ -442,3 +442,47 @@ fn sibling_import_does_not_make_lexer_type_visible_to_tokens() {
     assert!(out.stderr.contains("tokens.l:"), "{}", out.stderr);
     assert!(out.stderr.contains("error[L0001]"), "{}", out.stderr);
 }
+
+
+// Imported public nominal types must be available while checking signatures
+// of dependency modules, not merely in the final entry module's namespace.
+#[test]
+fn chained_imports_resolve_public_nominal_in_intermediate_signature() {
+    let out = check_modules_with_stage1(
+        "chained_public_nominal",
+        &[
+            ("ast.l", "pub struct Node { value: Int }\n"),
+            (
+                "parser.l",
+                "import ast\npub fn nodeValue(node: &Node) -> Int { return node.value }\n",
+            ),
+            (
+                "main.l",
+                "import parser\nfn main() -> Int { return 0 }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
+#[test]
+fn private_nominal_is_not_usable_in_importing_module_signature() {
+    let out = check_modules_with_stage1(
+        "chained_private_nominal",
+        &[
+            ("ast.l", "struct Node { value: Int }\n"),
+            (
+                "parser.l",
+                "import ast\npub fn nodeValue(node: &Node) -> Int { return node.value }\n",
+            ),
+            (
+                "main.l",
+                "import parser\nfn main() -> Int { return 0 }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(1), "{}", out.stderr);
+    assert!(out.stderr.contains("parser.l:"), "{}", out.stderr);
+    assert!(out.stderr.contains("error[L0001]"), "{}", out.stderr);
+}
