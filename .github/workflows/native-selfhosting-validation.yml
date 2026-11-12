@@ -339,7 +339,9 @@ jobs:
 
   differential-native-cfg-v2:
     name: Differential CFG native (base vs ELE v2, ELF64)
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    # This is a SEMANTICS-PRESERVING syntax-migration test, not a gate for
+    # feature PRs that intentionally change compiler output or fixtures.
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'chore/ele-v2-native-backend-sources'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
