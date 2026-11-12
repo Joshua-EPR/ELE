@@ -30,6 +30,7 @@ EXECUTABLE_FIXTURES = {
     "native_cfg_nested_copy.lir",
     "native_cfg_enum_positive.lir",
     "native_cfg_enum_payload_int.lir",
+    "native_cfg_enum_payload_wrong_active.lir",
     "native_cfg_partial_move_ok.lir",
     "native_cfg_list_index_ok.lir",
     "native_cfg_list_index_oob.lir",
@@ -58,7 +59,6 @@ REJECT_FIXTURES = {
     "native_cfg_list_double_drop.lir",
     "native_cfg_list_elem_move.lir",
     "native_cfg_tfield_double_drop.lir",
-    "native_cfg_enum_payload_wrong_active.lir",
     "native_cfg_enum_payload_use_after_move.lir",
 }
 
@@ -81,7 +81,7 @@ def digest(payload: bytes) -> str:
 def normalize(payload: bytes, source_root: Path) -> bytes:
     return (
         payload.replace(str(source_root).encode(), b"<SOURCE_ROOT>")
-        .replace(b"\\r\\n", b"\\n")
+        .replace(b"\r\n", b"\n")
     )
 
 
