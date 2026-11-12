@@ -146,7 +146,9 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             ctx.pending_loan = -1
             if val_e >= 0 {
                 if borrowed { ctx.borrow_site = SITE_RETURN }
+                ctx.expected_union_type = ctx.current_fn_ret_type
                 ret_t = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
+                ctx.expected_union_type = -1
             }
             let loan = ctx.pending_loan
             ctx.pending_loan = -1
