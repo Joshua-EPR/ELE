@@ -1,4 +1,4 @@
-enum SemTypeKind {
+pub enum SemTypeKind {
     Unknown
     Int
     Float
@@ -18,7 +18,7 @@ enum SemTypeKind {
     Result
 }
 
-struct SemType {
+pub struct SemType {
     kind: SemTypeKind
     name_start: Int
     name_end: Int
@@ -26,7 +26,7 @@ struct SemType {
     nominal_id: Int
 }
 
-struct TypeTable {
+pub struct TypeTable {
     types: List<SemType>
 }
 
