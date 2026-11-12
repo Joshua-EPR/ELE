@@ -1,10 +1,10 @@
 import symbols
 
-struct Scope {
+pub struct Scope {
     parent: Int
 }
 
-struct ScopeTree {
+pub struct ScopeTree {
     scopes: List<Scope>
     current_scope: Int
 }
