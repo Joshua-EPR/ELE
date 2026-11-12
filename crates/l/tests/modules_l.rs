@@ -382,7 +382,6 @@ fn dependency_type_errors_are_attributed_to_the_dependency() {
     assert!(out.stderr.contains("lib.l:"), "{}", out.stderr);
 }
 
-
 // Regression for the actual lexer -> tokens/cursor dependency boundary.
 // The Stage 1 loader must not treat a symbol imported by main as implicitly
 // accessible inside a sibling source.
@@ -401,7 +400,8 @@ fn check_modules_with_stage1(name: &str, files: &[(&str, &str)]) -> Output {
 
 #[test]
 fn public_lexer_nominal_types_resolve_in_token_module() {
-    let lexer = "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
+    let lexer =
+        "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
     let out = check_modules_with_stage1(
         "public_lexer_nominals",
         &[
@@ -422,7 +422,8 @@ fn public_lexer_nominal_types_resolve_in_token_module() {
 
 #[test]
 fn sibling_import_does_not_make_lexer_type_visible_to_tokens() {
-    let lexer = "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
+    let lexer =
+        "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
     let out = check_modules_with_stage1(
         "missing_lexer_import_in_tokens",
         &[
