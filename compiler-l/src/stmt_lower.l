@@ -122,7 +122,7 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
     }
     let name_none = "None"
     if is_option || is_result {
-        let builtin_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
+        let builtin_id = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, scrut_t)
         if builtin_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start) }
         var disc = -1
         if is_option && symbolNameEqualsText(source, p_start, p_end, name_none) {
