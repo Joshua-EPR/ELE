@@ -396,9 +396,11 @@ fn stage1_self_coverage_matches_versioned_baseline() {
 
     let baseline_path = root.join(BASELINE);
     let updating = std::env::var_os(UPDATE_VAR).is_some_and(|value| value == "1");
-    let baseline = fs::read_to_string(&baseline_path)
-        .map(|text| parse_baseline(&text))
-        .unwrap_or_default();
+    // A missing/unreadable baseline must never be treated as an empty one:
+    // update mode could otherwise silently approve every source as "new".
+    let baseline_text = fs::read_to_string(&baseline_path)
+        .unwrap_or_else(|err| panic!("No se puede leer {BASELINE}: {err}"));
+    let baseline = parse_baseline(&baseline_text);
 
     let mut regressions = Vec::new();
     let mut improvements = Vec::new();
