@@ -4,6 +4,7 @@ import lir_build
 import lir_finish
 import lir_verify_core
 import lir_verify_helpers
+import lir_builtin_union
 
 // Verifier of one lowered function. It does not trust the lowering: every
 // id is range-checked before use, so a corrupt function is rejected instead
@@ -134,6 +135,14 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
                 if types.types[dst_t].nominal_id != lm.en_decl[inst.a] { return 3 }
                 result = dst_t
             }
+            SemTypeKind.Option => {
+                if lm.en_builtin[inst.a] != dst_t { return 3 }
+                result = dst_t
+            }
+            SemTypeKind.Result => {
+                if lm.en_builtin[inst.a] != dst_t { return 3 }
+                result = dst_t
+            }
             _ => { return 3 }
         }
     } else if kind == LIR_PAYLOAD {
@@ -152,6 +161,12 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             SemTypeKind.Enum => {
                 if types.types[enum_t].nominal_id != lm.en_decl[inst.b] { return 3 }
             }
+            SemTypeKind.Option => {
+                if lm.en_builtin[inst.b] != enum_t { return 3 }
+            }
+            SemTypeKind.Result => {
+                if lm.en_builtin[inst.b] != enum_t { return 3 }
+            }
             _ => { return 3 }
         }
         if check && !v.defined[l.places[inst.a].root] { return 5 }
@@ -161,6 +176,14 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if enum_t < 0 || enum_t >= types.types.length { return 8 }
         match types.types[enum_t].kind {
             SemTypeKind.Enum => { result = 1 }
+            SemTypeKind.Option => {
+                if lirBuiltinEnumIndex(lm, enum_t) < 0 { return 3 }
+                result = 1
+            }
+            SemTypeKind.Result => {
+                if lirBuiltinEnumIndex(lm, enum_t) < 0 { return 3 }
+                result = 1
+            }
             _ => { return 3 }
         }
         if check && !v.defined[l.places[inst.a].root] { return 5 }
