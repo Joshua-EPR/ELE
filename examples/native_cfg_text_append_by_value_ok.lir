@@ -1,0 +1,16 @@
+ELE-LIR 1
+module structs 0 funcs 1 main f0
+func f0 4:109,97,105,110 params 0 result u 0 0 vars 2 blocks 1
+var v0 val t
+var v1 val t
+block 0 7
+i textbuf v0 8 @1:1
+i textbuf v1 4 @2:1
+i append v1 val ci42 @3:1
+i append v0 val v1 @4:1
+i print val v0 @5:1
+i drop v1 - @6:1
+i drop v0 - @7:1
+t return cu
+endfunc
+end
