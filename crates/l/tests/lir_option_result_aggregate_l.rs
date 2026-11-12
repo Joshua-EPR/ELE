@@ -267,6 +267,15 @@ fn protocol_reader_type_checks_aggregate_payloads() {
         "list payload",
         fixture("native_cfg_enum_aggregate_list_payload.lir"),
     );
+    // A choice nested in a drop-free shape may carry at most one Int/Bool.
+    reject(
+        "choice with two fields",
+        good.replace(
+            "variant 5:76,97,114,103,101 types 0",
+            "variant 5:76,97,114,103,101 types 2 i b",
+        )
+        .replace("i variant v0 e0 1 0", "i variant v0 e0 1 2 ci1 cb1"),
+    );
 }
 
 #[test]

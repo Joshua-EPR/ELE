@@ -575,9 +575,7 @@ fn drop_free(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) ->
         }),
         Type::Enum(e) => enums.get(e).is_some_and(|def| {
             def.variants.iter().all(|(_, payload)| {
-                payload
-                    .iter()
-                    .all(|p| drop_free(*p, structs, enums, depth + 1))
+                payload.len() <= 1 && payload.iter().all(|p| matches!(p, Type::Int | Type::Bool))
             })
         }),
         _ => false,
