@@ -85,7 +85,7 @@ pub struct SemaContext {
     lir_failed: Int
 }
 
-fn semaContextNew() -> SemaContext {
+pub fn semaContextNew() -> SemaContext {
     let errs: List<SemaError> = List[]
     let drop_memo: List<Int> = List[]
     let field_types: List<Int> = List[]
@@ -200,7 +200,7 @@ fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr
     }
 }
 
-fn semaAddError(ctx: &mut SemaContext, code: Text, message: Text, start: Int, end: Int) {
+pub fn semaAddError(ctx: &mut SemaContext, code: Text, message: Text, start: Int, end: Int) {
     ctx.errors.push(SemaError(code: code, message: message, start: start, end: end))
 }
 
@@ -209,13 +209,13 @@ fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
     return ctx.decl_module[decl]
 }
 
-fn semaSetDeclModules(ctx: &mut SemaContext, decl_module: &List<Int>) {
+pub fn semaSetDeclModules(ctx: &mut SemaContext, decl_module: &List<Int>) {
     for i in 0..decl_module.length {
         ctx.decl_module.push(decl_module[i])
     }
 }
 
-fn semaSetModuleAccess(ctx: &mut SemaContext, access: &List<Int>, module_count: Int) {
+pub fn semaSetModuleAccess(ctx: &mut SemaContext, access: &List<Int>, module_count: Int) {
     ctx.module_count = module_count
     for i in 0..access.length { ctx.module_access.push(access[i]) }
 }
@@ -228,7 +228,7 @@ fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int)
     return found
 }
 
-fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, type_id: Int) -> Int {
+pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, type_id: Int) -> Int {
     if type_id < 0 || type_id >= tree.types.length {
         return 0
     }
