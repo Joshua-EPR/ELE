@@ -1,6 +1,6 @@
 import sema_types
 
-enum SymbolKind {
+pub enum SymbolKind {
     Var
     Param
     Func
@@ -11,7 +11,7 @@ enum SymbolKind {
     Const
 }
 
-struct Symbol {
+pub struct Symbol {
     move_path: Int
     kind: SymbolKind
     name_start: Int
@@ -27,7 +27,7 @@ struct Symbol {
     module_id: Int
 }
 
-struct SymbolTable {
+pub struct SymbolTable {
     symbols: List<Symbol>
 }
 
