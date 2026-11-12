@@ -47,8 +47,8 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         for name in ('Option', 'Result'):
             self.assertRegex(
                 front,
-                rf'SemTypeKind\\.{name}\\s*=>\\s*\\{{\\s*'
-                r'lirMarkUnsupported\\(&mut ctx\\.lir, expr\\.start\\)',
+                rf'SemTypeKind\.{name}\s*=>\s*\{{\s*'
+                r'lirMarkUnsupported\(&mut ctx\.lir, expr\.start\)',
             )
 
 
