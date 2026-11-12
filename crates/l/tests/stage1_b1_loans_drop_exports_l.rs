@@ -1,5 +1,5 @@
 //! Focused B1 export contract: real Stage 1 modules, not synthetic stubs.
-//! B2 loan snapshot fixes are the parent of this stacked branch; no self-hosting claim.
+//! PR #43 B2 loan snapshots are in main; no self-hosting claim.
 mod stage1_support;
 
 use std::{
@@ -56,18 +56,20 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     assert!(drop_plan.contains("FLOW_LIVE"));
     assert!(drop_plan.contains("FLOW_MAYBE"));
 
-    check(
+    let visible_loan = check(
         &dir,
         "visible_loan_ancestry",
         "import flow_cfg\nimport loans_l\nfn probe(graph: &FlowGraph) -> Bool { return loanDescendsFrom(graph, 0, 0) }\n",
         true,
     );
-    check(
+    assert!(visible_loan.is_empty(), "{visible_loan}");
+    let visible_states = check(
         &dir,
         "visible_drop_states",
         "import ownership_l\nflow probe() => Int { give FLOW_LIVE + FLOW_MAYBE }\n",
         true,
     );
+    assert!(visible_states.is_empty(), "{visible_states}");
     let private_loan = check(
         &dir,
         "private_loan_helper",
@@ -84,4 +86,12 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     );
     assert!(private_state.contains("error[L0001]"), "{private_state}");
     assert!(private_state.contains("private_drop_state.l:"), "{private_state}");
+    let private_moved = check(
+        &dir,
+        "private_moved_state",
+        "import ownership_l\nflow probe() => Int { give FLOW_MOVED }\n",
+        false,
+    );
+    assert!(private_moved.contains("error[L0001]"), "{private_moved}");
+    assert!(private_moved.contains("private_moved_state.l:"), "{private_moved}");
 }
