@@ -3,13 +3,13 @@ import lir_build
 
 const LIR_TY_ERR = -1
 
-struct LirCheck {
+pub struct LirCheck {
     status: Int
     block: Int
     inst: Int
 }
 
-struct LirVerifier {
+pub struct LirVerifier {
     defined: List<Bool>
     table: List<Bool>
     seen: List<Bool>
