@@ -113,6 +113,26 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: >-
           cargo test -p project-l --no-fail-fast -- --test-threads=1
+      # Stage 1 tools were bootstrapped by the Rust integration suites above.
+      # This is a per-entry + imported closure measurement, not Stage 2.
+      - name: Test self-coverage gate (MSVC)
+        if: runner.os == 'Windows' && !cancelled()
+        run: python -m unittest discover -s tests/native_backend -p 'test_self_coverage_gate.py' -v
+      - name: Measure Stage 1 self-coverage and reject green-phase regressions (MSVC)
+        if: runner.os == 'Windows' && success()
+        run: >-
+          python tools/self_coverage_gate.py
+          --baseline docs/SELF_COVERAGE_MATRIX_2026-11-11.md
+      - name: Preserve Stage 1 self-coverage evidence
+        if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage1-self-coverage-${{ github.run_id }}-${{ matrix.os }}
+          path: |
+            target/stage1-tests/self-coverage-gate/report.json
+            target/stage1-tests/self-coverage-gate/report.md
+          if-no-files-found: warn
+          retention-days: 7
       - name: Native print, references and Text queries through the ELE backend (MSVC host, image checks)
         if: runner.os == 'Windows' && !cancelled()
         run: >-
