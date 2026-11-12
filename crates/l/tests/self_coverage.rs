@@ -306,6 +306,27 @@ fn parse_baseline(text: &str) -> BTreeMap<String, Phase> {
     map
 }
 
+// A maintenance mode must never turn an observed coverage regression into
+// a new approved baseline. Only improvements (and explicit source changes)
+// may be recorded by ELE_UPDATE_SELF_COVERAGE.
+fn reject_regressive_baseline_update(regressions: &[String]) {
+    assert!(
+        regressions.is_empty(),
+        "No se puede actualizar {BASELINE}: regresiones detectadas:\n  {}",
+        regressions.join("\n  ")
+    );
+}
+
+#[test]
+fn baseline_update_refuses_regressions() {
+    reject_regressive_baseline_update(&[]);
+    let backward = vec!["lexer.l: lir -> semantica".to_string()];
+    assert!(
+        std::panic::catch_unwind(|| reject_regressive_baseline_update(&backward)).is_err(),
+        "no se debe aceptar un retroceso en modo actualización"
+    );
+}
+
 #[test]
 fn stage1_self_coverage_matches_versioned_baseline() {
     let root = root();
@@ -404,11 +425,7 @@ fn stage1_self_coverage_matches_versioned_baseline() {
     if updating {
         // Updating the baseline may record genuine progress, but it must
         // NEVER normalize a regression into the new golden matrix.
-        assert!(
-            regressions.is_empty(),
-            "No se puede actualizar {BASELINE}: regresiones detectadas:\\n  {}",
-            regressions.join("\\n  ")
-        );
+        reject_regressive_baseline_update(&regressions);
         fs::write(&baseline_path, render_baseline(&rows)).unwrap();
         println!(
             "{BASELINE} regenerada ({total} archivos). Mejoras: {improvements:?}; nuevos: {added:?}; eliminados: {removed:?}"
