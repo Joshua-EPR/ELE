@@ -234,7 +234,17 @@ fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
         let finish = p_end - 1
         if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
         if finish == start + 1 && source.byteAt(start) == 95 { return }
-        if !lirBuiltinPrimitive(payload_ty) { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        if !lirBuiltinPrimitive(payload_ty) || !lirBuiltinSupported(&ctx.types, scrut_t) {
+            // Stage 1 ownership must still see the source-level pattern
+            // binder for non-native unions (e.g. Result<Int, LexError>).
+            // The LIR remains explicitly unsupported: no unchecked payload
+            // read, coercion, or fabricated value can reach the backend.
+            lirMarkUnsupported(&mut ctx.lir, p_start)
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, start, finish, payload_ty, ctx.scopes.current_scope, false, false, -1, start, finish)
+            scopeAddSymbol(&mut ctx.scopes, sym_id)
+            semaInitPath(&mut ctx, sym_id, start, finish)
+            return
+        }
         let enum_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
         if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
         let place = lirPlaceVar(&mut ctx.lir, scrut_var)
