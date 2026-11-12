@@ -402,9 +402,16 @@ fn stage1_self_coverage_matches_versioned_baseline() {
         .collect();
 
     if updating {
+        // Updating the baseline may record genuine progress, but it must
+        // NEVER normalize a regression into the new golden matrix.
+        assert!(
+            regressions.is_empty(),
+            "No se puede actualizar {BASELINE}: regresiones detectadas:\\n  {}",
+            regressions.join("\\n  ")
+        );
         fs::write(&baseline_path, render_baseline(&rows)).unwrap();
         println!(
-            "{BASELINE} regenerada ({total} archivos). Regresiones aceptadas: {regressions:?}; mejoras: {improvements:?}; nuevos: {added:?}; eliminados: {removed:?}"
+            "{BASELINE} regenerada ({total} archivos). Mejoras: {improvements:?}; nuevos: {added:?}; eliminados: {removed:?}"
         );
         return;
     }
