@@ -41,6 +41,8 @@ pub struct SemaContext {
     current_fn_ret_type: Int
     current_fn_is_async: Bool
     expected_list_type: Int
+    // Context for standalone None/Ok/Err when a concrete type is annotated.
+    expected_union_type: Int
     // Module identity: the module whose declarations are being analyzed,
     // and the owning module of each merged-tree declaration.
     current_module: Int
@@ -108,6 +110,7 @@ pub fn semaContextNew() -> SemaContext {
         current_fn_ret_type: 6,
         current_fn_is_async: false,
         expected_list_type: -1,
+        expected_union_type: -1,
         current_module: 0,
         decl_module: List[],
         module_access: List[],
