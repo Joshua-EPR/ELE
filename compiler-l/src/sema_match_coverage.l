@@ -145,6 +145,12 @@ fn semaBuiltinBinderIsName(source: &Text, start: Int, end: Int) -> Bool {
 
 pub fn semaBuiltinMatchCovered(source: &Text, tree: &AstTree, expr: &AstExpr, result_type: Bool) -> Bool {
     if expr.c != 2 { return false }
+    // Stage 0 requires a variable/field at a &Text parameter. Keep these
+    // patterns as reusable Text bindings rather than temporary literals.
+    let ok_name = "Ok("
+    let err_name = "Err("
+    let some_name = "Some("
+    let none_name = "None"
     var seen_zero = false
     var seen_one = false
     for arm in 0..expr.c {
@@ -154,17 +160,17 @@ pub fn semaBuiltinMatchCovered(source: &Text, tree: &AstTree, expr: &AstExpr, re
         var variant = -1
         var bind_start = -1
         if result_type {
-            if count >= 5 && symbolNameEqualsText(source, start, start + 3, "Ok(") {
+            if count >= 5 && symbolNameEqualsText(source, start, start + 3, ok_name) {
                 variant = 0
                 bind_start = start + 3
-            } else if count >= 6 && symbolNameEqualsText(source, start, start + 4, "Err(") {
+            } else if count >= 6 && symbolNameEqualsText(source, start, start + 4, err_name) {
                 variant = 1
                 bind_start = start + 4
             }
         } else {
-            if count == 4 && symbolNameEqualsText(source, start, end, "None") {
+            if count == 4 && symbolNameEqualsText(source, start, end, none_name) {
                 variant = 0
-            } else if count >= 7 && symbolNameEqualsText(source, start, start + 5, "Some(") {
+            } else if count >= 7 && symbolNameEqualsText(source, start, start + 5, some_name) {
                 variant = 1
                 bind_start = start + 5
             }
