@@ -1,0 +1,85 @@
+//! Focused B1 export contract: real Stage 1 modules, not synthetic stubs.
+//! B2 loan snapshot fixes are the parent of this stacked branch; no self-hosting claim.
+mod stage1_support;
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn sema() -> &'static Path {
+    static EXE: OnceLock<PathBuf> = OnceLock::new();
+    EXE.get_or_init(|| stage1_support::build("main_sema", false))
+}
+
+fn prepare_real_imports() -> PathBuf {
+    let dir = repo_root().join("target/stage1-tests/b1-loans-drop-state");
+    fs::create_dir_all(&dir).unwrap();
+    for entry in fs::read_dir(repo_root().join("compiler-l/src")).unwrap() {
+        let entry = entry.unwrap();
+        let file = entry.path();
+        if file.extension().is_some_and(|ext| ext == "l") {
+            fs::copy(&file, dir.join(file.file_name().unwrap())).unwrap();
+        }
+    }
+    dir
+}
+
+fn check(dir: &Path, name: &str, source: &str, accepted: bool) -> String {
+    let path = dir.join(format!("{name}.l"));
+    fs::write(&path, source).unwrap();
+    let out = Command::new(sema())
+        .arg(&path)
+        .arg("--check-ownership")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.success(), accepted, "{name}: {stderr}");
+    stderr
+}
+
+#[test]
+fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
+    let dir = prepare_real_imports();
+
+    let loans_check = fs::read_to_string(dir.join("loans_check.l")).unwrap();
+    assert!(loans_check.contains("import loans_l"));
+    assert!(loans_check.contains("loanDescendsFrom("));
+    let drop_plan = fs::read_to_string(dir.join("drops_plan.l")).unwrap();
+    assert!(drop_plan.contains("import ownership_l"));
+    assert!(drop_plan.contains("FLOW_LIVE"));
+    assert!(drop_plan.contains("FLOW_MAYBE"));
+
+    check(
+        &dir,
+        "visible_loan_ancestry",
+        "import flow_cfg\nimport loans_l\nflow probe(graph: &FlowGraph) => Bool { give loanDescendsFrom(graph, 0, 0) }\n",
+        true,
+    );
+    check(
+        &dir,
+        "visible_drop_states",
+        "import ownership_l\nflow probe() => Int { give FLOW_LIVE + FLOW_MAYBE }\n",
+        true,
+    );
+    let private_loan = check(
+        &dir,
+        "private_loan_helper",
+        "import flow_cfg\nimport loans_l\nflow probe(graph: edit FlowGraph) => Int { give loanPlaceOf(edit graph, 0) }\n",
+        false,
+    );
+    assert!(private_loan.contains("error[L0001]"), "{private_loan}");
+    let private_state = check(
+        &dir,
+        "private_drop_state",
+        "import ownership_l\nflow probe() => Int { give FLOW_UNINIT }\n",
+        false,
+    );
+    assert!(private_state.contains("error[L0001]"), "{private_state}");
+}
