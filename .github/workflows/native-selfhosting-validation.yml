@@ -50,6 +50,7 @@ jobs:
           cargo test -p project-l
           --test native_enum_stage1_l
           --test ele_stage1_generic_types
+          --test native_builtin_union_l
           --test native_enum_stage1_payload_l
           --test native_heap_l
           --test native_heap_dynamic_l
@@ -73,6 +74,7 @@ jobs:
           --test native_wide_struct_l
           --test native_enum_stage1_l
           --test ele_stage1_generic_types
+          --test native_builtin_union_l
           --test native_enum_stage1_payload_l
           --test native_heap_l
           --test native_heap_dynamic_l
