@@ -43,10 +43,10 @@ class NativeCfgDifferentialContract(unittest.TestCase):
     def test_real_ownership_diagnostic_changes_are_not_normalized_away(self):
         baseline = Path("/tmp/ele-cfg-baseline-123456")
         prefix = str(ROOT).encode() + b"/examples/borrow.l:"
-        valid = prefix + b"7:4: error[L0012]: préstamo incompatible\n"
-        changed_code = prefix + b"7:4: error[L0013]: préstamo incompatible\n"
-        changed_location = prefix + b"8:4: error[L0012]: préstamo incompatible\n"
-        changed_message = prefix + b"7:4: error[L0012]: préstamo inválido\n"
+        valid = prefix + "7:4: error[L0012]: préstamo incompatible\n".encode("utf-8")
+        changed_code = prefix + "7:4: error[L0013]: préstamo incompatible\n".encode("utf-8")
+        changed_location = prefix + "8:4: error[L0012]: préstamo incompatible\n".encode("utf-8")
+        changed_message = prefix + "7:4: error[L0012]: préstamo inválido\n".encode("utf-8")
         for mutated in (changed_code, changed_location, changed_message):
             with self.subTest(mutated=mutated):
                 self.assertNotEqual(
