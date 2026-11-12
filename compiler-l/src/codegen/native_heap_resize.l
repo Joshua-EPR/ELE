@@ -29,7 +29,8 @@ expose flow heapEmitDynamicResize(code: edit X64Code) => Bool {
     x64TestRax(edit code)
     hold success = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 125)
-    x64PatchRelative(edit code, success, code.bytes.length)
+    hold end_offset = code.bytes.length
+    x64PatchRelative(edit code, success, end_offset)
     x64MovReg(edit code, 0, 2)
     give code.error == 0
 }
