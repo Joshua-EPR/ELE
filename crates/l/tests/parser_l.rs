@@ -251,10 +251,12 @@ fn test_differential_ast_with_stage0() {
     let (ok, stdout, stderr) = run_parser_on_file(&target_file);
     assert!(ok, "parser-l failed on tokens.l: {stderr}");
 
-    // Compare top-level function count
-    let stage0_fn_count = stage0_prog.functions.len();
+    // Stage 1's AST summary counts imports as declarations. Stage 0 keeps
+    // imports in a separate collection, so include both when comparing this
+    // function-only source file with its new explicit lexer import.
+    let stage0_decl_count = stage0_prog.functions.len() + stage0_prog.imports.len();
     assert!(
-        stdout.contains(&format!("AstSummary decls={stage0_fn_count}")),
-        "Decl count mismatch between Stage 0 ({stage0_fn_count}) and parser-l output:\n{stdout}"
+        stdout.contains(&format!("AstSummary decls={stage0_decl_count}")),
+        "Decl count mismatch between Stage 0 ({stage0_decl_count}) and parser-l output:\n{stdout}"
     );
 }
