@@ -21,7 +21,7 @@ const DROP_OP_SET = 2
 const DROP_OP_CLEAR = 3
 const DROP_OP_REF = 4
 
-struct DropOp {
+pub struct DropOp {
     kind: Int
     // Leaf path (DROP, COND, SET, CLEAR) or written place (REF).
     path: Int
@@ -34,7 +34,7 @@ struct DropOp {
     ty: Int
 }
 
-struct DropPlan {
+pub struct DropPlan {
     ops: List<DropOp>
     flag_of: List<Int>
     flag_paths: List<Int>
