@@ -79,8 +79,13 @@ def digest(payload: bytes) -> str:
 
 
 def normalize(payload: bytes, source_root: Path) -> bytes:
+    # Both compilers analyze the SAME checked-out fixture path (ROOT),
+    # even when the baseline compiler itself was built in a worktree.
+    # Canonicalize both possible roots symmetrically. Never ignore the
+    # message, diagnostic code, location or payload.
     return (
-        payload.replace(str(source_root).encode(), b"<SOURCE_ROOT>")
+        payload.replace(str(ROOT).encode(), b"<SOURCE_ROOT>")
+        .replace(str(source_root).encode(), b"<SOURCE_ROOT>")
         .replace(b"\r\n", b"\n")
     )
 
