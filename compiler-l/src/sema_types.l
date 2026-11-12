@@ -30,7 +30,7 @@ pub struct TypeTable {
     types: List<SemType>
 }
 
-fn typeTableNew() -> TypeTable {
+pub fn typeTableNew() -> TypeTable {
     let list: List<SemType> = List[]
     var table = TypeTable(types: list)
     table.types.push(SemType(kind: SemTypeKind.Unknown, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
@@ -44,13 +44,13 @@ fn typeTableNew() -> TypeTable {
     return table
 }
 
-fn semTypeAdd(table: &mut TypeTable, kind: SemTypeKind, name_start: Int, name_end: Int, elem_type: Int, nominal_id: Int) -> Int {
+pub fn semTypeAdd(table: &mut TypeTable, kind: SemTypeKind, name_start: Int, name_end: Int, elem_type: Int, nominal_id: Int) -> Int {
     let id = table.types.length
     table.types.push(SemType(kind: kind, name_start: name_start, name_end: name_end, elem_type: elem_type, nominal_id: nominal_id))
     return id
 }
 
-fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int {
+pub fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         if is_mut {
@@ -76,7 +76,7 @@ fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int {
     return semTypeAdd(&mut table, kind, -1, -1, inner_id, -1)
 }
 
-fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
+pub fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         match t.kind {
@@ -89,7 +89,7 @@ fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
     return semTypeAdd(&mut table, SemTypeKind.List, -1, -1, elem_id, -1)
 }
 
-fn semTypeMakeOption(table: &mut TypeTable, elem_id: Int) -> Int {
+pub fn semTypeMakeOption(table: &mut TypeTable, elem_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         match t.kind {
@@ -102,7 +102,7 @@ fn semTypeMakeOption(table: &mut TypeTable, elem_id: Int) -> Int {
     return semTypeAdd(&mut table, SemTypeKind.Option, -1, -1, elem_id, -1)
 }
 
-fn semTypeMakeResult(table: &mut TypeTable, ok_id: Int, err_id: Int) -> Int {
+pub fn semTypeMakeResult(table: &mut TypeTable, ok_id: Int, err_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         match t.kind {
@@ -115,7 +115,7 @@ fn semTypeMakeResult(table: &mut TypeTable, ok_id: Int, err_id: Int) -> Int {
     return semTypeAdd(&mut table, SemTypeKind.Result, -1, -1, ok_id, err_id)
 }
 
-fn semTypeMakeArray(table: &mut TypeTable, elem_id: Int) -> Int {
+pub fn semTypeMakeArray(table: &mut TypeTable, elem_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         match t.kind {
@@ -128,7 +128,7 @@ fn semTypeMakeArray(table: &mut TypeTable, elem_id: Int) -> Int {
     return semTypeAdd(&mut table, SemTypeKind.Array, -1, -1, elem_id, -1)
 }
 
-fn semTypeMakeSlice(table: &mut TypeTable, elem_id: Int) -> Int {
+pub fn semTypeMakeSlice(table: &mut TypeTable, elem_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]
         match t.kind {
@@ -141,7 +141,7 @@ fn semTypeMakeSlice(table: &mut TypeTable, elem_id: Int) -> Int {
     return semTypeAdd(&mut table, SemTypeKind.Slice, -1, -1, elem_id, -1)
 }
 
-fn semTypeIsNumeric(kind: &SemTypeKind) -> Bool {
+pub fn semTypeIsNumeric(kind: &SemTypeKind) -> Bool {
     match kind {
         SemTypeKind.Int => { return true }
         SemTypeKind.Float => { return true }
@@ -150,7 +150,7 @@ fn semTypeIsNumeric(kind: &SemTypeKind) -> Bool {
     }
 }
 
-fn semTypeIsCopy(kind: &SemTypeKind) -> Bool {
+pub fn semTypeIsCopy(kind: &SemTypeKind) -> Bool {
     match kind {
         SemTypeKind.Int => { return true }
         SemTypeKind.Float => { return true }
@@ -161,11 +161,11 @@ fn semTypeIsCopy(kind: &SemTypeKind) -> Bool {
     }
 }
 
-fn semTypeIsMove(kind: &SemTypeKind) -> Bool {
+pub fn semTypeIsMove(kind: &SemTypeKind) -> Bool {
     return !semTypeIsCopy(kind)
 }
 
-fn semTypeEquals(table: &TypeTable, a: Int, b: Int) -> Bool {
+pub fn semTypeEquals(table: &TypeTable, a: Int, b: Int) -> Bool {
     if a == b { return true }
     if a == 0 || b == 0 { return true }
     if a == 7 || b == 7 { return true }
@@ -272,7 +272,7 @@ fn semTypeEquals(table: &TypeTable, a: Int, b: Int) -> Bool {
     }
 }
 
-fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
+pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
     if type_id < 0 || type_id >= table.types.length {
         return "<invalid>"
     }
