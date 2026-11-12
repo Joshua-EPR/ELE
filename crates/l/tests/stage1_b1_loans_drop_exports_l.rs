@@ -77,7 +77,10 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         false,
     );
     assert!(private_loan.contains("error[L0001]"), "{private_loan}");
-    assert!(private_loan.contains("private_loan_helper.l:"), "{private_loan}");
+    assert!(
+        private_loan.contains("private_loan_helper.l:"),
+        "{private_loan}"
+    );
     let private_state = check(
         &dir,
         "private_drop_state",
@@ -85,7 +88,10 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         false,
     );
     assert!(private_state.contains("error[L0001]"), "{private_state}");
-    assert!(private_state.contains("private_drop_state.l:"), "{private_state}");
+    assert!(
+        private_state.contains("private_drop_state.l:"),
+        "{private_state}"
+    );
     let private_moved = check(
         &dir,
         "private_moved_state",
@@ -93,5 +99,8 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         false,
     );
     assert!(private_moved.contains("error[L0001]"), "{private_moved}");
-    assert!(private_moved.contains("private_moved_state.l:"), "{private_moved}");
+    assert!(
+        private_moved.contains("private_moved_state.l:"),
+        "{private_moved}"
+    );
 }
