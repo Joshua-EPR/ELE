@@ -1,191 +1,191 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
-import native_cfg_inst
-import native_cfg_list
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
+take native_cfg_inst
+take native_cfg_list
 
 // ELE-LIR CFG reader; split across modules to obey CORE-1 token limit.
-fn cfgReadBlock(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f: Int, b: Int) {
-    nativeExpect(source, &mut reader, "block")
-    let id = nativeNumber(source, &mut reader)
-    let count = nativeNumber(source, &mut reader)
-    nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != b || count < 0 || count > 100000 {
+flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int, b: Int) {
+    nativeExpect(source, edit reader, "block")
+    hold id = nativeNumber(source, edit reader)
+    hold count = nativeNumber(source, edit reader)
+    nativeEndLine(source, edit reader)
+    when reader.error != 0 || id != b || count < 0 || count > 100000 {
         p.error = 38
-        return
+        give
     }
-    let first = p.insts.length
-    for i in 0..count {
-        if p.error != 0 { break }
-        cfgReadInst(&mut p, source, &mut reader, f)
+    hold first = p.insts.length
+    each i among 0..count {
+        when p.error != 0 { leave }
+        cfgReadInst(edit p, source, edit reader, f)
     }
-    if p.error != 0 { return }
-    nativeExpect(source, &mut reader, "t")
-    let keyword = nativeWord(source, &mut reader)
-    var kind = 0
-    var value = cfgEmptyOperand()
-    var yes = -1
-    var no = -1
-    if nativeEquals(source, &keyword, "return") {
+    when p.error != 0 { give }
+    nativeExpect(source, edit reader, "t")
+    hold keyword = nativeWord(source, edit reader)
+    change kind = 0
+    change value = cfgEmptyOperand()
+    change yes = -1
+    change no = -1
+    when nativeEquals(source, view keyword, "return") {
         kind = 1
-        value = cfgOperand(&mut p, source, &mut reader)
-    } else if nativeEquals(source, &keyword, "jump") {
+        value = cfgOperand(edit p, source, edit reader)
+    } otherwise when nativeEquals(source, view keyword, "jump") {
         kind = 2
-        yes = nativeNumber(source, &mut reader)
-    } else if nativeEquals(source, &keyword, "branch") {
+        yes = nativeNumber(source, edit reader)
+    } otherwise when nativeEquals(source, view keyword, "branch") {
         kind = 3
-        value = nativeOperand(source, &mut reader)
-        yes = nativeNumber(source, &mut reader)
-        no = nativeNumber(source, &mut reader)
-    } else if nativeEquals(source, &keyword, "unreachable") {
+        value = nativeOperand(source, edit reader)
+        yes = nativeNumber(source, edit reader)
+        no = nativeNumber(source, edit reader)
+    } otherwise when nativeEquals(source, view keyword, "unreachable") {
         kind = 4
-    } else {
+    } otherwise {
         p.error = 39
     }
-    nativeEndLineSpan(source, &mut reader)
-    if reader.error != 0 { p.error = 40 }
-    if kind == 1 {
-        let expected = p.functions[f].result_type
-        if cfgOperandType(p, f, &value) != expected { p.error = 41 }
+    nativeEndLineSpan(source, edit reader)
+    when reader.error != 0 { p.error = 40 }
+    when kind == 1 {
+        hold expected = p.functions[f].result_type
+        when cfgOperandType(p, f, view value) != expected { p.error = 41 }
     }
-    if kind == 3 && cfgOperandType(p, f, &value) != 1 { p.error = 42 }
-    if (kind == 2 || kind == 3) && (yes < 0 || yes >= p.functions[f].blocks) { p.error = 43 }
-    if kind == 3 && (no < 0 || no >= p.functions[f].blocks) { p.error = 43 }
-    if p.error == 0 {
-        p.blocks.push(CfgBlock(first: first, count: count, term: kind, value: value, yes: yes, no: no))
+    when kind == 3 && cfgOperandType(p, f, view value) != 1 { p.error = 42 }
+    when (kind == 2 || kind == 3) && (yes < 0 || yes >= p.functions[f].blocks) { p.error = 43 }
+    when kind == 3 && (no < 0 || no >= p.functions[f].blocks) { p.error = 43 }
+    when p.error == 0 {
+        p.blocks@push(CfgBlock(first: first, count: count, term: kind, value: value, yes: yes, no: no))
     }
 }
 
-fn cfgReadFunction(p: &mut CfgProgram, source: &Text, reader: &mut NativeReader, f: Int) {
-    nativeExpect(source, &mut reader, "func")
-    let id = nativeId(source, &mut reader, 102)
-    let name = nativeWord(source, &mut reader)
-    nativeExpect(source, &mut reader, "params")
-    let params = nativeNumber(source, &mut reader)
-    nativeExpect(source, &mut reader, "result")
-    let result_type = cfgTypeOrUnit(p, source, &mut reader)
-    let returned_ref = nativeNumber(source, &mut reader)
-    let returned_mut = nativeNumber(source, &mut reader)
-    nativeExpect(source, &mut reader, "vars")
-    let vars = nativeNumber(source, &mut reader)
-    nativeExpect(source, &mut reader, "blocks")
-    let blocks = nativeNumber(source, &mut reader)
-    nativeEndLine(source, &mut reader)
-    if reader.error != 0 || id != f || !cfgEncodedName(source, &name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
+flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int) {
+    nativeExpect(source, edit reader, "func")
+    hold id = nativeId(source, edit reader, 102)
+    hold name = nativeWord(source, edit reader)
+    nativeExpect(source, edit reader, "params")
+    hold params = nativeNumber(source, edit reader)
+    nativeExpect(source, edit reader, "result")
+    hold result_type = cfgTypeOrUnit(p, source, edit reader)
+    hold returned_ref = nativeNumber(source, edit reader)
+    hold returned_mut = nativeNumber(source, edit reader)
+    nativeExpect(source, edit reader, "vars")
+    hold vars = nativeNumber(source, edit reader)
+    nativeExpect(source, edit reader, "blocks")
+    hold blocks = nativeNumber(source, edit reader)
+    nativeEndLine(source, edit reader)
+    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
         p.error = 44
-        return
+        give
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     // Aggregate results travel through a hidden pointer (see native_cfg_emit).
-    if result_type >= 2 && cfgTypeSize(p, result_type) > 512 { p.error = 68; return }
-    p.functions.push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType(), result_type: result_type))
-    var next_slot = 0
-    for i in 0..vars {
-        nativeExpect(source, &mut reader, "var")
-        let vid = nativeId(source, &mut reader, 118)
-        let mode = nativeWord(source, &mut reader)
-        let is_ref = nativeEquals(source, &mode, "ref")
-        if !is_ref && !nativeEquals(source, &mode, "val") { reader.error = 14 }
-        let ty = cfgTypeOrUnit(p, source, &mut reader)
-        nativeEndLine(source, &mut reader)
-        let unit_var = ty == cfgUnitType()
-        let text_var = ty == cfgTextType()
-        if reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && unit_var) { p.error = 45; break }
+    when result_type >= 2 && cfgTypeSize(p, result_type) > 512 { p.error = 68; give }
+    p.functions@push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType(), result_type: result_type))
+    change next_slot = 0
+    each i among 0..vars {
+        nativeExpect(source, edit reader, "var")
+        hold vid = nativeId(source, edit reader, 118)
+        hold mode = nativeWord(source, edit reader)
+        hold is_ref = nativeEquals(source, view mode, "ref")
+        when !is_ref && !nativeEquals(source, view mode, "val") { reader.error = 14 }
+        hold ty = cfgTypeOrUnit(p, source, edit reader)
+        nativeEndLine(source, edit reader)
+        hold unit_var = ty == cfgUnitType()
+        hold text_var = ty == cfgTextType()
+        when reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var) || (i < params && !is_ref && unit_var) { p.error = 45; leave }
         // A local reference is defined by a `loan` (native_cfg_loan).
-        if is_ref && unit_var { p.error = 96; break }
-        var size = cfgTypeSize(p, ty)
-        if is_ref { size = 8 }
-        let count_slots = (size + 7) / 8
-        if size < 1 || count_slots < 1 || next_slot + count_slots > 512 { p.error = 69; break }
-        p.types_bool.push(ty == 1 && !is_ref)
-        p.types_code.push(ty)
-        p.var_ref.push(is_ref)
-        p.ref_root.push(-1)
-        p.ref_field.push(-1)
-        p.ref_sub.push(-1)
-        p.ref_mut.push(-1)
-        p.slot_start.push(next_slot)
-        p.slot_count.push(count_slots)
+        when is_ref && unit_var { p.error = 96; leave }
+        change size = cfgTypeSize(p, ty)
+        when is_ref { size = 8 }
+        hold count_slots = (size + 7) / 8
+        when size < 1 || count_slots < 1 || next_slot + count_slots > 512 { p.error = 69; leave }
+        p.types_bool@push(ty == 1 && !is_ref)
+        p.types_code@push(ty)
+        p.var_ref@push(is_ref)
+        p.ref_root@push(-1)
+        p.ref_field@push(-1)
+        p.ref_sub@push(-1)
+        p.ref_mut@push(-1)
+        p.slot_start@push(next_slot)
+        p.slot_count@push(count_slots)
         next_slot += count_slots
     }
-    if p.error != 0 { return }
-    for i in 0..blocks {
-        if p.error != 0 { break }
-        cfgReadBlock(&mut p, source, &mut reader, f, i)
+    when p.error != 0 { give }
+    each i among 0..blocks {
+        when p.error != 0 { leave }
+        cfgReadBlock(edit p, source, edit reader, f, i)
     }
-    if p.error != 0 { return }
-    nativeExpect(source, &mut reader, "endfunc")
-    nativeEndLine(source, &mut reader)
-    if reader.error != 0 { p.error = 46 }
+    when p.error != 0 { give }
+    nativeExpect(source, edit reader, "endfunc")
+    nativeEndLine(source, edit reader)
+    when reader.error != 0 { p.error = 46 }
 }
 
-pub fn cfgParse(source: &Text) -> CfgProgram {
-    var p = cfgEmpty()
-    if source.byteLength == 0 || source.byteLength > 1048576 {
+expose flow cfgParse(source: view Text) => CfgProgram {
+    change p = cfgEmpty()
+    when source.byteLength == 0 || source.byteLength > 1048576 {
         p.error = 47
-        return p
+        give p
     }
-    var r = nativeReaderNew()
-    nativeExpect(source, &mut r, "ELE-LIR")
-    nativeExpect(source, &mut r, "1")
-    nativeEndLine(source, &mut r)
-    nativeExpect(source, &mut r, "module")
-    nativeExpect(source, &mut r, "structs")
-    let structs = nativeNumber(source, &mut r)
-    var probe = NativeReader(offset: r.offset, error: 0)
-    let next_word = nativeWord(source, &mut probe)
-    var enums = 0
-    if nativeEquals(source, &next_word, "enums") {
-        nativeExpect(source, &mut r, "enums")
-        enums = nativeNumber(source, &mut r)
+    change r = nativeReaderNew()
+    nativeExpect(source, edit r, "ELE-LIR")
+    nativeExpect(source, edit r, "1")
+    nativeEndLine(source, edit r)
+    nativeExpect(source, edit r, "module")
+    nativeExpect(source, edit r, "structs")
+    hold structs = nativeNumber(source, edit r)
+    change probe = NativeReader(offset: r.offset, error: 0)
+    hold next_word = nativeWord(source, edit probe)
+    change enums = 0
+    when nativeEquals(source, view next_word, "enums") {
+        nativeExpect(source, edit r, "enums")
+        enums = nativeNumber(source, edit r)
     }
-    var lists = 0
-    var list_probe = NativeReader(offset: r.offset, error: 0)
-    let list_word = nativeWord(source, &mut list_probe)
-    if nativeEquals(source, &list_word, "lists") {
-        nativeExpect(source, &mut r, "lists")
-        lists = nativeNumber(source, &mut r)
+    change lists = 0
+    change list_probe = NativeReader(offset: r.offset, error: 0)
+    hold list_word = nativeWord(source, edit list_probe)
+    when nativeEquals(source, view list_word, "lists") {
+        nativeExpect(source, edit r, "lists")
+        lists = nativeNumber(source, edit r)
     }
-    nativeExpect(source, &mut r, "funcs")
-    let functions = nativeNumber(source, &mut r)
-    nativeExpect(source, &mut r, "main")
-    let main = nativeId(source, &mut r, 102)
-    nativeEndLine(source, &mut r)
-    if r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || lists < 0 || lists > 64 || functions < 1 || functions > 256 || main < 0 || main >= functions {
+    nativeExpect(source, edit r, "funcs")
+    hold functions = nativeNumber(source, edit r)
+    nativeExpect(source, edit r, "main")
+    hold main = nativeId(source, edit r, 102)
+    nativeEndLine(source, edit r)
+    when r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || lists < 0 || lists > 64 || functions < 1 || functions > 256 || main < 0 || main >= functions {
         p.error = 48
-        return p
+        give p
     }
     p.main = main
     p.decl_structs = structs
     p.decl_enums = enums
     p.decl_lists = lists
-    for i in 0..structs {
-        if p.error != 0 { break }
-        cfgReadStruct(&mut p, source, &mut r, i)
+    each i among 0..structs {
+        when p.error != 0 { leave }
+        cfgReadStruct(edit p, source, edit r, i)
     }
-    if p.error != 0 { return p }
-    for i in 0..enums {
-        if p.error != 0 { break }
-        cfgReadEnum(&mut p, source, &mut r, i)
+    when p.error != 0 { give p }
+    each i among 0..enums {
+        when p.error != 0 { leave }
+        cfgReadEnum(edit p, source, edit r, i)
     }
-    if p.error != 0 { return p }
-    for i in 0..lists {
-        if p.error != 0 { break }
-        cfgReadList(&mut p, source, &mut r, i)
+    when p.error != 0 { give p }
+    each i among 0..lists {
+        when p.error != 0 { leave }
+        cfgReadList(edit p, source, edit r, i)
     }
-    if p.error != 0 { return p }
-    for i in 0..functions {
-        if p.error != 0 { break }
-        cfgReadFunction(&mut p, source, &mut r, i)
+    when p.error != 0 { give p }
+    each i among 0..functions {
+        when p.error != 0 { leave }
+        cfgReadFunction(edit p, source, edit r, i)
     }
-    if p.error != 0 { return p }
-    nativeExpect(source, &mut r, "end")
-    nativeEndLine(source, &mut r)
-    if r.error != 0 || !nativeAtEnd(source, &r) {
+    when p.error != 0 { give p }
+    nativeExpect(source, edit r, "end")
+    nativeEndLine(source, edit r)
+    when r.error != 0 || !nativeAtEnd(source, view r) {
         p.error = 49
-        return p
+        give p
     }
-    if p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 { p.error = 50 }
-    return p
+    when p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 { p.error = 50 }
+    give p
 }
