@@ -234,6 +234,8 @@ pub struct LirModule {
     list_elem: List<Int>
     unit_enums: List<Int>
     en_decl: List<Int>
+    // -1 for a nominal enum, otherwise the concrete Option/Result type id.
+    en_builtin: List<Int>
     en_first: List<Int>
     en_count: List<Int>
     variant_payload: List<Int>
@@ -241,7 +243,7 @@ pub struct LirModule {
 }
 
 pub fn lirModuleNew() -> LirModule {
-    return LirModule(fn_first: List[], fn_count: List[], param_ty: List[], param_ref: List[], param_mut: List[], fn_ret: List[], fn_ret_ref: List[], fn_ret_mut: List[], fn_decl: List[], st_first: List[], st_count: List[], field_ty: List[], st_decl: List[], list_elem: List[], unit_enums: List[], en_decl: List[], en_first: List[], en_count: List[], variant_payload: List[], variant_type: List[])
+    return LirModule(fn_first: List[], fn_count: List[], param_ty: List[], param_ref: List[], param_mut: List[], fn_ret: List[], fn_ret_ref: List[], fn_ret_mut: List[], fn_decl: List[], st_first: List[], st_count: List[], field_ty: List[], st_decl: List[], list_elem: List[], unit_enums: List[], en_decl: List[], en_builtin: List[], en_first: List[], en_count: List[], variant_payload: List[], variant_type: List[])
 }
 
 pub fn lirListRegister(lm: &mut LirModule, elem: Int) -> Int {
