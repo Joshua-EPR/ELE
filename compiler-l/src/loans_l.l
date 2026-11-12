@@ -39,7 +39,7 @@ fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int
     return id
 }
 
-fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
+pub fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
     if loan < 0 || loan >= graph.loans.length { return false }
     return graph.loans[loan].kind == LOAN_MUT
 }

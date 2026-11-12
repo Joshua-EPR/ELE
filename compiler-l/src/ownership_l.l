@@ -1,6 +1,6 @@
 import flow_cfg
 
-const FLOW_UNINIT = 0
+pub const FLOW_UNINIT = 0
 pub const FLOW_LIVE = 1
 const FLOW_MOVED = 2
 pub const FLOW_MAYBE = 3
@@ -66,7 +66,7 @@ fn flowLoad(work: &mut FlowWork, block: Int, paths: Int) {
 
 // A path's own cell represents its residual storage. Descendants have
 // separate cells so a moved field does not invalidate a sibling.
-fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, verify: Bool) -> Bool {
+pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, verify: Bool) -> Bool {
     let kind = event.kind
     let root = event.path
     // Loan events belong to the borrow checker in loans_check.l. A drop

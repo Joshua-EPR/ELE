@@ -4,7 +4,7 @@ import cursor
 import ast
 import parse_util
 
-fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, min_prec: Int, parens: Int, depth: Int) -> Int {
+pub fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, min_prec: Int, parens: Int, depth: Int) -> Int {
     if depth > 128 {
         let s = cursorSpanStart(cursor, tokens, source.byteLength)
         let e = cursorSpanEnd(cursor, tokens, source.byteLength)

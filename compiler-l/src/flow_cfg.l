@@ -228,7 +228,7 @@ pub fn flowRootPath(graph: &FlowGraph, path: Int) -> Int {
 
 // True when places a and b share storage: same root and one is an
 // ancestor-or-equal of the other (field projections are canonical ids).
-fn loanOverlaps(graph: &FlowGraph, a: Int, b: Int) -> Bool {
+pub fn loanOverlaps(graph: &FlowGraph, a: Int, b: Int) -> Bool {
     if a < 0 || b < 0 { return false }
     if a == b { return true }
     if flowRootPath(graph, a) != flowRootPath(graph, b) { return false }

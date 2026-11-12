@@ -181,12 +181,12 @@ fn lirPlaceIndex(l: &mut LirFn, base: Int, index_var: Int) -> Int {
     return l.places.length - 1
 }
 
-fn lirArg(l: &mut LirFn, by_ref: Bool, value: Int, mutable: Bool) -> Int {
+pub fn lirArg(l: &mut LirFn, by_ref: Bool, value: Int, mutable: Bool) -> Int {
     l.args.push(LirArg(by_ref: by_ref, value: value, mutable: mutable))
     return l.args.length - 1
 }
 
-fn lirEmit(l: &mut LirFn, kind: Int, dst: Int, a: Int, b: Int, c: Int, block: Int, pos: Int) {
+pub fn lirEmit(l: &mut LirFn, kind: Int, dst: Int, a: Int, b: Int, c: Int, block: Int, pos: Int) {
     l.insts.push(LirInst(kind: kind, dst: dst, a: a, b: b, c: c, block: block, pos: pos, at: l.at))
 }
 
