@@ -11,68 +11,68 @@ import sema_types
 // Types are Stage 1 semantic type ids; `is_ref` marks a variable holding a
 // reference (`Ref(T)` in Stage 0 terms).
 
-const LIR_NONE = -1000000000
+pub const LIR_NONE = -1000000000
 
 // Constant kinds.
-const LIR_CONST_INT = 0
-const LIR_CONST_BOOL = 1
-const LIR_CONST_UNIT = 2
-const LIR_CONST_TEXT = 3
+pub const LIR_CONST_INT = 0
+pub const LIR_CONST_BOOL = 1
+pub const LIR_CONST_UNIT = 2
+pub const LIR_CONST_TEXT = 3
 
 // Instruction kinds.
-const LIR_USE = 0
-const LIR_UNARY = 1
-const LIR_BINARY = 2
-const LIR_CALL = 3
-const LIR_STRUCT = 4
-const LIR_READ = 5
-const LIR_LOAN = 6
-const LIR_TEXTBUF = 7
-const LIR_APPEND = 8
-const LIR_STORE = 9
-const LIR_PRINT = 10
-const LIR_DROP = 11
-const LIR_DROPFIELD = 12
-const LIR_LEN = 13
-const LIR_LIST_PUSH = 14
-const LIR_LIST_POP = 15
-const LIR_LIST_RESERVE = 16
-const LIR_BYTE_AT = 17
-const LIR_PLATFORM = 18
-const LIR_LIST_LIT = 19
-const LIR_CAP = 20
-const LIR_VARIANT = 21
-const LIR_DISC = 22
+pub const LIR_USE = 0
+pub const LIR_UNARY = 1
+pub const LIR_BINARY = 2
+pub const LIR_CALL = 3
+pub const LIR_STRUCT = 4
+pub const LIR_READ = 5
+pub const LIR_LOAN = 6
+pub const LIR_TEXTBUF = 7
+pub const LIR_APPEND = 8
+pub const LIR_STORE = 9
+pub const LIR_PRINT = 10
+pub const LIR_DROP = 11
+pub const LIR_DROPFIELD = 12
+pub const LIR_LEN = 13
+pub const LIR_LIST_PUSH = 14
+pub const LIR_LIST_POP = 15
+pub const LIR_LIST_RESERVE = 16
+pub const LIR_BYTE_AT = 17
+pub const LIR_PLATFORM = 18
+pub const LIR_LIST_LIT = 19
+pub const LIR_CAP = 20
+pub const LIR_VARIANT = 21
+pub const LIR_DISC = 22
 // Guarded Copy projection from the single active primitive enum payload.
-const LIR_PAYLOAD = 23
+pub const LIR_PAYLOAD = 23
 
-const LIR_PLATFORM_ARG_COUNT = 0
-const LIR_PLATFORM_ARG = 1
-const LIR_PLATFORM_READ_TEXT = 2
-const LIR_PLATFORM_PRINT_ERROR = 3
+pub const LIR_PLATFORM_ARG_COUNT = 0
+pub const LIR_PLATFORM_ARG = 1
+pub const LIR_PLATFORM_READ_TEXT = 2
+pub const LIR_PLATFORM_PRINT_ERROR = 3
 
 // Terminators.
-const LIR_T_NONE = 0
-const LIR_T_JUMP = 1
-const LIR_T_BRANCH = 2
-const LIR_T_RETURN = 3
-const LIR_T_RETURNREF = 4
-const LIR_T_UNREACHABLE = 5
+pub const LIR_T_NONE = 0
+pub const LIR_T_JUMP = 1
+pub const LIR_T_BRANCH = 2
+pub const LIR_T_RETURN = 3
+pub const LIR_T_RETURNREF = 4
+pub const LIR_T_UNREACHABLE = 5
 
 // Operators (same order as Stage 0 `BinOp`).
-const LIR_ADD = 0
-const LIR_SUB = 1
-const LIR_MUL = 2
-const LIR_DIV = 3
-const LIR_REM = 4
-const LIR_EQ = 5
-const LIR_NE = 6
-const LIR_LT = 7
-const LIR_LE = 8
-const LIR_GT = 9
-const LIR_GE = 10
-const LIR_NEG = 0
-const LIR_NOT = 1
+pub const LIR_ADD = 0
+pub const LIR_SUB = 1
+pub const LIR_MUL = 2
+pub const LIR_DIV = 3
+pub const LIR_REM = 4
+pub const LIR_EQ = 5
+pub const LIR_NE = 6
+pub const LIR_LT = 7
+pub const LIR_LE = 8
+pub const LIR_GT = 9
+pub const LIR_GE = 10
+pub const LIR_NEG = 0
+pub const LIR_NOT = 1
 
 pub struct LirVar {
     ty: Int
@@ -141,7 +141,7 @@ pub struct LirFn {
     at: Int
 }
 
-fn lirFnNew() -> LirFn {
+pub fn lirFnNew() -> LirFn {
     return LirFn(vars: List[], consts: List[], places: List[], args: List[], operands: List[], insts: List[], path_var: List[], cond: List[], swap: List[], ret: List[], ret_ref: List[], val: LIR_NONE, place: -1, borrowed: -1, unsupported: -1, params: 0, at: 0)
 }
 
@@ -153,7 +153,7 @@ fn lirConstId(operand: Int) -> Int {
     return -1 - operand
 }
 
-fn lirVar(l: &mut LirFn, ty: Int, is_ref: Bool) -> Int {
+pub fn lirVar(l: &mut LirFn, ty: Int, is_ref: Bool) -> Int {
     l.vars.push(LirVar(ty: ty, is_ref: is_ref))
     return l.vars.length - 1
 }
@@ -200,7 +200,7 @@ fn lirBlocks(l: &mut LirFn, blocks: Int) {
     }
 }
 
-fn lirBindPath(l: &mut LirFn, path: Int, slot: Int) {
+pub fn lirBindPath(l: &mut LirFn, path: Int, slot: Int) {
     if path < 0 { return }
     while l.path_var.length <= path { l.path_var.push(-1) }
     l.path_var[path] = slot
@@ -240,11 +240,11 @@ pub struct LirModule {
     variant_type: List<Int>
 }
 
-fn lirModuleNew() -> LirModule {
+pub fn lirModuleNew() -> LirModule {
     return LirModule(fn_first: List[], fn_count: List[], param_ty: List[], param_ref: List[], param_mut: List[], fn_ret: List[], fn_ret_ref: List[], fn_ret_mut: List[], fn_decl: List[], st_first: List[], st_count: List[], field_ty: List[], st_decl: List[], list_elem: List[], unit_enums: List[], en_decl: List[], en_first: List[], en_count: List[], variant_payload: List[], variant_type: List[])
 }
 
-fn lirListRegister(lm: &mut LirModule, elem: Int) -> Int {
+pub fn lirListRegister(lm: &mut LirModule, elem: Int) -> Int {
     for k in 0..lm.list_elem.length {
         if lm.list_elem[k] == elem { return k }
     }
@@ -252,7 +252,7 @@ fn lirListRegister(lm: &mut LirModule, elem: Int) -> Int {
     return lm.list_elem.length - 1
 }
 
-fn lirIsUnitEnum(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
+pub fn lirIsUnitEnum(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
     if ty < 0 || ty >= types.types.length { return false }
     match types.types[ty].kind {
         SemTypeKind.Enum => {
