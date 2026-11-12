@@ -130,7 +130,11 @@ fn b11_fixed_accept_reject_corpus_agrees_with_stage0() {
     fs::create_dir_all(&scratch).unwrap();
     for (name, source, accepted) in [
         ("valid", "fn main() -> Int { return 42 }\n", true),
-        ("invalid", "fn main() { let x = \"owned\"; let y = x; print(x) }\n", false),
+        (
+            "invalid",
+            "fn main() { let x = \"owned\"; let y = x; print(x) }\n",
+            false,
+        ),
     ] {
         let source_file = scratch.join(format!("{name}.l"));
         fs::write(&source_file, source).unwrap();
