@@ -216,7 +216,8 @@ def compare_stage1(
             )
             require(
                 normalize(a.stderr, base) == normalize(b.stderr, head),
-                f"{relative}: {option}: Stage 1 diagnostic differs",
+                f"{relative}: {option}: Stage 1 diagnostic differs\\n"
+                f"main: {a.stderr[:2400]!r}\\npr: {b.stderr[:2400]!r}",
             )
             row[option] = {
                 "exit": a.returncode,
