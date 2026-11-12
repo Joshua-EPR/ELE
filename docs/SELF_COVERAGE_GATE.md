@@ -82,3 +82,24 @@ B1 requiere ampliar la resolución real de módulos, no el inventario estático.
 La siguiente medición deberá distinguir explícitamente el éxito del grafo
 frontend completo y sus módulos críticos; no se debe proclamar autocobertura
 del núcleo basándose solamente en el incremento de contadores aislados.
+
+## Diagnóstico no destructivo del código 48 (B4)
+
+El medidor añade a las filas que llegaron a LIR una estructura
+`lir_module` con los recuentos y el índice `main` extraídos de la segunda
+línea del protocolo `ELE-LIR 1`. Cuando el backend termina con estado 48,
+`native_48_hint` compara ese header con las condiciones documentadas
+en `codegen/native_cfg_ir.l`.
+
+Estas pistas **no sustituyen el verificador**: el error 48 cubre tanto
+invalidación del punto de entrada como límites e incidencias del lector.
+El JSON conserva el estado de fallo aunque la pista señale que falta
+`main`, y jamás crea un ejecutable artificial.
+
+Al probar bibliotecas sin `main`, la ruta correcta para demostrar código
+nativo es construir un *harness* real con punto de entrada que importe y
+ejecute funciones de la biblioteca. No desactivar la comprobación de entrada.
+
+Los datos `lir_module`/`native_48_hint` son auxiliares para B4, no
+cambian la puerta monótona de regresión ni convierten un ELF producido
+en ejecución nativa verificada.

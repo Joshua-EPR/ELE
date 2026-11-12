@@ -133,5 +133,48 @@ class SelfCoverageGateTests(unittest.TestCase):
         self.assertIn("missing.l", errors[0])
 
 
+    def test_native_module_header_and_code48_invariants(self):
+        missing = gate.inspect_module_header(
+            "ELE-LIR 1\nmodule structs 2 funcs 3 main f-1\nend\n"
+        )
+        self.assertEqual(
+            missing, {"structs": 2, "enums": 0, "lists": 0, "funcs": 3, "main": -1}
+        )
+        self.assertIn("entrypoint", gate.code48_hint(missing, 48))
+        large = gate.inspect_module_header(
+            "ELE-LIR 1\nmodule structs 17 enums 1 lists 1 funcs 1 main f0\n"
+        )
+        self.assertIn("counts", gate.code48_hint(large, 48))
+        self.assertIsNone(gate.code48_hint(large, 1))
+        self.assertIsNone(gate.inspect_module_header("garbage"))
+
+    def test_native_code48_diagnosis_does_not_count_as_success(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "library.l"
+            source.write_text("pub fn f() -> Int { return 1 }\n", encoding="utf-8")
+
+            def fake_command(argv, cwd, timeout):
+                if str(argv[0]) == "backend":
+                    return {"exit_code": 48, "stdout": "", "stderr": "native reject"}
+                if "--emit-lir" in argv:
+                    return {
+                        "exit_code": 0,
+                        "stdout": "ELE-LIR 1\nmodule structs 0 funcs 1 main f-1\nend\n",
+                        "stderr": "",
+                    }
+                return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+            with patch.object(gate, "command", side_effect=fake_command):
+                row = gate.probe_source(
+                    source, "library.l", Path("parser"), Path("sema"),
+                    Path("backend"), root, root, 10,
+                )
+            self.assertEqual(row["phases"]["native"]["status"], "fail")
+            self.assertEqual(row["phases"]["native"]["exit_code"], 48)
+            self.assertEqual(row["lir_module"]["main"], -1)
+            self.assertIn("entrypoint", row["native_48_hint"])
+
+
 if __name__ == "__main__":
     unittest.main()

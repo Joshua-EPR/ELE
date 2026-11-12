@@ -25,6 +25,43 @@ DIAGNOSTIC = re.compile(
 )
 CODE = re.compile(r"error\[([^]]+)\]")
 
+# The Stage 1 protocol describes the entry point and table counts on line 2.
+# This is advisory diagnosis only; the native backend remains authoritative.
+MODULE_HEADER = re.compile(
+    r"^module structs (?P<structs>-?\d+)"
+    r"(?: enums (?P<enums>-?\d+))?"
+    r"(?: lists (?P<lists>-?\d+))?"
+    r" funcs (?P<funcs>-?\d+) main f(?P<main>-?\d+)$"
+)
+
+
+def inspect_module_header(lir: str) -> dict[str, int] | None:
+    lines = lir.splitlines()
+    if len(lines) < 2 or lines[0] != "ELE-LIR 1":
+        return None
+    match = MODULE_HEADER.fullmatch(lines[1])
+    if not match:
+        return None
+    return {key: int(value) if value is not None else 0
+            for key, value in match.groupdict().items()}
+
+
+def code48_hint(module: dict[str, int] | None, code: int | None) -> str | None:
+    """Expose guard predicates, not a claimed native parser root cause."""
+    if code != 48:
+        return None
+    if module is None:
+        return "backend 48; LIR header unavailable or malformed"
+    if module["main"] < 0 or module["main"] >= module["funcs"]:
+        return "entrypoint missing or out of range (backend guard includes main)"
+    if (module["structs"] > 16 or module["enums"] > 16 or
+            module["lists"] > 64 or module["funcs"] < 1 or
+            module["funcs"] > 256):
+        return "module counts exceed current native backend guard"
+    return "backend 48; inspect parser errors and remaining header invariants"
+
+
+
 
 def find_binary(target: Path, name: str) -> Path:
     # Stage 0 builds Stage 1 tools into per-test normal directories on MSVC.
@@ -123,7 +160,13 @@ def probe_source(
         if not image.is_file() or image.read_bytes()[:4] != b"\x7fELF":
             reason = "error[AUDIT-ELF]: backend returned success without an ELF64 image"
     phases["native"] = phase_result(built, reason=reason)
-    return {"source": relative, "phases": phases}
+    info = inspect_module_header(emitted["stdout"])
+    return {
+        "source": relative,
+        "phases": phases,
+        "lir_module": info,
+        "native_48_hint": code48_hint(info, built["exit_code"]),
+    }
 
 
 def load_baseline(path: Path) -> dict[str, dict[str, bool]]:
