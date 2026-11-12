@@ -1,4 +1,4 @@
-enum AstExprKind {
+pub enum AstExprKind {
     IntLit
     BoolLit
     TextLit
@@ -22,7 +22,7 @@ enum AstExprKind {
     Named
 }
 
-struct AstExpr {
+pub struct AstExpr {
     kind: AstExprKind
     start: Int
     end: Int
@@ -32,7 +32,7 @@ struct AstExpr {
     d: Int
 }
 
-enum AstStmtKind {
+pub enum AstStmtKind {
     Let
     Const
     Assign
@@ -49,7 +49,7 @@ enum AstStmtKind {
     Region
 }
 
-struct AstStmt {
+pub struct AstStmt {
     kind: AstStmtKind
     start: Int
     end: Int
@@ -60,7 +60,7 @@ struct AstStmt {
     e: Int
 }
 
-enum AstTypeKind {
+pub enum AstTypeKind {
     Int
     Float
     F32
@@ -73,7 +73,7 @@ enum AstTypeKind {
     Slice
 }
 
-struct AstType {
+pub struct AstType {
     kind: AstTypeKind
     start: Int
     end: Int
@@ -82,7 +82,7 @@ struct AstType {
     c: Int
 }
 
-enum AstDeclKind {
+pub enum AstDeclKind {
     Function
     Struct
     Enum
@@ -90,7 +90,7 @@ enum AstDeclKind {
     Const
 }
 
-struct AstDecl {
+pub struct AstDecl {
     kind: AstDeclKind
     start: Int
     end: Int
@@ -104,7 +104,7 @@ struct AstDecl {
     g: Int
 }
 
-struct AstParam {
+pub struct AstParam {
     name_start: Int
     name_end: Int
     type_id: Int
@@ -112,7 +112,7 @@ struct AstParam {
     end: Int
 }
 
-struct AstField {
+pub struct AstField {
     name_start: Int
     name_end: Int
     is_public: Bool
@@ -122,7 +122,7 @@ struct AstField {
     end: Int
 }
 
-struct AstVariant {
+pub struct AstVariant {
     name_start: Int
     name_end: Int
     first_payload_index: Int
@@ -131,7 +131,7 @@ struct AstVariant {
     end: Int
 }
 
-enum ParseProblem {
+pub enum ParseProblem {
     ExpectedExpression
     ExpectedIdentifier
     ExpectedType
@@ -147,14 +147,14 @@ enum ParseProblem {
     UnexpectedToken
 }
 
-struct ParseError {
+pub struct ParseError {
     problem: ParseProblem
     expected_token: Text
     token_start: Int
     token_end: Int
 }
 
-struct AstTree {
+pub struct AstTree {
     expressions: List<AstExpr>
     statements: List<AstStmt>
     declarations: List<AstDecl>
