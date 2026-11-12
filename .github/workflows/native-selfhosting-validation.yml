@@ -230,6 +230,14 @@ jobs:
         run: |
           python3 -m unittest discover -s tests/native_backend -p 'test_*.py' -q
           python3 tools/test_native_enum_contract.py
+      # Install/verify strace earlier in this Linux job. The B11 hook will
+      # fail if Stage 1 or its ELE-native backend launches any child process,
+      # including a Rust frontend by absolute path.
+      - name: B11 isolated Stage 1 -> native ELF with execve guard (Linux)
+        if: runner.os == 'Linux' && !cancelled()
+        env:
+          ELE_REQUIRE_STRACE: "1"
+        run: cargo test -p project-l --test stage2_hook_l -- --test-threads=1
       - name: Check Rust diagnostics
         if: always()
         run: cargo clippy --workspace --all-targets -- -D warnings
