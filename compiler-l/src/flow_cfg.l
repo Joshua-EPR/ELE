@@ -246,7 +246,7 @@ fn loanOverlaps(graph: &FlowGraph, a: Int, b: Int) -> Bool {
 }
 
 // Walk the tracked subtree without recursion or a temporary stack.
-fn flowNextPath(graph: &FlowGraph, root: Int, current: Int) -> Int {
+pub fn flowNextPath(graph: &FlowGraph, root: Int, current: Int) -> Int {
     let child = graph.paths[current].child
     if child >= 0 { return child }
     var cursor = current

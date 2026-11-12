@@ -121,7 +121,7 @@ fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
     while work.queue.length > 0 {
         var id = 0
         match work.queue.pop() {
-            Some(block) => { id = block }
+            Some(next_block) => { id = next_block }
             None => { break }
         }
         steps += 1
