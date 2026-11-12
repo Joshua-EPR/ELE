@@ -31,12 +31,12 @@ pub struct SymbolTable {
     symbols: List<Symbol>
 }
 
-fn symbolTableNew() -> SymbolTable {
+pub fn symbolTableNew() -> SymbolTable {
     let list: List<Symbol> = List[]
     return SymbolTable(symbols: list)
 }
 
-fn symbolAdd(table: &mut SymbolTable, kind: SymbolKind, name_start: Int, name_end: Int, type_id: Int, scope_id: Int, is_mut: Bool, is_pub: Bool, decl_id: Int, start: Int, end: Int) -> Int {
+pub fn symbolAdd(table: &mut SymbolTable, kind: SymbolKind, name_start: Int, name_end: Int, type_id: Int, scope_id: Int, is_mut: Bool, is_pub: Bool, decl_id: Int, start: Int, end: Int) -> Int {
     let id = table.symbols.length
     table.symbols.push(Symbol(
         move_path: -1,
@@ -55,7 +55,7 @@ fn symbolAdd(table: &mut SymbolTable, kind: SymbolKind, name_start: Int, name_en
     return id
 }
 
-fn symbolSetModule(table: &mut SymbolTable, sym_id: Int, module_id: Int) {
+pub fn symbolSetModule(table: &mut SymbolTable, sym_id: Int, module_id: Int) {
     if sym_id < 0 || sym_id >= table.symbols.length { return }
     table.symbols[sym_id].module_id = module_id
 }
@@ -63,7 +63,7 @@ fn symbolSetModule(table: &mut SymbolTable, sym_id: Int, module_id: Int) {
 // A symbol is visible from `module_id` when it is a local (module -1), from
 // the same module, or public. Cross-module access only happens through public
 // symbols, which is the visibility rule enforced by the module system.
-fn symbolVisible(sym: &Symbol, module_id: Int, allowed: &List<Int>, module_count: Int) -> Bool {
+pub fn symbolVisible(sym: &Symbol, module_id: Int, allowed: &List<Int>, module_count: Int) -> Bool {
     if sym.module_id < 0 { return true }
     if sym.module_id == module_id { return true }
     if !sym.is_pub { return false }
@@ -76,7 +76,7 @@ fn symbolVisible(sym: &Symbol, module_id: Int, allowed: &List<Int>, module_count
     return allowed[pos] == 1
 }
 
-fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b_end: Int) -> Bool {
+pub fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b_end: Int) -> Bool {
     let len_a = a_end - a_start
     let len_b = b_end - b_start
     if len_a != len_b { return false }
@@ -92,7 +92,7 @@ fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b_end
     return true
 }
 
-fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, target: &Text) -> Bool {
+pub fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, target: &Text) -> Bool {
     let len_a = name_end - name_start
     let len_t = target.byteLength
     if len_a != len_t { return false }
@@ -107,11 +107,11 @@ fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, target: &
     return true
 }
 
-fn symbolName(source: &Text, sym: &Symbol) -> Text {
+pub fn symbolName(source: &Text, sym: &Symbol) -> Text {
     return "<symbol>"
 }
 
-fn symbolKindName(kind: SymbolKind) -> Text {
+pub fn symbolKindName(kind: SymbolKind) -> Text {
     match kind {
         SymbolKind.Var => { return "Var" }
         SymbolKind.Param => { return "Param" }
