@@ -1,4 +1,6 @@
-fn tokenName(kind: &LexKind) -> Text {
+import lexer
+
+pub fn tokenName(kind: &LexKind) -> Text {
     match kind {
         LexKind.Word => { return "word" }
         LexKind.Integer => { return "int" }
@@ -13,7 +15,7 @@ fn tokenName(kind: &LexKind) -> Text {
     }
 }
 
-fn emitTokens(tokens: &List<LexToken>) {
+pub fn emitTokens(tokens: &List<LexToken>) {
     for i in 0..tokens.length {
         let token = &tokens[i]
         let name = tokenName(&token.kind)
