@@ -1,9 +1,9 @@
 import flow_cfg
 
 const FLOW_UNINIT = 0
-const FLOW_LIVE = 1
+pub const FLOW_LIVE = 1
 const FLOW_MOVED = 2
-const FLOW_MAYBE = 3
+pub const FLOW_MAYBE = 3
 
 struct FlowCheck {
     status: Int
