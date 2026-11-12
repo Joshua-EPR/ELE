@@ -173,18 +173,27 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         hold dest = cfgVarBase(p, f, inst.dst)
         x64MovImm64(edit code, 0, inst.place_field)
         x64StoreMem64(edit code, 5, dest, 0)
-        when kind.size == 16 {
-            // Zero-fill to keep the complete slot initialized and make
-            // moves of unit variants and Bool payloads well-defined.
+        when kind.size > 8 {
+            // Zero-fill the whole payload area to keep the complete value
+            // initialized: moves of unit variants, Bool payloads and
+            // aggregates smaller than the largest payload copy defined words.
             x64MovImm64(edit code, 0, 0)
-            x64StoreMem64(edit code, 5, dest + 8, 0)
+            each w among 1..(kind.size / 8) {
+                x64StoreMem64(edit code, 5, dest + 8 * w, 0)
+            }
             when inst.argc == 1 {
-                cfgLoadOperand(edit code, p, f, view inst.a, 0)
                 hold payload = p.variants[kind.first_variant + inst.place_field].payload_type
-                when payload == 1 {
-                    x64StoreMem8(edit code, 5, dest + 8, 0)
+                when payload >= 2 {
+                    // A drop-free shape/choice moved in (the verifier kills
+                    // the source): copy its layout into the payload area.
+                    cfgCopyValue(edit code, p, payload, 5, dest + 8, 5, cfgVarBase(p, f, inst.a.value))
                 } otherwise {
-                    x64StoreMem64(edit code, 5, dest + 8, 0)
+                    cfgLoadOperand(edit code, p, f, view inst.a, 0)
+                    when payload == 1 {
+                        x64StoreMem8(edit code, 5, dest + 8, 0)
+                    } otherwise {
+                        x64StoreMem64(edit code, 5, dest + 8, 0)
+                    }
                 }
             }
         }
@@ -202,12 +211,17 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         fix.bad_variant_at@push(x64ConditionalPlaceholder(edit code, false))
         hold e = view p.enums[inst.op]
         hold payload = p.variants[e.first_variant + inst.place_field].payload_type
-        when payload == 1 {
+        when payload >= 2 {
+            // Aggregate payload: copied by layout only after the check. The
+            // verifier treats this as a move of the whole (owned) enum.
+            cfgCopyValue(edit code, p, payload, 5, cfgVarBase(p, f, inst.dst), at.base, owner + 8)
+        } otherwise when payload == 1 {
             x64LoadMem8(edit code, 0, at.base, owner + 8)
+            x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
         } otherwise {
             x64LoadMem64(edit code, 0, at.base, owner + 8)
+            x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
         }
-        x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     } otherwise when inst.kind == 16 {
         cfgEmitUnary(edit code, p, f, inst, edit fix)
     } otherwise when inst.kind >= 18 && inst.kind <= 21 {

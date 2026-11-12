@@ -3,13 +3,15 @@ import lir_tokens
 // Restricted, typed, flattened representation of ELE-LIR 1 for the
 // independent ELE-written x86-64 bootstrap backend. Supports move-only,
 // drop-free structs with primitive fields (including nested structs).
-// Also supports tagged enums with zero or one primitive payload per variant.
+// Also supports tagged enums with zero or one payload per variant: Int, Bool
+// or a drop-free shape/choice (laid out by cfgLayoutDecls; extracting an
+// aggregate payload moves the enum).
 // Local loans, returned references, floats, arrays and Text inside
 // aggregates are explicitly rejected.
 // Type IDs: 0 = Int, 1 = Bool, 2+s = nominal struct s,
 // 2+struct_count+e = nominal enum e.
 // Instruction kinds: 1 use, 2 binary, 3 call, 4 struct, 5 read,
-// 6 store, 7 variant, 8 discriminant, 9 checked primitive payload,
+// 6 store, 7 variant, 8 discriminant, 9 checked payload,
 // 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt),
 // 14 len (Text byte length), 15 byteat (bounds-checked Text byte).
 // References (`var vN ref T`: parameters, and locals defined by `loan`,
@@ -62,9 +64,10 @@ pub struct CfgStruct {
     align: Int
 }
 
-// Monomorphized tagged enums. This bootstrap subset supports only variants
-// with no payload or one primitive Int/Bool payload. Each enum is move-only
-// and drop-free. A populated payload slot is always fully initialized,
+// Monomorphized tagged enums. Variants carry no payload or one Int, Bool or
+// drop-free aggregate payload. Layout: tag word at 0, payload area at 8
+// sized by the largest payload (whole words). Each enum is move-only and
+// drop-free. The payload area is always fully initialized (zero-filled),
 // including for None/unit variants, so whole-value moves copy defined bytes.
 pub struct CfgEnum {
     first_variant: Int
