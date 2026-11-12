@@ -581,3 +581,25 @@ fn stage1_resolves_list_type_annotations() {
         Err("L0016"),
     );
 }
+
+#[test]
+fn compiler_ownership_and_lir_verifier_resolve_imported_helper_functions() {
+    // These are actual compiler modules, not standalone reimplementations:
+    // they must resolve only public functions from their declared imports.
+    for source_name in ["ownership_l.l", "lir_verify_core.l"] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compiler-l/src")
+            .join(source_name);
+        let out = Command::new(sema_exe_path())
+            .arg(&path)
+            .arg("--check-ownership")
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{source_name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
