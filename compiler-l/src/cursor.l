@@ -1,13 +1,16 @@
-struct TokenCursor {
+import lexer
+import tokens
+
+pub struct TokenCursor {
     pos: Int
     fileId: Int
 }
 
-fn cursorNew(fileId: Int) -> TokenCursor {
+pub fn cursorNew(fileId: Int) -> TokenCursor {
     return TokenCursor(pos: 0, fileId: fileId)
 }
 
-fn cursorIsAtEnd(cursor: &TokenCursor, tokens: &List<LexToken>) -> Bool {
+pub fn cursorIsAtEnd(cursor: &TokenCursor, tokens: &List<LexToken>) -> Bool {
     if cursor.pos >= tokens.length { return true }
     let current_kind_token = &tokens[cursor.pos]
     match tokenKindValue(&current_kind_token.kind) {
@@ -16,15 +19,15 @@ fn cursorIsAtEnd(cursor: &TokenCursor, tokens: &List<LexToken>) -> Bool {
     }
 }
 
-fn cursorCurrent(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexToken {
+pub fn cursorCurrent(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexToken {
     return &tokens[cursor.pos]
 }
 
-fn cursorCurrentKind(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexKind {
+pub fn cursorCurrentKind(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexKind {
     return &tokens[cursor.pos].kind
 }
 
-fn cursorAdvance(cursor: &mut TokenCursor, tokens: &List<LexToken>) -> &LexToken {
+pub fn cursorAdvance(cursor: &mut TokenCursor, tokens: &List<LexToken>) -> &LexToken {
     let current = &tokens[cursor.pos]
     if cursor.pos < tokens.length {
         cursor.pos += 1
@@ -32,7 +35,7 @@ fn cursorAdvance(cursor: &mut TokenCursor, tokens: &List<LexToken>) -> &LexToken
     return current
 }
 
-fn cursorExpectKind(kind: &LexKind, expected: &LexKind) -> Bool {
+pub fn cursorExpectKind(kind: &LexKind, expected: &LexKind) -> Bool {
     match kind {
         LexKind.Word => { match expected { LexKind.Word => { return true }, _ => { return false } } }
         LexKind.Integer => { match expected { LexKind.Integer => { return true }, _ => { return false } } }
@@ -47,7 +50,7 @@ fn cursorExpectKind(kind: &LexKind, expected: &LexKind) -> Bool {
     }
 }
 
-fn cursorExpect(cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: &LexKind) -> Bool {
+pub fn cursorExpect(cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: &LexKind) -> Bool {
     if cursor.pos >= tokens.length { return false }
     let token = &tokens[cursor.pos]
     if cursorExpectKind(&token.kind, expected) {
