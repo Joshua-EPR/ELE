@@ -45,11 +45,7 @@ fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&result.stderr).to_string();
-    assert_eq!(
-        result.status.success(),
-        expected,
-        "{name}: {stderr}"
-    );
+    assert_eq!(result.status.success(), expected, "{name}: {stderr}");
     stderr
 }
 
