@@ -657,8 +657,7 @@ fn main() {}
 fn actual_lexer_scan_has_no_reachable_missing_return() {
     // This checks the real compiler source including Result/Option matches,
     // not a reduced fixture. It is not evidence of native LIR support.
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../compiler-l/src/lexer.l");
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../compiler-l/src/lexer.l");
     let output = Command::new(sema_exe_path())
         .arg(&source)
         .arg("--check-ownership")
