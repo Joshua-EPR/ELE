@@ -361,9 +361,19 @@ fn main() {
     }
 }
 "#;
+    // This unit test intentionally combines the three source modules as a
+    // single program; import semantics are tested separately in modules_l.rs.
+    // Remove only their known import headers, so the bundled fixture never
+    // depends on virtual files that this test does not create.
+    let tokens_inline = TOKENS
+        .strip_prefix("import lexer\n\n")
+        .expect("tokens.l must import lexer explicitly");
+    let cursor_inline = CURSOR
+        .strip_prefix("import lexer\nimport tokens\n\n")
+        .expect("cursor.l must import lexer and tokens explicitly");
     check(
         "cursor",
-        &format!("{LEXER}\n{TOKENS}\n{CURSOR}\n{driver}"),
+        &format!("{LEXER}\n{tokens_inline}\n{cursor_inline}\n{driver}"),
         "false\n0\n0\n4\ntrue\n5\nfalse\n",
         None,
     );
