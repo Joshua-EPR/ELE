@@ -52,7 +52,8 @@ flow rtFailIfNegative(code: edit X64Code, status: Int) {
     x64TestRax(edit code)
     hold ok = x64ConditionalPlaceholder(edit code, true)
     rtExit(edit code, status)
-    x64PatchRelative(edit code, ok, code.bytes.length)
+    hold patch_offset_55 = code.bytes.length
+    x64PatchRelative(edit code, ok, patch_offset_55)
     x64MovReg(edit code, 0, 9)
 }
 
@@ -81,8 +82,10 @@ flow rtEmitWriteAll(code: edit X64Code) {
     x64SubReg(edit code, 2, 9)
     hold again = x64JumpPlaceholder(edit code)
     x64PatchRelative(edit code, again, top)
-    x64PatchRelative(edit code, finished, code.bytes.length)
-    x64PatchRelative(edit code, failed, code.bytes.length)
+    hold patch_offset_84 = code.bytes.length
+    x64PatchRelative(edit code, finished, patch_offset_84)
+    hold patch_offset_85 = code.bytes.length
+    x64PatchRelative(edit code, failed, patch_offset_85)
     x64FrameEnd(edit code)
 }
 
@@ -101,7 +104,8 @@ flow rtEmitDigits(code: edit X64Code, end: Int, newline: Bool) {
     x64TestRax(edit code)
     hold positive = x64ConditionalPlaceholder(edit code, true)
     x64NegReg(edit code, 9)
-    x64PatchRelative(edit code, positive, code.bytes.length)
+    hold patch_offset_104 = code.bytes.length
+    x64PatchRelative(edit code, positive, patch_offset_104)
     x64MovReg(edit code, 6, 5)
     rtAdjust(edit code, 6, end)
     when newline {
@@ -126,7 +130,8 @@ flow rtEmitDigits(code: edit X64Code, end: Int, newline: Bool) {
     rtAdjust(edit code, 6, -1)
     x64MovImm64(edit code, 1, 45)
     x64StoreMem8(edit code, 6, 0, 1)
-    x64PatchRelative(edit code, unsigned, code.bytes.length)
+    hold patch_offset_129 = code.bytes.length
+    x64PatchRelative(edit code, unsigned, patch_offset_129)
     x64MovReg(edit code, 2, 5)
     rtAdjust(edit code, 2, end)
     x64SubReg(edit code, 2, 6)
@@ -145,7 +150,8 @@ flow rtEmitBoolWord(code: edit X64Code, line: Bool) {
         x64MovImm64(edit code, 2, 4)
     }
     hold join = x64JumpPlaceholder(edit code)
-    x64PatchRelative(edit code, is_false, code.bytes.length)
+    hold patch_offset_148 = code.bytes.length
+    x64PatchRelative(edit code, is_false, patch_offset_148)
     when line {
         x64MovImm64(edit code, 0, 11430844457318)
         x64MovImm64(edit code, 2, 6)
@@ -153,7 +159,8 @@ flow rtEmitBoolWord(code: edit X64Code, line: Bool) {
         x64MovImm64(edit code, 0, 435728179558)
         x64MovImm64(edit code, 2, 5)
     }
-    x64PatchRelative(edit code, join, code.bytes.length)
+    hold patch_offset_156 = code.bytes.length
+    x64PatchRelative(edit code, join, patch_offset_156)
 }
 
 // print_int(RDI = value).
@@ -204,7 +211,8 @@ flow rtEmitTextNew(code: edit X64Code) {
     x64TestRax(edit code)
     hold sized = x64ConditionalPlaceholder(edit code, false)
     x64MovImm64(edit code, 6, 4096)
-    x64PatchRelative(edit code, sized, code.bytes.length)
+    hold patch_offset_207 = code.bytes.length
+    x64PatchRelative(edit code, sized, patch_offset_207)
     x64StoreSlot(edit code, 0, 6)
     // mmap(0, RSI, READ|WRITE, PRIVATE|ANONYMOUS, -1, 0)
     x64MovImm64(edit code, 7, 0)
@@ -241,7 +249,8 @@ flow rtEmitTextAppend(code: edit X64Code) {
     x64TestRax(edit code)
     hold owned = x64ConditionalPlaceholder(edit code, false)
     rtExit(edit code, 121)
-    x64PatchRelative(edit code, owned, code.bytes.length)
+    hold patch_offset_244 = code.bytes.length
+    x64PatchRelative(edit code, owned, patch_offset_244)
     // R8 = new capacity = pages(needed + old capacity).
     x64MovReg(edit code, 6, 0)
     x64LoadSlot(edit code, 2, 3)
@@ -260,7 +269,8 @@ flow rtEmitTextAppend(code: edit X64Code) {
     x64LoadSlot(edit code, 7, 0)
     x64StoreMem64(edit code, 7, 0, 0)
     x64StoreMem64(edit code, 7, 16, 8)
-    x64PatchRelative(edit code, fits, code.bytes.length)
+    hold patch_offset_263 = code.bytes.length
+    x64PatchRelative(edit code, fits, patch_offset_263)
     // Copy to address + length, then publish the new length.
     x64LoadSlot(edit code, 0, 0)
     x64LoadMem64(edit code, 7, 0, 0)
@@ -312,8 +322,10 @@ flow rtEmitTextDrop(code: edit X64Code) {
     x64TestRax(edit code)
     hold released = x64ConditionalPlaceholder(edit code, true)
     rtExit(edit code, 124)
-    x64PatchRelative(edit code, literal, code.bytes.length)
-    x64PatchRelative(edit code, released, code.bytes.length)
+    hold patch_offset_315 = code.bytes.length
+    x64PatchRelative(edit code, literal, patch_offset_315)
+    hold patch_offset_316 = code.bytes.length
+    x64PatchRelative(edit code, released, patch_offset_316)
     x64FrameEnd(edit code)
 }
 
