@@ -262,7 +262,10 @@ pub fn cfgEmitText(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, f
         // Text or list: the address of the variable, then its release.
         cfgVarAddress(&mut code, p, f, inst.place_var, &mut fix)
         cfgDropAt(&mut code, &mut fix, p.types_code[cfgVarIndex(p, f, inst.place_var)])
-        if skip >= 0 { x64PatchRelative(&mut code, skip, code.bytes.length) }
+        if skip >= 0 {
+            let end_offset = code.bytes.length
+            x64PatchRelative(&mut code, skip, end_offset)
+        }
     } else if inst.kind == 17 {
         // dropfield: release the Text or list stored in a field, when the flag
         // says so.
@@ -276,7 +279,10 @@ pub fn cfgEmitText(code: &mut X64Code, p: &CfgProgram, f: Int, inst: &CfgInst, f
         x64MovReg(&mut code, 7, 0)
         let place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
         cfgDropAt(&mut code, &mut fix, cfgPlaceType(p, f, &place))
-        if skip >= 0 { x64PatchRelative(&mut code, skip, code.bytes.length) }
+        if skip >= 0 {
+            let end_offset = code.bytes.length
+            x64PatchRelative(&mut code, skip, end_offset)
+        }
     } else if inst.kind == 14 {
         // byteLength or length: the second word of a Text or a list.
         let at = cfgPlaceAddr(&mut code, p, f, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, &mut fix)
