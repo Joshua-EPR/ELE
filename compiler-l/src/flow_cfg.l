@@ -17,7 +17,7 @@ const FLOW_MUTATE = 8
 const LOAN_SHARED = 0
 const LOAN_MUT = 1
 
-struct FlowBlock {
+pub struct FlowBlock {
     first: Int
     last: Int
     next_a: Int
@@ -26,12 +26,12 @@ struct FlowBlock {
     predecessor: Int
 }
 
-struct FlowPredecessor {
+pub struct FlowPredecessor {
     block: Int
     next: Int
 }
 
-struct FlowEvent {
+pub struct FlowEvent {
     kind: Int
     path: Int
     start: Int
@@ -45,7 +45,7 @@ struct FlowEvent {
 // `parent` the loan it reborrows from, `alt` the next alternative origin of
 // a borrowed call result and `param` the parameter index of a loan carried
 // by a reference parameter (-1 otherwise).
-struct Loan {
+pub struct Loan {
     kind: Int
     place: Int
     parent: Int
@@ -55,7 +55,7 @@ struct Loan {
     end: Int
 }
 
-struct MovePath {
+pub struct MovePath {
     symbol: Int
     parent: Int
     field: Int
@@ -132,7 +132,7 @@ fn flowReturn(graph: &mut FlowGraph) {
     graph.current = detached
 }
 
-struct FlowLoop {
+pub struct FlowLoop {
     header: Int
     exit: Int
     outer_break: Int
