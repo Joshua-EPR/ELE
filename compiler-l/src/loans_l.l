@@ -91,7 +91,10 @@ fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
             cursor = graph.paths[cursor].parent
             hops -= 1
         }
-        place = flowField(&mut graph, place, graph.paths[cursor].field)
+        // Snapshot the projection index before taking a mutable loan of graph.
+        // This preserves the exact path and avoids aliasing the graph argument.
+        let field = graph.paths[cursor].field
+        place = flowField(&mut graph, place, field)
         i += 1
     }
     return place
