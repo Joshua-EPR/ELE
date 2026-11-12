@@ -45,7 +45,7 @@ fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
 }
 
 // The loan carried by the reference binding that roots `path`, or -1.
-fn loanOfPath(graph: &FlowGraph, path: Int) -> Int {
+pub fn loanOfPath(graph: &FlowGraph, path: Int) -> Int {
     let root = flowRootPath(graph, path)
     if root < 0 || root >= graph.binding_loans.length { return -1 }
     return graph.binding_loans[root]
