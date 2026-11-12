@@ -199,6 +199,53 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
 // deterministic drops, and remain intentionally unsupported.
 fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int) {
     if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
+    // Primitive builtin unions reuse the exact checked LIR_PAYLOAD protocol
+    // of nominal enums. Never bind before testing the active tag.
+    let st = &ctx.types.types[scrut_t]
+    var builtin = false
+    var which = -1
+    var start = -1
+    var payload_ty = -1
+    match st.kind {
+        SemTypeKind.Option => {
+            builtin = true
+            if p_end - p_start > 6 && source.byteAt(p_start) == 83 && source.byteAt(p_start + 4) == 40 {
+                which = 1
+                start = p_start + 5
+                payload_ty = st.elem_type
+            }
+        }
+        SemTypeKind.Result => {
+            builtin = true
+            if p_end - p_start > 4 && source.byteAt(p_start) == 79 && source.byteAt(p_start + 2) == 40 {
+                which = 0
+                start = p_start + 3
+                payload_ty = st.elem_type
+            } else if p_end - p_start > 5 && source.byteAt(p_start) == 69 && source.byteAt(p_start + 3) == 40 {
+                which = 1
+                start = p_start + 4
+                payload_ty = st.nominal_id
+            }
+        }
+        _ => {}
+    }
+    if builtin {
+        if start < 0 { return }
+        let finish = p_end - 1
+        if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        if finish == start + 1 && source.byteAt(start) == 95 { return }
+        if !lirBuiltinPrimitive(payload_ty) { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        let enum_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        let place = lirPlaceVar(&mut ctx.lir, scrut_var)
+        let value = lirNew(&mut ctx, payload_ty, false, LIR_PAYLOAD, place, enum_id, which)
+        let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, start, finish, payload_ty, ctx.scopes.current_scope, false, false, -1, start, finish)
+        scopeAddSymbol(&mut ctx.scopes, sym_id)
+        semaInitPath(&mut ctx, sym_id, start, finish)
+        lirSetVal(&mut ctx, value)
+        lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, payload_ty, false)
+        return
+    }
     match ctx.types.types[scrut_t].kind {
         SemTypeKind.Enum => {}
         _ => { return }
