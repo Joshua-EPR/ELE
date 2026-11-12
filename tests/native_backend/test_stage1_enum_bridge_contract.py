@@ -35,19 +35,32 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         parser = src('crates/l/src/lir_protocol.rs')
         native = src('crates/l/src/native.rs')
         self.assertIn('"payload" => {', parser)
-        self.assertIn('Type::Int | Type::Bool', parser)
+        # Only Int/Bool or drop-free aggregates (no Text, list, float).
+        self.assertIn('fn drop_free(', parser)
+        self.assertIn('Type::Int | Type::Bool => true', parser)
+        self.assertIn('!drop_free(payload[0], self.structs, self.enums, 0)', parser)
         self.assertIn('Proj::Payload(variant_id, 0)', parser)
         self.assertIn('acceso a variante enum inactiva', native)
         self.assertIn('enum_layout.layout.size / 8', native)
 
-    def test_builtin_unions_only_lower_primitive_payloads(self):
+    def test_builtin_unions_only_lower_drop_free_payloads(self):
         front = src('compiler-l/src/sema_expr.l')
         binding = src('compiler-l/src/stmt_lower.l')
         union = src('compiler-l/src/lir_builtin_union.l')
         for name in ('Option', 'Result'):
             self.assertIn(f'SemTypeKind.{name}', union)
-        self.assertIn('lirBuiltinPrimitive(t.elem_type)', union)
-        self.assertIn('lirBuiltinPrimitive(t.nominal_id)', union)
+        self.assertIn('lirBuiltinPayloadOk(types, lm, t.elem_type)', union)
+        self.assertIn('lirBuiltinPayloadOk(types, lm, t.nominal_id)', union)
+        # Drop-free walk: shapes recurse, choices carry only Int/Bool.
+        self.assertIn('fn lirDropFreeValue(', union)
+        self.assertIn('if n == 1 && !lirBuiltinPrimitive(lm.variant_type[v]) { return false }', union)
+        # Binding a non-Copy payload moves the scrutinee (ownership).
+        self.assertIn('semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)', binding)
+        # Native backend: owned payloads rejected, aggregate extraction moves.
+        types = src('compiler-l/src/codegen/native_cfg_fields.l')
+        verify = src('compiler-l/src/codegen/native_cfg_verify.l')
+        self.assertIn('when cfgOwnsHeap(p, payload) || cfgTypeAlign(p, payload) > 8 { give 82 }', types)
+        self.assertIn('when inst.kind == 9 && cfgPayloadMoves(p, f, inst) { live[inst.place_var] = false }', verify)
         self.assertIn('lirMarkUnsupported(&mut ctx.lir, start)', src('compiler-l/src/sema_builtin_union.l'))
         self.assertIn('lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)', binding)
         self.assertIn('LIR_PAYLOAD, place, enum_id, which', binding)

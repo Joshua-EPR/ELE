@@ -51,3 +51,40 @@ el resultado de `main` (50). Los casos negativos exigen que se rechace
 No constituye self-hosting ni Stage 2. Stage 0 sigue participando en el
 bootstrap; `Result` sin contexto, las variantes propietarias y las
 conversiones `?` requieren trabajo posterior.
+
+## Incremento: payloads agregados sin drop (2026-11-12)
+
+`Option`/`Result` aceptan además payloads **sin drop**: `shape` cuyos campos
+son, recursivamente, `Int`, `Bool`, otras `shape` sin drop o `choice` cuyas
+variantes llevan a lo sumo un `Int`/`Bool` (las de solo variantes unitarias
+incluidas). Ejemplo: `Result of[Int, LexError]` con
+`LexError { problem: LexProblem, offset: Int }`.
+
+- **Stage 1** (`lir_builtin_union.l`, `lirBuiltinPayloadOk`): el enum
+  sintético `eN` declara el payload como `sK`/`eK`; `i variant`, `i disc`
+  e `i payload` no cambian de sintaxis. El verificador de Stage 1 exige que
+  el payload sea sin drop y del tipo exacto.
+- **Movimiento**: ligar un payload no `Copy` en un brazo (`Some(p)`,
+  `Err(e)`) MUEVE el escrutinio (como Stage 0): usarlo después es `L0005`, y
+  ligar desde un escrutinio prestado (`view`) es `L0005`.
+- **Stage 0** (`lir_protocol.rs`, `drop_free`): `payload` acepta `Int`,
+  `Bool` o struct/enum recursivamente sin drop; Text, listas, floats y
+  ciclos por valor se rechazan.
+- **Backend ELE**: las structs pueden nombrar enums declarados después; los
+  layouts se calculan tras leer todas las declaraciones (`cfgLayoutDecls`,
+  punto fijo; ciclo por valor = 63). Enum = palabra de tag + área de payload
+  del tamaño del mayor payload, rellenada con ceros en `i variant`; copia
+  por palabras. `i payload` comprueba el tag (salida 126) antes de copiar el
+  agregado por layout y **consume** el enum (uso posterior = 57). Payload
+  con Text/lista = 82; extracción de agregado desde un `ref` = 89.
+
+Siguen fuera: `Option<Text>`, `Result<_, Text>`, listas, shapes con Text o
+listas, `Option`/`Result` anidados, `?` y `List.pop` (L0016).
+
+```bash
+cargo test -p project-l --test lir_option_result_aggregate_l -- --test-threads=1
+```
+
+`examples/native_option_result_aggregate_stage1.l`: Stage 1 → ELE-LIR →
+backend ELE → ELF64; en Linux imprime `42 205 8 156 3` y sale con 158, igual
+que `l run` y `l run-lir` de Stage 0.
