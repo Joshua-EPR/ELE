@@ -46,7 +46,8 @@ pub fn heapEmitCheckedMap(code: &mut X64Code, bytes: Int) -> Bool {
     x64MovImm64(&mut code, 7, 123)    // fail closed
     x64MovImm64(&mut code, 0, 60)
     x64Syscall(&mut code)
-    x64PatchRelative(&mut code, success, code.bytes.length)
+    hold patch_offset_49 = code.bytes.length
+    x64PatchRelative(&mut code, success, patch_offset_49)
     x64MovReg(&mut code, 0, 3)        // restore pointer to RAX
     return code.error == 0
 }
@@ -65,6 +66,7 @@ pub fn heapEmitCheckedUnmap(code: &mut X64Code, bytes: Int) -> Bool {
     x64MovImm64(&mut code, 7, 124)
     x64MovImm64(&mut code, 0, 60)
     x64Syscall(&mut code)
-    x64PatchRelative(&mut code, success, code.bytes.length)
+    hold patch_offset_68 = code.bytes.length
+    x64PatchRelative(&mut code, success, patch_offset_68)
     return code.error == 0
 }

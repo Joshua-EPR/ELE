@@ -25,7 +25,8 @@ expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
     x64TestRax(edit code)
     hold good_min = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 122)
-    x64PatchRelative(edit code, good_min, code.bytes.length)
+    hold patch_offset_28 = code.bytes.length
+    x64PatchRelative(edit code, good_min, patch_offset_28)
 
     x64MovImm64(edit code, 1, 1048576)
     x64CmpReg(edit code, reg, 1)
@@ -33,7 +34,8 @@ expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
     x64TestRax(edit code)
     hold good_max = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 122)
-    x64PatchRelative(edit code, good_max, code.bytes.length)
+    hold patch_offset_36 = code.bytes.length
+    x64PatchRelative(edit code, good_max, patch_offset_36)
 }
 
 // Given a validated positive size in RSI, round it up to 4 KiB without
@@ -78,7 +80,8 @@ expose flow heapEmitDynamicMap(code: edit X64Code) => Bool {
     x64TestRax(edit code)
     hold success = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 123)
-    x64PatchRelative(edit code, success, code.bytes.length)
+    hold patch_offset_81 = code.bytes.length
+    x64PatchRelative(edit code, success, patch_offset_81)
     x64MovReg(edit code, 0, 2)
     give code.error == 0
 }
@@ -92,6 +95,7 @@ expose flow heapEmitDynamicUnmap(code: edit X64Code) => Bool {
     x64TestRax(edit code)
     hold success = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 124)
-    x64PatchRelative(edit code, success, code.bytes.length)
+    hold patch_offset_95 = code.bytes.length
+    x64PatchRelative(edit code, success, patch_offset_95)
     give code.error == 0
 }

@@ -40,7 +40,8 @@ flow rtListFailIf(code: edit X64Code, condition: Int) {
     x64TestRax(edit code)
     hold ok = x64ConditionalPlaceholder(edit code, true)
     rtListExit(edit code, 123)
-    x64PatchRelative(edit code, ok, code.bytes.length)
+    hold patch_offset_43 = code.bytes.length
+    x64PatchRelative(edit code, ok, patch_offset_43)
 }
 
 // slot = max(slot, RAX), signed. Clobbers RAX, RCX and R9.
@@ -52,7 +53,8 @@ flow rtListMaxSlot(code: edit X64Code, slot: Int) {
     x64TestRax(edit code)
     hold keep = x64ConditionalPlaceholder(edit code, true)
     x64StoreSlot(edit code, slot, 9)
-    x64PatchRelative(edit code, keep, code.bytes.length)
+    hold patch_offset_55 = code.bytes.length
+    x64PatchRelative(edit code, keep, patch_offset_55)
 }
 
 // RAX = pages(RAX * RCX): the byte size of a buffer, a multiple of 4096.
@@ -90,7 +92,8 @@ expose flow rtEmitListReserve(code: edit X64Code) {
     x64TestRax(edit code)
     hold grow = x64ConditionalPlaceholder(edit code, false)
     x64FrameEnd(edit code)
-    x64PatchRelative(edit code, grow, code.bytes.length)
+    hold patch_offset_93 = code.bytes.length
+    x64PatchRelative(edit code, grow, patch_offset_93)
     // new capacity = max(needed, 2 * capacity, minimum) <= limit.
     x64LoadSlot(edit code, 7, 0)
     x64LoadMem64(edit code, 0, 7, 16)
@@ -120,7 +123,8 @@ expose flow rtEmitListReserve(code: edit X64Code) {
     x64MovImm64(edit code, 0, 25)
     x64Syscall(edit code)
     hold mapped = x64JumpPlaceholder(edit code)
-    x64PatchRelative(edit code, fresh, code.bytes.length)
+    hold patch_offset_123 = code.bytes.length
+    x64PatchRelative(edit code, fresh, patch_offset_123)
     // mmap(0, new bytes, READ|WRITE, PRIVATE|ANONYMOUS, -1, 0)
     x64LoadSlot(edit code, 6, 4)
     x64MovImm64(edit code, 7, 0)
@@ -130,7 +134,8 @@ expose flow rtEmitListReserve(code: edit X64Code) {
     x64MovImm64(edit code, 9, 0)
     x64MovImm64(edit code, 0, 9)
     x64Syscall(edit code)
-    x64PatchRelative(edit code, mapped, code.bytes.length)
+    hold patch_offset_133 = code.bytes.length
+    x64PatchRelative(edit code, mapped, patch_offset_133)
     // Linux reports a failed call as a negative result.
     x64MovReg(edit code, 8, 0)
     x64MovImm64(edit code, 1, 0)

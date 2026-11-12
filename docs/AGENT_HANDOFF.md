@@ -1,5 +1,34 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-12 — autocobertura Stage 1
+
+**Referencia remota verificada:** `main` = `b61000b24e`
+(PR #33, #34 y #35 fusionados); [CI de main exitoso](https://github.com/Joshua-EPR/ELE/actions/runs/43147786262).
+La medición posterior a #35 se obtuvo del `report.json` de ese CI:
+**89/89 parser, 23/89 ownership, 9/89 LIR y 1/89 ELF64**.
+No hay evidencia de Stage 2/3.
+
+Trabajo pendiente en **PR #36** (exportación selectiva de tipos, funciones y
+constantes inter-módulo; B1 parcial) y **PR #37** (23 correcciones de
+lectura+edición del runtime; B2 parcial). Ambos son drafts independientes de
+`main`, sin integración ni mejora cuantitativa atribuida hasta obtener sus
+respectivos JSON de CI.
+
+El desglose real de fallos y la matriz B1–B11 están en
+[STAGE1_B1_B11_STATUS_2026-11-12.md](STAGE1_B1_B11_STATUS_2026-11-12.md).
+Los seis errores L0003 convergen en `lexer.l:87`; el backend devuelve
+código 48 para ocho módulos sin `main`, condición que debe distinguirse de
+límites de capacidad antes de modificar el verificador.
+
+**Nota de preservación:** los worktrees y cambios locales de agentes de
+otras sesiones no son accesibles por esta conexión con GitHub. Las referencias
+a `stash@{0}`, archivos modificados o rutas de Windows que aparecen en el
+histórico siguiente no están verificadas desde aquí. No ejecutar limpieza o
+resets basándose únicamente en estas notas.
+
+---
+
+
 ## Estado actual — 2026-11-11
 
 Trabajo activo: `feat/native-list-cfg`, basado en `c8dfc81`. El resto de este
