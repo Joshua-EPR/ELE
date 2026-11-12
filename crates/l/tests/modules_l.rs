@@ -381,3 +381,64 @@ fn dependency_type_errors_are_attributed_to_the_dependency() {
     assert_eq!(out.code, Some(1), "{}", out.stderr);
     assert!(out.stderr.contains("lib.l:"), "{}", out.stderr);
 }
+
+// Regression for the actual lexer -> tokens/cursor dependency boundary.
+// The Stage 1 loader must not treat a symbol imported by main as implicitly
+// accessible inside a sibling source.
+fn check_modules_with_stage1(name: &str, files: &[(&str, &str)]) -> Output {
+    let dir = case_dir(name);
+    for (file, content) in files {
+        fs::write(dir.join(file), content).unwrap();
+    }
+    exec(
+        Command::new(sema_exe())
+            .arg(dir.join("main.l"))
+            .arg("--check-ownership")
+            .env("PATH", ""),
+    )
+}
+
+#[test]
+fn public_lexer_nominal_types_resolve_in_token_module() {
+    let lexer =
+        "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
+    let out = check_modules_with_stage1(
+        "public_lexer_nominals",
+        &[
+            ("lexer.l", lexer),
+            (
+                "tokens.l",
+                "import lexer\npub fn tokenStart(t: &LexToken) -> Int { return t.start }\n",
+            ),
+            (
+                "main.l",
+                "import lexer\nimport tokens\nfn main() -> Int { return 0 }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
+#[test]
+fn sibling_import_does_not_make_lexer_type_visible_to_tokens() {
+    let lexer =
+        "pub enum LexKind {\n Word\n Eof\n}\npub struct LexToken { kind: LexKind, start: Int }\n";
+    let out = check_modules_with_stage1(
+        "missing_lexer_import_in_tokens",
+        &[
+            ("lexer.l", lexer),
+            (
+                "tokens.l",
+                "pub fn tokenStart(t: &LexToken) -> Int { return t.start }\n",
+            ),
+            (
+                "main.l",
+                "import lexer\nimport tokens\nfn main() -> Int { return 0 }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(1), "{}", out.stderr);
+    assert!(out.stderr.contains("tokens.l:"), "{}", out.stderr);
+    assert!(out.stderr.contains("error[L0001]"), "{}", out.stderr);
+}

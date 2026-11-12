@@ -1,4 +1,4 @@
-enum LexKind {
+pub enum LexKind {
     Word
     Integer
     Symbol
@@ -11,13 +11,13 @@ enum LexKind {
     InterpolationEnd
 }
 
-struct LexToken {
+pub struct LexToken {
     kind: LexKind
     start: Int
     end: Int
 }
 
-enum LexProblem {
+pub enum LexProblem {
     UnexpectedByte
     UnclosedComment
     UnsupportedNumber
@@ -30,7 +30,7 @@ enum LexProblem {
     ExcessiveDepth
 }
 
-struct LexError {
+pub struct LexError {
     problem: LexProblem
     offset: Int
 }
@@ -77,7 +77,7 @@ fn lexSymbolWidth(b: Int, next: Int, third: Int) -> Int {
     return 0
 }
 
-fn lexStart(source: &Text) -> Int {
+pub fn lexStart(source: &Text) -> Int {
     if source.byteLength >= 3 && source.byteAt(0) == 239 && source.byteAt(1) == 187 && source.byteAt(2) == 191 {
         return 3
     }
@@ -287,7 +287,7 @@ fn lexScan(source: &Text, start_offset: Int, end: Int, interpolation: Int, inter
     return Ok(offset)
 }
 
-fn lexSource(source: &Text) -> Result<List<LexToken>, LexError> {
+pub fn lexSource(source: &Text) -> Result<List<LexToken>, LexError> {
     let end = source.byteLength
     var tokens: List<LexToken> = List[]
     let start = lexStart(source)
