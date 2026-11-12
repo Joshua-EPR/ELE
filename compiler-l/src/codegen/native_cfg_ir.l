@@ -3,6 +3,7 @@ take native_cfg_defs
 take native_cfg_types
 take native_cfg_inst
 take native_cfg_list
+take native_cfg_fields
 
 // ELE-LIR CFG reader; split across modules to obey CORE-1 token limit.
 flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int, b: Int) {
@@ -169,6 +170,9 @@ expose flow cfgParse(source: view Text) => CfgProgram {
         when p.error != 0 { leave }
         cfgReadEnum(edit p, source, edit r, i)
     }
+    when p.error != 0 { give p }
+    // Layouts need every struct and enum (structs may name later enums).
+    cfgLayoutDecls(edit p)
     when p.error != 0 { give p }
     each i among 0..lists {
         when p.error != 0 { leave }

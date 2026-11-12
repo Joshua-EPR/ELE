@@ -254,9 +254,12 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
                 p.error = 88
             } otherwise {
                 hold payload = p.variants[e.first_variant + inst.place_field].payload_type
-                // A unit variant cannot be projected; only Int/Bool Copy
-                // payloads are safe while the heap/drop runtime is absent.
-                when payload < 0 || payload > 1 || dest_type != payload { p.error = 89 }
+                // A unit variant cannot be projected. Payloads are Int/Bool
+                // (copied) or drop-free aggregates (cfgLayoutEnum), whose
+                // extraction MOVES the whole enum (native_cfg_verify). Moving
+                // out of a referent is not allowed.
+                when payload < 0 || dest_type != payload { p.error = 89 }
+                when payload >= 2 && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
             }
         }
     }

@@ -1,6 +1,7 @@
 import lir_tokens
 import native_cfg_defs
 import native_cfg_types
+import native_layout
 
 // Text fields of shapes in the ELE-written CFG backend: projected sources
 // of `print`/`append` (`ref pN.k[.j] 0`) and `i dropfield <place> v<flag>|-`
@@ -71,4 +72,81 @@ expose flow cfgOwnsHeap(p: view CfgProgram, ty: Int) => Bool {
         when cfgOwnsHeap(p, p.fields[first + k].ty) { give true }
     }
     give false
+}
+
+// Declaration layouts (after cfgReadStruct/cfgReadEnum in native_cfg_types).
+// Lays out struct `s` once all its field types are sized. Returns 1 when it
+// was laid out now, 0 when it must wait, or an error code.
+flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
+    hold first = p.structs[s].first_field
+    hold count = p.structs[s].fields
+    each k among first..(first + count) {
+        when cfgTypeSize(p, p.fields[k].ty) <= 0 { give 0 }
+    }
+    change layout = nativeLayoutNew()
+    each k among first..(first + count) {
+        hold ty = p.fields[k].ty
+        hold offset = nativeLayoutAdd(edit layout, cfgTypeSize(p, ty), cfgTypeAlign(p, ty), false)
+        when offset < 0 { give 62 }
+        p.fields[k].offset = offset
+    }
+    hold size = nativeLayoutSeal(edit layout)
+    when size <= 0 || size > 512 { give 63 }
+    p.structs[s].size = size
+    p.structs[s].align = layout.align
+    give 1
+}
+
+// Enum layout: an 8-byte tag at offset 0 and, when some variant carries a
+// payload, a payload area at offset 8 sized by the largest payload rounded
+// up to whole words. Every alignment in this backend is at most 8, so
+// offset 8 suits any payload. A payload that owns a Text or a list,
+// directly or in a nested field, is rejected (82): enums stay drop-free.
+flow cfgLayoutEnum(p: edit CfgProgram, e: Int) => Int {
+    hold first = p.enums[e].first_variant
+    hold count = p.enums[e].variants
+    change largest = 0
+    each v among first..(first + count) {
+        hold payload = p.variants[v].payload_type
+        when payload >= 0 {
+            when cfgTypeSize(p, payload) <= 0 { give 0 }
+            when cfgOwnsHeap(p, payload) || cfgTypeAlign(p, payload) > 8 { give 82 }
+            hold size = cfgTypeSize(p, payload)
+            when size > largest { largest = size }
+        }
+    }
+    change size = 8
+    when largest > 0 { size = 8 + 8 * ((largest + 7) / 8) }
+    when size > 520 { give 63 }
+    p.enums[e].size = size
+    p.enums[e].align = 8
+    give 1
+}
+
+// Fixed point over the declarations: each round lays out every struct and
+// enum whose members are already sized. A round without progress while a
+// declaration is pending means a by-value cycle (63).
+expose flow cfgLayoutDecls(p: edit CfgProgram) {
+    hold total = p.structs.length + p.enums.length
+    change done = 0
+    during done < total {
+        change progress = 0
+        each s among 0..p.structs.length {
+            when p.error == 0 && p.structs[s].size == 0 {
+                hold r = cfgLayoutStruct(edit p, s)
+                when r > 1 { p.error = r }
+                when r == 1 { progress += 1 }
+            }
+        }
+        each e among 0..p.enums.length {
+            when p.error == 0 && p.enums[e].size == 0 {
+                hold r = cfgLayoutEnum(edit p, e)
+                when r > 1 { p.error = r }
+                when r == 1 { progress += 1 }
+            }
+        }
+        when p.error != 0 { give }
+        when progress == 0 { p.error = 63; give }
+        done += progress
+    }
 }

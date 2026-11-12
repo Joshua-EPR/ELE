@@ -23,15 +23,18 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     let first_arm = expr.b
     let arm_count = expr.c
     let scrut_t = semaExprMode(&mut ctx, source, tree, scrut_e, ACCESS_READ)
+    // Move path of a place scrutinee (-1 for temporaries), consumed when an
+    // arm binds a non-Copy payload (lirMatchArmBind).
+    let scrut_path = ctx.expression_path
     var match_covered = false
     if scrut_t >= 0 && scrut_t < ctx.types.types.length {
         match ctx.types.types[scrut_t].kind {
             SemTypeKind.Option => {
-                if !lirBuiltinSupported(&ctx.types, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                if !lirBuiltinSupported(&ctx.types, &ctx.lir_module, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                 match_covered = semaBuiltinMatchCovered(source, tree, expr, false)
             }
             SemTypeKind.Result => {
-                if !lirBuiltinSupported(&ctx.types, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                if !lirBuiltinSupported(&ctx.types, &ctx.lir_module, scrut_t) { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                 match_covered = semaBuiltinMatchCovered(source, tree, expr, true)
             }
             SemTypeKind.Enum => {
@@ -65,7 +68,7 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = arm_body
         scopePush(&mut ctx.scopes)
         semaScopeEnter(&mut ctx)
-        lirMatchArmBind(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t)
+        lirMatchArmBind(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, scrut_path)
         if body_stmt >= 0 { semaCheckStmt(&mut ctx, source, tree, body_stmt) }
         semaScopeExit(&mut ctx, p_end, p_end)
         scopePop(&mut ctx.scopes)
@@ -121,7 +124,6 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
                     }
                 }
             }
-            // The written place types an empty `List[]` on the right.
             ctx.expected_list_type = target_t
             let val_t = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
             let value = lirTakeOperand(&mut ctx, val_t)
