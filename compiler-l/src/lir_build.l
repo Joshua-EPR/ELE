@@ -74,12 +74,12 @@ const LIR_GE = 10
 const LIR_NEG = 0
 const LIR_NOT = 1
 
-struct LirVar {
+pub struct LirVar {
     ty: Int
     is_ref: Bool
 }
 
-struct LirConst {
+pub struct LirConst {
     kind: Int
     value: Int
     // Text: source span of the literal content (escapes not decoded).
@@ -90,20 +90,20 @@ struct LirConst {
 // A place is a variable plus a chain of struct field projections (local
 // field index within the struct). A place rooted at a reference variable
 // denotes the referent.
-struct LirPlace {
+pub struct LirPlace {
     root: Int
     parent: Int
     field: Int
 }
 
-struct LirArg {
+pub struct LirArg {
     by_ref: Bool
     // Operand (by value) or place (by reference).
     value: Int
     mutable: Bool
 }
 
-struct LirInst {
+pub struct LirInst {
     kind: Int
     dst: Int
     a: Int
@@ -115,7 +115,7 @@ struct LirInst {
     at: Int
 }
 
-struct LirFn {
+pub struct LirFn {
     vars: List<LirVar>
     consts: List<LirConst>
     places: List<LirPlace>
@@ -217,7 +217,7 @@ fn lirMarkUnsupported(l: &mut LirFn, offset: Int) {
 
 // Module tables shared by every function: signatures (parameters and
 // result) in function index order and structs with their field types.
-struct LirModule {
+pub struct LirModule {
     fn_first: List<Int>
     fn_count: List<Int>
     param_ty: List<Int>
