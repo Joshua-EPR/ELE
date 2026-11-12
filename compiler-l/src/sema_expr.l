@@ -27,6 +27,9 @@ fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
     }
     for i in 0..expr.d {
         let arg = &tree.expressions[tree.extra[expr.c + i]]
+        // The declared field type is the context of an empty `List[]`.
+        let field = semaNamedField(source, tree, decl_id, arg)
+        if field >= 0 { ctx.expected_list_type = semaFieldType(&mut ctx, source, tree, field) }
         let ty = semaExprMode(&mut ctx, source, tree, arg.c, ACCESS_MOVE)
         semaConstructorField(&mut ctx, source, tree, decl_id, arg, ty, &mut seen, &mut slots)
     }
@@ -126,7 +129,18 @@ fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: I
     // Instructions of this expression carry its start (runtime messages).
     let outer_at = ctx.lir.at
     ctx.lir.at = tree.expressions[expr_id].start
+    // A list context set by the caller belongs to this expression only when
+    // it is the list literal itself (or a named argument wrapping it); it
+    // never reaches unrelated subexpressions.
+    let expected_list = ctx.expected_list_type
+    ctx.expected_list_type = -1
+    match tree.expressions[expr_id].kind {
+        AstExprKind.ListLit => { ctx.expected_list_type = expected_list }
+        AstExprKind.Named => { ctx.expected_list_type = expected_list }
+        _ => {}
+    }
     let ty = semaInferExpr(&mut ctx, source, tree, expr_id, mode)
+    ctx.expected_list_type = -1
     ctx.lir.at = outer_at
     match tree.expressions[expr_id].kind {
         AstExprKind.Name => {}
@@ -323,6 +337,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                                 args.push(lirArg(&mut ctx.lir, true, ctx.lir.borrowed, semaIsMutRef(ctx, param_t)))
                             } else {
                                 loans.push(-1)
+                                ctx.expected_list_type = param_t
                                 let arg_t = semaExprMode(&mut ctx, source, tree, arg_eid, ACCESS_MOVE)
                                 args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, arg_t), false))
                                 if !semTypeEquals(&ctx.types, arg_t, param_t) {
@@ -399,9 +414,14 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
 fn semaCollectionLit(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, is_array: Bool) -> Int {
     let first = expr.a
     let count = expr.b
-    var elem_t = semaExpectedListElem(ctx)
+    var elem_t = 0
+    if !is_array { elem_t = semaExpectedListElem(ctx) }
+    ctx.expected_list_type = -1
+    let elem_context = elem_t
     var elements: List<Int> = List[]
     for i in 0..count {
+        // Each element gets the element type as its own (nested) context.
+        ctx.expected_list_type = elem_context
         let ti = semaExprMode(&mut ctx, source, tree, tree.extra[first + i], ACCESS_MOVE)
         if elem_t == 0 { elem_t = ti }
         if !semTypeEquals(&ctx.types, elem_t, ti) {
