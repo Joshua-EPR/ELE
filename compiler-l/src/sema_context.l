@@ -18,14 +18,14 @@ const SITE_VAR = 2
 const SITE_ARG = 3
 const SITE_RETURN = 4
 
-struct SemaError {
+pub struct SemaError {
     code: Text
     message: Text
     start: Int
     end: Int
 }
 
-struct SemaContext {
+pub struct SemaContext {
     types: TypeTable
     symbols: SymbolTable
     scopes: ScopeTree
