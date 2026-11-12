@@ -143,3 +143,69 @@ fn b1_loan_overlap_and_mutability_are_public_but_param_root_stays_private() {
         "import flow_cfg\nimport loans_l\nfn probe(graph: &FlowGraph) -> Bool { return loanRootedAtParams(graph, 0) }\n",
     );
 }
+
+#[test]
+fn b1_lir_const_and_place_helpers_are_public_but_index_place_stays_private() {
+    let dir = prepare_modules();
+    assert_consumer(&dir, "sema_lower.l", "lir_build", "lirConst(");
+    assert_consumer(&dir, "sema_lower.l", "lir_build", "lirPlaceVar(");
+    assert_consumer(&dir, "lir_finish.l", "lir_build", "lirPathVar(");
+
+    let public = check(
+        &dir,
+        "public_lir_const",
+        "import lir_build\nfn probe(l: &mut LirFn) -> Int {\n    let c = lirConst(&mut l, 0, 1, 0, 0)\n    let slot = lirPathVar(l, 0)\n    return lirPlaceVar(&mut l, slot) + c\n}\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    assert_private(
+        &dir,
+        "private_lir_place_index_again",
+        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceIndex(&mut l, 0, 0) }\n",
+    );
+}
+
+#[test]
+fn b1_loan_positions_and_place_are_public_but_param_root_stays_private() {
+    let dir = prepare_modules();
+    assert_consumer(&dir, "drops_dump.l", "loans_l", "loanLineAt(");
+    assert_consumer(&dir, "drops_dump.l", "loans_l", "loanColAt(");
+    assert_consumer(&dir, "loans_check.l", "loans_l", "loanPlaceOf(");
+
+    let public = check(
+        &dir,
+        "public_loan_place_of",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph, source: &Text) -> Int {\n    let line = loanLineAt(source, 0)\n    let col = loanColAt(source, 0)\n    return loanPlaceOf(&mut graph, 0) + line + col\n}\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    assert_private(
+        &dir,
+        "private_loan_rooted_at_params_again",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &FlowGraph) -> Bool { return loanRootedAtParams(graph, 0) }\n",
+    );
+}
+
+#[test]
+fn b1_drop_op_kinds_are_public_but_drop_flag_search_stays_private() {
+    let dir = prepare_modules();
+    assert_consumer(&dir, "drops_verify.l", "drops_plan", "DROP_OP_REF");
+    assert_consumer(&dir, "drops_verify.l", "drops_plan", "DROP_OP_DROP");
+    assert_consumer(&dir, "lir_finish.l", "drops_plan", "DROP_OP_COND");
+
+    let public = check(
+        &dir,
+        "public_drop_op_kinds",
+        "import drops_plan\nfn probe() -> Int { return DROP_OP_DROP + DROP_OP_COND + DROP_OP_SET + DROP_OP_CLEAR + DROP_OP_REF }\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    assert_private(
+        &dir,
+        "private_drop_releases",
+        "import flow_cfg\nimport drops_plan\nfn probe(graph: &FlowGraph) -> Bool { return dropReleases(graph, 0, 0) }\n",
+    );
+}

@@ -158,12 +158,12 @@ pub fn lirVar(l: &mut LirFn, ty: Int, is_ref: Bool) -> Int {
     return l.vars.length - 1
 }
 
-fn lirConst(l: &mut LirFn, kind: Int, value: Int, start: Int, end: Int) -> Int {
+pub fn lirConst(l: &mut LirFn, kind: Int, value: Int, start: Int, end: Int) -> Int {
     l.consts.push(LirConst(kind: kind, value: value, start: start, end: end))
     return -l.consts.length
 }
 
-fn lirPlaceVar(l: &mut LirFn, slot: Int) -> Int {
+pub fn lirPlaceVar(l: &mut LirFn, slot: Int) -> Int {
     l.places.push(LirPlace(root: slot, parent: -1, field: -1))
     return l.places.length - 1
 }
@@ -206,7 +206,7 @@ pub fn lirBindPath(l: &mut LirFn, path: Int, slot: Int) {
     l.path_var[path] = slot
 }
 
-fn lirPathVar(l: &LirFn, path: Int) -> Int {
+pub fn lirPathVar(l: &LirFn, path: Int) -> Int {
     if path < 0 || path >= l.path_var.length { return -1 }
     return l.path_var[path]
 }

@@ -1,5 +1,11 @@
 //! Verify Stage 1 cross-module loan lookup visibility using the real ELE sources.
-//! Exporting a read-only helper must not expose the mutating loan-place helper.
+//! Exporting a read-only helper must not expose a mutating loan helper.
+//! The negative case originally targeted `loans_l::loanPlaceOf`; that helper
+//! is now public because loans_check.l and sema_borrow.l call it through a
+//! direct import. Every remaining private helper of loans_l.l is also used by
+//! other modules, so the negative case moved to
+//! `loans_check::loanResolveThrough`, a mutating loan helper
+//! (`&mut FlowGraph`) used only inside loans_check.l.
 mod stage1_support;
 
 use std::{
@@ -44,7 +50,7 @@ fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
 }
 
 #[test]
-fn b1_read_only_loan_of_path_is_public_but_mutable_place_lookup_is_private() {
+fn b1_read_only_loan_of_path_is_public_but_mutating_loan_helper_is_private() {
     let dir = prepare_modules();
     let consumer = fs::read_to_string(dir.join("sema_context.l")).unwrap();
     assert!(consumer.contains("import loans_l"));
@@ -60,10 +66,10 @@ fn b1_read_only_loan_of_path_is_public_but_mutable_place_lookup_is_private() {
 
     let private = check(
         &dir,
-        "private_loan_place",
-        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph) -> Int { return loanPlaceOf(&mut graph, 0) }\n",
+        "private_loan_resolve_through",
+        "import flow_cfg\nimport loans_l\nimport loans_check\nfn probe(graph: &mut FlowGraph) { loanResolveThrough(&mut graph) }\n",
         false,
     );
     assert!(private.contains("error[L0001]"), "{private}");
-    assert!(private.contains("private_loan_place.l:"), "{private}");
+    assert!(private.contains("private_loan_resolve_through.l:"), "{private}");
 }
