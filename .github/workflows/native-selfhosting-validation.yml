@@ -335,3 +335,32 @@ jobs:
                   assert not result.stderr, f"{name}: unexpected stderr"
               print(f"{name}: native Linux exit {expected} verified")
           PY
+
+
+  differential-native-cfg-v2:
+    name: Differential CFG native (base vs ELE v2, ELF64)
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build one shared Stage 0 bootstrap executable
+        run: cargo build -p project-l --bin l
+      - name: Build main and PR CFG backends; compare every LIR fixture, diagnostics and ELF64
+        env:
+          ELE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/verify_native_cfg_migration.py --base "$ELE_BASE_SHA"
+      - name: Preserve differential evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-cfg-differential-report
+          path: target/differential/native-cfg-results.json
+          if-no-files-found: warn
+          retention-days: 7
