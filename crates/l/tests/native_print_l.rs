@@ -190,6 +190,8 @@ fn text_lir_fixtures_run_with_their_documented_status() {
         ("native_cfg_text_flagged_drop.lir", 0, "false\n"),
         // A shape may hold a Text field (native_text_fields_l covers them).
         ("native_cfg_text_in_struct.lir", 0, ""),
+        // Appending a Text by value reads it; the source is released after.
+        ("native_cfg_text_append_by_value_ok.lir", 0, "42\n"),
         // Appending to a literal is caught at run time, before any write.
         ("native_cfg_text_append_literal.lir", 121, ""),
     ] {
@@ -252,8 +254,10 @@ fn unsupported_or_invalid_print_and_unit_forms_are_rejected() {
     rejected("native_cfg_text_leak.lir", 59);
     rejected("native_cfg_text_overwrite.lir", 59);
     rejected("native_cfg_text_append_self.lir", 93);
-    // Forms the backend does not lower yet must not be accepted silently.
-    rejected("native_cfg_text_append_by_value.lir", 90);
+    rejected("native_cfg_text_append_self_by_value.lir", 93);
+    // `append val vN` only reads its Text (as in Stage 0); this fixture never
+    // releases that source, so it is rejected as a leak.
+    rejected("native_cfg_text_append_by_value.lir", 59);
     // A reference argument for a by-value parameter.
     rejected("native_cfg_call_ref_arg.lir", 54);
     rejected("native_cfg_text_drop_int.lir", 92);
