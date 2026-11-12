@@ -59,7 +59,7 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     check(
         &dir,
         "visible_loan_ancestry",
-        "import flow_cfg\nimport loans_l\nflow probe(graph: &FlowGraph) => Bool { give loanDescendsFrom(graph, 0, 0) }\n",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &FlowGraph) -> Bool { return loanDescendsFrom(graph, 0, 0) }\n",
         true,
     );
     check(
@@ -71,10 +71,11 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     let private_loan = check(
         &dir,
         "private_loan_helper",
-        "import flow_cfg\nimport loans_l\nflow probe(graph: edit FlowGraph) => Int { give loanPlaceOf(edit graph, 0) }\n",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph) -> Int { return loanPlaceOf(&mut graph, 0) }\n",
         false,
     );
     assert!(private_loan.contains("error[L0001]"), "{private_loan}");
+    assert!(private_loan.contains("private_loan_helper.l:"), "{private_loan}");
     let private_state = check(
         &dir,
         "private_drop_state",
@@ -82,4 +83,5 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         false,
     );
     assert!(private_state.contains("error[L0001]"), "{private_state}");
+    assert!(private_state.contains("private_drop_state.l:"), "{private_state}");
 }
