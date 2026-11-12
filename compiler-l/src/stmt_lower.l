@@ -93,11 +93,10 @@ fn lirMatchScrutVar(ctx: &mut SemaContext, scrut_t: Int) -> Int {
 }
 
 fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) -> Bool {
-    // Only a genuine wildcard may skip the discriminant check. Treating the
-    // final named arm as a wildcard could read the wrong variant's payload.
-    if is_last || (p_end - p_start == 1 && source.byteAt(p_start) == 95) {
-        // `is_last` is set only after strict enum exhaustiveness validation;
-        // the enum value must have one of the declared discriminants.
+    // A wildcard needs no discriminant or payload binding. A proven final
+    // named arm is handled by its type-specific branch below: builtin
+    // Option/Result arms must still bind their payloads before entry.
+    if p_end - p_start == 1 && source.byteAt(p_start) == 95 {
         flowLink(&mut ctx.flow, arm_body, -1)
         return true
     }
@@ -145,12 +144,18 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
             elem_t = ctx.types.types[scrut_t].nominal_id
         }
         if disc >= 0 {
-            let disc_const = lirConst(&mut ctx.lir, LIR_CONST_INT, disc, 0, 0)
-            let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, scrut_var, disc_const)
-            ctx.lir.val = cond
-            ctx.lir.place = -1
-            lirCondition(&mut ctx)
-            flowLink(&mut ctx.flow, arm_body, next_test)
+            if is_last {
+                // Exhaustiveness was checked against both builtin tags.
+                // Keep the payload binding even when no final test is needed.
+                flowLink(&mut ctx.flow, arm_body, -1)
+            } else {
+                let disc_const = lirConst(&mut ctx.lir, LIR_CONST_INT, disc, 0, 0)
+                let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, scrut_var, disc_const)
+                ctx.lir.val = cond
+                ctx.lir.place = -1
+                lirCondition(&mut ctx)
+                flowLink(&mut ctx.flow, arm_body, next_test)
+            }
             if payload_start >= 0 {
                 let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, payload_start, payload_end, elem_t, ctx.scopes.current_scope, false, false, -1, payload_start, payload_end)
                 scopeAddSymbol(&mut ctx.scopes, sym_id)
@@ -158,8 +163,14 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
                 ctx.lir.val = scrut_var
                 lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, elem_t, false)
             }
-            return false
+            return is_last
         }
+    }
+    // Only the strict nominal-enum coverage proof may promote a final
+    // named variant to an unconditional arm (its payload binds separately).
+    if is_last && enum_decl >= 0 {
+        flowLink(&mut ctx.flow, arm_body, -1)
+        return true
     }
     if enum_decl >= 0 && enum_decl < tree.declarations.length {
         let decl = &tree.declarations[enum_decl]
