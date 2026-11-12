@@ -9,6 +9,7 @@ import lir_build
 import sema_context
 import sema_drop
 import sema_lower
+import lir_builtin_union
 
 // Non-recursive parts of expression checking and lowering, kept out of
 // sema_expr.l (CORE-1 budget). Each function receives what the recursive
@@ -26,8 +27,20 @@ fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: I
     if sym_id < 0 {
         let name_none = "None"
         if symbolNameEqualsText(source, expr.start, expr.end, name_none) {
-            let opt_t = semTypeMakeOption(&mut ctx.types, 0)
-            lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_INT, 0, 0, 0))
+            var opt_t = semTypeMakeOption(&mut ctx.types, 0)
+            let annotated = ctx.expected_union_type
+            if annotated >= 0 && annotated < ctx.types.types.length {
+                match ctx.types.types[annotated].kind {
+                    SemTypeKind.Option => { opt_t = annotated }
+                    _ => {}
+                }
+            }
+            let enum_id = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, opt_t)
+            if enum_id < 0 {
+                lirMarkUnsupported(&mut ctx.lir, expr.start)
+            } else {
+                lirSetVal(&mut ctx, lirNew(&mut ctx, opt_t, false, LIR_VARIANT, enum_id, 0, LIR_NONE))
+            }
             return opt_t
         }
         semaAddError(&mut ctx, "L0001", "identificador no declarado", expr.start, expr.end)

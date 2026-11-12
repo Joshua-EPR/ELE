@@ -40,16 +40,18 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('acceso a variante enum inactiva', native)
         self.assertIn('enum_layout.layout.size / 8', native)
 
-    def test_no_false_claim_of_option_result_support(self):
-        front = src('compiler-l/src/sema_stmt.l')
-        # These arms must *still* mark LIR unsupported. Layout may change
-        # without silently broadening the backend's supported type set.
+    def test_builtin_unions_only_lower_primitive_payloads(self):
+        front = src('compiler-l/src/sema_expr.l')
+        binding = src('compiler-l/src/stmt_lower.l')
+        union = src('compiler-l/src/lir_builtin_union.l')
         for name in ('Option', 'Result'):
-            self.assertRegex(
-                front,
-                rf'SemTypeKind\.{name}\s*=>\s*\{{\s*'
-                r'lirMarkUnsupported\(&mut ctx\.lir, expr\.start\)',
-            )
+            self.assertIn(f'SemTypeKind.{name}', union)
+        self.assertIn('lirBuiltinPrimitive(t.elem_type)', union)
+        self.assertIn('lirBuiltinPrimitive(t.nominal_id)', union)
+        self.assertIn('lirMarkUnsupported(&mut ctx.lir, start)', src('compiler-l/src/sema_builtin_union.l'))
+        self.assertIn('lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)', binding)
+        self.assertIn('LIR_PAYLOAD, place, enum_id, which', binding)
+        self.assertIn('semaBuiltinUnionValue', front)
 
 
 if __name__ == '__main__':

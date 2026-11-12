@@ -8,6 +8,7 @@ import lir_build
 import sema_context
 import sema_drop
 import sema_lower
+import lir_builtin_union
 
 // Statement lowering helpers for the semantic pass (sema_stmt.l). They run
 // right after the statement's CFG events, so the instructions they emit sit
@@ -121,50 +122,36 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
     }
     let name_none = "None"
     if is_option || is_result {
-        // Stage 1 knows their types but has no tagged-union lowering or
-        // payload move paths yet. Keep semantic checking, reject LIR output.
-        lirMarkUnsupported(&mut ctx.lir, p_start)
+        let builtin_id = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, scrut_t)
+        if builtin_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start) }
         var disc = -1
-        var payload_start = -1
-        var payload_end = -1
         if is_option && symbolNameEqualsText(source, p_start, p_end, name_none) {
             disc = 0
-        } else if is_option && (p_end - p_start > 5) && source.byteAt(p_start) == 83 && source.byteAt(p_start + 1) == 111 && source.byteAt(p_start + 2) == 109 && source.byteAt(p_start + 3) == 101 && source.byteAt(p_start + 4) == 40 {
+        } else if is_option && (p_end - p_start > 6) && source.byteAt(p_start) == 83 && source.byteAt(p_start + 1) == 111 && source.byteAt(p_start + 2) == 109 && source.byteAt(p_start + 3) == 101 && source.byteAt(p_start + 4) == 40 {
             disc = 1
-            payload_start = p_start + 5
-            payload_end = p_end - 1
-        } else if is_result && (p_end - p_start > 3) && source.byteAt(p_start) == 79 && source.byteAt(p_start + 1) == 107 && source.byteAt(p_start + 2) == 40 {
+        } else if is_result && (p_end - p_start > 4) && source.byteAt(p_start) == 79 && source.byteAt(p_start + 1) == 107 && source.byteAt(p_start + 2) == 40 {
             disc = 0
-            payload_start = p_start + 3
-            payload_end = p_end - 1
-        } else if is_result && (p_end - p_start > 4) && source.byteAt(p_start) == 69 && source.byteAt(p_start + 1) == 114 && source.byteAt(p_start + 2) == 114 && source.byteAt(p_start + 3) == 40 {
+        } else if is_result && (p_end - p_start > 5) && source.byteAt(p_start) == 69 && source.byteAt(p_start + 1) == 114 && source.byteAt(p_start + 2) == 114 && source.byteAt(p_start + 3) == 40 {
             disc = 1
-            payload_start = p_start + 4
-            payload_end = p_end - 1
-            elem_t = ctx.types.types[scrut_t].nominal_id
         }
         if disc >= 0 {
             if is_last {
-                // Exhaustiveness was checked against both builtin tags.
-                // Keep the payload binding even when no final test is needed.
+                // Final named arm is unconditional only after strict coverage
+                // proof. Its payload is read inside that arm, not here.
                 flowLink(&mut ctx.flow, arm_body, -1)
             } else {
-                let disc_const = lirConst(&mut ctx.lir, LIR_CONST_INT, disc, 0, 0)
-                let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, scrut_var, disc_const)
+                let place = lirPlaceVar(&mut ctx.lir, scrut_var)
+                let tag = lirNew(&mut ctx, 1, false, LIR_DISC, place, 0, 0)
+                let target = lirConst(&mut ctx.lir, LIR_CONST_INT, disc, 0, 0)
+                let cond = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_EQ, tag, target)
                 ctx.lir.val = cond
                 ctx.lir.place = -1
                 lirCondition(&mut ctx)
                 flowLink(&mut ctx.flow, arm_body, next_test)
             }
-            if payload_start >= 0 {
-                let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, payload_start, payload_end, elem_t, ctx.scopes.current_scope, false, false, -1, payload_start, payload_end)
-                scopeAddSymbol(&mut ctx.scopes, sym_id)
-                semaInitPath(&mut ctx, sym_id, payload_start, payload_end)
-                ctx.lir.val = scrut_var
-                lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, elem_t, false)
-            }
             return is_last
         }
+        lirMarkUnsupported(&mut ctx.lir, p_start)
     }
     // Only the strict nominal-enum coverage proof may promote a final
     // named variant to an unconditional arm (its payload binds separately).
@@ -212,6 +199,63 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
 // deterministic drops, and remain intentionally unsupported.
 fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int) {
     if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
+    // Primitive builtin unions reuse the exact checked LIR_PAYLOAD protocol
+    // of nominal enums. Never bind before testing the active tag.
+    let st = &ctx.types.types[scrut_t]
+    var builtin = false
+    var which = -1
+    var start = -1
+    var payload_ty = -1
+    match st.kind {
+        SemTypeKind.Option => {
+            builtin = true
+            if p_end - p_start > 6 && source.byteAt(p_start) == 83 && source.byteAt(p_start + 4) == 40 {
+                which = 1
+                start = p_start + 5
+                payload_ty = st.elem_type
+            }
+        }
+        SemTypeKind.Result => {
+            builtin = true
+            if p_end - p_start > 4 && source.byteAt(p_start) == 79 && source.byteAt(p_start + 2) == 40 {
+                which = 0
+                start = p_start + 3
+                payload_ty = st.elem_type
+            } else if p_end - p_start > 5 && source.byteAt(p_start) == 69 && source.byteAt(p_start + 3) == 40 {
+                which = 1
+                start = p_start + 4
+                payload_ty = st.nominal_id
+            }
+        }
+        _ => {}
+    }
+    if builtin {
+        if start < 0 { return }
+        let finish = p_end - 1
+        if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        if finish == start + 1 && source.byteAt(start) == 95 { return }
+        if !lirBuiltinPrimitive(payload_ty) || !lirBuiltinSupported(&ctx.types, scrut_t) {
+            // Stage 1 ownership must still see the source-level pattern
+            // binder for non-native unions (e.g. Result<Int, LexError>).
+            // The LIR remains explicitly unsupported: no unchecked payload
+            // read, coercion, or fabricated value can reach the backend.
+            lirMarkUnsupported(&mut ctx.lir, p_start)
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, start, finish, payload_ty, ctx.scopes.current_scope, false, false, -1, start, finish)
+            scopeAddSymbol(&mut ctx.scopes, sym_id)
+            semaInitPath(&mut ctx, sym_id, start, finish)
+            return
+        }
+        let enum_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        let place = lirPlaceVar(&mut ctx.lir, scrut_var)
+        let value = lirNew(&mut ctx, payload_ty, false, LIR_PAYLOAD, place, enum_id, which)
+        let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, start, finish, payload_ty, ctx.scopes.current_scope, false, false, -1, start, finish)
+        scopeAddSymbol(&mut ctx.scopes, sym_id)
+        semaInitPath(&mut ctx, sym_id, start, finish)
+        lirSetVal(&mut ctx, value)
+        lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, payload_ty, false)
+        return
+    }
     match ctx.types.types[scrut_t].kind {
         SemTypeKind.Enum => {}
         _ => { return }

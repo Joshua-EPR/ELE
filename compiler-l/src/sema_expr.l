@@ -15,6 +15,7 @@ import sema_lower
 import sema_ops
 import sema_collection_ops
 import stmt_lower
+import sema_builtin_union
 
 fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
     let decl = &tree.declarations[decl_id]
@@ -228,17 +229,19 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaAddError(&mut ctx, "L0004", "print requiere un argumento imprimible", expr.start, expr.end)
                 return 7
             }
-            if symbolNameEqualsText(source, name_start, name_end, name_ok) && arg_count == 1 {
-                let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
-                return semTypeMakeResult(&mut ctx.types, ty, 0)
-            }
-            if symbolNameEqualsText(source, name_start, name_end, name_err) && arg_count == 1 {
-                let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
-                return semTypeMakeResult(&mut ctx.types, 0, ty)
-            }
-            if symbolNameEqualsText(source, name_start, name_end, name_some) && arg_count == 1 {
-                let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
-                return semTypeMakeOption(&mut ctx.types, ty)
+            var builtin_variant = -1
+            if symbolNameEqualsText(source, name_start, name_end, name_ok) { builtin_variant = 0 }
+            if symbolNameEqualsText(source, name_start, name_end, name_err) { builtin_variant = 1 }
+            if symbolNameEqualsText(source, name_start, name_end, name_some) { builtin_variant = 2 }
+            if builtin_variant >= 0 && arg_count == 1 {
+                // A nested expression must not inherit the result union type
+                // of its constructor's own expected destination.
+                let contextual = ctx.expected_union_type
+                ctx.expected_union_type = -1
+                let arg_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+                let payload = lirTakeOperand(&mut ctx, arg_t)
+                ctx.expected_union_type = contextual
+                return semaBuiltinUnionValue(&mut ctx, arg_t, payload, builtin_variant, expr.start, expr.end)
             }
             let name_print_err = "printError"
             if symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
