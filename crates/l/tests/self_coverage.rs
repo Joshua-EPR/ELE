@@ -306,6 +306,19 @@ fn parse_baseline(text: &str) -> BTreeMap<String, Phase> {
     map
 }
 
+fn require_nonempty_baseline(baseline: &BTreeMap<String, Phase>) {
+    assert!(
+        !baseline.is_empty(),
+        "{BASELINE} no contiene fuentes: se rechaza una referencia vacía"
+    );
+}
+
+#[test]
+fn empty_baseline_cannot_be_used_to_approve_all_sources() {
+    let empty = BTreeMap::new();
+    assert!(std::panic::catch_unwind(|| require_nonempty_baseline(&empty)).is_err());
+}
+
 // A maintenance mode must never turn an observed coverage regression into
 // a new approved baseline. Only improvements (and explicit source changes)
 // may be recorded by ELE_UPDATE_SELF_COVERAGE.
@@ -401,6 +414,7 @@ fn stage1_self_coverage_matches_versioned_baseline() {
     let baseline_text = fs::read_to_string(&baseline_path)
         .unwrap_or_else(|err| panic!("No se puede leer {BASELINE}: {err}"));
     let baseline = parse_baseline(&baseline_text);
+    require_nonempty_baseline(&baseline);
 
     let mut regressions = Vec::new();
     let mut improvements = Vec::new();
