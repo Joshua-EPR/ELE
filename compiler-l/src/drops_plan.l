@@ -79,7 +79,10 @@ fn dropFlags(graph: &FlowGraph, plan: &mut DropPlan, root: Int, kind: Int, block
     var leaf = root
     while leaf >= 0 {
         if leaf < paths && plan.flag_of[leaf] >= 0 {
-            dropPush(&mut plan, kind, leaf, plan.flag_of[leaf], block, event, true, flowDropType(graph, leaf))
+            // Snapshot immutable metadata before mutating the drop plan.
+            let flag = plan.flag_of[leaf]
+            let ty = flowDropType(graph, leaf)
+            dropPush(&mut plan, kind, leaf, flag, block, event, true, ty)
         }
         leaf = flowNextPath(graph, root, leaf)
     }
