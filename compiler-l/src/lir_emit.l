@@ -2,6 +2,7 @@ import tokens
 import sema_types
 import lir_build
 import lir_finish
+import lir_builtin_union
 
 // Text serialization of ELE LIR, protocol version 1 (docs/LIR_PROTOCOL.md).
 // One record per line, fields separated by single spaces. Names and text
@@ -134,6 +135,14 @@ fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
                 for k in 0..lm.en_decl.length {
                     if lm.en_decl[k] == decl { return "e{k}" }
                 }
+            }
+            SemTypeKind.Option => {
+                let k = lirBuiltinEnumIndex(lm, ty)
+                if k >= 0 { return "e{k}" }
+            }
+            SemTypeKind.Result => {
+                let k = lirBuiltinEnumIndex(lm, ty)
+                if k >= 0 { return "e{k}" }
             }
             SemTypeKind.List => {
                 let elem = types.types[ty].elem_type
