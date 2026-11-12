@@ -101,7 +101,7 @@ fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
 }
 
 // Is `ancestor` on the reborrow chain of `loan` (inclusive)?
-fn loanDescendsFrom(graph: &FlowGraph, loan: Int, ancestor: Int) -> Bool {
+pub fn loanDescendsFrom(graph: &FlowGraph, loan: Int, ancestor: Int) -> Bool {
     var cursor = loan
     while cursor >= 0 && cursor < graph.loans.length {
         if cursor == ancestor { return true }
