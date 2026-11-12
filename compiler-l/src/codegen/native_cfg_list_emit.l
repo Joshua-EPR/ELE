@@ -110,7 +110,8 @@ flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit C
         cfgDropAt(edit code, edit fix, elem)
         hold again = x64JumpPlaceholder(edit code)
         x64PatchRelative(edit code, again, top)
-        x64PatchRelative(edit code, done, code.bytes.length)
+        hold after_items = code.bytes.length
+        x64PatchRelative(edit code, done, after_items)
     }
     // munmap(buffer, pages(capacity * size)), unless it never had a buffer.
     x64LoadSlot(edit code, 7, 0)
@@ -128,8 +129,10 @@ flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit C
     x64MovImm64(edit code, 7, 124)
     x64MovImm64(edit code, 0, 60)
     x64Syscall(edit code)
-    x64PatchRelative(edit code, released, code.bytes.length)
-    x64PatchRelative(edit code, empty, code.bytes.length)
+    // Both branches target the same post-release instruction offset.
+    hold after_release = code.bytes.length
+    x64PatchRelative(edit code, released, after_release)
+    x64PatchRelative(edit code, empty, after_release)
     x64FrameEnd(edit code)
 }
 
