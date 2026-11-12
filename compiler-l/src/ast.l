@@ -1,4 +1,4 @@
-enum AstExprKind {
+pub enum AstExprKind {
     IntLit
     BoolLit
     TextLit
@@ -22,7 +22,7 @@ enum AstExprKind {
     Named
 }
 
-struct AstExpr {
+pub struct AstExpr {
     kind: AstExprKind
     start: Int
     end: Int
@@ -32,7 +32,7 @@ struct AstExpr {
     d: Int
 }
 
-enum AstStmtKind {
+pub enum AstStmtKind {
     Let
     Const
     Assign
@@ -49,7 +49,7 @@ enum AstStmtKind {
     Region
 }
 
-struct AstStmt {
+pub struct AstStmt {
     kind: AstStmtKind
     start: Int
     end: Int
@@ -60,7 +60,7 @@ struct AstStmt {
     e: Int
 }
 
-enum AstTypeKind {
+pub enum AstTypeKind {
     Int
     Float
     F32
@@ -73,7 +73,7 @@ enum AstTypeKind {
     Slice
 }
 
-struct AstType {
+pub struct AstType {
     kind: AstTypeKind
     start: Int
     end: Int
@@ -82,7 +82,7 @@ struct AstType {
     c: Int
 }
 
-enum AstDeclKind {
+pub enum AstDeclKind {
     Function
     Struct
     Enum
@@ -90,7 +90,7 @@ enum AstDeclKind {
     Const
 }
 
-struct AstDecl {
+pub struct AstDecl {
     kind: AstDeclKind
     start: Int
     end: Int
@@ -104,7 +104,7 @@ struct AstDecl {
     g: Int
 }
 
-struct AstParam {
+pub struct AstParam {
     name_start: Int
     name_end: Int
     type_id: Int
@@ -112,7 +112,7 @@ struct AstParam {
     end: Int
 }
 
-struct AstField {
+pub struct AstField {
     name_start: Int
     name_end: Int
     is_public: Bool
@@ -122,7 +122,7 @@ struct AstField {
     end: Int
 }
 
-struct AstVariant {
+pub struct AstVariant {
     name_start: Int
     name_end: Int
     first_payload_index: Int
@@ -131,7 +131,7 @@ struct AstVariant {
     end: Int
 }
 
-enum ParseProblem {
+pub enum ParseProblem {
     ExpectedExpression
     ExpectedIdentifier
     ExpectedType
@@ -147,14 +147,14 @@ enum ParseProblem {
     UnexpectedToken
 }
 
-struct ParseError {
+pub struct ParseError {
     problem: ParseProblem
     expected_token: Text
     token_start: Int
     token_end: Int
 }
 
-struct AstTree {
+pub struct AstTree {
     expressions: List<AstExpr>
     statements: List<AstStmt>
     declarations: List<AstDecl>
@@ -166,14 +166,14 @@ struct AstTree {
     errors: List<ParseError>
 }
 
-fn astAppendExtras(tree: &mut AstTree, children: &List<Int>, prefixed: Bool) -> Int {
+pub fn astAppendExtras(tree: &mut AstTree, children: &List<Int>, prefixed: Bool) -> Int {
     let first = tree.extra.length
     if prefixed { tree.extra.push(children.length) }
     for child in children { tree.extra.push(child) }
     return first
 }
 
-fn astNew() -> AstTree {
+pub fn astNew() -> AstTree {
     let exprs: List<AstExpr> = List[]
     let stmts: List<AstStmt> = List[]
     let decls: List<AstDecl> = List[]
@@ -196,73 +196,73 @@ fn astNew() -> AstTree {
     )
 }
 
-fn astAddExpr(tree: &mut AstTree, kind: AstExprKind, start: Int, end: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
+pub fn astAddExpr(tree: &mut AstTree, kind: AstExprKind, start: Int, end: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
     let id = tree.expressions.length
     tree.expressions.push(AstExpr(kind: kind, start: start, end: end, a: a, b: b, c: c, d: d))
     return id
 }
 
-fn astAddStmt(tree: &mut AstTree, kind: AstStmtKind, start: Int, end: Int, a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
+pub fn astAddStmt(tree: &mut AstTree, kind: AstStmtKind, start: Int, end: Int, a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
     let id = tree.statements.length
     tree.statements.push(AstStmt(kind: kind, start: start, end: end, a: a, b: b, c: c, d: d, e: e))
     return id
 }
 
-fn astAddType(tree: &mut AstTree, kind: AstTypeKind, start: Int, end: Int, a: Int, b: Int, c: Int) -> Int {
+pub fn astAddType(tree: &mut AstTree, kind: AstTypeKind, start: Int, end: Int, a: Int, b: Int, c: Int) -> Int {
     let id = tree.types.length
     tree.types.push(AstType(kind: kind, start: start, end: end, a: a, b: b, c: c))
     return id
 }
 
-fn astAddDecl(tree: &mut AstTree, kind: AstDeclKind, start: Int, end: Int, is_public: Bool, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
+pub fn astAddDecl(tree: &mut AstTree, kind: AstDeclKind, start: Int, end: Int, is_public: Bool, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
     let id = tree.declarations.length
     tree.declarations.push(AstDecl(kind: kind, start: start, end: end, is_public: is_public, a: a, b: b, c: c, d: d, e: e, f: f, g: g))
     return id
 }
 
-fn astAddParam(tree: &mut AstTree, name_start: Int, name_end: Int, type_id: Int, start: Int, end: Int) -> Int {
+pub fn astAddParam(tree: &mut AstTree, name_start: Int, name_end: Int, type_id: Int, start: Int, end: Int) -> Int {
     let id = tree.params.length
     tree.params.push(AstParam(name_start: name_start, name_end: name_end, type_id: type_id, start: start, end: end))
     return id
 }
 
-fn astAddField(tree: &mut AstTree, name_start: Int, name_end: Int, is_public: Bool, type_id: Int, default_expr_id: Int, start: Int, end: Int) -> Int {
+pub fn astAddField(tree: &mut AstTree, name_start: Int, name_end: Int, is_public: Bool, type_id: Int, default_expr_id: Int, start: Int, end: Int) -> Int {
     let id = tree.fields.length
     tree.fields.push(AstField(name_start: name_start, name_end: name_end, is_public: is_public, type_id: type_id, default_expr_id: default_expr_id, start: start, end: end))
     return id
 }
 
-fn astAddVariant(tree: &mut AstTree, name_start: Int, name_end: Int, first_payload_index: Int, payload_count: Int, start: Int, end: Int) -> Int {
+pub fn astAddVariant(tree: &mut AstTree, name_start: Int, name_end: Int, first_payload_index: Int, payload_count: Int, start: Int, end: Int) -> Int {
     let id = tree.variants.length
     tree.variants.push(AstVariant(name_start: name_start, name_end: name_end, first_payload_index: first_payload_index, payload_count: payload_count, start: start, end: end))
     return id
 }
 
-fn astAddExtra(tree: &mut AstTree, val: Int) -> Int {
+pub fn astAddExtra(tree: &mut AstTree, val: Int) -> Int {
     let id = tree.extra.length
     tree.extra.push(val)
     return id
 }
 
-fn astAddError(tree: &mut AstTree, problem: ParseProblem, expected_token: Text, token_start: Int, token_end: Int) {
+pub fn astAddError(tree: &mut AstTree, problem: ParseProblem, expected_token: Text, token_start: Int, token_end: Int) {
     tree.errors.push(ParseError(problem: problem, expected_token: expected_token, token_start: token_start, token_end: token_end))
 }
 
-fn astExprEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
+pub fn astExprEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
     if id >= 0 && id < tree.expressions.length {
         return tree.expressions[id].end
     }
     return fallback
 }
 
-fn astStmtEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
+pub fn astStmtEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
     if id >= 0 && id < tree.statements.length {
         return tree.statements[id].end
     }
     return fallback
 }
 
-fn astTypeEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
+pub fn astTypeEnd(tree: &AstTree, id: Int, fallback: Int) -> Int {
     if id >= 0 && id < tree.types.length {
         return tree.types[id].end
     }
@@ -366,7 +366,7 @@ fn astDumpSummary(tree: &AstTree) {
     print("AstSummary decls={d} stmts={s} exprs={e} types={t} errors={err}")
 }
 
-fn astDumpCanonical(tree: &AstTree) {
+pub fn astDumpCanonical(tree: &AstTree) {
     for i in 0..tree.declarations.length {
         let decl = &tree.declarations[i]
         var name = "Unknown"

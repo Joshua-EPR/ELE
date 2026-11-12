@@ -3,33 +3,33 @@ import tokens
 import cursor
 import ast
 
-fn selectInt(cond: Bool, ifTrue: Int, ifFalse: Int) -> Int {
+pub fn selectInt(cond: Bool, ifTrue: Int, ifFalse: Int) -> Int {
     if cond { return ifTrue }
     return ifFalse
 }
 
-fn cursorSpanStart(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
+pub fn cursorSpanStart(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
     if cursor.pos < tokens.length {
         return tokens[cursor.pos].start
     }
     return defaultPos
 }
 
-fn cursorSpanEnd(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
+pub fn cursorSpanEnd(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
     if cursor.pos < tokens.length {
         return tokens[cursor.pos].end
     }
     return defaultPos
 }
 
-fn cursorPrevEnd(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
+pub fn cursorPrevEnd(cursor: &TokenCursor, tokens: &List<LexToken>, defaultPos: Int) -> Int {
     if cursor.pos > 0 && cursor.pos - 1 < tokens.length {
         return tokens[cursor.pos - 1].end
     }
     return defaultPos
 }
 
-fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool {
+pub fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool {
     let len = end - start
     if len != expected.byteLength { return false }
     for i in 0..len {
@@ -41,13 +41,13 @@ fn parserMatchText(source: &Text, start: Int, end: Int, expected: Text) -> Bool 
 }
 
 // Compare keyword spelling without relying on unsupported Text == Text.
-fn parserExpectedIs(word: &Text, candidate: Text) -> Bool {
+pub fn parserExpectedIs(word: &Text, candidate: Text) -> Bool {
     return parserMatchText(word, 0, word.byteLength, candidate)
 }
 
 // Canonical ELE keywords are recognized at the syntax boundary without
 // rewriting the underlying source offsets used by Stage 1 diagnostics.
-fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
+pub fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Word => {
             if parserExpectedIs(&expected, "fn") && parserMatchText(source, token.start, token.end, "flow") { return true }
@@ -84,7 +84,7 @@ fn parserIsWord(source: &Text, token: &LexToken, expected: Text) -> Bool {
     }
 }
 
-fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
+pub fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
     match tokenKindValue(&token.kind) {
         LexKind.Symbol => {
             if parserExpectedIs(&expected, "->") && parserMatchText(source, token.start, token.end, "=>") { return true }
@@ -95,7 +95,7 @@ fn parserIsSymbol(source: &Text, token: &LexToken, expected: Text) -> Bool {
     }
 }
 
-fn parserParseDecimalInt(source: &Text, start: Int, end: Int) -> Int {
+pub fn parserParseDecimalInt(source: &Text, start: Int, end: Int) -> Int {
     var val = 0
     for i in start..end {
         let b = source.byteAt(i)
@@ -109,7 +109,7 @@ fn parserParseDecimalInt(source: &Text, start: Int, end: Int) -> Int {
     return val
 }
 
-fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
+pub fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     while cursor.pos < tokens.length {
         let current_kind_token = &tokens[cursor.pos]
         match tokenKindValue(&current_kind_token.kind) {
@@ -119,7 +119,7 @@ fn parserSkipNewlines(cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     }
 }
 
-fn parserSkipSeparators(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) {
+pub fn parserSkipSeparators(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) {
     while cursor.pos < tokens.length {
         let tok = &tokens[cursor.pos]
         match tokenKindValue(&tok.kind) {
@@ -136,19 +136,19 @@ fn parserSkipSeparators(source: &Text, cursor: &mut TokenCursor, tokens: &List<L
     }
 }
 
-fn parserAtWord(source: &Text, cursor: &TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserAtWord(source: &Text, cursor: &TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if cursor.pos >= tokens.length { return false }
     let tok = &tokens[cursor.pos]
     return parserIsWord(source, tok, expected)
 }
 
-fn parserAtSymbol(source: &Text, cursor: &TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserAtSymbol(source: &Text, cursor: &TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if cursor.pos >= tokens.length { return false }
     let tok = &tokens[cursor.pos]
     return parserIsSymbol(source, tok, expected)
 }
 
-fn parserTakeWord(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserTakeWord(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if parserAtWord(source, cursor, tokens, expected) {
         cursor.pos += 1
         return true
@@ -156,7 +156,7 @@ fn parserTakeWord(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToke
     return false
 }
 
-fn parserTakeSymbol(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserTakeSymbol(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if parserAtSymbol(source, cursor, tokens, expected) {
         cursor.pos += 1
         return true
@@ -164,7 +164,7 @@ fn parserTakeSymbol(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexTo
     return false
 }
 
-fn parserNeedWord(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserNeedWord(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if parserTakeWord(source, &mut cursor, tokens, "{expected}") {
         return true
     }
@@ -174,7 +174,7 @@ fn parserNeedWord(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, t
     return false
 }
 
-fn parserNeedSymbol(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
+pub fn parserNeedSymbol(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: Text) -> Bool {
     if parserTakeSymbol(source, &mut cursor, tokens, "{expected}") {
         return true
     }
@@ -184,7 +184,7 @@ fn parserNeedSymbol(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor,
     return false
 }
 
-fn parserGetBinaryPrecedence(source: &Text, token: &LexToken) -> Int {
+pub fn parserGetBinaryPrecedence(source: &Text, token: &LexToken) -> Int {
     match tokenKindValue(&token.kind) {
         LexKind.Symbol => {
             let len = token.end - token.start

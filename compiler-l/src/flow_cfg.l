@@ -1,23 +1,23 @@
-const FLOW_READ = 0
-const FLOW_MOVE = 1
-const FLOW_INIT = 2
-const FLOW_WRITE = 3
-const FLOW_LOAN_CREATE = 4
-const FLOW_LOAN_USE = 5
+pub const FLOW_READ = 0
+pub const FLOW_MOVE = 1
+pub const FLOW_INIT = 2
+pub const FLOW_WRITE = 3
+pub const FLOW_LOAN_CREATE = 4
+pub const FLOW_LOAN_USE = 5
 // End of the lexical lifetime of an owned binding or temporary: the drop
 // elaborator (drops_plan.l) turns it into drops of whatever it still owns.
-const FLOW_DROP = 6
+pub const FLOW_DROP = 6
 // Write through a reference: the old referent value is released first.
-const FLOW_DROP_REF = 7
+pub const FLOW_DROP_REF = 7
 // In-place collection mutation: requires a live owner and exclusive access,
 // but does not replace or drop the collection value.
-const FLOW_MUTATE = 8
+pub const FLOW_MUTATE = 8
 
 // Loan kinds.
-const LOAN_SHARED = 0
-const LOAN_MUT = 1
+pub const LOAN_SHARED = 0
+pub const LOAN_MUT = 1
 
-struct FlowBlock {
+pub struct FlowBlock {
     first: Int
     last: Int
     next_a: Int
@@ -26,12 +26,12 @@ struct FlowBlock {
     predecessor: Int
 }
 
-struct FlowPredecessor {
+pub struct FlowPredecessor {
     block: Int
     next: Int
 }
 
-struct FlowEvent {
+pub struct FlowEvent {
     kind: Int
     path: Int
     start: Int
@@ -45,7 +45,7 @@ struct FlowEvent {
 // `parent` the loan it reborrows from, `alt` the next alternative origin of
 // a borrowed call result and `param` the parameter index of a loan carried
 // by a reference parameter (-1 otherwise).
-struct Loan {
+pub struct Loan {
     kind: Int
     place: Int
     parent: Int
@@ -55,7 +55,7 @@ struct Loan {
     end: Int
 }
 
-struct MovePath {
+pub struct MovePath {
     symbol: Int
     parent: Int
     field: Int
@@ -100,7 +100,7 @@ pub fn flowNew() -> FlowGraph {
     return FlowGraph(blocks: blocks, events: events, paths: paths, predecessors: predecessors, loans: loans, binding_loans: binding_loans, drop_types: drop_types, origins: origins, entry: entry, reached: reached, current: 0, break_to: -1, continue_to: -1)
 }
 
-fn flowEmptyBlock() -> FlowBlock {
+pub fn flowEmptyBlock() -> FlowBlock {
     return FlowBlock(first: -1, last: -1, next_a: -1, next_b: -1, returned: false, predecessor: -1)
 }
 
@@ -110,7 +110,7 @@ pub fn flowBlock(graph: &mut FlowGraph) -> Int {
     return id
 }
 
-fn flowLink(graph: &mut FlowGraph, first: Int, second: Int) {
+pub fn flowLink(graph: &mut FlowGraph, first: Int, second: Int) {
     let id = graph.current
     graph.blocks[id].next_a = first
     graph.blocks[id].next_b = second
@@ -118,7 +118,7 @@ fn flowLink(graph: &mut FlowGraph, first: Int, second: Int) {
     flowAddPredecessor(&mut graph, second, id)
 }
 
-fn flowAddPredecessor(graph: &mut FlowGraph, destination: Int, origin: Int) {
+pub fn flowAddPredecessor(graph: &mut FlowGraph, destination: Int, origin: Int) {
     if destination < 0 { return }
     let previous = graph.blocks[destination].predecessor
     let id = graph.predecessors.length
@@ -126,20 +126,20 @@ fn flowAddPredecessor(graph: &mut FlowGraph, destination: Int, origin: Int) {
     graph.blocks[destination].predecessor = id
 }
 
-fn flowReturn(graph: &mut FlowGraph) {
+pub fn flowReturn(graph: &mut FlowGraph) {
     graph.blocks[graph.current].returned = true
     let detached = flowBlock(&mut graph)
     graph.current = detached
 }
 
-struct FlowLoop {
+pub struct FlowLoop {
     header: Int
     exit: Int
     outer_break: Int
     outer_continue: Int
 }
 
-fn flowLoopStart(graph: &mut FlowGraph) -> FlowLoop {
+pub fn flowLoopStart(graph: &mut FlowGraph) -> FlowLoop {
     let header = flowBlock(&mut graph)
     let exit = flowBlock(&mut graph)
     flowLink(&mut graph, header, -1)
@@ -147,7 +147,7 @@ fn flowLoopStart(graph: &mut FlowGraph) -> FlowLoop {
     return FlowLoop(header: header, exit: exit, outer_break: graph.break_to, outer_continue: graph.continue_to)
 }
 
-fn flowLoopBody(graph: &mut FlowGraph, state: &FlowLoop, conditional: Bool) {
+pub fn flowLoopBody(graph: &mut FlowGraph, state: &FlowLoop, conditional: Bool) {
     let body = flowBlock(&mut graph)
     var alternative = -1
     if conditional { alternative = state.exit }
@@ -157,34 +157,34 @@ fn flowLoopBody(graph: &mut FlowGraph, state: &FlowLoop, conditional: Bool) {
     graph.continue_to = state.header
 }
 
-fn flowLoopEnd(graph: &mut FlowGraph, state: &FlowLoop) {
+pub fn flowLoopEnd(graph: &mut FlowGraph, state: &FlowLoop) {
     flowLink(&mut graph, state.header, -1)
     graph.current = state.exit
     graph.break_to = state.outer_break
     graph.continue_to = state.outer_continue
 }
 
-const FLOW_NO_ORIGIN = -1000000000
+pub const FLOW_NO_ORIGIN = -1000000000
 
-fn flowPad(graph: &mut FlowGraph) {
+pub fn flowPad(graph: &mut FlowGraph) {
     while graph.drop_types.length < graph.paths.length {
         graph.drop_types.push(-1)
         graph.origins.push(FLOW_NO_ORIGIN)
     }
 }
 
-fn flowDropType(graph: &FlowGraph, path: Int) -> Int {
+pub fn flowDropType(graph: &FlowGraph, path: Int) -> Int {
     if path < 0 || path >= graph.drop_types.length { return -1 }
     return graph.drop_types[path]
 }
 
-fn flowRoot(graph: &mut FlowGraph, symbol: Int) -> Int {
+pub fn flowRoot(graph: &mut FlowGraph, symbol: Int) -> Int {
     let id = graph.paths.length
     graph.paths.push(MovePath(symbol: symbol, parent: -1, field: -1, child: -1, sibling: -1))
     return id
 }
 
-fn flowField(graph: &mut FlowGraph, parent: Int, field: Int) -> Int {
+pub fn flowField(graph: &mut FlowGraph, parent: Int, field: Int) -> Int {
     let first = graph.paths[parent].child
     var cursor = first
     while cursor >= 0 {
@@ -198,11 +198,11 @@ fn flowField(graph: &mut FlowGraph, parent: Int, field: Int) -> Int {
     return id
 }
 
-fn flowEvent(graph: &mut FlowGraph, kind: Int, path: Int, start: Int, end: Int) {
+pub fn flowEvent(graph: &mut FlowGraph, kind: Int, path: Int, start: Int, end: Int) {
     flowEventData(&mut graph, kind, path, start, end, -1)
 }
 
-fn flowEventData(graph: &mut FlowGraph, kind: Int, path: Int, start: Int, end: Int, data: Int) {
+pub fn flowEventData(graph: &mut FlowGraph, kind: Int, path: Int, start: Int, end: Int, data: Int) {
     if path < 0 { return }
     let block = graph.current
     let previous = graph.blocks[block].last
@@ -217,7 +217,7 @@ fn flowEventData(graph: &mut FlowGraph, kind: Int, path: Int, start: Int, end: I
 }
 
 // The root move path of any path.
-fn flowRootPath(graph: &FlowGraph, path: Int) -> Int {
+pub fn flowRootPath(graph: &FlowGraph, path: Int) -> Int {
     if path < 0 || path >= graph.paths.length { return -1 }
     var cursor = path
     while graph.paths[cursor].parent >= 0 {

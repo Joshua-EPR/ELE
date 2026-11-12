@@ -9,7 +9,7 @@ import lir_build
 // operation anchored after `e` before the first instruction emitted after
 // `e + 1`. Drop flags become Bool variables. Every block gets a terminator.
 
-struct LirBody {
+pub struct LirBody {
     order: List<Int>
     first: List<Int>
     count: List<Int>

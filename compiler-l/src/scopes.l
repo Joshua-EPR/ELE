@@ -1,38 +1,38 @@
 import symbols
 
-struct Scope {
+pub struct Scope {
     parent: Int
 }
 
-struct ScopeTree {
+pub struct ScopeTree {
     scopes: List<Scope>
     current_scope: Int
 }
 
-fn scopeTreeNew() -> ScopeTree {
+pub fn scopeTreeNew() -> ScopeTree {
     let s_list: List<Scope> = List[]
     var tree = ScopeTree(scopes: s_list, current_scope: 0)
     tree.scopes.push(Scope(parent: -1))
     return tree
 }
 
-fn scopePush(tree: &mut ScopeTree) -> Int {
+pub fn scopePush(tree: &mut ScopeTree) -> Int {
     let id = tree.scopes.length
     tree.scopes.push(Scope(parent: tree.current_scope))
     tree.current_scope = id
     return id
 }
 
-fn scopePop(tree: &mut ScopeTree) {
+pub fn scopePop(tree: &mut ScopeTree) {
     if tree.current_scope > 0 && tree.current_scope < tree.scopes.length {
         tree.current_scope = tree.scopes[tree.current_scope].parent
     }
 }
 
-fn scopeAddSymbol(tree: &mut ScopeTree, sym_id: Int) {
+pub fn scopeAddSymbol(tree: &mut ScopeTree, sym_id: Int) {
 }
 
-fn scopeLookupCurrent(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int) -> Int {
+pub fn scopeLookupCurrent(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int) -> Int {
     let cur = tree.current_scope
     for i in 0..sym_table.symbols.length {
         let sym = &sym_table.symbols[i]
@@ -45,7 +45,7 @@ fn scopeLookupCurrent(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, 
     return -1
 }
 
-fn scopeLookupAll(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int) -> Int {
+pub fn scopeLookupAll(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int) -> Int {
     var cur = tree.current_scope
     while cur >= 0 && cur < tree.scopes.length {
         for i in 0..sym_table.symbols.length {
@@ -64,7 +64,7 @@ fn scopeLookupAll(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name
 // Duplicate detection within one module: only symbols owned by the same
 // module count as colliding, so two modules may each declare a private
 // symbol with the same name.
-fn scopeLookupCurrentModule(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int, module_id: Int) -> Int {
+pub fn scopeLookupCurrentModule(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int, module_id: Int) -> Int {
     let cur = tree.current_scope
     for i in 0..sym_table.symbols.length {
         let sym = &sym_table.symbols[i]
@@ -80,7 +80,7 @@ fn scopeLookupCurrentModule(tree: &ScopeTree, sym_table: &SymbolTable, source: &
 // Name resolution with transitive import visibility. Local/current-module
 // names shadow imported declarations. Multiple imported public symbols with
 // the same unqualified name are ambiguous (return -2), not first-match wins.
-fn scopeLookupAllVisible(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int, module_id: Int, allowed: &List<Int>, module_count: Int) -> Int {
+pub fn scopeLookupAllVisible(tree: &ScopeTree, sym_table: &SymbolTable, source: &Text, name_start: Int, name_end: Int, module_id: Int, allowed: &List<Int>, module_count: Int) -> Int {
     var cur = tree.current_scope
     while cur >= 0 && cur < tree.scopes.length {
         var imported = -1
