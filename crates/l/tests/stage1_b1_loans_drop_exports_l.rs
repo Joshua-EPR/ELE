@@ -51,10 +51,12 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     let loans_check = fs::read_to_string(dir.join("loans_check.l")).unwrap();
     assert!(loans_check.contains("import loans_l"));
     assert!(loans_check.contains("loanDescendsFrom("));
+    assert!(loans_check.contains("loanPlaceOf("));
     let drop_plan = fs::read_to_string(dir.join("drops_plan.l")).unwrap();
     assert!(drop_plan.contains("import ownership_l"));
     assert!(drop_plan.contains("FLOW_LIVE"));
     assert!(drop_plan.contains("FLOW_MAYBE"));
+    assert!(drop_plan.contains("FLOW_UNINIT"));
 
     let visible_loan = check(
         &dir,
@@ -63,17 +65,28 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         true,
     );
     assert!(visible_loan.is_empty(), "{visible_loan}");
+    // loans_check.l needs the place lookup across its direct import.
+    let visible_place = check(
+        &dir,
+        "visible_loan_place",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph) -> Int { return loanPlaceOf(&mut graph, 0) }\n",
+        true,
+    );
+    assert!(visible_place.is_empty(), "{visible_place}");
     let visible_states = check(
         &dir,
         "visible_drop_states",
-        "import ownership_l\nflow probe() => Int { give FLOW_LIVE + FLOW_MAYBE }\n",
+        "import ownership_l\nflow probe() => Int { give FLOW_LIVE + FLOW_MAYBE + FLOW_UNINIT }\n",
         true,
     );
     assert!(visible_states.is_empty(), "{visible_states}");
+    let loans = fs::read_to_string(dir.join("loans_l.l")).unwrap();
+    assert!(loans.contains("fn loanBind("));
+    assert!(!loans.contains("pub fn loanBind("));
     let private_loan = check(
         &dir,
         "private_loan_helper",
-        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph) -> Int { return loanPlaceOf(&mut graph, 0) }\n",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &mut FlowGraph) { loanBind(&mut graph, 0, 0) }\n",
         false,
     );
     assert!(private_loan.contains("error[L0001]"), "{private_loan}");
@@ -81,17 +94,9 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         private_loan.contains("private_loan_helper.l:"),
         "{private_loan}"
     );
-    let private_state = check(
-        &dir,
-        "private_drop_state",
-        "import ownership_l\nflow probe() => Int { give FLOW_UNINIT }\n",
-        false,
-    );
-    assert!(private_state.contains("error[L0001]"), "{private_state}");
-    assert!(
-        private_state.contains("private_drop_state.l:"),
-        "{private_state}"
-    );
+    let owners = fs::read_to_string(dir.join("ownership_l.l")).unwrap();
+    assert!(owners.contains("const FLOW_MOVED ="));
+    assert!(!owners.contains("pub const FLOW_MOVED ="));
     let private_moved = check(
         &dir,
         "private_moved_state",

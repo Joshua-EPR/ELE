@@ -71,5 +71,8 @@ fn b1_read_only_loan_of_path_is_public_but_mutating_loan_helper_is_private() {
         false,
     );
     assert!(private.contains("error[L0001]"), "{private}");
-    assert!(private.contains("private_loan_resolve_through.l:"), "{private}");
+    assert!(
+        private.contains("private_loan_resolve_through.l:"),
+        "{private}"
+    );
 }

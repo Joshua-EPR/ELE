@@ -78,11 +78,25 @@ fn only_required_cross_module_helper_apis_are_visible() {
         true,
     );
 
-    // The change must not accidentally make all module internals public.
+    // loans_check.l also needs this overlap predicate across module boundaries.
+    let loans_check = fs::read_to_string(dir.join("loans_check.l")).unwrap();
+    assert!(loans_check.contains("import flow_cfg"));
+    assert!(loans_check.contains("loanOverlaps("));
+    check(
+        &dir,
+        "visible_loan_overlaps",
+        "import flow_cfg\nfn probe(graph: &FlowGraph) -> Bool { return loanOverlaps(graph, 0, 0) }\n",
+        true,
+    );
+
+    // A real private helper still cannot cross a module boundary.
+    let loans = fs::read_to_string(dir.join("loans_l.l")).unwrap();
+    assert!(loans.contains("fn loanRootedAtParams("));
+    assert!(!loans.contains("pub fn loanRootedAtParams("));
     let private = check(
         &dir,
-        "private_flow_helper",
-        "import flow_cfg\nfn probe(graph: &FlowGraph) -> Bool { return loanOverlaps(graph, 0, 0) }\n",
+        "private_loan_helper",
+        "import flow_cfg\nimport loans_l\nfn probe(graph: &FlowGraph) -> Bool { return loanRootedAtParams(graph, 0) }\n",
         false,
     );
     assert!(private.contains("error[L0001]"), "{private}");
