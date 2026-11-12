@@ -9,6 +9,7 @@ import lir_finish
 import lir_verify
 import lir_emit
 import lir_write
+import lir_builtin_union
 import sema_context
 import sema_drop
 
@@ -47,6 +48,7 @@ fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
             AstDeclKind.Enum => {
                 ctx.current_module = semaDeclModule(ctx, d)
                 ctx.lir_module.en_decl.push(d)
+                ctx.lir_module.en_builtin.push(-1)
                 ctx.lir_module.en_first.push(ctx.lir_module.variant_payload.length)
                 ctx.lir_module.en_count.push(decl.d)
                 var has_payload = false
@@ -71,6 +73,11 @@ fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
             AstDeclKind.Function => { semaLirSignature(&mut ctx, source, tree, d) }
             _ => {}
         }
+    }
+    // Signatures have resolved their concrete generic types. Newly inferred
+    // Option/Result types are additionally registered as expressions lower.
+    for t in 8..ctx.types.types.length {
+        lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, t)
     }
     for t in 8..ctx.types.types.length {
         match ctx.types.types[t].kind {
@@ -147,6 +154,10 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
         }
     }
     for k in 0..enums {
+        if ctx.lir_module.en_builtin[k] >= 0 {
+            lirBuiltinHeader(&mut ctx, k)
+            continue
+        }
         let d = ctx.lir_module.en_decl[k]
         ctx.current_module = semaDeclModule(ctx, d)
         let decl = &tree.declarations[d]
