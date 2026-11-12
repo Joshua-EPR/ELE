@@ -145,11 +145,11 @@ pub fn lirFnNew() -> LirFn {
     return LirFn(vars: List[], consts: List[], places: List[], args: List[], operands: List[], insts: List[], path_var: List[], cond: List[], swap: List[], ret: List[], ret_ref: List[], val: LIR_NONE, place: -1, borrowed: -1, unsupported: -1, params: 0, at: 0)
 }
 
-fn lirIsVar(operand: Int) -> Bool {
+pub fn lirIsVar(operand: Int) -> Bool {
     return operand >= 0
 }
 
-fn lirConstId(operand: Int) -> Int {
+pub fn lirConstId(operand: Int) -> Int {
     return -1 - operand
 }
 
