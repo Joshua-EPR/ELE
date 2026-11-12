@@ -23,7 +23,9 @@ fn parseType(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
         for _ in 0..layers {
             let extra_idx = astAddExtra(&mut tree, 1)
             astAddExtra(&mut tree, t)
-            t = astAddType(&mut tree, AstTypeKind.Named, tree.types[t].start, tree.types[t].end + 1, 0, 0, extra_idx)
+            let type_start = tree.types[t].start
+            let type_end = tree.types[t].end + 1
+            t = astAddType(&mut tree, AstTypeKind.Named, type_start, type_end, 0, 0, extra_idx)
         }
     }
     return t

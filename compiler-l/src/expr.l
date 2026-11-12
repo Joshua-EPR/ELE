@@ -16,6 +16,8 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
     if lhs < 0 { return -1 }
 
     while parserAtSymbol(source, cursor, tokens, ".") || parserAtSymbol(source, cursor, tokens, "@") || parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "[") {
+        // Keep the expression span independent of the mutable AST insertion.
+        let lhs_start = tree.expressions[lhs].start
         let tok = &tokens[cursor.pos]
         if parserTakeSymbol(source, &mut cursor, tokens, "[") {
             parserSkipNewlines(&mut cursor, tokens)
@@ -23,11 +25,11 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             parserSkipNewlines(&mut cursor, tokens)
             parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "]")
             let end_pos = cursorPrevEnd(cursor, tokens, tok.end)
-            lhs = astAddExpr(&mut tree, AstExprKind.Index, tree.expressions[lhs].start, end_pos, lhs, index, 0, 0)
+            lhs = astAddExpr(&mut tree, AstExprKind.Index, lhs_start, end_pos, lhs, index, 0, 0)
             continue
         }
         if parserTakeSymbol(source, &mut cursor, tokens, "?") {
-            lhs = astAddExpr(&mut tree, AstExprKind.Try, tree.expressions[lhs].start, tok.end, lhs, 0, 0, 0)
+            lhs = astAddExpr(&mut tree, AstExprKind.Try, lhs_start, tok.end, lhs, 0, 0, 0)
             continue
         }
 
@@ -66,13 +68,13 @@ fn parseExpr(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
             }
             let first_call = astAppendExtras(&mut tree, children, true)
             let end_pos = cursorPrevEnd(cursor, tokens, m_end)
-            lhs = astAddExpr(&mut tree, AstExprKind.MethodCall, tree.expressions[lhs].start, end_pos, lhs, m_start, m_end, first_call)
+            lhs = astAddExpr(&mut tree, AstExprKind.MethodCall, lhs_start, end_pos, lhs, m_start, m_end, first_call)
         } else {
             if method_only {
                 astAddError(&mut tree, ParseProblem.ExpectedToken, "(", m_start, m_end)
                 return -1
             }
-            lhs = astAddExpr(&mut tree, AstExprKind.Field, tree.expressions[lhs].start, m_end, lhs, m_start, m_end, 0)
+            lhs = astAddExpr(&mut tree, AstExprKind.Field, lhs_start, m_end, lhs, m_start, m_end, 0)
         }
     }
 

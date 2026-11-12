@@ -91,7 +91,10 @@ fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
             cursor = graph.paths[cursor].parent
             hops -= 1
         }
-        place = flowField(&mut graph, place, graph.paths[cursor].field)
+        // Snapshot the projection index before taking a mutable loan of graph.
+        // This preserves the exact path and avoids aliasing the graph argument.
+        let field = graph.paths[cursor].field
+        place = flowField(&mut graph, place, field)
         i += 1
     }
     return place
@@ -141,7 +144,10 @@ fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int,
     var i = origins.length - 1
     while i >= 0 {
         let origin = origins[i]
-        let node = loanNew(&mut graph, kind, graph.loans[origin].place, origin, start, end)
+        // Capture the origin place before the exclusive borrow for loanNew.
+        // This preserves which location is reborrowed without overlapping loans.
+        let borrowed_place = graph.loans[origin].place
+        let node = loanNew(&mut graph, kind, borrowed_place, origin, start, end)
         graph.loans[node].alt = head
         head = node
         i -= 1
