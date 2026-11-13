@@ -382,6 +382,139 @@ fn dependency_type_errors_are_attributed_to_the_dependency() {
     assert!(out.stderr.contains("lib.l:"), "{}", out.stderr);
 }
 
+// A graph traversal must work independently of dependency numbering. The
+// production loader currently assigns lower IDs to dependencies, but the
+// visibility algorithm must also terminate safely on cyclic and malformed
+// adjacency lists, without granting permissions to unrelated modules.
+#[test]
+fn module_graph_out_of_order_and_invalid_edges_are_bounded() {
+    let graph = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../compiler-l/src/module_graph_l.l"),
+    )
+    .unwrap();
+    // The real ELE module-graph implementation is compiled unchanged, then
+    // called from a main in the same source module. No fake graph routine.
+    let main = r#"
+fn main() -> Int {
+    var first: List<Int> = List[]
+    first.push(0)
+    first.push(2)
+    first.push(3)
+    first.push(4)
+    first.push(5)
+    var counts: List<Int> = List[]
+    counts.push(2)
+    counts.push(1)
+    counts.push(1)
+    counts.push(1)
+    counts.push(0)
+    var deps: List<Int> = List[]
+    deps.push(2)
+    deps.push(999)
+    deps.push(0)
+    deps.push(3)
+    deps.push(1)
+    let access = moduleAccessBuild(5, &first, &counts, &deps)
+    if access.length != 25 { return 1 }
+    // 0 -> 2 -> 3 -> 1 -> 0, despite reverse-numbered edges.
+    for src in 0..4 {
+        for dst in 0..4 {
+            if access[src * 5 + dst] != 1 { return 2 }
+        }
+        if access[src * 5 + 4] != 0 { return 3 }
+    }
+    // Module 4 is not imported by the cycle, nor does it import the cycle.
+    for dst in 0..4 {
+        if access[4 * 5 + dst] != 0 { return 4 }
+    }
+    if access[4 * 5 + 4] != 1 { return 5 }
+    // A corrupted count crossing into module 1's adjacency slice must not
+    // grant module 0 access to any dependencies.
+    counts[0] = 3
+    let invalid = moduleAccessBuild(5, &first, &counts, &deps)
+    if invalid[0 * 5 + 2] != 0 { return 6 }
+    if invalid[0 * 5 + 0] != 1 { return 7 }
+    return 42
+}
+"#;
+    let source = format!("{graph}\n{main}");
+    let stage0 = run_stage0(
+        "graph_out_of_order_stage0",
+        "main.l",
+        &[("main.l", &source)],
+    );
+    assert_eq!(stage0.code, Some(42), "{}{}", stage0.stdout, stage0.stderr);
+    let stage1 = check_modules_with_stage1("graph_out_of_order_stage1", &[("main.l", &source)]);
+    assert_eq!(stage1.code, Some(0), "{}", stage1.stderr);
+}
+
+#[test]
+fn two_distinct_public_names_reachable_only_transitively_are_ambiguous() {
+    let out = emit_lir_multi(
+        "transitive_ambiguous",
+        "main.l",
+        &[
+            ("a.l", "pub fn clash() -> Int { return 1 }\n"),
+            ("b.l", "pub fn clash() -> Int { return 2 }\n"),
+            ("left.l", "import a\npub fn left() -> Int { return 0 }\n"),
+            ("right.l", "import b\npub fn right() -> Int { return 0 }\n"),
+            (
+                "main.l",
+                "import left\nimport right\nfn main() -> Int { return clash() }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(1), "{}", out.stderr);
+    assert!(out.stderr.contains("main.l:"), "{}", out.stderr);
+    assert!(out.stderr.contains("error[L0014]"), "{}", out.stderr);
+    assert!(!out.stderr.contains("error[ICE]"), "{}", out.stderr);
+}
+
+#[test]
+fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
+    compare_multi(
+        "diamond_direct_export",
+        "main.l",
+        &[
+            ("common.l", "pub fn answer() -> Int { return 42 }\n"),
+            (
+                "left.l",
+                "import common\npub fn left() -> Int { return 1 }\n",
+            ),
+            (
+                "right.l",
+                "import common\npub fn right() -> Int { return 2 }\n",
+            ),
+            (
+                "main.l",
+                "import left\nimport right\nfn main() -> Int { return answer() }\n",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn private_name_in_transitive_dependency_is_not_exported() {
+    let out = emit_lir_multi(
+        "transitive_private",
+        "main.l",
+        &[
+            ("secret.l", "fn secret() -> Int { return 42 }\n"),
+            (
+                "mid.l",
+                "import secret\npub fn middle() -> Int { return 1 }\n",
+            ),
+            (
+                "main.l",
+                "import mid\nfn main() -> Int { return secret() }\n",
+            ),
+        ],
+    );
+    assert_eq!(out.code, Some(1), "{}", out.stderr);
+    assert!(out.stderr.contains("main.l:"), "{}", out.stderr);
+    assert!(out.stderr.contains("error[L0001]"), "{}", out.stderr);
+}
+
 // Regression for the actual lexer -> tokens/cursor dependency boundary.
 // The Stage 1 loader must not treat a symbol imported by main as implicitly
 // accessible inside a sibling source.
