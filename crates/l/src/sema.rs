@@ -191,6 +191,12 @@ struct Env {
     generic_trait_impls: Vec<GenericTraitImpl>,
 
     functions: RefCell<HashMap<String, usize>>,
+    /// Every declared free function, identified by source file and name.
+    module_functions: RefCell<HashMap<(u32, String), usize>>,
+    /// IDs of exported free functions (which win unqualified lookup).
+    public_functions: RefCell<HashSet<usize>>,
+    /// Names with multiple private definitions and no unique unqualified binding.
+    ambiguous_private_functions: RefCell<HashSet<String>>,
     methods: RefCell<HashMap<(Type, String), usize>>,
     sigs: RefCell<Vec<Sig>>,
 
@@ -240,6 +246,17 @@ type BorrowSigResult = (
 );
 
 impl Env {
+    /// Resolve a function in its defining source module first. The fallback
+    /// preserves unambiguous historical imports during the bootstrap migration;
+    /// homonymous private functions must never resolve to an arbitrary module.
+    fn free_function(&self, name: &str, source_file: u32) -> Option<usize> {
+        self.module_functions
+            .borrow()
+            .get(&(source_file, name.to_owned()))
+            .copied()
+            .or_else(|| self.functions.borrow().get(name).copied())
+    }
+
     fn region_name(&self, r: usize) -> String {
         if r == crate::lir::CALLER_REGION {
             "del llamador".into()
@@ -1478,6 +1495,8 @@ struct Checker<'a> {
     view_return: Option<crate::lir::ViewReturn>,
     /// The function being checked is `async fn`: `await` is allowed.
     is_async: bool,
+    /// Source module of the body being lowered (0 for a single source string).
+    source_file: u32,
 }
 
 impl Checker<'_> {
@@ -2725,10 +2744,7 @@ impl Checker<'_> {
                 ));
             };
             let result = env
-                .functions
-                .borrow()
-                .get(name)
-                .copied()
+                .free_function(name, self.source_file)
                 .and_then(|id| env.sigs.borrow()[id].result)
                 .and_then(|ty| match ty {
                     Type::Future(task) => Some(env.futures.borrow()[task].result),
@@ -2901,10 +2917,8 @@ impl Checker<'_> {
             let (args, result) = self.call(fid, args, span, depth)?;
             return Ok((result, ValueKind::Call(fid, args)));
         }
-        let id = *env
-            .functions
-            .borrow()
-            .get(n)
+        let id = env
+            .free_function(n, self.source_file)
             .ok_or_else(|| err(span, format!("función no definida: {n}")))?;
         let (args, result) = self.call(id, args, span, depth)?;
         Ok((result, ValueKind::Call(id, args)))
@@ -4656,6 +4670,9 @@ fn declare<'a>(
         trait_impls: RefCell::new(HashMap::new()),
         generic_trait_impls: Vec::new(),
         functions: RefCell::new(HashMap::new()),
+        module_functions: RefCell::new(HashMap::new()),
+        public_functions: RefCell::new(HashSet::new()),
+        ambiguous_private_functions: RefCell::new(HashSet::new()),
         methods: RefCell::new(HashMap::new()),
         sigs: RefCell::new(Vec::new()),
         fn_templates: Vec::new(),
@@ -4929,16 +4946,49 @@ fn declare<'a>(
             });
         } else {
             let fid = env.sigs.borrow().len();
+            // A private name is unique within its module, not across files.
+            // Keep unambiguous imports working while Stage 0's full module
+            // visibility rules are migrated to match Stage 1.
             if env
-                .functions
+                .module_functions
                 .borrow_mut()
-                .insert(f.name.clone(), fid)
+                .insert((f.span.file, f.name.clone()), fid)
                 .is_some()
             {
                 return Err(err(
                     f.span,
                     format!("función duplicada o reservada: {}", f.name),
                 ));
+            }
+            let previous = env.functions.borrow().get(&f.name).copied();
+            if f.public || f.span.file == 0 {
+                if previous.is_some_and(|id| env.public_functions.borrow().contains(&id))
+                    || (f.span.file == 0 && previous.is_some())
+                {
+                    return Err(err(
+                        f.span,
+                        format!("función duplicada o reservada: {}", f.name),
+                    ));
+                }
+                if f.public {
+                    env.public_functions.borrow_mut().insert(fid);
+                }
+                env.functions.borrow_mut().insert(f.name.clone(), fid);
+            } else if !env.ambiguous_private_functions.borrow().contains(&f.name) {
+                match previous {
+                    Some(id) if env.public_functions.borrow().contains(&id) => {
+                        // This private declaration is only visible in its module.
+                    }
+                    Some(_) => {
+                        env.functions.borrow_mut().remove(&f.name);
+                        env.ambiguous_private_functions
+                            .borrow_mut()
+                            .insert(f.name.clone());
+                    }
+                    None => {
+                        env.functions.borrow_mut().insert(f.name.clone(), fid);
+                    }
+                }
             }
             let mut params = Vec::new();
             let mut param_modes = Vec::new();
@@ -5435,6 +5485,7 @@ fn checker<'a>(
         borrow_return: None,
         view_return: None,
         is_async: false,
+        source_file: 0,
     }
 }
 
@@ -5512,6 +5563,7 @@ fn lower(
     }
     let mut c = checker(env, globals, sig_owner, sig_result, bindings.to_vec());
     c.is_async = is_async;
+    c.source_file = f.span.file;
     c.borrow_return = env.sigs.borrow()[id].borrow_return.clone();
     c.view_return = env.sigs.borrow()[id].view_return.clone();
     let receiver = match (sig_kind, sig_owner) {
@@ -5735,6 +5787,11 @@ fn global_constants(
     for c in decls {
         if c.name == "print"
             || env.functions.borrow().contains_key(&c.name)
+            || env
+                .module_functions
+                .borrow()
+                .keys()
+                .any(|(_, name)| name == &c.name)
             || env.struct_ids.contains_key(&c.name)
             || env.struct_template_ids.contains_key(&c.name)
             || env.template_ids.contains_key(&c.name)
