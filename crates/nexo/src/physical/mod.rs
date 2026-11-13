@@ -5,12 +5,14 @@
 
 mod address_space;
 mod generation;
+mod oracle_adapter;
 mod platform;
 mod pool;
 
 use std::fmt;
 
 pub use address_space::{AddressSpace, AddressSpaceMetrics};
+pub use oracle_adapter::{Command, CommandResult, DifferentialHarness, DifferentialSnapshot};
 pub use pool::{
     DestroyOutcome, Handle, HoleToken, Link, PageState, PhysicalPool, PoolConfig, PoolError,
     PoolMetrics,
