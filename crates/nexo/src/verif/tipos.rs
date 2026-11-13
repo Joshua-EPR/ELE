@@ -791,11 +791,13 @@ impl<'a> Tipos<'a> {
                 indice,
                 cuerpo,
             } => {
-                if *partes == 0 {
+                if *partes == 0 || *partes > MAX_PARTICIONES_NEXO {
                     self.err(
                         Regla::C6,
                         ruta,
-                        "dividir necesita al menos una partición".into(),
+                        format!(
+                            "dividir requiere entre 1 y {MAX_PARTICIONES_NEXO} particiones, recibidas {partes}"
+                        ),
                     );
                 }
                 self.requiere_edit(*pool, ruta, "dividir", Regla::C6);
