@@ -83,7 +83,7 @@ sema_drop.l	parser
 sema_expr.l	parser
 sema_expr_temp.l	parser
 sema_loop_jump.l	semantica
-sema_lower.l	parser
+sema_lower.l	semantica
 sema_match_coverage.l	parser
 sema_ops.l	parser
 sema_stmt.l	parser
