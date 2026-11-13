@@ -48,6 +48,10 @@ pub struct Clase {
 pub const TAM_SLOT_MIN: u32 = 64;
 /// Tamaño máximo de slot: un objeto de pool no puede cruzar subpáginas.
 pub const TAM_SLOT_MAX: u32 = 4096;
+/// Máximo de particiones simultáneas soportadas por el índice Bi-Slab
+/// de 64 palabras × 64 bits sobre 15 subpáginas por superpágina.
+/// Limita los recursos de `dividir` incluso ante IR no confiable.
+pub const MAX_PARTICIONES_NEXO: u32 = 64 * 64 / 15;
 
 impl Clase {
     /// Tamaño del slot en bytes: 8 bytes por campo, redondeado a múltiplo
