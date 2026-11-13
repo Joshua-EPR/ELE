@@ -39,11 +39,17 @@ class EnumPayloadBridgeContract(unittest.TestCase):
         self.assertIn('scopePush(&mut ctx.scopes)', front)
         self.assertIn('scopePop(&mut ctx.scopes)', front)
 
-    def test_verifier_rejects_wrong_enum_variant_and_noncopy_payloads(self):
+    def test_verifier_rejects_wrong_enum_variant_and_owned_payloads(self):
         verifier = read('compiler-l/src/lir_verify.l')
+        builtin = read('compiler-l/src/lir_builtin_union.l')
         self.assertIn('kind == LIR_PAYLOAD', verifier)
         self.assertIn('lm.variant_type[variant]', verifier)
-        self.assertIn('payload_ty != 1 && payload_ty != 4', verifier)
+        self.assertIn('if !lirBuiltinPayloadOk(types, lm, payload_ty) { return 3 }', verifier)
+        self.assertIn('if lirBuiltinPrimitive(ty) { return true }', builtin)
+        self.assertIn('if !lirDropFreeValue(types, lm, lm.field_ty[f], depth + 1)', builtin)
+        self.assertIn('if n < 0 || n > 1 { return false }', builtin)
+        self.assertIn('if n == 1 && !lirBuiltinPrimitive(lm.variant_type[v])', builtin)
+        self.assertIn('_ => { return false }', builtin)
         self.assertIn('types.types[enum_t].nominal_id != lm.en_decl[inst.b]', verifier)
         self.assertIn('if check && !v.defined[l.places[inst.a].root]', verifier)
 

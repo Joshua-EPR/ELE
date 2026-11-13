@@ -28,6 +28,13 @@ flow cfgResultType(func: view CfgFunc) => Int {
     give func.result_type
 }
 
+// `i payload` of a shape/choice payload: a move, not a copy, because
+// aggregates are move-only in ELE even when drop-free.
+flow cfgPayloadMoves(p: view CfgProgram, f: Int, inst: view CfgInst) => Bool {
+    when inst.kind != 9 || inst.dst < 0 || inst.dst >= p.functions[f].vars { give false }
+    give p.types_code[p.functions[f].first_var + inst.dst] >= 2
+}
+
 flow cfgMoveOperand(p: view CfgProgram, f: Int, op: view NativeOperand, variable: Int) => Bool {
     give op.is_var && op.value == variable && cfgIsMove(cfgOperandType(p, f, view op))
 }
@@ -50,6 +57,8 @@ flow cfgMoves(p: view CfgProgram, f: Int, inst: view CfgInst, variable: Int) => 
     when inst.kind == 7 && inst.argc == 1 {
         give cfgMoveOperand(p, f, view inst.a, variable)
     }
+    // Extracting an aggregate payload moves the whole owned enum out.
+    when inst.kind == 9 && inst.place_var == variable { give cfgPayloadMoves(p, f, inst) }
     when inst.kind == 4 || inst.kind == 18 {
         each n among 0..inst.argc {
             hold arg = view p.struct_args[inst.arg_first + n]
@@ -111,6 +120,9 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         live[inst.place_var] = false
         give 0
     }
+    // An aggregate payload is moved out: the enum is consumed (a later
+    // `disc`, `payload` or use of it is a use after move).
+    when inst.kind == 9 && cfgPayloadMoves(p, f, inst) { live[inst.place_var] = false }
     when inst.kind == 3 {
         each n among 0..inst.argc {
             hold arg = view p.call_args[inst.arg_first + n]

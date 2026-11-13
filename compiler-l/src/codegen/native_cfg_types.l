@@ -76,11 +76,15 @@ expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
 }
 
 // Structs in ELE are MOVE-only, even when all their fields are primitives.
-// The backend currently accepts only drop-free structs. A type may refer
-// to a previously completed struct, yielding acyclic by-value layouts.
-// The verifier invalidates whole-value move sources; `read` of a struct
-// field (partial move) remains rejected until move paths are implemented.
-// Text, Lists, loans and unknown types remain unsupported.
+// A field may name a previously declared struct, Text, a list, or ANY
+// declared enum (`eK` with K below the header count): enums are listed
+// after structs, so a struct such as `LexError { problem: LexProblem,
+// offset: Int }` refers forward. Layouts are computed once every
+// declaration is read (cfgLayoutDecls in native_cfg_fields); until then a
+// struct or enum has size 0 and fields have offset -1.
+// The verifier invalidates whole-value move sources; reads of aggregate
+// fields are partial moves tracked by move paths (native_cfg_paths).
+// Loans and unknown types remain unsupported.
 expose flow cfgReadStruct(p: edit CfgProgram, source: view Text, reader: edit NativeReader, sid: Int) {
     nativeExpect(source, edit reader, "struct")
     hold id = nativeId(source, edit reader, 115)
@@ -92,32 +96,52 @@ expose flow cfgReadStruct(p: edit CfgProgram, source: view Text, reader: edit Na
         p.error = 60
         give
     }
-    change layout = nativeLayoutNew()
     hold first = p.fields.length
     each i among 0..count {
         nativeExpect(source, edit reader, "field")
         hold fname = nativeWord(source, edit reader)
         // A field may own a Text (three words); see native_cfg_paths.
-        hold ty = cfgTypeOrUnit(p, source, edit reader)
+        hold ty = cfgDeclType(p, source, edit reader, true)
         nativeEndLine(source, edit reader)
         when reader.error != 0 || !cfgEncodedName(source, view fname) || (ty < 0 && ty != cfgTextType()) {
             p.error = 61
             leave
         }
-        hold offset = nativeLayoutAdd(edit layout, cfgTypeSize(p, ty), cfgTypeAlign(p, ty), false)
-        when offset < 0 { p.error = 62; leave }
-        p.fields@push(CfgField(ty: ty, offset: offset))
+        p.fields@push(CfgField(ty: ty, offset: -1))
     }
     when p.error != 0 { give }
-    hold size = nativeLayoutSeal(edit layout)
-    when size <= 0 || size > 512 { p.error = 63; give }
-    p.structs@push(CfgStruct(first_field: first, fields: count, size: size, align: layout.align))
+    p.structs@push(CfgStruct(first_field: first, fields: count, size: 0, align: 0))
+}
+
+// Type of a declaration member: `i`, `b`, an earlier struct `sK`, any
+// declared enum `eK`, a declared list `lK`, and `t` when `text` holds.
+// Enum codes use the header counts (2 + decl_structs + K): they equal the
+// final codes because every struct is declared before any enum.
+flow cfgDeclType(p: view CfgProgram, source: view Text, reader: edit NativeReader, text: Bool) => Int {
+    change probe = NativeReader(offset: reader.offset, error: 0)
+    hold w = nativeWord(source, edit probe)
+    when text && nativeEquals(source, view w, "t") {
+        reader.offset = probe.offset
+        give cfgTextType()
+    }
+    when w.start < w.end && source@byteAt(w.start) == 101 {
+        reader.offset = probe.offset
+        hold id = nativeDecimal(source, edit reader, view w, 1)
+        when id >= 0 && id < p.decl_enums { give 2 + p.decl_structs + id }
+        reader.error = 30
+        give -1
+    }
+    give cfgType(p, source, edit reader)
 }
 
 // Read a complete enum descriptor from the official ELE-LIR 1 extension:
 // enum eN <encoded-name> variants V
-// variant <encoded-name> types 0|1 [i|b]
-// No user-provided layouts and no heap/owned payloads are trusted here.
+// variant <encoded-name> types 0|1 [<type>]
+// A payload is Int, Bool or a DROP-FREE aggregate: a struct or enum that
+// owns no Text and no list, directly or in a nested field. That, and the
+// layout, are checked by cfgLayoutDecls once every member is known.
+// Text payloads are not even parsed here. No user-provided layouts and no
+// heap/owned payloads are trusted.
 expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit NativeReader, id: Int) {
     nativeExpect(source, edit reader, "enum")
     hold actual = nativeId(source, edit reader, 101)
@@ -125,12 +149,11 @@ expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit Nati
     nativeExpect(source, edit reader, "variants")
     hold count = nativeNumber(source, edit reader)
     nativeEndLine(source, edit reader)
-    when reader.error != 0 || actual != id || !cfgEncodedName(source, view name) || count < 1 || count > 8 {
+    when reader.error != 0 || actual != id || !cfgEncodedName(source, view name) || count < 1 || count > 64 {
         p.error = 80
         give
     }
     hold first = p.variants.length
-    change any_payload = false
     each v among 0..count {
         nativeExpect(source, edit reader, "variant")
         hold vname = nativeWord(source, edit reader)
@@ -138,18 +161,15 @@ expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit Nati
         hold argc = nativeNumber(source, edit reader)
         when argc < 0 || argc > 1 { p.error = 81; give }
         change payload = -1
-        when argc == 1 { payload = cfgType(p, source, edit reader) }
+        when argc == 1 { payload = cfgDeclType(p, source, edit reader, false) }
         nativeEndLine(source, edit reader)
-        when reader.error != 0 || !cfgEncodedName(source, view vname) || payload > 1 {
+        when reader.error != 0 || !cfgEncodedName(source, view vname) || (argc == 1 && payload < 0) {
             p.error = 82
             give
         }
-        when argc == 1 { any_payload = true }
         p.variants@push(CfgVariant(payload_type: payload))
     }
-    change size = 8
-    when any_payload { size = 16 }
-    p.enums@push(CfgEnum(first_variant: first, variants: count, size: size, align: 8))
+    p.enums@push(CfgEnum(first_variant: first, variants: count, size: 0, align: 0))
 }
 
 flow cfgBadPlace(reader: edit NativeReader) => CfgPlace {

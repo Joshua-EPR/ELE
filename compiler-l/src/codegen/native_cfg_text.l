@@ -344,13 +344,13 @@ pub fn cfgCopyValue(code: &mut X64Code, p: &CfgProgram, ty: Int, dst_base: Int, 
         }
     } else if ty >= 2 + p.structs.length && ty - 2 - p.structs.length < p.enums.length {
         let enum_id = ty - 2 - p.structs.length
-        // Both the tag and the optional 8-byte payload slot are ALWAYS
-        // initialized by `i variant`, including unit/Bool cases.
-        x64LoadMem64(&mut code, 0, src_base, src_disp)
-        x64StoreMem64(&mut code, dst_base, dst_disp, 0)
-        if p.enums[enum_id].size == 16 {
-            x64LoadMem64(&mut code, 0, src_base, src_disp + 8)
-            x64StoreMem64(&mut code, dst_base, dst_disp + 8, 0)
+        // The tag and the whole payload area are ALWAYS initialized by
+        // `i variant` (zero-filled before the payload is written), so a
+        // word-wise copy moves defined bytes for every variant. Payloads
+        // are drop-free (cfgLayoutEnum): copying the words is the move.
+        for w in 0..(p.enums[enum_id].size / 8) {
+            x64LoadMem64(&mut code, 0, src_base, src_disp + 8 * w)
+            x64StoreMem64(&mut code, dst_base, dst_disp + 8 * w, 0)
         }
     } else {
         code.error = 12
