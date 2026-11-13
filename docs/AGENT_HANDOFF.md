@@ -4,10 +4,12 @@
 
 `origin/main` verificado tras `git fetch origin --prune`: `ebec0847e938b98f0cc6fea9da5943e66e4e4b04`.
 Los PR #62, #63 y #64 están fusionados; #55 sigue abierto en borrador.
-La cuota de GitHub Actions está agotada. No se hizo push, merge ni se lanzó CI.
+El PR #65 está abierto en borrador desde la rama de esta actualización.
+La cuota de GitHub Actions está agotada. No se hizo merge ni se lanzó CI manualmente.
 
-La rama **local** `codex/fix-stage1-lir-internal-interfaces`, worktree
-`target/p0-lir-interfaces-20261113`, parte de ese `main` y contiene, en orden:
+La rama publicada `codex/fix-stage1-lir-internal-interfaces`, worktree
+`target/p0-lir-interfaces-20261113`, parte de ese `main` y contiene estos
+commits de código, en orden:
 
 1. `54236c9` — exporta `lirBlocks` para `lir_finish.l`, `sema_ops.l` y `stmt_lower.l`.
 2. `253402a` — exporta `lirPlaceIndex` para los módulos de colecciones.
@@ -87,13 +89,14 @@ Hay además WIP en los worktrees `agent-a1d76385424054ae7`,
 - WSL2 devuelve «Acceso denegado» en `wsl --list --quiet`: no se ejecutaron
   tests nativos Linux y no se afirma ejecución ELF64 sobre Linux.
 
-PR propuesto, aún no creado porque la rama es local y el usuario prohibió
-hacer push: **`fix(stage1): resolve LIR internal module interfaces`**.
-Descripción: exporta solo las dependencias reales de construcción y
+[PR #65](https://github.com/Joshua-EPR/ELE/pull/65), en borrador:
+**`fix(stage1): resolve LIR internal module interfaces`**.
+Exporta solo las dependencias reales de construcción y
 verificación LIR, mantiene privado `lirVerifyInst`, corrige la lectura y
 edición simultáneas en el drop, y eleva cuatro entradas de autocobertura a
-semántica. Debe revisarse antes de fusionar, sin consumir Actions hasta que
-la cuota vuelva a estar disponible. No cierra las issues #3, #4, #5, #8 o
+semántica. El commit de documentación inicial fue `c27b567`. Debe revisarse
+antes de fusionar, sin consumir Actions hasta que la cuota vuelva a estar
+disponible. No cierra las issues #3, #4, #5, #8 o
 #31, que siguen parcialmente abiertas.
 
 ---
