@@ -168,7 +168,7 @@ pub fn lirPlaceVar(l: &mut LirFn, slot: Int) -> Int {
     return l.places.length - 1
 }
 
-fn lirPlaceField(l: &mut LirFn, base: Int, field: Int) -> Int {
+expose flow lirPlaceField(l: &mut LirFn, base: Int, field: Int) => Int {
     let slot = l.places[base].root
     l.places.push(LirPlace(root: slot, parent: base, field: field))
     return l.places.length - 1
