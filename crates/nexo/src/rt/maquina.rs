@@ -920,7 +920,7 @@ impl<'p> Maquina<'p> {
                     self.registrar(Granulo::Meta(pool, duenio), true)?;
                     let ev = &mut self.ev;
                     if let Some(p) = self.pools.get_mut(pool).and_then(|x| x.as_mut()) {
-                        p.liberar_hueco(slot, ev);
+                        p.liberar_hueco(slot, ev)?;
                     }
                     self.met.huecos_liberados += 1;
                 }
