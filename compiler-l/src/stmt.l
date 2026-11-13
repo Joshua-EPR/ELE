@@ -56,7 +56,7 @@ fn parseBlock(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, token
     return astAddStmt(&mut tree, AstStmtKind.Block, openTok.start, end_pos, first_stmt, count, 0, 0, 0)
 }
 
-fn parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) -> Int {
+expose flow parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) => Int {
     if cursor.pos >= tokens.length { return -1 }
     let tok = &tokens[cursor.pos]
 
