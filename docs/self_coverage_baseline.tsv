@@ -31,7 +31,7 @@ codegen/native_rt.l	lir
 codegen/native_rt_list.l	lir
 codegen/x86_64.l	lir
 cursor.l	semantica
-decl.l	parser
+decl.l	semantica
 drops_dump.l	semantica
 drops_plan.l	semantica
 drops_verify.l	semantica
@@ -71,7 +71,7 @@ native_memory_cases.l	backend
 native_stack_aggregate_demo.l	parser
 ownership_l.l	semantica
 parse_util.l	semantica
-parser.l	parser
+parser.l	semantica
 scopes.l	lir
 sema.l	parser
 sema_borrow.l	parser

@@ -7,7 +7,7 @@ import expr
 import types
 import stmt
 
-fn parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {
+expose flow parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) => Int {
     if cursor.pos >= tokens.length { return -1 }
     let is_public = parserTakeWord(source, &mut cursor, tokens, "pub")
 
@@ -32,8 +32,14 @@ fn parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
     if parserAtWord(source, cursor, tokens, "const") {
         let s_id = parseStmt(&mut tree, source, &mut cursor, tokens, 0)
         if s_id >= 0 {
-            let s = &tree.statements[s_id]
-            return astAddDecl(&mut tree, AstDeclKind.Const, s.start, s.end, is_public, s.a, s.b, s.c, s.d, 0, 0, 0)
+            // End the immutable AST borrow before astAddDecl mutates the tree.
+            let start = tree.statements[s_id].start
+            let end = tree.statements[s_id].end
+            let a = tree.statements[s_id].a
+            let b = tree.statements[s_id].b
+            let c = tree.statements[s_id].c
+            let d = tree.statements[s_id].d
+            return astAddDecl(&mut tree, AstDeclKind.Const, start, end, is_public, a, b, c, d, 0, 0, 0)
         }
         return -1
     }
