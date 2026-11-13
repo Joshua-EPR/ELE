@@ -27,9 +27,17 @@ fn moduleAccessBuild(module_count: Int, first: &List<Int>, counts: &List<Int>, d
             // Malformed dependency metadata must never grant visibility.
             // Iterate with a remaining counter to avoid start + count overflow.
             if start < 0 || start > deps.length || count < 0 { continue }
+            // Reject an out-of-range count instead of scanning into another
+            // module's adjacency slice and accidentally granting access.
+            if count > deps.length - start { continue }
+            if dep + 1 < first.length {
+                let next_start = first[dep + 1]
+                if next_start < start || next_start > deps.length { continue }
+                if count > next_start - start { continue }
+            }
             var i = start
             var remaining = count
-            while remaining > 0 && i < deps.length {
+            while remaining > 0 {
                 let next = deps[i]
                 if next >= 0 && next < module_count {
                     let pos = base + next
