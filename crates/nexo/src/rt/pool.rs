@@ -721,7 +721,22 @@ impl Pool {
     }
 
     /// Particiona las superpáginas sin reservar en `n` rangos disjuntos.
-    pub fn dividir(&mut self, n: u32) {
+    pub fn dividir(&mut self, n: u32) -> Result<(), Aborto> {
+        if n == 0 || n > crate::ir::MAX_PARTICIONES_NEXO {
+            return abortar(
+                Violacion::ValorInvalido,
+                format!(
+                    "dividir requiere entre 1 y {} particiones, recibidas {n}",
+                    crate::ir::MAX_PARTICIONES_NEXO
+                ),
+            );
+        }
+        if self.particiones() > 0 {
+            return abortar(
+                Violacion::PermisoInventado,
+                "no se puede volver a dividir un pool ya dividido",
+            );
+        }
         let libres: Vec<u32> = std::mem::take(&mut self.asignadores[0].sin_reservar)
             .into_iter()
             .collect();
@@ -731,6 +746,7 @@ impl Pool {
             let rango: BTreeSet<u32> = libres.iter().skip(k * trozo).take(trozo).copied().collect();
             self.asignadores.push(Asignador::nuevo(palabras, rango));
         }
+        Ok(())
     }
 
     pub fn particiones(&self) -> usize {
