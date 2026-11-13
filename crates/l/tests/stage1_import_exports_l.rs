@@ -131,18 +131,19 @@ fn parser_export_chain_exposes_only_cross_module_entrypoints() {
         true,
     );
 
-    // parseBlock remains an internal recursive helper, never exported.
+    // decl.l also calls parseBlock directly for function bodies, so this
+    // is a required cross-module interface, not a private implementation.
     let stmt = fs::read_to_string(dir.join("stmt.l")).unwrap();
-    assert!(stmt.contains("fn parseBlock("));
-    assert!(!stmt.contains("pub fn parseBlock("));
-    assert!(!stmt.contains("expose flow parseBlock("));
-    let private = check(
+    assert!(decl.contains("parseBlock("));
+    assert!(stmt.contains("expose flow parseBlock("));
+    check(
         &dir,
-        "private_parser_block",
+        "visible_parser_block",
         &format!(
             "{types}import stmt\nfn probe(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {{ return parseBlock(&mut tree, source, &mut cursor, tokens, 0) }}\n"
         ),
-        false,
+        true,
     );
-    assert!(private.contains("error[L0001]"), "{private}");
+    // Cross-module private visibility is separately covered by
+    // private_loan_helper above. Do not make other helpers public.
 }
