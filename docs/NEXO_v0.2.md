@@ -412,3 +412,23 @@ esta revisión. Repetir localmente `cargo fmt --all --check`,
 `cargo clippy -p ele-nexo --all-targets -- -D warnings`,
 `cargo test -p ele-nexo -- --test-threads=1` y el fuzz directo de pools
 sobre el HEAD actualizado antes de considerar el PR fusionable.
+
+
+### Límite de particiones C6 y protección frente a IR hostil
+
+`Dividir` tenía una cantidad de trabajadores `u32` sin límite superior:
+una solicitud `u32::MAX` podía forzar una construcción desproporcionada
+de índices de asignación antes de llegar a ninguna operación útil.
+El verificador de NEXO-Core ahora rechaza cantidades fuera del rango
+`1..=MAX_PARTICIONES_NEXO` (273); la API del pool también devuelve
+`Aborto` sin mutar su estado y prohíbe dividir un pool ya dividido.
+
+La constante 273 corresponde al máximo del índice Bi-Slab simulado
+(64 palabras × 64 bits / 15 subpáginas por superpágina). Es un límite
+del prototipo v0.2, no una garantía de que cualquier número inferior
+pueda ejecutarse con los recursos disponibles. Las nuevas regresiones
+comprueban la validación estática y la máquina ante límites extremos.
+
+**Estas pruebas nuevas siguen sin ejecutarse localmente en el HEAD revisado**;
+el resultado previo de las 110 pruebas pertenece al commit original
+`d4947d3`. No usar esos resultados como prueba de aprobación de estos cambios.
