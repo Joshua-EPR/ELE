@@ -174,7 +174,7 @@ expose flow lirPlaceField(l: &mut LirFn, base: Int, field: Int) => Int {
     return l.places.length - 1
 }
 
-fn lirPlaceIndex(l: &mut LirFn, base: Int, index_var: Int) -> Int {
+expose flow lirPlaceIndex(l: edit LirFn, base: Int, index_var: Int) => Int {
     let slot = l.places[base].root
     let f = 0 - 2 - index_var
     l.places.push(LirPlace(root: slot, parent: base, field: f))

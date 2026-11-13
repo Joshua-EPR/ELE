@@ -166,13 +166,17 @@ fn lir_place_field_is_public_for_actual_cross_module_consumers() {
         true,
     );
 
-    // The neighbouring indexed-place helper has a distinct contract and is
-    // not exported by this fix. This negative test prevents API widening.
+    // The verifier instruction walker is internal and must stay private.
     let private = check(
         &dir,
-        "private_lir_place_index_b1",
-        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceIndex(&mut l, 0, 0) }\n",
+        "private_lir_verify_inst_b1",
+        "import lir_verify\nflow probe() => Int { give lirVerifyInst() }\n",
         false,
     );
-    assert!(private.contains("error[L0001]"), "{private}");
+    assert!(
+        private.lines().any(|line| {
+            line.contains("private_lir_verify_inst_b1.l:2:") && line.contains("error[L0001]")
+        }),
+        "{private}"
+    );
 }

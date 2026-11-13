@@ -61,8 +61,23 @@ fn assert_private(dir: &Path, name: &str, source: &str) {
     assert!(private.contains(&format!("{name}.l:")), "{private}");
 }
 
+fn assert_verifier_internal_private(dir: &Path, name: &str) {
+    let stderr = check(
+        dir,
+        name,
+        "import lir_verify\nflow probe() => Int { give lirVerifyInst() }\n",
+        false,
+    );
+    assert!(
+        stderr.lines().any(|line| {
+            line.contains(&format!("{name}.l:2:")) && line.contains("error[L0001]")
+        }),
+        "{stderr}"
+    );
+}
+
 #[test]
-fn b1_lir_emit_and_arg_are_public_but_index_place_stays_private() {
+fn b1_lir_emit_and_arg_are_public_but_verifier_internal_stays_private() {
     let dir = prepare_modules();
     assert_consumer(&dir, "sema_lower.l", "lir_build", "lirEmit(");
     assert_consumer(&dir, "sema_lower.l", "lir_build", "lirArg(");
@@ -75,11 +90,7 @@ fn b1_lir_emit_and_arg_are_public_but_index_place_stays_private() {
     );
     assert!(public.is_empty(), "{public}");
 
-    assert_private(
-        &dir,
-        "private_lir_place_index",
-        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceIndex(&mut l, 0, 0) }\n",
-    );
+    assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_emit");
 }
 
 #[test]
@@ -145,7 +156,7 @@ fn b1_loan_overlap_and_mutability_are_public_but_param_root_stays_private() {
 }
 
 #[test]
-fn b1_lir_const_and_place_helpers_are_public_but_index_place_stays_private() {
+fn b1_lir_const_and_place_helpers_are_public_but_verifier_internal_stays_private() {
     let dir = prepare_modules();
     assert_consumer(&dir, "sema_lower.l", "lir_build", "lirConst(");
     assert_consumer(&dir, "sema_lower.l", "lir_build", "lirPlaceVar(");
@@ -159,11 +170,7 @@ fn b1_lir_const_and_place_helpers_are_public_but_index_place_stays_private() {
     );
     assert!(public.is_empty(), "{public}");
 
-    assert_private(
-        &dir,
-        "private_lir_place_index_again",
-        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceIndex(&mut l, 0, 0) }\n",
-    );
+    assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_const");
 }
 
 #[test]
@@ -237,7 +244,7 @@ fn b1_lir_unsupported_marker_is_public_for_actual_consumers() {
 }
 
 #[test]
-fn b1_lir_blocks_is_public_for_actual_consumers_but_index_place_stays_private() {
+fn b1_lir_blocks_is_public_for_actual_consumers_but_verifier_internal_stays_private() {
     let dir = prepare_modules();
     for consumer in ["lir_finish.l", "sema_ops.l", "stmt_lower.l"] {
         assert_consumer(&dir, consumer, "lir_build", "lirBlocks(");
@@ -251,9 +258,23 @@ fn b1_lir_blocks_is_public_for_actual_consumers_but_index_place_stays_private() 
     );
     assert!(public.is_empty(), "{public}");
 
-    assert_private(
+    assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_blocks");
+}
+
+#[test]
+fn b1_lir_index_place_is_public_for_collection_lowering_but_verifier_internals_stay_private() {
+    let dir = prepare_modules();
+    for consumer in ["sema_collection_ops.l", "sema_stmt.l"] {
+        assert_consumer(&dir, consumer, "lir_build", "lirPlaceIndex(");
+    }
+
+    let public = check(
         &dir,
-        "private_lir_place_index_after_blocks",
+        "public_lir_place_index",
         "import lir_build\nflow probe(l: edit LirFn) => Int { give lirPlaceIndex(edit l, 0, 0) }\n",
+        true,
     );
+    assert!(public.is_empty(), "{public}");
+
+    assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_index");
 }
