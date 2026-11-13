@@ -4,11 +4,17 @@
 //! modelo abstracto, ELE-LIR, el ABI ni las reglas de ownership de ELE.
 
 mod address_space;
+mod generation;
 mod platform;
+mod pool;
 
 use std::fmt;
 
 pub use address_space::{AddressSpace, AddressSpaceMetrics};
+pub use pool::{
+    DestroyOutcome, Handle, HoleToken, Link, PageState, PhysicalPool, PoolConfig, PoolError,
+    PoolMetrics,
+};
 
 /// Error controlado de la capa de memoria virtual.
 #[derive(Clone, Debug, Eq, PartialEq)]
