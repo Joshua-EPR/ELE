@@ -45,7 +45,8 @@ flow nativeListRejectFlag(code: edit X64Code) {
     x64TestRax(edit code)
     hold sane = x64ConditionalPlaceholder(edit code, true)
     nativeListExit(edit code, 127)
-    x64PatchRelative(edit code, sane, code.bytes.length)
+    hold sane_target = code.bytes.length
+    x64PatchRelative(edit code, sane, sane_target)
 }
 
 // Guard the *whole* list metadata on every read/write/pop. In particular,
@@ -85,7 +86,8 @@ flow nativeListGuard(code: edit X64Code, s: view NativeIntListSlots) {
     x64CmpReg(edit code, 0, 1)
     hold equal = x64ConditionalPlaceholder(edit code, true)
     nativeListExit(edit code, 127)
-    x64PatchRelative(edit code, equal, code.bytes.length)
+    hold equal_target = code.bytes.length
+    x64PatchRelative(edit code, equal, equal_target)
 }
 
 // Initialize empty list with fixed initial capacity, 1..131072 Ints.
@@ -124,14 +126,16 @@ expose flow nativeListPush(code: edit X64Code, s: view NativeIntListSlots, value
     x64TestRax(edit code)
     hold grow_ok = x64ConditionalPlaceholder(edit code, true)
     nativeListExit(edit code, 122)
-    x64PatchRelative(edit code, grow_ok, code.bytes.length)
+    hold grow_ok_target = code.bytes.length
+    x64PatchRelative(edit code, grow_ok, grow_ok_target)
     x64LoadSlot(edit code, 7, s.cap_scratch)
     x64MovImm64(edit code, 1, 8)
     x64MulReg(edit code, 7, 1)
     heapOwnerResize(edit code, s.ptr, s.bytes, s.live, s.resize_scratch)
     x64LoadSlot(edit code, 0, s.cap_scratch)
     x64StoreSlot(edit code, s.cap, 0)
-    x64PatchRelative(edit code, has_capacity, code.bytes.length)
+    hold has_capacity_target = code.bytes.length
+    x64PatchRelative(edit code, has_capacity, has_capacity_target)
 
     heapOwnerPtr(edit code, s.ptr, s.live)
     x64LoadSlot(edit code, 1, s.len)
@@ -157,7 +161,8 @@ expose flow nativeListRead(code: edit X64Code, s: view NativeIntListSlots, index
     x64TestRax(edit code)
     hold valid = x64ConditionalPlaceholder(edit code, true)
     nativeListExit(edit code, 127)
-    x64PatchRelative(edit code, valid, code.bytes.length)
+    hold valid_target = code.bytes.length
+    x64PatchRelative(edit code, valid, valid_target)
     heapOwnerPtr(edit code, s.ptr, s.live)
     x64MovImm64(edit code, 1, index * 8)
     x64AddReg(edit code, 0, 1)
@@ -171,7 +176,8 @@ expose flow nativeListPop(code: edit X64Code, s: view NativeIntListSlots) {
     x64TestRax(edit code)
     hold valid = x64ConditionalPlaceholder(edit code, false)
     nativeListExit(edit code, 127)
-    x64PatchRelative(edit code, valid, code.bytes.length)
+    hold valid_target = code.bytes.length
+    x64PatchRelative(edit code, valid, valid_target)
     x64LoadSlot(edit code, 1, s.len)
     x64MovImm64(edit code, 2, 1)
     x64SubReg(edit code, 1, 2)
