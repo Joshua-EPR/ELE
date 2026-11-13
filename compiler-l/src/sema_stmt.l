@@ -121,6 +121,8 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
                     }
                 }
             }
+            // The written place types an empty `List[]` on the right.
+            ctx.expected_list_type = target_t
             let val_t = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
             let value = lirTakeOperand(&mut ctx, val_t)
             if target >= 0 && loanOfPath(&ctx.flow, target) >= 0 && semaNeedsDrop(&mut ctx, source, tree, target_t) {
@@ -148,6 +150,7 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             if val_e >= 0 {
                 if borrowed { ctx.borrow_site = SITE_RETURN }
                 ctx.expected_union_type = ctx.current_fn_ret_type
+                if !borrowed { ctx.expected_list_type = ctx.current_fn_ret_type }
                 ret_t = semaExprMode(&mut ctx, source, tree, val_e, ACCESS_MOVE)
                 ctx.expected_union_type = -1
             }
