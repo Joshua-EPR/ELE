@@ -1,0 +1,11 @@
+[package]
+name = "ele-nexo"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.99"
+description = "NEXO v0.2: modelo de memoria de ELE (IR NEXO-Core, verificador estático y máquina abstracta Bi-Slab con oráculo)"
+
+[lib]
+name = "nexo"
+
+[dependencies]
