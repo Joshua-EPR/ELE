@@ -7,7 +7,7 @@ import expr
 import types
 import stmt
 
-fn parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {
+expose flow parseDecl(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) => Int {
     if cursor.pos >= tokens.length { return -1 }
     let is_public = parserTakeWord(source, &mut cursor, tokens, "pub")
 
