@@ -372,6 +372,7 @@ fn b1_verifier_helpers_reject_out_of_bounds_ids_without_panicking() {
         &entry,
         r#"take lir_build
 take lir_verify_core
+take sema_types
 
 flow main() => Int {
     change l = lirFnNew()
@@ -418,6 +419,32 @@ flow main() => Int {
     when !lirUse(edit v, view l, slot, true) { give 12 }
     when !lirArgDefined(edit v, view l, ref_arg, true) { give 13 }
     when !lirArgDefined(edit v, view l, value_arg, true) { give 14 }
+
+    change types = typeTableNew()
+    hold struct_ty = semTypeAdd(edit types, SemTypeKind.Struct, -1, -1, -1, 42)
+    change module = lirModuleNew()
+    module.st_decl.push(42)
+    hold struct_slot = lirVar(edit l, struct_ty, false)
+    hold struct_place = lirPlaceVar(edit l, struct_slot)
+    hold field_place = lirPlaceField(edit l, struct_place, 0)
+    when lirPlaceType(view l, view types, view module, field_place) != LIR_TY_ERR { give 20 }
+
+    module.st_first.push(0)
+    module.st_count.push(1)
+    when lirPlaceType(view l, view types, view module, field_place) != LIR_TY_ERR { give 21 }
+    module.field_ty.push(1)
+    when lirPlaceType(view l, view types, view module, field_place) != 1 { give 22 }
+
+    module.st_count[0] = 2
+    when lirPlaceType(view l, view types, view module, field_place) != LIR_TY_ERR { give 23 }
+    module.st_count[0] = 1
+    module.field_ty[0] = 999
+    when lirPlaceType(view l, view types, view module, field_place) != LIR_TY_ERR { give 24 }
+    module.field_ty[0] = 1
+    module.st_first[0] = -1
+    when lirPlaceType(view l, view types, view module, field_place) != LIR_TY_ERR { give 25 }
+    module.st_first[0] = 0
+    when lirPlaceType(view l, view types, view module, field_place) != 1 { give 26 }
     give 42
 }
 "#,
