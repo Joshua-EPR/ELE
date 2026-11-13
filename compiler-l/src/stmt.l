@@ -6,7 +6,7 @@ import parse_util
 import expr
 import types
 
-fn parseBlock(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) -> Int {
+expose flow parseBlock(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) => Int {
     if depth > 128 {
         let s = cursorSpanStart(cursor, tokens, source.byteLength)
         let e = cursorSpanEnd(cursor, tokens, source.byteLength)
