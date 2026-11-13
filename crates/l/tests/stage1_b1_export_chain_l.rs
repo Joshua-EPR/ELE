@@ -209,3 +209,29 @@ fn b1_drop_op_kinds_are_public_but_drop_flag_search_stays_private() {
         "import flow_cfg\nimport drops_plan\nfn probe(graph: &FlowGraph) -> Bool { return dropReleases(graph, 0, 0) }\n",
     );
 }
+
+#[test]
+fn b1_lir_unsupported_marker_is_public_for_actual_consumers() {
+    let dir = prepare_modules();
+    for consumer in [
+        "sema_stmt.l",
+        "sema_collection_ops.l",
+        "sema_builtin_union.l",
+        "sema_match_coverage.l",
+        "sema_ops.l",
+        "stmt_lower.l",
+    ] {
+        assert_consumer(&dir, consumer, "lir_build", "lirMarkUnsupported(");
+    }
+
+    let public = check(
+        &dir,
+        "public_lir_unsupported",
+        "import lir_build\nfn probe(l: &mut LirFn) -> Int { lirMarkUnsupported(&mut l, 7); return 0 }\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    // Do not freeze lirBlocks as private here: other real lowerers invoke
+    // it and a later B1 export must be tested independently.
+}
