@@ -278,3 +278,21 @@ fn b1_lir_index_place_is_public_for_collection_lowering_but_verifier_internals_s
 
     assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_index");
 }
+
+#[test]
+fn b1_lir_type_compatibility_is_public_for_verifier_but_instruction_walker_stays_private() {
+    let dir = prepare_modules();
+    for consumer in ["lir_verify.l", "lir_verify_helpers.l"] {
+        assert_consumer(&dir, consumer, "lir_build", "lirTypesCompat(");
+    }
+
+    let public = check(
+        &dir,
+        "public_lir_types_compat",
+        "import lir_build\nflow probe(types: view TypeTable, lm: view LirModule) => Bool { give lirTypesCompat(types, lm, 1, 1) }\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    assert_verifier_internal_private(&dir, "private_lir_verify_inst_after_types_compat");
+}

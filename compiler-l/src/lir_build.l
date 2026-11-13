@@ -268,7 +268,7 @@ pub fn lirIsUnitEnum(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
     }
 }
 
-fn lirTypesCompat(types: &TypeTable, lm: &LirModule, a: Int, b: Int) -> Bool {
+expose flow lirTypesCompat(types: view TypeTable, lm: view LirModule, a: Int, b: Int) => Bool {
     // Nominal enums are not integers, including unit-only enums. Emitting
     // enum values as `ciN` is an obsolete Stage 1 shortcut, not a coercion.
     return a == b && a >= 0
