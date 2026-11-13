@@ -308,3 +308,61 @@ fn ambiguous_private_function_is_not_resolved_from_another_module() {
         );
     }
 }
+
+#[test]
+fn homonymous_private_generic_functions_keep_distinct_instantiations() {
+    // Each generic helper produces a distinct result; one global function
+    // template table would either reject the module or call the wrong body.
+    let fix = ModuleFixture::new("generic_private_identity");
+    fix.write_file(
+        "a.l",
+        "flow helper of[T](value: T) => Int { give 1 }\nexpose flow from_a() => Int { give helper of[Int](0) }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "flow helper of[T](value: T) => Int { give 41 }\nexpose flow from_b() => Int { give helper of[Int](0) }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a() + from_b()) }\n",
+    );
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn homonymous_private_generic_function_is_not_exported_ambiguously() {
+    let fix = ModuleFixture::new("generic_private_ambiguous");
+    fix.write_file("a.l", "flow helper of[T](value: T) => Int { give 1 }\n");
+    fix.write_file("b.l", "flow helper of[T](value: T) => Int { give 41 }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(helper of[Int](0)) }\n",
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("función no definida: helper"),
+            "{backend}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn homonymous_generic_declaration_in_one_module_still_fails() {
+    let fix = ModuleFixture::new("generic_duplicate_local");
+    fix.write_file(
+        "main.l",
+        "flow helper of[T](value: T) => Int { give 1 }\nflow helper of[T](value: T) => Int { give 2 }\nflow main() { print(42) }\n",
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("función duplicada o reservada: helper"),
+            "{backend}: {stderr}"
+        );
+    }
+}
