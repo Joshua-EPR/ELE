@@ -90,16 +90,7 @@ pub fn scopeLookupAllVisible(tree: &ScopeTree, sym_table: &SymbolTable, source: 
             if sym.scope_id == cur && symbolNamesEqual(source, sym.name_start, sym.name_end, name_start, name_end) {
                 if sym.module_id < 0 || sym.module_id == module_id { return i }
                 if symbolVisible(sym, module_id, allowed, module_count) {
-                    if imported >= 0 {
-                        // If the same symbol is reachable through two different
-                        // modules we must reject the use instead of silently picking
-                        // the first match. This preserves the import-ambiguity
-                        // diagnostic required for public symbols from different
-                        // modules.
-                        if imported != i { ambiguous = true }
-                    } else {
-                        imported = i
-                    }
+                    if imported >= 0 { ambiguous = true } else { imported = i }
                 }
             }
         }
