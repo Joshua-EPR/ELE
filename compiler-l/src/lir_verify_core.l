@@ -94,7 +94,10 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
 expose flow lirUse(v: edit LirVerifier, l: view LirFn, operand: Int, check: Bool) => Bool {
     if !lirIsVar(operand) { return true }
     if !lirVarOk(l, operand) { return false }
-    return !check || v.defined[operand]
+    if !check { return true }
+    // A malformed defined-state table must be rejected, not indexed.
+    if operand >= v.defined.length { return false }
+    return v.defined[operand]
 }
 
 expose flow lirArgType(l: view LirFn, types: view TypeTable, lm: view LirModule, arg: Int) => Int {
@@ -108,9 +111,15 @@ expose flow lirPrintable(ty: Int) => Bool {
 }
 
 expose flow lirArgDefined(v: edit LirVerifier, l: view LirFn, arg: Int, check: Bool) => Bool {
+    if arg < 0 || arg >= l.args.length { return false }
     if l.args[arg].by_ref {
         let place = l.args[arg].value
-        return !check || v.defined[l.places[place].root]
+        if place < 0 || place >= l.places.length { return false }
+        let root = l.places[place].root
+        if !lirVarOk(l, root) { return false }
+        if !check { return true }
+        if root >= v.defined.length { return false }
+        return v.defined[root]
     }
     return lirUse(&mut v, l, l.args[arg].value, check)
 }
