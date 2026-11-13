@@ -294,11 +294,17 @@ fn ambiguous_private_function_is_not_resolved_from_another_module() {
     let fix = ModuleFixture::new("private_ambiguous");
     fix.write_file("a.l", "flow helper() => Int { give 1 }\n");
     fix.write_file("b.l", "flow helper() => Int { give 41 }\n");
-    fix.write_file("main.l", "take a\ntake b\nflow main() { print(helper()) }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(helper()) }\n",
+    );
     for backend in BACKENDS {
         let output = fix.build("main.l", backend, false);
         assert!(!output.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("función no definida: helper"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función no definida: helper"),
+            "{backend}: {stderr}"
+        );
     }
 }
