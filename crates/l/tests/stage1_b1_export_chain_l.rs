@@ -232,11 +232,6 @@ fn b1_lir_unsupported_marker_is_public_for_actual_consumers() {
     );
     assert!(public.is_empty(), "{public}");
 
-    // Marking unsupported is needed across modules; this does not expose
-    // the neighbouring mutable block-table allocator.
-    assert_private(
-        &dir,
-        "private_lir_blocks",
-        "import lir_build\nfn probe(l: &mut LirFn) -> Int { lirBlocks(&mut l, 1); return 0 }\n",
-    );
+    // Do not freeze lirBlocks as private here: other real lowerers invoke
+    // it and a later B1 export must be tested independently.
 }
