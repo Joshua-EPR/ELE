@@ -398,7 +398,11 @@ fn module_graph_out_of_order_and_invalid_edges_are_bounded() {
     let main = r#"
 fn main() -> Int {
     var first: List<Int> = List[]
-    for v in 0..5 { first.push(v) }
+    first.push(0)
+    first.push(2)
+    first.push(3)
+    first.push(4)
+    first.push(5)
     var counts: List<Int> = List[]
     counts.push(2)
     counts.push(1)
@@ -425,6 +429,12 @@ fn main() -> Int {
         if access[4 * 5 + dst] != 0 { return 4 }
     }
     if access[4 * 5 + 4] != 1 { return 5 }
+    // A corrupted count crossing into module 1's adjacency slice must not
+    // grant module 0 access to any dependencies.
+    counts[0] = 3
+    let invalid = moduleAccessBuild(5, &first, &counts, &deps)
+    if invalid[0 * 5 + 2] != 0 { return 6 }
+    if invalid[0 * 5 + 0] != 1 { return 7 }
     return 42
 }
 "#;
