@@ -101,11 +101,9 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
 
 expose flow lirUse(v: edit LirVerifier, l: view LirFn, operand: Int, check: Bool) => Bool {
     if !lirIsVar(operand) {
-        // Negative operands denote real constants, except LIR_NONE.
-        // Neither an unset operand nor an invalid constant is a valid use.
-        if operand == LIR_NONE { return false }
-        let id = lirConstId(operand)
-        return id >= 0 && id < l.consts.length
+        // A constant must have a valid ID and one of the known LIR kinds.
+        // This also rejects LIR_NONE and malformed constant encodings.
+        return lirOperandType(l, operand) != LIR_TY_ERR
     }
     if !lirVarOk(l, operand) { return false }
     if !check { return true }
