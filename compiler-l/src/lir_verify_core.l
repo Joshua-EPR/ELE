@@ -80,12 +80,18 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
             let index_var = 0 - 2 - fields[i]
             if !lirVarOk(l, index_var) || l.vars[index_var].ty != 1 || l.vars[index_var].is_ref { return LIR_TY_ERR }
             let elem = types.types[ty].elem_type
-            if elem < 0 { return LIR_TY_ERR }
+            if elem < 0 || elem >= types.types.length { return LIR_TY_ERR }
             ty = elem
         } else {
             let k = lirStructOf(types, lm, ty)
-            if k < 0 || fields[i] >= lm.st_count[k] { return LIR_TY_ERR }
-            ty = lm.field_ty[lm.st_first[k] + fields[i]]
+            // A malformed LIR module must not access missing or truncated
+            // struct tables. Compare using subtraction before adding indexes.
+            if k < 0 || k >= lm.st_count.length || k >= lm.st_first.length { return LIR_TY_ERR }
+            if fields[i] >= lm.st_count[k] { return LIR_TY_ERR }
+            let first = lm.st_first[k]
+            if first < 0 || first > lm.field_ty.length { return LIR_TY_ERR }
+            if fields[i] >= lm.field_ty.length - first { return LIR_TY_ERR }
+            ty = lm.field_ty[first + fields[i]]
         }
         i -= 1
     }
