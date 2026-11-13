@@ -211,7 +211,7 @@ pub fn lirPathVar(l: &LirFn, path: Int) -> Int {
     return l.path_var[path]
 }
 
-fn lirMarkUnsupported(l: &mut LirFn, offset: Int) {
+expose flow lirMarkUnsupported(l: &mut LirFn, offset: Int) {
     if l.unsupported < 0 { l.unsupported = offset }
 }
 
