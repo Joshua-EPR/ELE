@@ -41,12 +41,12 @@ flow_self_harness.l	backend
 lexer.l	semantica
 lir_build.l	lir
 lir_builtin_union.l	semantica
-lir_emit.l	parser
-lir_finish.l	parser
+lir_emit.l	semantica
+lir_finish.l	semantica
 lir_module.l	parser
-lir_verify.l	parser
+lir_verify.l	semantica
 lir_verify_core.l	lir
-lir_verify_helpers.l	parser
+lir_verify_helpers.l	semantica
 lir_write.l	parser
 loans_check.l	semantica
 loans_l.l	semantica

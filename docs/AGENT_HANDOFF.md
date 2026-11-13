@@ -1,5 +1,103 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-13 — interfaces LIR de Stage 1
+
+`origin/main` verificado tras `git fetch origin --prune`: `ebec0847e938b98f0cc6fea9da5943e66e4e4b04`.
+Los PR #62, #63 y #64 están fusionados; #55 sigue abierto en borrador.
+La cuota de GitHub Actions está agotada. No se hizo push, merge ni se lanzó CI.
+
+La rama **local** `codex/fix-stage1-lir-internal-interfaces`, worktree
+`target/p0-lir-interfaces-20261113`, parte de ese `main` y contiene, en orden:
+
+1. `54236c9` — exporta `lirBlocks` para `lir_finish.l`, `sema_ops.l` y `stmt_lower.l`.
+2. `253402a` — exporta `lirPlaceIndex` para los módulos de colecciones.
+3. `b8080a7` — exporta `lirTypesCompat` para los módulos del verificador.
+4. `0195f0b` — exporta únicamente los nueve símbolos de `lir_verify_core.l`
+   usados realmente por `lir_verify.l`/`lir_verify_helpers.l`; captura la raíz
+   antes de `lirEmit` en `lir_finish.l` para evitar el préstamo `L0012`.
+
+Las pruebas de `stage1_b1_export_chain_l.rs` reprodujeron `L0001` y `L0012`
+antes de las correcciones y pasaron después (14/14). El test negativo conserva
+`lirVerifyInst` privado. `lir_verify.l --check-ownership` ahora termina con
+`errors=0`. El gate de autocobertura midió **91/91 parser, 64/91 semántica y
+ownership, 40/91 LIR y 5/91 nativo**; los cuatro avances de semántica son
+`lir_emit.l`, `lir_finish.l`, `lir_verify.l` y `lir_verify_helpers.l`. Solo esas
+cuatro filas se promovieron en `docs/self_coverage_baseline.tsv`.
+
+Validación local Windows/MSVC sobre `0195f0b` y la línea base promovida:
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`git diff --check`, `stage1_b1_export_chain_l` (14/14),
+`stage1_import_exports_l` (3/3), `self_coverage` (3/3), y
+`cargo test --workspace --no-fail-fast -- --test-threads=1` (exit code 0;
+ninguna prueba fallida, tres microbenchmarks ignorados). El gate
+`python tools/self_coverage_gate.py --baseline docs/SELF_COVERAGE_MATRIX_2026-11-11.md`
+pasó tras la actualización del baseline con 91/64/40/5. Los negativos de
+visibilidad, préstamos, ownership y LIR siguieron aprobando. No se detectó
+regresión en la suite local.
+
+### Worktrees inventariados
+
+`git worktree list --porcelain` enumera 21 worktrees. Los recuentos siguientes
+son de `git status --porcelain` (incluyen cachés `__pycache__`); no se limpió
+ningún árbol ajeno. Rutas relativas bajo `C:/Users/Usuario/Desktop/`.
+
+| Worktree | Rama | Entradas locales |
+| --- | --- | ---: |
+| `ELE` | `feat/native-list-cfg` | 6 |
+| `ELE/.claude/worktrees/agent-a05cd3aeb3be8ebbe` | `chore/project-registry-self-coverage` | 0 |
+| `ELE/.claude/worktrees/agent-a1d76385424054ae7` | `feat/native-pe64-win32-runtime` | 4 |
+| `ELE/.claude/worktrees/agent-a211fa3c9eab69693` | `feat/stage1-lir-lowering-gaps` | 6 |
+| `ELE/.claude/worktrees/agent-a47f84692f572f627` | `feat/stage1-cross-module-types` | 2 |
+| `ELE/.claude/worktrees/agent-a582e948d165bff07` | `fix/stage1-borrow-two-phase-returns` | 8 |
+| `ELE/.claude/worktrees/agent-ab7597703089636e1` | `chore/ele-v2-frontend-sources` | 1 |
+| `ELE/target/handoff-2026-11-12` | `chore/session-handoff-2026-11-12` | 0 |
+| `ELE/target/p0-lir-interfaces-20261113` | `codex/fix-stage1-lir-internal-interfaces` | 1 cache antes de este documento |
+| `ELE/target/verify-pr63-pr64-20261113` | `test/verify-pr63-pr64-20261113` | 2 caches |
+| `ELE-baseline` | `fix/stage1-b2-stmt-span-snapshot` | 0 |
+| `ELE-wt/agent-builtins` | `fix/stage1-b8-write-bytes-builtin` | 1 cache |
+| `ELE-wt/agent-exports` | `fix/stage1-b1-export-chain-after-45-47` | 3 |
+| `ELE-wt/agent-listlit` | `feat/stage1-b3-contextual-empty-list` | 1 cache |
+| `ELE-wt/agent-owned` | `feat/lir-option-result-owned-payloads` | 2 |
+| `ELE-wt/agent-result` | `feat/lir-option-result-dropfree-aggregates` | 2 caches |
+| `ELE-wt/cycle2` | `test/fable-cycle2-integration` | 1 cache |
+| `ELE-wt/fable-append` | `fix/native-append-text-by-value` | 0 |
+| `ELE-wt/fable-b2` | `fix/stage1-b2-native-list-int-snapshot` | 1 cache |
+| `ELE-wt/fable-main` | detached | 1 cache |
+| `ELE-wt/integration` | `integration/fable-cycle-1` | 0 |
+
+Cambios de código ajenos que deben conservarse: el worktree principal tiene
+`native_cfg_loan.l`, `native_cfg_verify.l` y este documento modificados; el
+worktree `agent-owned` tiene `lir_builtin_union.l` y `sema_drop.l` modificados.
+Hay además WIP en los worktrees `agent-a1d76385424054ae7`,
+`agent-a211fa3c9eab69693`, `agent-a47f84692f572f627`,
+`agent-a582e948d165bff07`, `agent-ab7597703089636e1` y `agent-exports`.
+`fable-append` estaba limpio al comprobarlo. No se modificaron esos árboles.
+
+### Bloqueos siguientes
+
+- `sema_collection_ops.l` aún emite varios `L0001` de helpers distintos;
+  `feat/stage1-lir-lowering-gaps` ya tiene cambios locales en ese módulo,
+  así que hay que coordinar o integrar ese trabajo antes de tocarlo.
+- `Result<List<LexToken>, LexError>` y los payloads propietarios siguen sin
+  alcanzar ELE-LIR/nativo con drops demostrados (`L0016`). `agent-owned` tiene
+  WIP, que debe revisarse sin perderlo. No se declara Stage 2 ni self-hosting.
+- El reporte local muestra `L0016` como siguiente fase fallida para `lexer.l`,
+  `lir_emit.l`, `lir_finish.l`, `lir_verify.l` y `lir_verify_helpers.l`; no hay
+  que convertir ese diagnóstico en aceptación sin implementar la semántica.
+- WSL2 devuelve «Acceso denegado» en `wsl --list --quiet`: no se ejecutaron
+  tests nativos Linux y no se afirma ejecución ELF64 sobre Linux.
+
+PR propuesto, aún no creado porque la rama es local y el usuario prohibió
+hacer push: **`fix(stage1): resolve LIR internal module interfaces`**.
+Descripción: exporta solo las dependencias reales de construcción y
+verificación LIR, mantiene privado `lirVerifyInst`, corrige la lectura y
+edición simultáneas en el drop, y eleva cuatro entradas de autocobertura a
+semántica. Debe revisarse antes de fusionar, sin consumir Actions hasta que
+la cuota vuelva a estar disponible. No cierra las issues #3, #4, #5, #8 o
+#31, que siguen parcialmente abiertas.
+
+---
+
 ## Actualización 2026-11-12 — autocobertura Stage 1
 
 **Referencia remota verificada:** `main` = `b61000b24e`
