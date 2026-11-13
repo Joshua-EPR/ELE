@@ -35,7 +35,8 @@ expose flow lirOperandType(l: view LirFn, operand: Int) => Int {
     if kind == LIR_CONST_INT { return 1 }
     if kind == LIR_CONST_BOOL { return 4 }
     if kind == LIR_CONST_UNIT { return 6 }
-    return 5
+    if kind == LIR_CONST_TEXT { return 5 }
+    return LIR_TY_ERR
 }
 
 // LIR struct index of a semantic struct type, or -1.
@@ -92,7 +93,13 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
 }
 
 expose flow lirUse(v: edit LirVerifier, l: view LirFn, operand: Int, check: Bool) => Bool {
-    if !lirIsVar(operand) { return true }
+    if !lirIsVar(operand) {
+        // Negative operands denote real constants, except LIR_NONE.
+        // Neither an unset operand nor an invalid constant is a valid use.
+        if operand == LIR_NONE { return false }
+        let id = lirConstId(operand)
+        return id >= 0 && id < l.consts.length
+    }
     if !lirVarOk(l, operand) { return false }
     if !check { return true }
     // A malformed defined-state table must be rejected, not indexed.
