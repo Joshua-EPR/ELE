@@ -1277,7 +1277,8 @@ pub fn fuzz_pool(semilla: u64, ops: u64) -> Result<InformePool, String> {
                         }
                         vivos.push((s, g2));
                     } else {
-                        p.liberar_hueco(s, &mut ev);
+                        p.liberar_hueco(s, &mut ev)
+                            .map_err(|e| contexto(semilla, paso, &p, e.to_string()))?;
                     }
                 }
             }
