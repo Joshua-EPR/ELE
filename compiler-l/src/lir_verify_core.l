@@ -87,11 +87,12 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
             // A malformed LIR module must not access missing or truncated
             // struct tables. Compare using subtraction before adding indexes.
             if k < 0 || k >= lm.st_count.length || k >= lm.st_first.length { return LIR_TY_ERR }
-            if fields[i] >= lm.st_count[k] { return LIR_TY_ERR }
             let first = lm.st_first[k]
-            if first < 0 || first > lm.field_ty.length { return LIR_TY_ERR }
-            if fields[i] >= lm.field_ty.length - first { return LIR_TY_ERR }
+            let count = lm.st_count[k]
+            if first < 0 || first > lm.field_ty.length || count < 0 { return LIR_TY_ERR }
+            if count > lm.field_ty.length - first || fields[i] >= count { return LIR_TY_ERR }
             ty = lm.field_ty[first + fields[i]]
+            if ty < 0 || ty >= types.types.length { return LIR_TY_ERR }
         }
         i -= 1
     }
