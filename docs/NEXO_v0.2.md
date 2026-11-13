@@ -342,8 +342,8 @@ fiable del conservadurismo del verificador.
 
 ## 8. Bi-Slab: comprobaciones
 
-`tests/bislab.rs` y `maquina.rs` verifican: cabecera de 3 975 B ≤ 4 KiB
-(960 gen + 15 bitmaps + 15 contadores, también como `const assert`);
+`tests/bislab.rs` y `maquina.rs` verifican: cabecera de 4 095 B ≤ 4 KiB
+(960 generaciones + 15 bitmaps de slots libres + 15 bitmaps de huecos reservados + 15 contadores, también como `const assert`);
 superpágina = 4 KiB + 15 × 4 KiB; base alineada a 64 KiB y fija; para tamaños
 64, 72, 96, 128, 200, 1000, 2048, 3000 y 4096 B: ≤ 960 slots por superpágina,
 ningún slot cruza subpágina ni invade la cabecera, alineación 8 B, sin
@@ -381,3 +381,34 @@ densidad y estados de subpágina coherentes tras cada operación
 * Préstamos por campo y disjunción de objetos: no implementados (rechazos
   conservadores).
 * Falta un argumento formal de solidez.
+
+
+## 11. Endurecimiento posterior a la fase 3 (revisión PR #66)
+
+La API pública de Bi-Slab distinguía huecos reservados y slots libres solo
+mediante la paridad de la generación. Ambos estados usan generaciones pares:
+invocar `Pool::reusar_hueco` sobre un slot ordinariamente libre podía
+consumir un permiso inexistente, restar de `self.huecos` y desincronizar
+el bitmap/lista libre. `Pool::liberar_hueco` también permitía una segunda
+liberación sin comprobar el permiso.
+
+Corrección: se reservan 120 B adicionales en la cabecera por superpágina
+para 15 bitmaps de *huecos lineales pendientes* (uno por subpágina).
+El total máximo pasa de 3975 B a 4095 B, todavía dentro de 4096 B.
+Destruir con `hueco=true` marca explícitamente el permiso; reutilizarlo o
+liberarlo exige su presencia y lo consume exactamente una vez. Los errores
+se devuelven como `Aborto` sin mutar la estructura. El invariante comprueba
+la exclusión entre vivo/libre/retirado/hueco reservado.
+
+Pruebas añadidas en `tests/bislab.rs`:
+`un_slot_libre_no_otorga_permiso_de_hueco` y
+`permisos_de_hueco_son_lineales_y_comprobados`.
+También se propagan los errores de `liberar_hueco` desde el runtime y
+el fuzzer directo de pools.
+
+**Estado de validación de estos commits:** código publicado; los resultados
+de 110/110 pruebas y las campañas de fuzzing anteriores no cubren todavía
+esta revisión. Repetir localmente `cargo fmt --all --check`,
+`cargo clippy -p ele-nexo --all-targets -- -D warnings`,
+`cargo test -p ele-nexo -- --test-threads=1` y el fuzz directo de pools
+sobre el HEAD actualizado antes de considerar el PR fusionable.
