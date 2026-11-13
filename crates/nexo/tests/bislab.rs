@@ -74,6 +74,14 @@ fn tamanos_invalidos_y_generacion_inicial_invalida_no_entran_en_panico() {
         "generación inicial impar"
     );
     assert!(Pool::nuevo(0, 1, 64, 1, GEN_RETIRADO).is_err());
+    assert_eq!(
+        Pool::nuevo(0, usize::MAX, 64, 1, 0)
+            .err()
+            .unwrap()
+            .violacion,
+        Violacion::ValorInvalido,
+        "el tamaño del esquema se comprueba sin overflow"
+    );
     assert!(
         Pool::nuevo(1 << 16, 1, 64, 1, 0).is_err(),
         "espacio de pools agotado"

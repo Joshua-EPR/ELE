@@ -230,7 +230,9 @@ impl Pool {
         gen_inicial: u32,
     ) -> Result<Pool, Aborto> {
         if !(crate::ir::TAM_SLOT_MIN..=SUBPAGINA as u32).contains(&tam_slot)
-            || (campos as u64) * 8 > tam_slot as u64
+            || (campos as u64)
+                .checked_mul(8)
+                .is_none_or(|bytes| bytes > tam_slot as u64)
         {
             return abortar(
                 Violacion::ValorInvalido,

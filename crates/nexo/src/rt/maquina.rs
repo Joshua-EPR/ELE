@@ -250,18 +250,20 @@ impl<'p> Maquina<'p> {
 
     /// Destruye un pool comprobando que no queden objetos ni huecos.
     pub fn destruir_pool(&mut self, p: usize) -> R<()> {
-        let pool = self.pools.get_mut(p).and_then(|x| x.take());
-        match pool {
-            None => abortar(Violacion::PoolInexistente, format!("pool {p} inexistente")),
-            Some(x) if x.vivos > 0 || x.huecos > 0 => abortar(
+        let Some(pool) = self.pools.get(p).and_then(|x| x.as_ref()) else {
+            return abortar(Violacion::PoolInexistente, format!("pool {p} inexistente"));
+        };
+        if pool.vivos > 0 || pool.huecos > 0 {
+            return abortar(
                 Violacion::Fuga,
                 format!(
                     "el pool {p} se destruye con {} objetos y {} huecos vivos",
-                    x.vivos, x.huecos
+                    pool.vivos, pool.huecos
                 ),
-            ),
-            Some(_) => Ok(()),
+            );
         }
+        self.pools[p] = None;
+        Ok(())
     }
 
     /// Ejecuta `f` con los pools y argumentos dados. Los pools se ven con el
