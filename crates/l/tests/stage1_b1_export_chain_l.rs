@@ -381,12 +381,20 @@ flow main() => Int {
         seen: List[],
         pending: List[],
         queue: List[],
-        status: 0,
+        status: 0
     )
 
     when lirArgDefined(edit v, view l, -1, false) { give 1 }
     when lirArgDefined(edit v, view l, 0, true) { give 2 }
     when lirUse(edit v, view l, 0, true) { give 3 }
+    when lirUse(edit v, view l, LIR_NONE, false) { give 15 }
+    when lirUse(edit v, view l, -1, false) { give 16 }
+    hold constant = lirConst(edit l, LIR_CONST_INT, 42, 0, 0)
+    when !lirUse(edit v, view l, constant, true) { give 17 }
+    hold malformed = lirConst(edit l, 99, 0, 0, 0)
+    when lirOperandType(view l, malformed) != LIR_TY_ERR { give 18 }
+    hold invalid_value_arg = lirArg(edit l, false, LIR_NONE, false)
+    when lirArgDefined(edit v, view l, invalid_value_arg, false) { give 19 }
 
     hold slot = lirVar(edit l, 1, false)
     when lirUse(edit v, view l, slot, true) { give 4 }
