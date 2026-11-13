@@ -360,3 +360,87 @@ fn b1_lir_verifier_modules_check_ownership_after_internal_exports() {
         assert!(stderr.is_empty(), "{module}: {stderr}");
     }
 }
+
+#[test]
+fn b1_verifier_helpers_reject_out_of_bounds_ids_without_panicking() {
+    // Execute real Stage 1 verifier helpers through the Stage 0 bootstrap.
+    // Invalid argument/place/root IDs must be rejected, even with check=false;
+    // a too-short defined-state table must not cause an out-of-bounds access.
+    let dir = prepare_modules();
+    let entry = dir.join("b1_verifier_helper_runtime.l");
+    fs::write(
+        &entry,
+        r#"take lir_build
+take lir_verify_core
+
+flow main() => Int {
+    change l = lirFnNew()
+    change v = LirVerifier(
+        defined: List[],
+        table: List[],
+        seen: List[],
+        pending: List[],
+        queue: List[],
+        status: 0,
+    )
+
+    when lirArgDefined(edit v, view l, -1, false) { give 1 }
+    when lirArgDefined(edit v, view l, 0, true) { give 2 }
+    when lirUse(edit v, view l, 0, true) { give 3 }
+
+    hold slot = lirVar(edit l, 1, false)
+    when lirUse(edit v, view l, slot, true) { give 4 }
+    when !lirUse(edit v, view l, slot, false) { give 5 }
+
+    hold missing_place_arg = lirArg(edit l, true, 99, false)
+    when lirArgDefined(edit v, view l, missing_place_arg, false) { give 6 }
+    hold wrong_root_place = lirPlaceVar(edit l, 99)
+    hold wrong_root_arg = lirArg(edit l, true, wrong_root_place, false)
+    when lirArgDefined(edit v, view l, wrong_root_arg, true) { give 7 }
+
+    hold place = lirPlaceVar(edit l, slot)
+    hold ref_arg = lirArg(edit l, true, place, false)
+    when lirArgDefined(edit v, view l, ref_arg, true) { give 8 }
+    when !lirArgDefined(edit v, view l, ref_arg, false) { give 9 }
+    hold value_arg = lirArg(edit l, false, slot, false)
+    when lirArgDefined(edit v, view l, value_arg, true) { give 10 }
+    when !lirArgDefined(edit v, view l, value_arg, false) { give 11 }
+
+    v.defined.push(true)
+    when !lirUse(edit v, view l, slot, true) { give 12 }
+    when !lirArgDefined(edit v, view l, ref_arg, true) { give 13 }
+    when !lirArgDefined(edit v, view l, value_arg, true) { give 14 }
+    give 42
+}
+"#,
+    )
+    .unwrap();
+
+    let build_dir = root().join("target/stage1-tests/b1-verifier-helper-runtime");
+    fs::create_dir_all(&build_dir).unwrap();
+    let mut build = Command::new(env!("CARGO_BIN_EXE_l"));
+    build.current_dir(&build_dir).arg("build").arg(&entry);
+    if cfg!(windows) {
+        build.args(["--backend", "cranelift"]);
+    }
+    let built = build.output().unwrap();
+    assert!(
+        built.status.success(),
+        "Stage 0 compilation failed: {}{}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&built.stdout);
+    let exe = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("Build: "))
+        .expect("Stage 0 did not report the executable");
+    let result = Command::new(build_dir.join(exe)).output().unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(42),
+        "verifier guards: {}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
