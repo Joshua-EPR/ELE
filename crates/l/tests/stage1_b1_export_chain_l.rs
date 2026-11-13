@@ -235,3 +235,25 @@ fn b1_lir_unsupported_marker_is_public_for_actual_consumers() {
     // Do not freeze lirBlocks as private here: other real lowerers invoke
     // it and a later B1 export must be tested independently.
 }
+
+#[test]
+fn b1_lir_blocks_is_public_for_actual_consumers_but_index_place_stays_private() {
+    let dir = prepare_modules();
+    for consumer in ["lir_finish.l", "sema_ops.l", "stmt_lower.l"] {
+        assert_consumer(&dir, consumer, "lir_build", "lirBlocks(");
+    }
+
+    let public = check(
+        &dir,
+        "public_lir_blocks",
+        "import lir_build\nflow probe(l: edit LirFn) => Int { lirBlocks(edit l, 1) give 0 }\n",
+        true,
+    );
+    assert!(public.is_empty(), "{public}");
+
+    assert_private(
+        &dir,
+        "private_lir_place_index_after_blocks",
+        "import lir_build\nflow probe(l: edit LirFn) => Int { give lirPlaceIndex(edit l, 0, 0) }\n",
+    );
+}

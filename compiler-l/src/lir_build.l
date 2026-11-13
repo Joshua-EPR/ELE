@@ -191,7 +191,7 @@ pub fn lirEmit(l: &mut LirFn, kind: Int, dst: Int, a: Int, b: Int, c: Int, block
 }
 
 // Make sure the per-block tables cover `blocks` CFG blocks.
-fn lirBlocks(l: &mut LirFn, blocks: Int) {
+expose flow lirBlocks(l: edit LirFn, blocks: Int) {
     while l.cond.length < blocks {
         l.cond.push(LIR_NONE)
         l.swap.push(false)
