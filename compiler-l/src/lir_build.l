@@ -174,7 +174,7 @@ expose flow lirPlaceField(l: &mut LirFn, base: Int, field: Int) => Int {
     return l.places.length - 1
 }
 
-fn lirPlaceIndex(l: &mut LirFn, base: Int, index_var: Int) -> Int {
+expose flow lirPlaceIndex(l: edit LirFn, base: Int, index_var: Int) => Int {
     let slot = l.places[base].root
     let f = 0 - 2 - index_var
     l.places.push(LirPlace(root: slot, parent: base, field: f))
@@ -191,7 +191,7 @@ pub fn lirEmit(l: &mut LirFn, kind: Int, dst: Int, a: Int, b: Int, c: Int, block
 }
 
 // Make sure the per-block tables cover `blocks` CFG blocks.
-fn lirBlocks(l: &mut LirFn, blocks: Int) {
+expose flow lirBlocks(l: edit LirFn, blocks: Int) {
     while l.cond.length < blocks {
         l.cond.push(LIR_NONE)
         l.swap.push(false)
@@ -268,7 +268,7 @@ pub fn lirIsUnitEnum(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
     }
 }
 
-fn lirTypesCompat(types: &TypeTable, lm: &LirModule, a: Int, b: Int) -> Bool {
+expose flow lirTypesCompat(types: view TypeTable, lm: view LirModule, a: Int, b: Int) => Bool {
     // Nominal enums are not integers, including unit-only enums. Emitting
     // enum values as `ciN` is an obsolete Stage 1 shortcut, not a coercion.
     return a == b && a >= 0
