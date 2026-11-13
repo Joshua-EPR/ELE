@@ -176,5 +176,37 @@ class SelfCoverageGateTests(unittest.TestCase):
             self.assertIn("entrypoint", row["native_48_hint"])
 
 
+    def test_native_wrapped_code48_preserves_diagnostic_without_changing_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "library.l"
+            source.write_text("flow example() => Int { give 1 }\n", encoding="utf-8")
+
+            def fake_command(argv, cwd, timeout):
+                if str(argv[0]) == "backend":
+                    return {
+                        "exit_code": 3,
+                        "stdout": "",
+                        "stderr": "ELE-LIR/CFG rechazado (código 48)",
+                    }
+                if "--emit-lir" in argv:
+                    return {
+                        "exit_code": 0,
+                        "stdout": "ELE-LIR 1\nmodule structs 0 funcs 1 main f-1\nend\n",
+                        "stderr": "",
+                    }
+                return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+            with patch.object(gate, "command", side_effect=fake_command):
+                row = gate.probe_source(
+                    source, "library.l", Path("parser"), Path("sema"),
+                    Path("backend"), root, root, 10,
+                )
+            self.assertEqual(row["phases"]["native"]["status"], "fail")
+            self.assertEqual(row["phases"]["native"]["exit_code"], 3)
+            self.assertIn("entrypoint", row["native_48_hint"])
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -165,7 +165,20 @@ def probe_source(
         "source": relative,
         "phases": phases,
         "lir_module": info,
-        "native_48_hint": code48_hint(info, built["exit_code"]),
+        # Stage 0 wrappers may translate an ELE native reject (48) into
+        # a host process exit (3), retaining the original diagnostic.
+        # Derive only an advisory hint; never change the native phase status
+        # or its actual exit code.
+        "native_48_hint": code48_hint(
+            info,
+            48
+            if built["exit_code"] == 48
+            or (
+                built["exit_code"] not in (None, 0)
+                and "ELE-LIR/CFG rechazado (código 48)" in built["stderr"]
+            )
+            else built["exit_code"],
+        ),
     }
 
 
