@@ -58,7 +58,8 @@ fn lirFinishOp(l: &mut LirFn, body: &mut LirBody, graph: &FlowGraph, field_local
         if l.places[place].parent < 0 { return }
         lirEmit(&mut l, LIR_DROPFIELD, -1, place, -1, 0, block, pos)
     } else if l.places[place].parent < 0 {
-        lirEmit(&mut l, LIR_DROP, l.places[place].root, guard, 0, 0, block, pos)
+        let root = l.places[place].root
+        lirEmit(&mut l, LIR_DROP, root, guard, 0, 0, block, pos)
     } else {
         lirEmit(&mut l, LIR_DROPFIELD, -1, place, guard, 0, block, pos)
     }

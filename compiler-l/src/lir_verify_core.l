@@ -1,7 +1,7 @@
 import sema_types
 import lir_build
 
-const LIR_TY_ERR = -1
+pub const LIR_TY_ERR = -1
 
 pub struct LirCheck {
     status: Int
@@ -18,12 +18,12 @@ pub struct LirVerifier {
     status: Int
 }
 
-fn lirVarOk(l: &LirFn, slot: Int) -> Bool {
+expose flow lirVarOk(l: view LirFn, slot: Int) => Bool {
     return slot >= 0 && slot < l.vars.length
 }
 
 // Type of an operand, or LIR_TY_ERR when the id is invalid.
-fn lirOperandType(l: &LirFn, operand: Int) -> Int {
+expose flow lirOperandType(l: view LirFn, operand: Int) => Int {
     if operand == LIR_NONE { return LIR_TY_ERR }
     if lirIsVar(operand) {
         if !lirVarOk(l, operand) || l.vars[operand].is_ref { return LIR_TY_ERR }
@@ -39,7 +39,7 @@ fn lirOperandType(l: &LirFn, operand: Int) -> Int {
 }
 
 // LIR struct index of a semantic struct type, or -1.
-fn lirStructOf(types: &TypeTable, lm: &LirModule, ty: Int) -> Int {
+expose flow lirStructOf(types: view TypeTable, lm: view LirModule, ty: Int) => Int {
     if ty < 0 || ty >= types.types.length { return -1 }
     match types.types[ty].kind {
         SemTypeKind.Struct => {
@@ -55,7 +55,7 @@ fn lirStructOf(types: &TypeTable, lm: &LirModule, ty: Int) -> Int {
 
 // Type of a place (the referent for a reference root), or LIR_TY_ERR.
 // The chain is walked with a step bound so a corrupt cycle terminates.
-fn lirPlaceType(l: &LirFn, types: &TypeTable, lm: &LirModule, place: Int) -> Int {
+expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModule, place: Int) => Int {
     if place < 0 || place >= l.places.length { return LIR_TY_ERR }
     var fields: List<Int> = List[]
     var cursor = place
@@ -91,23 +91,23 @@ fn lirPlaceType(l: &LirFn, types: &TypeTable, lm: &LirModule, place: Int) -> Int
     return ty
 }
 
-fn lirUse(v: &mut LirVerifier, l: &LirFn, operand: Int, check: Bool) -> Bool {
+expose flow lirUse(v: edit LirVerifier, l: view LirFn, operand: Int, check: Bool) => Bool {
     if !lirIsVar(operand) { return true }
     if !lirVarOk(l, operand) { return false }
     return !check || v.defined[operand]
 }
 
-fn lirArgType(l: &LirFn, types: &TypeTable, lm: &LirModule, arg: Int) -> Int {
+expose flow lirArgType(l: view LirFn, types: view TypeTable, lm: view LirModule, arg: Int) => Int {
     if arg < 0 || arg >= l.args.length { return LIR_TY_ERR }
     if l.args[arg].by_ref { return lirPlaceType(l, types, lm, l.args[arg].value) }
     return lirOperandType(l, l.args[arg].value)
 }
 
-fn lirPrintable(ty: Int) -> Bool {
+expose flow lirPrintable(ty: Int) => Bool {
     return ty == 1 || ty == 2 || ty == 4 || ty == 5
 }
 
-fn lirArgDefined(v: &mut LirVerifier, l: &LirFn, arg: Int, check: Bool) -> Bool {
+expose flow lirArgDefined(v: edit LirVerifier, l: view LirFn, arg: Int, check: Bool) => Bool {
     if l.args[arg].by_ref {
         let place = l.args[arg].value
         return !check || v.defined[l.places[place].root]
