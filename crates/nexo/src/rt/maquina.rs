@@ -1207,7 +1207,7 @@ impl<'p> Maquina<'p> {
                 if *partes == 0 {
                     return abortar(Violacion::ValorInvalido, "dividir en 0 partes");
                 }
-                self.pm(p)?.dividir(*partes);
+                self.pm(p)?.dividir(*partes)?;
                 let previa = self.particion.get(&p).copied();
                 self.regiones.push(Region::default());
                 self.hilos.push(0);
