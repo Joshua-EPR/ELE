@@ -475,10 +475,10 @@ flow main() => Int {
         .enumerate()
         .map(|(i, line)| format!("{:>3}: {line}", i + 1))
         .collect::<Vec<_>>()
-        .join("\\n");
+        .join("\n");
     assert!(
         built.status.success(),
-        "Stage 0 fixture failed at {}:\\n{}\\nstdout:\\n{}\\nstderr:\\n{}",
+        "Stage 0 fixture failed at {}:\n{}\nstdout:\n{}\nstderr:\n{}",
         entry.display(),
         numbered_fixture,
         String::from_utf8_lossy(&built.stdout),
