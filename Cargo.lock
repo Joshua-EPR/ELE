@@ -211,6 +211,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ele-nexo"
+version = "0.2.0"
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
