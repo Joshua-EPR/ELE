@@ -229,3 +229,31 @@ fn permisos_de_hueco_son_lineales_y_comprobados() {
     assert_eq!(p.huecos, 0);
     assert_eq!(p.vivos, 0);
 }
+
+#[test]
+fn dividir_rechaza_cantidades_extremas_sin_mutar_el_pool() {
+    let mut ev = Eventos::default();
+    let mut p = Pool::nuevo(0, 1, 64, 4, 0).unwrap();
+    assert_eq!(
+        p.dividir(0).unwrap_err().violacion,
+        Violacion::ValorInvalido
+    );
+    assert_eq!(
+        p.dividir(u32::MAX).unwrap_err().violacion,
+        Violacion::ValorInvalido
+    );
+    assert_eq!(p.particiones(), 0);
+    p.comprobar_invariantes().unwrap();
+
+    p.dividir(2).unwrap();
+    assert_eq!(p.particiones(), 2);
+    assert_eq!(
+        p.dividir(2).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    assert_eq!(p.particiones(), 2);
+    p.unir_particiones();
+    assert_eq!(p.particiones(), 0);
+    let (_slot, _gen) = p.asignar(0, &mut ev).unwrap();
+    p.comprobar_invariantes().unwrap();
+}
