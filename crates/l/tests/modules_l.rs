@@ -389,8 +389,7 @@ fn dependency_type_errors_are_attributed_to_the_dependency() {
 #[test]
 fn module_graph_out_of_order_and_invalid_edges_are_bounded() {
     let graph = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../compiler-l/src/module_graph_l.l"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../compiler-l/src/module_graph_l.l"),
     )
     .unwrap();
     // The real ELE module-graph implementation is compiled unchanged, then
@@ -445,10 +444,7 @@ fn main() -> Int {
         &[("main.l", &source)],
     );
     assert_eq!(stage0.code, Some(42), "{}{}", stage0.stdout, stage0.stderr);
-    let stage1 = check_modules_with_stage1(
-        "graph_out_of_order_stage1",
-        &[("main.l", &source)],
-    );
+    let stage1 = check_modules_with_stage1("graph_out_of_order_stage1", &[("main.l", &source)]);
     assert_eq!(stage1.code, Some(0), "{}", stage1.stderr);
 }
 
@@ -481,8 +477,14 @@ fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
         "main.l",
         &[
             ("common.l", "pub fn answer() -> Int { return 42 }\n"),
-            ("left.l", "import common\npub fn left() -> Int { return 1 }\n"),
-            ("right.l", "import common\npub fn right() -> Int { return 2 }\n"),
+            (
+                "left.l",
+                "import common\npub fn left() -> Int { return 1 }\n",
+            ),
+            (
+                "right.l",
+                "import common\npub fn right() -> Int { return 2 }\n",
+            ),
             (
                 "main.l",
                 "import left\nimport right\nfn main() -> Int { return answer() }\n",
@@ -498,7 +500,10 @@ fn private_name_in_transitive_dependency_is_not_exported() {
         "main.l",
         &[
             ("secret.l", "fn secret() -> Int { return 42 }\n"),
-            ("mid.l", "import secret\npub fn middle() -> Int { return 1 }\n"),
+            (
+                "mid.l",
+                "import secret\npub fn middle() -> Int { return 1 }\n",
+            ),
             (
                 "main.l",
                 "import mid\nfn main() -> Int { return secret() }\n",
