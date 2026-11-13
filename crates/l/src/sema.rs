@@ -202,6 +202,10 @@ struct Env {
 
     fn_templates: Vec<FnTemplate>,
     fn_template_ids: HashMap<String, usize>,
+    /// Generic functions retain their defining module, as non-generic flows do.
+    module_fn_templates: HashMap<(u32, String), usize>,
+    public_fn_templates: HashSet<usize>,
+    ambiguous_private_fn_templates: HashSet<String>,
     fn_instances: RefCell<HashMap<(usize, Vec<Type>), usize>>,
     instantiating_fns: RefCell<Vec<(usize, Vec<Type>)>>,
 
@@ -255,6 +259,15 @@ impl Env {
             .get(&(source_file, name.to_owned()))
             .copied()
             .or_else(|| self.functions.borrow().get(name).copied())
+    }
+
+    /// Stage 0 compatibility: a private generic is always resolved locally;
+    /// an unambiguous legacy import is retained until full module visibility.
+    fn free_template(&self, name: &str, source_file: u32) -> Option<usize> {
+        self.module_fn_templates
+            .get(&(source_file, name.to_owned()))
+            .copied()
+            .or_else(|| self.fn_template_ids.get(name).copied())
     }
 
     fn region_name(&self, r: usize) -> String {
@@ -2869,7 +2882,7 @@ impl Checker<'_> {
                 Ok((target_ty, ValueKind::Convert(Box::new(val), target_ty)))
             };
         }
-        if let Some(&tid) = env.fn_template_ids.get(n) {
+        if let Some(tid) = env.free_template(n, self.source_file) {
             let template = &env.fn_templates[tid];
             let param_names: Vec<String> = template
                 .func
@@ -4677,6 +4690,9 @@ fn declare<'a>(
         sigs: RefCell::new(Vec::new()),
         fn_templates: Vec::new(),
         fn_template_ids: HashMap::new(),
+        module_fn_templates: HashMap::new(),
+        public_fn_templates: HashSet::new(),
+        ambiguous_private_fn_templates: HashSet::new(),
         fn_instances: RefCell::new(HashMap::new()),
         instantiating_fns: RefCell::new(Vec::new()),
         method_templates: Vec::new(),
@@ -4914,11 +4930,45 @@ fn declare<'a>(
         }
         if !f.type_params.is_empty() {
             let tid = env.fn_templates.len();
-            if env.fn_template_ids.insert(f.name.clone(), tid).is_some() {
+            // A private generic can share its spelling with one in another
+            // module. Repeated declarations within a module remain errors.
+            if env
+                .module_fn_templates
+                .insert((f.span.file, f.name.clone()), tid)
+                .is_some()
+            {
                 return Err(err(
                     f.span,
                     format!("función duplicada o reservada: {}", f.name),
                 ));
+            }
+            let previous = env.fn_template_ids.get(&f.name).copied();
+            if f.public || f.span.file == 0 {
+                if previous.is_some_and(|id| env.public_fn_templates.contains(&id))
+                    || (f.span.file == 0 && previous.is_some())
+                {
+                    return Err(err(
+                        f.span,
+                        format!("función duplicada o reservada: {}", f.name),
+                    ));
+                }
+                if f.public {
+                    env.public_fn_templates.insert(tid);
+                }
+                env.fn_template_ids.insert(f.name.clone(), tid);
+            } else if !env.ambiguous_private_fn_templates.contains(&f.name) {
+                match previous {
+                    Some(id) if env.public_fn_templates.contains(&id) => {
+                        // The private template remains visible in its source.
+                    }
+                    Some(_) => {
+                        env.fn_template_ids.remove(&f.name);
+                        env.ambiguous_private_fn_templates.insert(f.name.clone());
+                    }
+                    None => {
+                        env.fn_template_ids.insert(f.name.clone(), tid);
+                    }
+                }
             }
             let p_names: Vec<String> = f.type_params.iter().map(|p| p.name.clone()).collect();
             for tp in &f.type_params {
