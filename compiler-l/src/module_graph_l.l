@@ -1,40 +1,45 @@
-// Reachability of module imports, calculated once after dependency-first load.
-// A module can see its own declarations and declarations from modules in
-// its transitive import closure. Visibility (`pub`) is checked separately.
-// The flat matrix is indexed by importer * module_count + defining_module.
-// This representation does not store pointers into potentially moved lists.
+// Reachability of module imports, calculated once after the loader has built
+// the dependency graph. An importer can see its own declarations and public
+// declarations in its transitive import closure.
 //
-// The loader guarantees dependencies are materialized first, but the visibility
-// matrix should not depend on that incidental ordering. Walk each module's
-// dependency graph explicitly and propagate the transitive closure from the
-// direct imports rather than copying earlier rows via a numeric ordering hack.
+// The matrix is indexed by importer * module_count + defining_module.
+// Each source runs a bounded graph traversal: one queue entry per reachable
+// module, even if multiple import paths reach it (diamonds or cycles). This
+// does not depend on module numbering or a fixed-point scan of every module.
 fn moduleAccessBuild(module_count: Int, first: &List<Int>, counts: &List<Int>, deps: &List<Int>) -> List<Int> {
     var access: List<Int> = List[]
     for i in 0..(module_count * module_count) { access.push(0) }
+
     for m in 0..module_count {
-        access[m * module_count + m] = 1
-    }
-    for m in 0..module_count {
-        var changed = true
-        while changed {
-            changed = false
-            for dep in 0..module_count {
-                let pos = m * module_count + dep
-                if pos < 0 || pos >= access.length || access[pos] == 0 { continue }
-                if dep >= first.length || dep >= counts.length { continue }
-                let dep_start = first[dep]
-                let dep_count = counts[dep]
-                for i in dep_start..(dep_start + dep_count) {
-                    if i < 0 || i >= deps.length { continue }
-                    let next = deps[i]
-                    if next < 0 || next >= module_count { continue }
-                    let next_pos = m * module_count + next
-                    if next_pos < 0 || next_pos >= access.length { continue }
-                    if access[next_pos] == 0 {
-                        access[next_pos] = 1
-                        changed = true
+        let base = m * module_count
+        access[base + m] = 1
+
+        var queue: List<Int> = List[]
+        queue.push(m)
+        var head = 0
+        while head < queue.length {
+            let dep = queue[head]
+            head += 1
+            if dep < 0 || dep >= first.length || dep >= counts.length { continue }
+
+            let start = first[dep]
+            let count = counts[dep]
+            // Malformed dependency metadata must never grant visibility.
+            // Iterate with a remaining counter to avoid start + count overflow.
+            if start < 0 || start > deps.length || count < 0 { continue }
+            var i = start
+            var remaining = count
+            while remaining > 0 && i < deps.length {
+                let next = deps[i]
+                if next >= 0 && next < module_count {
+                    let pos = base + next
+                    if access[pos] == 0 {
+                        access[pos] = 1
+                        queue.push(next)
                     }
                 }
+                i += 1
+                remaining -= 1
             }
         }
     }
