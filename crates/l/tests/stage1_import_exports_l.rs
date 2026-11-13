@@ -147,3 +147,32 @@ fn parser_export_chain_exposes_only_cross_module_entrypoints() {
     // Cross-module private visibility is separately covered by
     // private_loan_helper above. Do not make other helpers public.
 }
+
+#[test]
+fn lir_place_field_is_public_for_actual_cross_module_consumers() {
+    let dir = prepare_imports();
+    let lower = fs::read_to_string(dir.join("sema_lower.l")).unwrap();
+    let finish = fs::read_to_string(dir.join("lir_finish.l")).unwrap();
+    let ops = fs::read_to_string(dir.join("sema_ops.l")).unwrap();
+    for source in [&lower, &finish, &ops] {
+        assert!(source.contains("import lir_build"));
+        assert!(source.contains("lirPlaceField("));
+    }
+
+    check(
+        &dir,
+        "visible_lir_place_field",
+        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceField(&mut l, 0, 0) }\n",
+        true,
+    );
+
+    // The neighbouring indexed-place helper has a distinct contract and is
+    // not exported by this fix. This negative test prevents API widening.
+    let private = check(
+        &dir,
+        "private_lir_place_index_b1",
+        "import lir_build\nfn probe(l: &mut LirFn) -> Int { return lirPlaceIndex(&mut l, 0, 0) }\n",
+        false,
+    );
+    assert!(private.contains("error[L0001]"), "{private}");
+}
