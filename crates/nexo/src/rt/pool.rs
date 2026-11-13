@@ -31,9 +31,11 @@ pub const SUBPAGINAS_DATOS: usize = 15;
 pub const GEN_RETIRADO: u32 = 0xFFFF_FFFE;
 /// Máximo de generaciones que caben en la cabecera junto a los bitmaps.
 pub const MAX_SLOTS_SUPERPAGINA: u32 = 960;
-/// Bytes de cabecera ocupados: generaciones + bitmaps + contadores.
-pub const CABECERA_USADA: u64 =
-    MAX_SLOTS_SUPERPAGINA as u64 * 4 + SUBPAGINAS_DATOS as u64 * 8 + SUBPAGINAS_DATOS as u64;
+/// Bytes de cabecera: generaciones, bitmaps libres, bitmaps de huecos
+/// reservados y contadores; incluso la clase de 64 B cabe en 4 KiB.
+pub const CABECERA_USADA: u64 = MAX_SLOTS_SUPERPAGINA as u64 * 4
+    + SUBPAGINAS_DATOS as u64 * 8 * 2
+    + SUBPAGINAS_DATOS as u64;
 /// Superpáginas máximas por pool (el índice por densidad usa 64 × 64 bits).
 pub const MAX_SUPERPAGINAS: u32 = 64 * 64 / SUBPAGINAS_DATOS as u32;
 /// Pools simultáneos direccionables en el espacio virtual simulado.
@@ -75,6 +77,9 @@ pub enum EstadoSub {
 struct Superpagina {
     gens: Vec<u32>,
     libres: [u64; SUBPAGINAS_DATOS],
+    /// Reserva explícita de huecos lineales: distingue un slot realmente
+    /// reservado de un slot simplemente libre (ambos tienen generación par).
+    huecos_reservados: [u64; SUBPAGINAS_DATOS],
     /// Slots vivos + huecos pendientes por subpágina.
     ocupados: [u8; SUBPAGINAS_DATOS],
     estado: [EstadoSub; SUBPAGINAS_DATOS],
@@ -355,6 +360,7 @@ impl Pool {
             } else {
                 (1u64 << total) - 1
             }; SUBPAGINAS_DATOS],
+            huecos_reservados: [0; SUBPAGINAS_DATOS],
             ocupados: [0; SUBPAGINAS_DATOS],
             estado: [EstadoSub::Reservada; SUBPAGINAS_DATOS],
             datos: std::array::from_fn(|_| None),
@@ -496,6 +502,10 @@ impl Pool {
             return Ok(Destruido::Retirado);
         }
         if hueco {
+            self.sps[sp]
+                .as_mut()
+                .expect("superpágina")
+                .huecos_reservados[j] |= 1u64 << k;
             self.huecos += 1;
         } else {
             self.devolver_a_libres(sp, j, k, ev);
@@ -527,8 +537,12 @@ impl Pool {
         }
     }
 
-    /// Consume un hueco: `gen[s] += 1` (impar) sin tocar la lista libre.
+    /// Consume exclusivamente un hueco reservado. Un slot libre ordinario
+    /// tiene también generación par, pero NO concede permiso de reutilización.
     pub fn reusar_hueco(&mut self, s: u32) -> Result<u32, Aborto> {
+        if s as u64 >= self.capacidad() {
+            return abortar(Violacion::FueraDeLimites, format!("hueco {s} fuera de la reserva"));
+        }
         let (sp, j, k) = self.ubicar(s);
         let total = self.total_sub();
         let campos = self.campos;
@@ -538,6 +552,13 @@ impl Pool {
                 format!("hueco {s} sin superpágina"),
             );
         };
+        let marca = 1u64 << k;
+        if spg.huecos_reservados[j] & marca == 0 {
+            return abortar(
+                Violacion::PermisoInventado,
+                format!("slot {s} sin permiso de hueco reservado"),
+            );
+        }
         let idx = j * total as usize + k;
         if spg.gens[idx] & 1 == 1 || spg.gens[idx] >= GEN_RETIRADO {
             return abortar(
@@ -545,6 +566,17 @@ impl Pool {
                 format!("hueco {s} ya reutilizado o retirado"),
             );
         }
+        // A valid hueco keeps the data subpage committed until consumed.
+        if spg.estado[j] != EstadoSub::Confirmada || spg.datos[j].is_none() {
+            return abortar(
+                Violacion::PaginaDevuelta,
+                format!("hueco {s} en subpágina no confirmada"),
+            );
+        }
+        if self.huecos == 0 {
+            return abortar(Violacion::ValorInvalido, "contador de huecos incoherente");
+        }
+        spg.huecos_reservados[j] &= !marca;
         spg.gens[idx] += 1;
         if let Some(d) = spg.datos[j].as_mut() {
             for w in &mut d[k * campos..(k + 1) * campos] {
@@ -557,10 +589,30 @@ impl Pool {
         Ok(spg.gens[idx])
     }
 
-    pub fn liberar_hueco(&mut self, s: u32, ev: &mut Eventos) {
+    /// Libera un hueco reservado y lo devuelve a la lista libre.
+    /// Debe fallar sin modificar el pool ante reutilización o doble liberación.
+    pub fn liberar_hueco(&mut self, s: u32, ev: &mut Eventos) -> Result<(), Aborto> {
+        if s as u64 >= self.capacidad() {
+            return abortar(Violacion::FueraDeLimites, format!("hueco {s} fuera de la reserva"));
+        }
         let (sp, j, k) = self.ubicar(s);
+        let Some(spg) = self.sps.get_mut(sp).and_then(|x| x.as_mut()) else {
+            return abortar(Violacion::PaginaDevuelta, format!("hueco {s} sin superpágina"));
+        };
+        let marca = 1u64 << k;
+        if spg.huecos_reservados[j] & marca == 0 {
+            return abortar(
+                Violacion::PermisoInventado,
+                format!("slot {s} sin permiso de hueco reservado"),
+            );
+        }
+        if spg.gens[j * self.slots_por_sub as usize + k] & 1 == 1 || self.huecos == 0 {
+            return abortar(Violacion::ValorInvalido, "estado de hueco incoherente");
+        }
+        spg.huecos_reservados[j] &= !marca;
         self.huecos -= 1;
         self.devolver_a_libres(sp, j, k, ev);
+        Ok(())
     }
 
     /// Acceso a datos con todas las comprobaciones del oráculo.
@@ -736,8 +788,8 @@ impl Pool {
             };
             for j in 0..SUBPAGINAS_DATOS {
                 let g = sp as u32 * SUBPAGINAS_DATOS as u32 + j as u32;
-                if x.libres[j] & !mascara != 0 {
-                    return Err(format!("subpágina {g}: bits libres fuera de rango"));
+                if x.libres[j] & !mascara != 0 || x.huecos_reservados[j] & !mascara != 0 {
+                    return Err(format!("subpágina {g}: bits libres o de hueco fuera de rango"));
                 }
                 let mut v = 0u32;
                 let mut retirados = 0u32;
@@ -745,18 +797,24 @@ impl Pool {
                 for k in 0..total as usize {
                     let g_s = x.gens[j * total as usize + k];
                     let libre = x.libres[j] & (1u64 << k) != 0;
+                    let reservado = x.huecos_reservados[j] & (1u64 << k) != 0;
+                    if libre && reservado {
+                        return Err(format!("subpágina {g}: slot libre y hueco reservado a la vez"));
+                    }
                     if g_s == GEN_RETIRADO {
                         retirados += 1;
-                        if libre {
-                            return Err(format!("subpágina {g}: slot retirado en la lista libre"));
+                        if libre || reservado {
+                            return Err(format!("subpágina {g}: slot retirado en lista libre o huecos"));
                         }
                     } else if g_s & 1 == 1 {
                         v += 1;
-                        if libre {
-                            return Err(format!("subpágina {g}: slot vivo en la lista libre"));
+                        if libre || reservado {
+                            return Err(format!("subpágina {g}: slot vivo marcado como libre o hueco"));
                         }
-                    } else if !libre {
+                    } else if reservado {
                         pares_ocupados += 1;
+                    } else if !libre {
+                        return Err(format!("subpágina {g}: slot par ocupado sin permiso de hueco"));
                     }
                 }
                 let libres = x.libres[j].count_ones();
