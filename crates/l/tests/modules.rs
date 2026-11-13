@@ -268,3 +268,37 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     assert!(file.ends_with("intermedio.l"), "{file}");
     assert_eq!((error.span.line, error.span.column), (3, 31));
 }
+
+#[test]
+fn private_functions_with_equal_names_are_resolved_in_their_own_modules() {
+    // Regression for issue #31. Neither Stage 0 backend may conflate the
+    // private helpers of two imported modules. Source syntax is ELE v2.
+    let fix = ModuleFixture::new("private_name_identity");
+    fix.write_file(
+        "a.l",
+        "flow helper() => Int { give 1 }\nexpose flow from_a() => Int { give helper() }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "flow helper() => Int { give 41 }\nexpose flow from_b() => Int { give helper() }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a() + from_b()) }\n",
+    );
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn ambiguous_private_function_is_not_resolved_from_another_module() {
+    let fix = ModuleFixture::new("private_ambiguous");
+    fix.write_file("a.l", "flow helper() => Int { give 1 }\n");
+    fix.write_file("b.l", "flow helper() => Int { give 41 }\n");
+    fix.write_file("main.l", "take a\ntake b\nflow main() { print(helper()) }\n");
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("función no definida: helper"), "{backend}: {stderr}");
+    }
+}
