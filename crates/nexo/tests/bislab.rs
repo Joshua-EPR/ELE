@@ -13,8 +13,9 @@ const TAMS: [u32; 9] = [64, 72, 96, 128, 200, 1000, 2048, 3000, 4096];
 
 #[test]
 fn cabecera_cabe_en_4_kib() {
-    // 960 gen × 4 B + 15 bitmaps × 8 B + 15 contadores × 1 B.
-    assert_eq!(CABECERA_USADA, 3840 + 120 + 15);
+    // 960 gen × 4 B + dos grupos de 15 bitmaps × 8 B
+    // (libres y huecos reservados) + 15 contadores × 1 B.
+    assert_eq!(CABECERA_USADA, 3840 + 120 + 120 + 15);
     const { assert!(CABECERA_USADA <= CABECERA) };
     assert_eq!(SUPERPAGINA, CABECERA + SUBPAGINAS_DATOS as u64 * SUBPAGINA);
     // Con el slot mínimo (64 B) se usan exactamente las 960 generaciones.
@@ -158,4 +159,73 @@ fn bitmaps_y_devolucion_por_subpagina() {
     assert_eq!(ev.subpaginas_reconfirmadas, 1);
     assert_eq!(p.base, base);
     p.comprobar_invariantes().unwrap();
+}
+
+#[test]
+fn un_slot_libre_no_otorga_permiso_de_hueco() {
+    let mut ev = Eventos::default();
+    let mut p = Pool::nuevo(0, 1, 64, 1, 0).unwrap();
+    let (s, g) = p.asignar(0, &mut ev).unwrap();
+
+    // Un slot devuelto a la lista libre tiene generación par, pero no es
+    // un hueco lineal. Reutilizarlo como hueco corrompería ambos contadores.
+    p.destruir(s, g, false, &mut ev).unwrap();
+    assert_eq!(
+        p.reusar_hueco(s).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    assert_eq!(
+        p.liberar_hueco(s, &mut ev).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    p.comprobar_invariantes().unwrap();
+    assert_eq!(p.huecos, 0);
+    assert_eq!(p.vivos, 0);
+
+    // El camino ordinario continúa funcionando después de los rechazos.
+    let (s2, g2) = p.asignar(0, &mut ev).unwrap();
+    assert_eq!((s2, g2), (s, g + 2));
+    p.comprobar_invariantes().unwrap();
+}
+
+#[test]
+fn permisos_de_hueco_son_lineales_y_comprobados() {
+    let mut ev = Eventos::default();
+    let mut p = Pool::nuevo(0, 1, 64, 1, 0).unwrap();
+    let (s, g) = p.asignar(0, &mut ev).unwrap();
+
+    p.destruir(s, g, true, &mut ev).unwrap();
+    assert_eq!(p.huecos, 1);
+    p.comprobar_invariantes().unwrap();
+
+    // Solo el hueco reservado se puede reutilizar exactamente una vez.
+    assert_eq!(p.reusar_hueco(s).unwrap(), g + 2);
+    assert_eq!(
+        p.reusar_hueco(s).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    assert_eq!(
+        p.liberar_hueco(s, &mut ev).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    p.comprobar_invariantes().unwrap();
+
+    // El siguiente hueco puede devolverse una sola vez a la lista libre.
+    p.destruir(s, g + 2, true, &mut ev).unwrap();
+    p.liberar_hueco(s, &mut ev).unwrap();
+    assert_eq!(
+        p.liberar_hueco(s, &mut ev).unwrap_err().violacion,
+        Violacion::PermisoInventado
+    );
+    assert_eq!(
+        p.reusar_hueco(u32::MAX).unwrap_err().violacion,
+        Violacion::FueraDeLimites
+    );
+    assert_eq!(
+        p.liberar_hueco(u32::MAX, &mut ev).unwrap_err().violacion,
+        Violacion::FueraDeLimites
+    );
+    p.comprobar_invariantes().unwrap();
+    assert_eq!(p.huecos, 0);
+    assert_eq!(p.vivos, 0);
 }
