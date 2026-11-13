@@ -101,3 +101,48 @@ fn only_required_cross_module_helper_apis_are_visible() {
     );
     assert!(private.contains("error[L0001]"), "{private}");
 }
+
+#[test]
+fn parser_export_chain_exposes_only_cross_module_entrypoints() {
+    let dir = prepare_imports();
+    let decl = fs::read_to_string(dir.join("decl.l")).unwrap();
+    let parser = fs::read_to_string(dir.join("parser.l")).unwrap();
+    assert!(decl.contains("import stmt"));
+    assert!(decl.contains("parseStmt("));
+    assert!(parser.contains("import decl"));
+    assert!(parser.contains("parseDecl("));
+
+    // Real Stage 1 source modules, not dummy interfaces.
+    let types = "import lexer\nimport tokens\nimport cursor\nimport ast\n";
+    check(
+        &dir,
+        "visible_parser_stmt",
+        &format!(
+            "{types}import stmt\nfn probe(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {{ return parseStmt(&mut tree, source, &mut cursor, tokens, 0) }}\n"
+        ),
+        true,
+    );
+    check(
+        &dir,
+        "visible_parser_decl",
+        &format!(
+            "{types}import decl\nfn probe(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {{ return parseDecl(&mut tree, source, &mut cursor, tokens) }}\n"
+        ),
+        true,
+    );
+
+    // parseBlock remains an internal recursive helper, never exported.
+    let stmt = fs::read_to_string(dir.join("stmt.l")).unwrap();
+    assert!(stmt.contains("fn parseBlock("));
+    assert!(!stmt.contains("pub fn parseBlock("));
+    assert!(!stmt.contains("expose flow parseBlock("));
+    let private = check(
+        &dir,
+        "private_parser_block",
+        &format!(
+            "{types}import stmt\nfn probe(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) -> Int {{ return parseBlock(&mut tree, source, &mut cursor, tokens, 0) }}\n"
+        ),
+        false,
+    );
+    assert!(private.contains("error[L0001]"), "{private}");
+}
