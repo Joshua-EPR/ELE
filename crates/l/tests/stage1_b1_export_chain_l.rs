@@ -375,13 +375,20 @@ take lir_verify_core
 take sema_types
 
 flow main() => Int {
-    change l = lirFnNew()
-    change v = LirVerifier(
-        defined: List[],
-        table: List[],
-        seen: List[],
-        pending: List[],
-        queue: List[],
+    change l: LirFn = lirFnNew()
+    // Keep generic empty-list element types explicit across the module
+    // boundary. These are five distinct owned buffers, moved into v.
+    change defined: List of[Bool] = List[]
+    change table: List of[Bool] = List[]
+    change seen: List of[Bool] = List[]
+    change pending: List of[Bool] = List[]
+    change queue: List of[Int] = List[]
+    change v: LirVerifier = LirVerifier(
+        defined: defined,
+        table: table,
+        seen: seen,
+        pending: pending,
+        queue: queue,
         status: 0
     )
 
