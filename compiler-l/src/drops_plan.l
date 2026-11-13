@@ -15,11 +15,11 @@ import loans_l
 // function entry, set when the leaf is initialized or written and cleared
 // when it is moved or dropped (Stage 0 `drops::elaborate`).
 
-const DROP_OP_DROP = 0
-const DROP_OP_COND = 1
-const DROP_OP_SET = 2
-const DROP_OP_CLEAR = 3
-const DROP_OP_REF = 4
+pub const DROP_OP_DROP = 0
+pub const DROP_OP_COND = 1
+pub const DROP_OP_SET = 2
+pub const DROP_OP_CLEAR = 3
+pub const DROP_OP_REF = 4
 
 pub struct DropOp {
     kind: Int

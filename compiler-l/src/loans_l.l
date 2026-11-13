@@ -7,7 +7,7 @@ import flow_cfg
 // names the loan it carries, or -1 for an owner.
 
 // Line (1-based) of a byte offset. Only used when a diagnostic is built.
-fn loanLineAt(source: &Text, offset: Int) -> Int {
+pub fn loanLineAt(source: &Text, offset: Int) -> Int {
     var line = 1
     var i = 0
     while i < offset && i < source.byteLength {
@@ -18,7 +18,7 @@ fn loanLineAt(source: &Text, offset: Int) -> Int {
 }
 
 // Column (1-based, code points) of a byte offset, as the CLI reports it.
-fn loanColAt(source: &Text, offset: Int) -> Int {
+pub fn loanColAt(source: &Text, offset: Int) -> Int {
     var col = 1
     var i = 0
     while i < offset && i < source.byteLength {
@@ -39,7 +39,7 @@ fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int
     return id
 }
 
-fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
+pub fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
     if loan < 0 || loan >= graph.loans.length { return false }
     return graph.loans[loan].kind == LOAN_MUT
 }
@@ -71,7 +71,7 @@ fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, sta
 
 // The storage a place denotes. A projection below a reference binding is
 // replayed on the place borrowed by the binding's loan.
-fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
+pub fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
     if path < 0 || path >= graph.paths.length { return -1 }
     let loan = loanOfPath(graph, path)
     if loan < 0 { return path }
