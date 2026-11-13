@@ -269,10 +269,14 @@ fn parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens
         parserSkipNewlines(&mut cursor, tokens)
         let val = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
         let end_pos = astExprEnd(&tree, val, op_e)
-        return astAddStmt(&mut tree, AstStmtKind.Assign, tree.expressions[e].start, end_pos, e, op_s, op_e, val, 0)
+        // Read the target span before lending `tree` exclusively to astAddStmt.
+        let target_start = tree.expressions[e].start
+        return astAddStmt(&mut tree, AstStmtKind.Assign, target_start, end_pos, e, op_s, op_e, val, 0)
     }
 
     let explicit_semi = parserTakeSymbol(source, &mut cursor, tokens, ";")
     let semi_flag = selectInt(explicit_semi, 1, 0)
-    return astAddStmt(&mut tree, AstStmtKind.Expr, tree.expressions[e].start, tree.expressions[e].end, e, semi_flag, 0, 0, 0)
+    let expr_start = tree.expressions[e].start
+    let expr_end = tree.expressions[e].end
+    return astAddStmt(&mut tree, AstStmtKind.Expr, expr_start, expr_end, e, semi_flag, 0, 0, 0)
 }
