@@ -4,8 +4,9 @@
 //!   reservan dentro de `[base, base + max_superpaginas · 64 KiB)`.
 //! * Superpágina de 64 KiB alineada a 64 KiB:
 //!   - cabecera de 4 KiB: `gen[s]: u32` para cada slot (≤ 960 slots, 3840 B),
-//!     seguida de los 15 bitmaps de slots libres (`u64`, 120 B) y los
-//!     contadores de ocupación (15 B). La cabecera nunca se devuelve al SO.
+//!     15 bitmaps de slots libres (120 B), 15 bitmaps de huecos lineales
+//!     reservados (120 B) y contadores de ocupación (15 B): 4095 B.
+//!     La cabecera nunca se devuelve al SO.
 //!   - 15 subpáginas físicas de datos de 4 KiB; ningún slot cruza subpáginas.
 //! * `gen[s]`: bit bajo 1 = vivo, 0 = libre; `0xFFFF_FFFE` = retirado por
 //!   agotamiento de generación (nunca se reutiliza; no hay *wraparound*).
