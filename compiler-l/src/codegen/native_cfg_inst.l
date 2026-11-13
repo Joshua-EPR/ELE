@@ -171,12 +171,11 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     when has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
     hold first_type = cfgOperandType(p, f, view inst.a)
     when inst.kind == 10 || inst.kind == 12 {
-        // The source is Int, Bool or Text. A Text variable must come by
-        // reference: by value it would be consumed, which is not lowered.
+        // The source is Int, Bool or Text. As in Stage 0, `append val vN` of a
+        // Text only reads it: the source stays owned and is dropped later.
         change source_type = first_type
         when inst.op >= 0 { source_type = cfgSourcePlaceType(p, f, view inst) }
         when source_type != 0 && source_type != 1 && source_type != cfgTextType() { p.error = 90 }
-        when inst.kind == 12 && inst.op < 0 && inst.a.is_var && source_type == cfgTextType() { p.error = 90 }
     }
     when inst.kind == 11 && dest_type != cfgTextType() { p.error = 91 }
     when inst.kind == 12 || inst.kind == 13 {
@@ -189,6 +188,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         }
         // Appending a buffer to itself would read storage that growth moves.
         when inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
+        when inst.kind == 12 && inst.op < 0 && inst.a.is_var && inst.a.value == inst.place_var { p.error = 93 }
     }
     when inst.kind == 13 && inst.op >= 0 {
         when inst.op >= p.functions[f].vars {
