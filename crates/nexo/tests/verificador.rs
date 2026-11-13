@@ -847,3 +847,18 @@ fn regresion_fuzz_dividir_o_congelar_desde_un_trabajador() {
         rechaza(&f.p, Regla::C5);
     }
 }
+
+#[test]
+fn c6_rechaza_dividir_en_demasiadas_particiones_antes_del_runtime() {
+    let mut f = fx();
+    let mut c = Constructor::nueva("main");
+    let p = c.pool_local("P", f.nodo);
+    let i = c.var("i", Ty::Int);
+    f.p.agregar(c.cuerpo(vec![Stmt::Dividir {
+        pool: p,
+        partes: u32::MAX,
+        indice: i,
+        cuerpo: vec![],
+    }]));
+    rechaza(&f.p, Regla::C6);
+}
