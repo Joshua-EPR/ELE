@@ -406,12 +406,13 @@ Pruebas añadidas en `tests/bislab.rs`:
 También se propagan los errores de `liberar_hueco` desde el runtime y
 el fuzzer directo de pools.
 
-**Estado de validación de estos commits:** código publicado; los resultados
-de 110/110 pruebas y las campañas de fuzzing anteriores no cubren todavía
-esta revisión. Repetir localmente `cargo fmt --all --check`,
-`cargo clippy -p ele-nexo --all-targets -- -D warnings`,
-`cargo test -p ele-nexo -- --test-threads=1` y el fuzz directo de pools
-sobre el HEAD actualizado antes de considerar el PR fusionable.
+**Validación posterior al merge (2026-11-13, Windows/MSVC, `main@57b763c`):**
+las 114 pruebas de `ele-nexo` pasaron, incluidas las dos regresiones de
+huecos. Clippy con `-D warnings` pasó. El primer `cargo fmt --all --check`
+detectó formato pendiente en `pool.rs`; se corrigió mecánicamente y el gate
+de formato pasó después. La campaña acotada con semilla fija 11 ejecutó
+5 000 programas, 200 000 operaciones directas de pool y 500 grafos de
+efectos sin fallos P1/P3/P7/P8.
 
 
 ### Límite de particiones C6 y protección frente a IR hostil
@@ -429,6 +430,7 @@ del prototipo v0.2, no una garantía de que cualquier número inferior
 pueda ejecutarse con los recursos disponibles. Las nuevas regresiones
 comprueban la validación estática y la máquina ante límites extremos.
 
-**Estas pruebas nuevas siguen sin ejecutarse localmente en el HEAD revisado**;
-el resultado previo de las 110 pruebas pertenece al commit original
-`d4947d3`. No usar esos resultados como prueba de aprobación de estos cambios.
+Las regresiones de C6 y de división repetida están incluidas en las 114
+pruebas ejecutadas sobre `main@57b763c`. Esta validación acredita el modelo
+abstracto y sus invariantes comprobadas; no acredita un allocator físico,
+paralelismo real, un modelo de memoria débil ni una prueba formal de solidez.
