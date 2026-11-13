@@ -394,6 +394,9 @@ flow main() => Int {
     when !lirUse(edit v, view l, constant, true) { give 17 }
     hold malformed = lirConst(edit l, 99, 0, 0, 0)
     when lirOperandType(view l, malformed) != LIR_TY_ERR { give 18 }
+    when lirUse(edit v, view l, malformed, false) { give 27 }
+    hold malformed_arg = lirArg(edit l, false, malformed, false)
+    when lirArgDefined(edit v, view l, malformed_arg, false) { give 28 }
     hold invalid_value_arg = lirArg(edit l, false, LIR_NONE, false)
     when lirArgDefined(edit v, view l, invalid_value_arg, false) { give 19 }
 
