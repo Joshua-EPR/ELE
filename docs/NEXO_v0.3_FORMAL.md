@@ -606,14 +606,35 @@ ReclaimPending | Returned`; `ReclaimPending → Returned | Committed`; `Returned
 → Committed`. `check_invariants` verifica la
 combinación lógico×físico de cada subpágina.
 
-**Contratos.**
-- *Destrucción lógica*: `destroy(h)` devuelve `Err((h, e))` solo antes del
-  punto sin retorno (avance de generación) y entonces `h` vuelve intacto;
-  `Ok(DestroyReport)` significa que la identidad antigua quedó invalidada para
-  siempre, y separa el estado de la reclamación y del espejo de cabecera.
-  `Handle` es lineal (no `Copy`/`Clone`): la doble destrucción no compila.
-- *Hueco*: `reuse_hole`/`release_hole` siguen el mismo contrato con
-  `HoleToken`; ningún error pierde ni duplica el token.
+**Contratos y arquitectura de dos fases (Fase A / Fase B).**
+- *Destrucción lógica*: `destroy(h)` sigue una separación estricta en dos fases:
+  1. **Fase A (Prevalidación y preparación)**: Se valida pertenencia de `h`,
+     superpágina inicializada (`meta()`), generación viva coincidente,
+     decremento exacto `next_live = self.live.checked_sub(1)` (rechaza underflow con
+     `PoolError::Invariant`), ausencia de ocupación espuria (`occupied[sub] == 0`),
+     incremento exacto de huecos `next_holes = self.holes.checked_add(1)` (rechaza
+     overflow con `PoolError::OutOfSpace` si `hole == true`), y consistencia de bitmaps.
+     Cualquier error en Fase A devuelve `Err((h, e))` con `h` completamente intacto
+     y sin mutación lógica ni física.
+  2. **Fase B (Commit lógico irrevocable)**: Aplica de forma infalible la transición:
+     invalida la generación lógica del slot (`generation::destroy`), actualiza los
+     bitmaps libres/ocupados y sincroniza los contadores de seguridad `live` y `holes`.
+     Una vez alcanzada la Fase B, `h` queda consumido y nunca puede ser devuelto al
+     llamador.
+  3. **Efectos físicos post-commit**: La escritura del espejo físico de cabecera y el
+     reclaim físico ocurren tras el commit lógico; si fallan, se reportan mediante
+     `DestroyReport` (`HeaderStatus::Stale`, páginas en `ReclaimPending`), garantizando
+     que la capacidad lineal permanezca consumida sin inconsistencias.
+- *Hueco*: `reuse_hole` y `release_hole` implementan idéntica disciplina de dos fases
+  con `HoleToken`:
+  - En `reuse_hole`, la Fase A prevalida el token, calcula `holes.checked_sub(1)` y
+    `live.checked_add(1)`, y efectúa la puesta a cero física del slot (`space_mut()?.fill(0)`)
+    antes de mutar metadatos lógicos. Si falla, retorna `Err((token, e))` con el token intacto.
+    La Fase B consume el token, limpia el bit de hueco, publica la nueva generación viva y
+    actualiza contadores.
+  - En `release_hole`, la Fase A prevalida el token, la desocupación de la subpágina y
+    `holes.checked_sub(1)`. La Fase B libera el slot y actualiza contadores.
+  Ningún error devuelve una capacidad consumida ni pierde un token intacto.
 - *Reclamación física*: un fallo deja la subpágina `ReclaimPending` con el
   estado físico real; ninguna lectura alcanza objetos destruidos porque toda
   validez se decide por generación en los metadatos lógicos, que nunca
@@ -682,7 +703,7 @@ atómica ni un modelo de memoria de CPU.
 | O1 | El intérprete estructurado refina los pasos pequeños | Tests N01--N28 | Prueba por sentencia y continuaciones |
 | O2 | Preservación R1--R9 | Casos positivos/negativos | Inducción completa y formalización de `Gamma` |
 | O3 | Preservación C1--C6 | Oráculo y regresiones | Prueba por regiones y gránulos |
-| O4 | Linealidad de dueños, pools y huecos | Análisis lineal y tests | Cubrir joins, retornos, llamadas y errores |
+| O4 | Linealidad de dueños, pools y huecos | Análisis lineal, disciplina Fase A/B, tests A01–A12 y unitarias | Cubrir joins, retornos, llamadas y errores en compilador |
 | O5 | Sonoridad/completitud conservadora de efectos | Punto fijo y P4/P8 | Relación sentencia-contador, indirectas |
 | O6 | Drops deterministas y sin fuga en toda salida | Elaboración/drop flags | Orden formal y prueba de todas las salidas |
 | O7 | Limpieza de congelación, ligados y diferidos al abortar | Parcial en ejecución normal | Semántica de unwinding/error y pruebas |
@@ -692,10 +713,10 @@ atómica ni un modelo de memoria de CPU.
 | O11 | Layout físico cabe y está alineado | Aún dependiente del backend | Aserciones de offsets/tamaños por plataforma |
 | O12 | `unsafe` respeta aliasing y validez | No aplica al abstracto | Auditoría de cada bloque físico |
 | O13 | Correspondencia I11 | Arnés diferencial tras cada operación (identidad, valores, contadores, refinamiento de páginas), S12, fuzz Windows y Linux | Prueba de simulación |
-| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, S01–S12, PFS01–PFS12 y fuzz con fallos | Argumento formal por transición; no se provocó un fallo parcial real del kernel (PFS es simulación adversarial) |
+| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, S01–S12, PFS01–PFS12, A01–A12 y fuzz con fallos | Argumento formal por transición; no se provocó un fallo parcial real del kernel (PFS es simulación adversarial) |
 | O15 | Reclaim hace datos inaccesibles | Seguimiento físico por página, pruebas de `AddressSpace` (Windows y Linux reales) | Prueba de que ninguna ruta accede a `Protected`/`Discarded` |
 | O16 | No quedan mappings al destruir pool | F16, S09, cierre propietario reintentable, reintentos acotados y diagnóstico terminal de `Drop` | Un rechazo persistente del kernel todavía puede filtrar la reserva; `Drop` no puede devolver el error |
-| O17 | Progreso sin pánicos internos | Sin pánicos en las campañas | Justificar los `expect` de `pool.rs` (superpágina inicializada) |
+| O17 | Progreso sin pánicos internos | Sin pánicos en campañas; tipos testigo `SuperpageIndex` y `Result` en `meta`/`meta_mut` eliminaron todos los `expect` en `pool.rs` | Auditorías en máquina y verificador |
 | O18 | Concurrencia nativa | Fuera de v0.2 | Modelo de memoria y primitivas sincronizadas |
 
 ## 12. Correspondencia con pruebas existentes

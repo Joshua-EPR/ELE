@@ -1,5 +1,57 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-14 — Auditoría final de seguridad: atomicidad en dos fases (Fase A / Fase B), separación de contadores y casos adversariales A01–A12 (PR #69)
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
+
+### 1. Auditoría de atomicidad de capacidades lineales y corrección arquitectónica
+
+Se rediseñaron integralmente las operaciones propietarias del allocator físico (`crates/nexo/src/physical/pool.rs`) bajo una arquitectura formal en dos fases:
+- **Fase A (Prevalidación y preparación sin mutaciones lógicas)**:
+  - Todo chequeo de identidad, generación, inicialización de metadatos (`meta()`), límites de capacidad, comprobaciones de subpágina no ocupada y cálculo exacto de contadores (`checked_add`, `checked_sub`) se realiza antes de aplicar cualquier mutación lógica.
+  - En `reuse_hole`, la puesta a cero física del slot (`space_mut()?.fill(...)`) se ejecuta en Fase A.
+  - Si cualquier precondición, comprobación o efecto físico preliminar falla, la función retorna `Err((capacidad, error))` con el `Handle` o `HoleToken` exactamente intacto y sin que el pool haya alterado ninguna generación, bitmap o contador.
+- **Fase B (Commit lógico irrevocable)**:
+  - Una vez superada la Fase A, la transición de estado es infalible e irreversible: se invalida o avanza la generación del slot, se actualizan bitmaps de ocupados/libres, y se sincronizan los contadores `live` y `holes`.
+  - La capacidad queda consumida de manera permanente y jamás es devuelta dentro de un `Err`.
+  - Los efectos secundarios físicos post-commit (escritura del espejo de cabecera y descarte/reclaim físico por página) se aíslan completamente: si el kernel o el backend físico fallan, el error se reporta de forma estructurada en `DestroyReport` (`HeaderStatus::Stale`, páginas en `ReclaimPending`), conservando la destrucción irrevocable de la capacidad lineal sin comprometer la coherencia interna.
+
+### 2. Separación de contadores de seguridad y métricas de telemetría
+
+- Se eliminaron todos los `saturating_sub` sobre contadores de estado de seguridad:
+  - `self.live` y `self.holes` usan `checked_sub(1)` en Fase A; un subdesbordamiento es rechazado explícitamente con `PoolError::Invariant`.
+  - `self.live.checked_add(1)` en `allocate` y `reuse_hole` previene cualquier desbordamiento de capacidad o colisión de índices (`PoolError::OutOfSpace`).
+  - `self.holes.checked_add(1)` en `destroy` con creación de hueco valida límites de espacio antes de invalidar el objeto.
+- Los contadores de telemetría y diagnóstico (`alloc_count`, `destroy_count`, `bytes_allocated`, `reclaim_cycles`, etc.) se mantienen aislados y protegidos mediante `saturating_add`, garantizando que métricas acumulativas no provoquen desbordamiento ni afecten la corrección de seguridad.
+
+### 3. Batería de pruebas adversariales A01–A12 (`crates/nexo/tests/adversarial_atomicity.rs`)
+
+Se implementó una suite exhaustiva de 12 pruebas adversariales para auditar y verificar empíricamente los límites y la atomicidad:
+- **A01**: Underflow simulado de `live` en `destroy` es interceptado en Fase A; el `Handle` es devuelto intacto y la generación no sufre alteración.
+- **A02**: Underflow simulado de `holes` en `reuse_hole` o `release_hole` es interceptado en Fase A; el `HoleToken` es devuelto intacto.
+- **A03**: Overflow simulado de `live` en `allocate` es rechazado antes de publicar cualquier slot o alterar páginas físicas.
+- **A04**: Overflow simulado de `holes` en `destroy` con hueco rechaza la operación sin consumir ni invalidar el `Handle`.
+- **A05**: Error de metadatos ante superpágina desinicializada devuelve la capacidad intacta en Fase A.
+- **A06**: Reutilización exitosa garantizada de una capacidad `HoleToken` tras un fallo previo en Fase A.
+- **A07**: Degradación segura ante fallo forzado de sincronización de cabecera post-commit; retorna `Ok(DestroyReport)` con `HeaderStatus::Stale` y el handle consumido irreversiblemente.
+- **A08**: Generación destruida es permanentemente rechazada por `validate()`, impidiendo revalidaciones stale o ataques ABA.
+- **A09**: Consistencia estricta del `DensityIndex` respecto a los bitmaps de superpáginas a lo largo de ciclos de reserva, huecos y liberación.
+- **A10**: Fallo en espejo no revierte metadatos lógicos.
+- **A11**: Reclamación física pendiente preserva la destrucción lógica del handle.
+- **A12**: Campaña diferencial pseudo-adversarial de 300 operaciones con verificación continua de invariantes de pool.
+
+### 4. Estado de validación dual (Windows y Linux WSL2)
+
+- `cargo fmt --all --check`: aprobado (código 0).
+- `cargo clippy --workspace --all-targets -- -D warnings`: aprobado (código 0).
+- `cargo test -p ele-nexo --test adversarial_atomicity`: 12/12 aprobadas en Windows y Linux.
+- `cargo test -p ele-nexo`: suite completa de NEXO aprobada (203 pruebas en Windows, 204 en Linux).
+- `cargo test --test child_isolation`: 5/5 pruebas de protección física en proceso hijo aisladas y aprobadas en Windows (`0xC0000005`) y Linux (`SIGSEGV`).
+- `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+- Suite completa del workspace validada.
+
+---
+
 ## Actualización 2026-11-14 — Cierre de bloqueos P0 (overflow, tipado meta y probe físico) y validación PR #69
 
 Rama `feat/nexo-v0.3-physical-memory`, worktree

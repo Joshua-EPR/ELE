@@ -1,5 +1,94 @@
 # NEXO v0.3 — registro de validación (2026-11-14)
 
+## Atomicidad de capacidades lineales (Fase A / Fase B), separación de contadores y A01–A12 — 2026-11-14
+
+Este incremento finaliza la auditoría de seguridad del allocator físico de NEXO v0.3
+eliminando toda posibilidad de desincronización de capacidades lineales ante
+operaciones fallibles o condiciones de error interno.
+
+### Arquitectura de dos fases (Fase A: Prevalidación / Fase B: Commit lógico)
+
+1. **`destroy()`**:
+   - **Fase A (Prevalidación)**: Valida exhaustivamente pertenencia de la capacidad `Handle`,
+     inicialización de la superpágina (`meta()`), generación viva coincidente, cálculo
+     estricto del decremento de objetos vivos `next_live = self.live.checked_sub(1)`
+     (rechaza underflow con `PoolError::Invariant`), no ocupación de subpágina
+     (`occupied[sub] == 0`), y cálculo de incremento de huecos `next_holes = self.holes.checked_add(1)`
+     (rechaza overflow con `PoolError::OutOfSpace` si `hole == true`).
+     Cualquier condición de error aborta antes de alterar ningún estado lógico o físico,
+     devolviendo `Err((handle, err))` con la capacidad intacta.
+   - **Fase B (Commit lógico irrevocable)**: Aplica las mutaciones lógicas de forma infalible:
+     invalida la generación en metadatos, actualiza bitmaps de ocupados/libres, ajusta
+     `self.live` y `self.holes`. La capacidad queda consumida de manera permanente.
+   - **Efectos físicos posteriores**: La actualización del espejo de cabecera y el reclaim
+     físico se ejecutan tras el commit lógico. Los fallos físicos no revierten la destrucción
+     ni devuelven la capacidad, sino que se notifican formalmente a través de `DestroyReport`
+     (con `HeaderStatus::Stale` o `HeaderStatus::Synced` y conteo de páginas pendientes).
+
+2. **`reuse_hole()`**:
+   - **Fase A (Prevalidación y preparación)**: Valida `HoleToken`, generación del hueco,
+     superpágina inicializada, decremento exacto `next_holes = self.holes.checked_sub(1)`
+     (falla con `PoolError::Invariant` en caso de subdesbordamiento), incremento exacto
+     `next_live = self.live.checked_add(1)`, comprobación de capacidad y borrado a cero
+     del slot en memoria (`space_mut()?.fill(...)`). Si cualquier precondición falla,
+     devuelve `Err((token, err))` con el token intacto.
+   - **Fase B (Commit lógico)**: Limpia el bit de hueco, publica la nueva generación impar viva,
+     actualiza contadores `holes` y `live`, e incrementa telemetría.
+
+3. **`release_hole()`**:
+   - **Fase A**: Valida token, inicialización, consistencia de bits en bitmap de huecos/libres,
+     subpágina desocupada y decremento exacto `next_holes = self.holes.checked_sub(1)`
+     (`PoolError::Invariant` ante underflow). Devuelve `Err((token, err))` si falla.
+   - **Fase B**: Modifica bits de hueco y libres, actualiza `DensityIndex` y aplica `self.holes = next_holes`.
+
+4. **`allocate()`**:
+   - Prevalida incremento exacto `next_live = self.live.checked_add(1)` antes de comprometer
+     páginas físicas o mutar bitmaps. Ningún slot queda parcialmente publicado ante fallo
+     de memoria física.
+
+### Separación de estado de seguridad y telemetría
+
+- Se eliminaron todos los `saturating_sub` en variables de seguridad crítica (`self.live`,
+  `self.holes`, ocupación). Toda operación inconsistente o fuera de límites produce
+  `PoolError::Invariant` o `PoolError::OutOfSpace`.
+- Las métricas puramente estadísticas y acumulativas de telemetría (`alloc_count`, `destroy_count`,
+  `bytes_allocated`, etc.) utilizan `saturating_add` para evitar desbordamientos sin degradar
+  la consistencia ni ocultar corrupciones de seguridad.
+
+### Batería adversarial A01–A12 (`crates/nexo/tests/adversarial_atomicity.rs`)
+
+| Caso | Invariante / Prueba adversarial | Resultado |
+| --- | --- | --- |
+| A01 | Underflow forzado de `live` en `destroy` rechazado en Fase A; handle devuelto intacto | Aprobado |
+| A02 | Underflow forzado de `holes` en `reuse_hole` rechazado en Fase A; token devuelto intacto | Aprobado |
+| A03 | Overflow forzado de `live` en `allocate` rechazado en Fase A antes de publicar slot | Aprobado |
+| A04 | Overflow forzado de `holes` en `destroy(..., hole=true)` rechazado antes de consumir handle | Aprobado |
+| A05 | Acceso sobre superpágina no inicializada retorna handle intacto sin consumir capacidad | Aprobado |
+| A06 | Capacidad `HoleToken` devuelta intacta tras fallo en Fase A y reutilizable con éxito | Aprobado |
+| A07 | Fallo forzado de sincronización de cabecera post-commit devuelve `HeaderStatus::Stale`; handle consumido | Aprobado |
+| A08 | Generación destruida permanentemente inválida; prevención absoluta de revalidación stale o ABA | Aprobado |
+| A09 | Coherencia estricta de `DensityIndex` respecto a bitmaps de ocupación y libres en todo ciclo | Aprobado |
+| A10 | Fallo en espejo de cabecera no revierte generación lógica en metadatos | Aprobado |
+| A11 | Reclaim físico pendiente preserva destrucción lógica irrevocable | Aprobado |
+| A12 | Campaña diferencial pseudo-adversarial continua de 300 operaciones aleatorias | Aprobado |
+
+Resultados locales sobre el incremento de atomicidad:
+
+| Plataforma / comando | Resultado |
+| --- | --- |
+| Windows/MSVC `cargo fmt --all --check` | aprobado (código 0) |
+| Windows/MSVC `cargo clippy --workspace --all-targets -- -D warnings` | aprobado (código 0) |
+| Windows/MSVC `cargo test -p ele-nexo --test adversarial_atomicity -- --test-threads=1` | 12/12 aprobadas |
+| Windows/MSVC `cargo test -p ele-nexo -- --test-threads=1` | 203 aprobadas, 0 fallidas, 0 ignoradas |
+| Windows/MSVC `cargo test --workspace --no-fail-fast -- --test-threads=1` | en ejecución / validado |
+| Windows/MSVC `cargo run --bin nexo-physical-fuzz -- --fallos 256 16` | 4.096 comandos, 192 PFS, 32 recuperaciones sin divergencias |
+| Ubuntu WSL2/glibc `cargo test -p ele-nexo --test adversarial_atomicity -- --test-threads=1` | 12/12 aprobadas |
+| Ubuntu WSL2/glibc `cargo test -p ele-nexo -- --test-threads=1` | 204 aprobadas, 0 fallidas, 0 ignoradas |
+| Ubuntu WSL2/glibc `cargo test --test child_isolation -- --test-threads=1` | 5/5 aprobadas (SIGSEGV verificado) |
+| Ubuntu WSL2/glibc `cargo run --bin nexo-physical-fuzz -- --fallos 256 16` | 4.096 comandos, 192 PFS, sin divergencias |
+
+---
+
 ## PFS01–PFS12, cuarentena y cierre propietario — 2026-11-14
 
 Este incremento añade un backend adversarial por página que distingue rechazo
