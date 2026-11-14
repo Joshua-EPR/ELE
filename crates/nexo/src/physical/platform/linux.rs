@@ -100,12 +100,25 @@ pub(in crate::physical) fn reserve(
         }
     }
     if suffix != 0 {
-        let suffix_address = (aligned + len) as *mut c_void;
+        let suffix_address = match aligned.checked_add(len) {
+            Some(addr) => addr as *mut c_void,
+            None => {
+                unsafe { munmap(aligned as *mut c_void, total.saturating_sub(prefix)) };
+                return Err(PhysicalError::Overflow);
+            }
+        };
+        let remaining_len = match len.checked_add(suffix) {
+            Some(l) => l,
+            None => {
+                unsafe { munmap(aligned as *mut c_void, total.saturating_sub(prefix)) };
+                return Err(PhysicalError::Overflow);
+            }
+        };
         // SAFETY: suffix_address and suffix describe the page-aligned tail.
         if unsafe { munmap(suffix_address, suffix) } != 0 {
             let error = last_error("munmap alignment suffix");
             // SAFETY: after prefix trimming, this is the remaining live mapping.
-            unsafe { munmap(aligned as *mut c_void, len + suffix) };
+            unsafe { munmap(aligned as *mut c_void, remaining_len) };
             return Err(error);
         }
     }

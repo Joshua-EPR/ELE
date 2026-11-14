@@ -111,8 +111,11 @@ impl FaultPlan {
 
     /// Falla la `n`-ésima ocurrencia (contando desde que se activa el plan).
     pub fn fail_nth(mut self, op: FaultOp, n: u64) -> Self {
-        let base = self.counts[op.index()];
-        self.nth.push((op, base + n));
+        if n > 0
+            && let Some(target) = self.counts[op.index()].checked_add(n)
+        {
+            self.nth.push((op, target));
+        }
         self
     }
 
@@ -140,11 +143,15 @@ impl FaultPlan {
     }
 
     fn schedule(&mut self, op: FaultOp, n: u64, outcome: FaultOutcome) {
-        self.outcomes.push(ScheduledOutcome {
-            op,
-            occurrence: self.counts[op.index()] + n,
-            outcome,
-        });
+        if n > 0
+            && let Some(occurrence) = self.counts[op.index()].checked_add(n)
+        {
+            self.outcomes.push(ScheduledOutcome {
+                op,
+                occurrence,
+                outcome,
+            });
+        }
     }
 
     pub fn stop_failing(&mut self, op: FaultOp) {
@@ -159,8 +166,13 @@ impl FaultPlan {
     }
 
     fn outcome(&mut self, op: FaultOp) -> FaultOutcome {
-        self.counts[op.index()] += 1;
-        let n = self.counts[op.index()];
+        let (next, overflowed) = self.counts[op.index()].overflowing_add(1);
+        if overflowed {
+            self.counts[op.index()] = u64::MAX;
+            return FaultOutcome::Completed;
+        }
+        self.counts[op.index()] = next;
+        let n = next;
         if self.always.contains(&op) || self.nth.iter().any(|(o, k)| *o == op && *k == n) {
             return FaultOutcome::Rejected;
         }
@@ -193,7 +205,11 @@ pub struct OsCalls {
 
 impl OsCalls {
     pub fn total(&self) -> u64 {
-        self.reserve + self.commit + self.protect + self.discard + self.release
+        self.reserve
+            .saturating_add(self.commit)
+            .saturating_add(self.protect)
+            .saturating_add(self.discard)
+            .saturating_add(self.release)
     }
 }
 
@@ -327,9 +343,14 @@ impl AddressSpace {
             .count();
         AddressSpaceMetrics {
             reserved_bytes: self.len(),
-            committed_bytes: committed * self.page_size,
-            accessible_bytes: accessible * self.page_size,
-            quarantined_bytes: self.quarantined.iter().filter(|q| **q).count() * self.page_size,
+            committed_bytes: committed.saturating_mul(self.page_size),
+            accessible_bytes: accessible.saturating_mul(self.page_size),
+            quarantined_bytes: self
+                .quarantined
+                .iter()
+                .filter(|q| **q)
+                .count()
+                .saturating_mul(self.page_size),
             page_size: self.page_size,
             allocation_granularity: self.allocation_granularity,
             os_calls: self.calls,
@@ -404,7 +425,7 @@ impl AddressSpace {
             self.quarantine_unknown(pages.clone());
             return Err(error);
         }
-        self.calls.commit += 1;
+        self.calls.commit = self.calls.commit.saturating_add(1);
         self.pages[pages.clone()].fill(PageAccess::Accessible);
         self.actual_pages[pages.clone()].fill(Some(PageAccess::Accessible));
         self.quarantined[pages].fill(false);
@@ -431,7 +452,7 @@ impl AddressSpace {
             self.quarantine_unknown(pages.clone());
             return Err(error);
         }
-        self.calls.protect += 1;
+        self.calls.protect = self.calls.protect.saturating_add(1);
         self.pages[pages.clone()].fill(PageAccess::Protected);
         self.actual_pages[pages.clone()].fill(Some(PageAccess::Protected));
         self.quarantined[pages].fill(false);
@@ -470,7 +491,7 @@ impl AddressSpace {
                 self.quarantine_unknown(pages.clone());
                 return Err(error);
             }
-            self.calls.protect += 1;
+            self.calls.protect = self.calls.protect.saturating_add(1);
             for p in &mut self.pages[pages.clone()] {
                 if *p == PageAccess::Accessible {
                     *p = PageAccess::Protected;
@@ -488,7 +509,7 @@ impl AddressSpace {
             self.quarantine_unknown(pages.clone());
             return Err(error);
         }
-        self.calls.discard += 1;
+        self.calls.discard = self.calls.discard.saturating_add(1);
         self.pages[pages.clone()].fill(PageAccess::Discarded);
         self.actual_pages[pages.clone()].fill(Some(PageAccess::Discarded));
         self.quarantined[pages].fill(false);
@@ -517,7 +538,7 @@ impl AddressSpace {
                         self.actual_pages[page] = None;
                         return Err(error);
                     }
-                    self.calls.protect += 1;
+                    self.calls.protect = self.calls.protect.saturating_add(1);
                 }
                 Some(PageAccess::Reserved | PageAccess::Discarded) | None => {
                     self.faults.check(FaultOp::Recommit)?;
@@ -526,7 +547,7 @@ impl AddressSpace {
                         self.actual_pages[page] = None;
                         return Err(error);
                     }
-                    self.calls.commit += 1;
+                    self.calls.commit = self.calls.commit.saturating_add(1);
                     self.actual_pages[page] = Some(PageAccess::Accessible);
                     self.faults.check(FaultOp::Protect)?;
                     // SAFETY: la confirmación anterior tuvo éxito.
@@ -534,7 +555,7 @@ impl AddressSpace {
                         self.actual_pages[page] = None;
                         return Err(error);
                     }
-                    self.calls.protect += 1;
+                    self.calls.protect = self.calls.protect.saturating_add(1);
                 }
             }
             self.actual_pages[page] = Some(PageAccess::Protected);
@@ -623,7 +644,7 @@ impl AddressSpace {
             self.quarantined.fill(true);
             return Err(error);
         }
-        self.calls.release += 1;
+        self.calls.release = self.calls.release.saturating_add(1);
         self.released = true;
         self.release_uncertain = false;
         self.pages.fill(PageAccess::Reserved);
@@ -682,7 +703,7 @@ impl AddressSpace {
                         self.quarantined[pages.clone()].fill(true);
                         return Err(error);
                     }
-                    self.calls.commit += 1;
+                    self.calls.commit = self.calls.commit.saturating_add(1);
                     let index = pages.start + relative;
                     self.pages[index] = PageAccess::Accessible;
                     self.actual_pages[index] = Some(PageAccess::Accessible);
@@ -732,7 +753,7 @@ impl AddressSpace {
                         self.quarantined[pages.clone()].fill(true);
                         return Err(error);
                     }
-                    self.calls.protect += 1;
+                    self.calls.protect = self.calls.protect.saturating_add(1);
                     let index = pages.start + relative;
                     self.pages[index] = PageAccess::Protected;
                     self.actual_pages[index] = Some(PageAccess::Protected);
@@ -785,7 +806,7 @@ impl AddressSpace {
                         self.quarantined[pages.clone()].fill(true);
                         return Err(error);
                     }
-                    self.calls.discard += 1;
+                    self.calls.discard = self.calls.discard.saturating_add(1);
                     let index = pages.start + relative;
                     self.pages[index] = PageAccess::Discarded;
                     self.actual_pages[index] = Some(PageAccess::Discarded);
@@ -1092,5 +1113,41 @@ mod tests {
             FaultPlan::new().fail_nth(FaultOp::Reserve, 1),
         );
         assert_eq!(r.err(), Some(PhysicalError::Injected(FaultOp::Reserve)));
+    }
+
+    #[test]
+    fn fault_plan_overflow_and_boundaries_do_not_panic() {
+        let mut plan = FaultPlan::new();
+        // fail_nth with 0 is ignored safely
+        plan = plan.fail_nth(FaultOp::Commit, 0);
+        // fail_nth with u64::MAX does not overflow
+        plan = plan.fail_nth(FaultOp::Commit, u64::MAX);
+        assert_eq!(plan.check(FaultOp::Commit), Ok(()));
+
+        // Test near u64::MAX counter saturation
+        let mut saturated_plan = FaultPlan {
+            nth: Vec::new(),
+            always: Vec::new(),
+            outcomes: Vec::new(),
+            counts: [u64::MAX - 1; N_FAULT_OPS],
+        };
+        assert_eq!(saturated_plan.count(FaultOp::Commit), u64::MAX - 1);
+        assert_eq!(saturated_plan.check(FaultOp::Commit), Ok(()));
+        assert_eq!(saturated_plan.count(FaultOp::Commit), u64::MAX);
+        // Exceeding u64::MAX saturates without panic or wraparound
+        assert_eq!(saturated_plan.check(FaultOp::Commit), Ok(()));
+        assert_eq!(saturated_plan.count(FaultOp::Commit), u64::MAX);
+    }
+
+    #[test]
+    fn os_calls_and_metrics_overflow_safe() {
+        let calls = OsCalls {
+            reserve: u64::MAX,
+            commit: 1,
+            protect: u64::MAX,
+            discard: 10,
+            release: 100,
+        };
+        assert_eq!(calls.total(), u64::MAX);
     }
 }

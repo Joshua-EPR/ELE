@@ -374,7 +374,7 @@ impl Pool {
                 .insert(sp * SUBPAGINAS_DATOS as u32 + j as u32);
         }
         self.asignadores[a].reservadas.push(sp);
-        ev.superpaginas_reservadas += 1;
+        ev.superpaginas_reservadas = ev.superpaginas_reservadas.saturating_add(1);
         Ok(())
     }
 
@@ -409,9 +409,9 @@ impl Pool {
                 spg.datos[j] = Some(vec![Palabra::Int(0); total as usize * self.campos]);
                 spg.estado[j] = EstadoSub::Confirmada;
                 if antes == EstadoSub::Devuelta {
-                    ev.subpaginas_reconfirmadas += 1;
+                    ev.subpaginas_reconfirmadas = ev.subpaginas_reconfirmadas.saturating_add(1);
                 } else {
-                    ev.subpaginas_confirmadas += 1;
+                    ev.subpaginas_confirmadas = ev.subpaginas_confirmadas.saturating_add(1);
                 }
             }
         }
@@ -432,7 +432,7 @@ impl Pool {
         self.asignadores[a].quitar(g, libres_antes, total);
         self.asignadores[a].poner(g, libres_despues, total);
         self.vivos += 1;
-        self.cont.asignaciones += 1;
+        self.cont.asignaciones = self.cont.asignaciones.saturating_add(1);
         let slot = sp as u32 * self.slots_por_superpagina() + idx as u32;
         Ok((slot, gener))
     }
@@ -497,9 +497,9 @@ impl Pool {
         let nueva = spg.gens[idx] + 1;
         spg.gens[idx] = nueva;
         self.vivos -= 1;
-        self.cont.destrucciones += 1;
+        self.cont.destrucciones = self.cont.destrucciones.saturating_add(1);
         if nueva == GEN_RETIRADO {
-            ev.slots_retirados += 1;
+            ev.slots_retirados = ev.slots_retirados.saturating_add(1);
             self.soltar_ocupado(sp, j, ev);
             return Ok(Destruido::Retirado);
         }
@@ -535,7 +535,7 @@ impl Pool {
         if spg.ocupados[j] == 0 && spg.estado[j] == EstadoSub::Confirmada {
             spg.datos[j] = None;
             spg.estado[j] = EstadoSub::Devuelta;
-            ev.subpaginas_devueltas += 1;
+            ev.subpaginas_devueltas = ev.subpaginas_devueltas.saturating_add(1);
         }
     }
 
@@ -590,7 +590,7 @@ impl Pool {
         }
         self.huecos -= 1;
         self.vivos += 1;
-        self.cont.asignaciones += 1;
+        self.cont.asignaciones = self.cont.asignaciones.saturating_add(1);
         Ok(spg.gens[idx])
     }
 
@@ -724,9 +724,9 @@ impl Pool {
     /// `dividir`; se suma al unir).
     pub fn destruye(&mut self, a: usize) {
         if a == 0 {
-            self.epoca_destruccion += 1;
+            self.epoca_destruccion = self.epoca_destruccion.saturating_add(1);
         } else {
-            self.asignadores[a].epoca += 1;
+            self.asignadores[a].epoca = self.asignadores[a].epoca.saturating_add(1);
         }
     }
 
@@ -768,7 +768,7 @@ impl Pool {
         let total = self.total_sub();
         while self.asignadores.len() > 1 {
             let a = self.asignadores.pop().expect("partición");
-            self.epoca_destruccion += a.epoca;
+            self.epoca_destruccion = self.epoca_destruccion.saturating_add(a.epoca);
             self.asignadores[0].sin_reservar.extend(a.sin_reservar);
             for sp in a.reservadas {
                 let spg = self.sps[sp as usize].as_mut().expect("superpágina");
