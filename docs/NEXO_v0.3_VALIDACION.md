@@ -1,4 +1,54 @@
-# NEXO v0.3 — registro de validación (2026-11-13)
+# NEXO v0.3 — registro de validación (2026-11-14)
+
+## PFS01–PFS12, cuarentena y cierre propietario — 2026-11-14
+
+Este incremento añade un backend adversarial por página que distingue rechazo
+previo, aplicación parcial, operación completada con respuesta de error y
+resultado físico ambiguo. Todo el rango afectado queda en cuarentena; el pool
+lo retira del índice de asignación y `repair()` reconcilia cada página antes de
+reintentar el descarte. PFS no afirma haber provocado un fallo parcial real del
+kernel: `Partial` y `CompletedWithError` ejecutan operaciones reales página por
+página y simulan la respuesta adversarial; `Unknown` olvida deliberadamente la
+observación para comprobar la recuperación conservadora.
+
+El cierre explícito conserva la API reintentable y añade `try_close`, que
+devuelve el mismo dueño dentro del error. `Drop` hace como máximo tres intentos
+y registra fallos terminales y bytes posiblemente filtrados. Esto mejora la
+observabilidad, pero no garantiza liberación si el kernel rechaza la operación
+de forma persistente.
+
+Resultados locales ejecutados sobre
+`fb0c58b60cf8ab70377d9305965e5cc6179b297b`, derivado de
+`d6b03289edf9d0888fa11d81c70b7f574de49969`:
+
+| Plataforma / comando | Resultado |
+| --- | --- |
+| Windows/MSVC `cargo fmt --all --check` | aprobado |
+| Windows/MSVC `cargo clippy --workspace --all-targets -- -D warnings` | aprobado |
+| Windows/MSVC `cargo test -p ele-nexo -q -- --test-threads=1` | 185 aprobadas, 0 fallidas |
+| Windows/MSVC `cargo test -p ele-nexo --test partial_failures -- --test-threads=1` | 16/16 PFS aprobadas |
+| Windows/MSVC `cargo test -p ele-nexo --test close_contract -- --test-threads=1` | 7/7 aprobadas |
+| Windows/MSVC `cargo test --workspace --no-fail-fast -q -- --test-threads=1` | 769 aprobadas, 0 fallidas, 3 ignoradas |
+| Windows/MSVC `nexo-physical-fuzz --fallos 256 16` | 4.096 comandos, 192 resultados PFS y 32 recuperaciones de pool, sin divergencias |
+| Ubuntu WSL2/glibc `cargo test -p ele-nexo -q -- --test-threads=1` | 185 aprobadas, 0 fallidas |
+| Ubuntu WSL2/glibc `nexo-physical-fuzz --fallos 256 16` | mismos 4.096/192/32; sin divergencias |
+
+La corrida completa del workspace se guardó en un log local y produjo 85
+líneas `test result: ok`, todas con cero fallos. Se sumaron los contadores de
+esas líneas para obtener 769/3; no se infirió el resultado de un proceso
+interrumpido. La validación Linux se ejecutó dentro de Ubuntu WSL2, no en un
+host Linux independiente. GitHub Actions continúa bloqueado por cuota y no se
+modificaron workflows.
+
+Cobertura nueva relevante: rango de ocho páginas con prefijos de una o varias,
+protección/descarte/recommit parciales, error ambiguo, fallos repetidos durante
+reconciliación, reutilización posterior, cierre incierto, enlaces obsoletos,
+`HoleToken` lineal e invariantes de densidad durante cuarentena.
+
+Limitaciones abiertas: no se provocó un fallo parcial real del kernel; no hay
+Linux externo; `meta`/`meta_mut` todavía dependen de una invariante de
+inicialización no expresada por tipos; un rechazo persistente durante `Drop`
+puede filtrar espacio de direcciones aunque ahora quede contabilizado.
 
 ## Revalidación S01–S12 y Linux/glibc — commit `e5a1ad3`
 
@@ -30,11 +80,12 @@ GitHub Actions está bloqueado por agotamiento de cuota. Los trabajos con cero
 pasos ejecutados no son fallos de compilación y no se modificaron
 `.github/workflows/`. La validación anterior es local.
 
-Limitación central: `FaultPlan` interrumpe antes de cada syscall; S02 sí cubre
-el estado parcial entre dos syscalls (protección aplicada y descarte fallido),
-pero no se fuerza al kernel a fallar después de haber aplicado parcialmente
-una syscall individual. `Drop` tampoco puede reportar un fallo real de
-liberación. Estos riesgos permanecen abiertos.
+Limitación histórica de ese corte: `FaultPlan` solo interrumpía antes de cada
+syscall; S02 cubría el estado parcial entre dos syscalls, no dentro de una. El
+incremento PFS documentado arriba añade simulación adversarial dentro del rango,
+pero sigue sin provocar un fallo parcial real del kernel. `Drop` tampoco puede
+devolver un fallo real de liberación; ahora lo reintenta de forma acotada y lo
+contabiliza si persiste.
 
 Base: `main` en `2712a1b` (incluye NEXO v0.2, PR #66, y el arreglo del
 fixture de Stage 1, PR #67). Entorno: Windows 10 x86-64, Rust 1.99.1,

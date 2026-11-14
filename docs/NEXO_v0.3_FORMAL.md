@@ -584,6 +584,12 @@ se registra solo tras la confirmación del SO de cada paso:
 | `Protected` | sí | no | → `Discarded` (descarte) · → `Accessible` (recommit) |
 | `Discarded` | no | no | → `Accessible` (recommit, contenido a cero) |
 
+Un rango puede llevar además una marca ortogonal `quarantined`. Esta marca no
+afirma un quinto estado del kernel: expresa que la respuesta observada no basta
+para confiar en `PageAccess`. Mientras está activa, la vista pública se limita
+a `Protected`, toda lectura/escritura falla y `reconcile` normaliza cada página
+a un estado conocido e inaccesible antes de retirar la marca.
+
 El estado *lógico* de cada subpágina de datos (`PhysicalPool`):
 
 | Lógico | Confirmada | Acceso físico | Vivos/huecos | Asignable | Reintento | Metadatos conservados |
@@ -591,11 +597,13 @@ El estado *lógico* de cada subpágina de datos (`PhysicalPool`):
 | `Reserved` | no | no | no | sí (commit) | — | generaciones iniciales |
 | `Committed` | sí | `Accessible` | sí, o ninguno si está en la caché diferida | sí | — | todos |
 | `ReclaimPending` | sí | `Accessible` (falló la protección) o `Protected` (falló el descarte) | no | sí (recommit) | sí (`repair`) | todos |
+| `Quarantined` | desconocida | no expuesto por la API | no | no | sí (`repair` página por página) | todos |
 | `Returned` | no | `Discarded` | no | sí (recommit) | — | generaciones, bitmaps, ocupación |
 
 Transiciones legales: `Reserved → Committed`; `Committed → Returned |
-ReclaimPending | Committed(caché)`; `ReclaimPending → Returned |
-Committed`; `Returned → Committed`. `check_invariants` verifica la
+ReclaimPending | Quarantined | Committed(caché)`; `Quarantined →
+ReclaimPending | Returned`; `ReclaimPending → Returned | Committed`; `Returned
+→ Committed`. `check_invariants` verifica la
 combinación lógico×físico de cada subpágina.
 
 **Contratos.**
@@ -616,7 +624,9 @@ combinación lógico×físico de cada subpágina.
 - *Cabecera*: espejo verificado de los metadatos; un fallo de escritura la
   marca sucia sin afectar a la validez.
 - *Cierre*: `close` rechaza fugas; si la liberación falla, el pool sigue abierto
-  y consistente.
+  y consistente. `try_close` consume solo tras éxito y devuelve el mismo dueño
+  en el error. `Drop` hace tres intentos como último recurso y registra de forma
+  agregada un fallo terminal; no puede garantizar liberación persistente.
 
 **Secuencias por plataforma.** Linux: `mprotect(PROT_NONE)` → `madvise(
 MADV_DONTNEED)` (la protección previa es obligatoria porque `madvise` no
@@ -682,9 +692,9 @@ atómica ni un modelo de memoria de CPU.
 | O11 | Layout físico cabe y está alineado | Aún dependiente del backend | Aserciones de offsets/tamaños por plataforma |
 | O12 | `unsafe` respeta aliasing y validez | No aplica al abstracto | Auditoría de cada bloque físico |
 | O13 | Correspondencia I11 | Arnés diferencial tras cada operación (identidad, valores, contadores, refinamiento de páginas), S12, fuzz Windows y Linux | Prueba de simulación |
-| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, S01–S12, fuzz con fallos | Argumento formal por transición; fallos reales del SO (solo inyectados) |
+| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, S01–S12, PFS01–PFS12 y fuzz con fallos | Argumento formal por transición; no se provocó un fallo parcial real del kernel (PFS es simulación adversarial) |
 | O15 | Reclaim hace datos inaccesibles | Seguimiento físico por página, pruebas de `AddressSpace` (Windows y Linux reales) | Prueba de que ninguna ruta accede a `Protected`/`Discarded` |
-| O16 | No quedan mappings al destruir pool | F16, S09, liberación reintentable | Fuga de reserva si `Drop` falla (documentada) |
+| O16 | No quedan mappings al destruir pool | F16, S09, cierre propietario reintentable, reintentos acotados y diagnóstico terminal de `Drop` | Un rechazo persistente del kernel todavía puede filtrar la reserva; `Drop` no puede devolver el error |
 | O17 | Progreso sin pánicos internos | Sin pánicos en las campañas | Justificar los `expect` de `pool.rs` (superpágina inicializada) |
 | O18 | Concurrencia nativa | Fuera de v0.2 | Modelo de memoria y primitivas sincronizadas |
 
