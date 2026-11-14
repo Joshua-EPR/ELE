@@ -504,7 +504,7 @@ impl PhysicalPool {
         }
         let slot_offset = self.data_offset(sp, sub) + bit * self.config.slot_size as usize;
         let slot_size = self.config.slot_size as usize;
-        if let Err(e) = self.space_mut()?.write(slot_offset, &vec![0u8; slot_size]) {
+        if let Err(e) = self.space_mut()?.fill(slot_offset, slot_size, 0) {
             if self.meta(sp).occupied[sub] == 0 {
                 let _ = self.on_empty(sp, sub);
             }
@@ -593,7 +593,7 @@ impl PhysicalPool {
         let slot_size = self.config.slot_size as usize;
         let zeroed = match self.space_mut() {
             Ok(space) => space
-                .write(slot_offset, &vec![0u8; slot_size])
+                .fill(slot_offset, slot_size, 0)
                 .map_err(PoolError::from),
             Err(e) => Err(e),
         };
@@ -974,12 +974,41 @@ impl PhysicalPool {
         }
     }
 
-    /// Espejo de cabecera: reescribe la cabecera completa (4.095 B) en cada
-    /// transición, como la versión anterior.
-    fn mirror(&mut self, sp: usize, _sub: usize, _index: usize) -> HeaderStatus {
-        match self.resync_header(sp) {
-            Ok(()) => HeaderStatus::Synced,
-            Err(e) => HeaderStatus::Stale(e),
+    /// Escritura incremental del espejo: generación, bitmaps y ocupación de la
+    /// subpágina tocada (21 bytes). Un único punto de inyección por
+    /// transición, comprobado antes de escribir nada.
+    fn mirror(&mut self, sp: usize, sub: usize, index: usize) -> HeaderStatus {
+        if self.meta(sp).header_dirty {
+            return match self.resync_header(sp) {
+                Ok(()) => HeaderStatus::Synced,
+                Err(e) => HeaderStatus::Stale(e),
+            };
+        }
+        let meta = self.meta(sp);
+        let generation = meta.generations[index].to_le_bytes();
+        let free = meta.free[sub].to_le_bytes();
+        let holes = meta.holes[sub].to_le_bytes();
+        let occupied = [meta.occupied[sub]];
+        let base = sp * SUPERPAGINA as usize;
+        let result = (|| -> Result<(), PhysicalError> {
+            let space = self.space.as_mut().ok_or(PhysicalError::Released)?;
+            space.inject(super::FaultOp::HeaderWrite)?;
+            space.write(base + index * 4, &generation)?;
+            space.write(base + FREE_OFFSET + sub * 8, &free)?;
+            space.write(base + HOLES_OFFSET + sub * 8, &holes)?;
+            space.write(base + OCCUPIED_OFFSET + sub, &occupied)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.metrics.header_bytes_written += 21;
+                HeaderStatus::Synced
+            }
+            Err(e) => {
+                self.meta_mut(sp).header_dirty = true;
+                self.metrics.header_mirror_failures += 1;
+                HeaderStatus::Stale(e)
+            }
         }
     }
 

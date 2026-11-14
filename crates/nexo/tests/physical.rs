@@ -309,3 +309,56 @@ fn f20_diferencial_largo_con_semilla_fija() {
         }
     }
 }
+
+/// Espejo incremental: tras secuencias aleatorias (asignar, destruir, huecos,
+/// reusar, liberar, fallos de escritura del espejo y reparación) la cabecera
+/// física leída byte a byte coincide con la reconstruida desde los metadatos
+/// (`check_invariants` la compara completa: 960 generaciones, 30 bitmaps y
+/// 15 contadores) en cada superpágina no marcada como sucia, y `repair` deja
+/// todas limpias.
+#[test]
+fn cabecera_fisica_coincide_con_la_esperada_tras_secuencias_aleatorias() {
+    use nexo::physical::{FaultOp, FaultPlan};
+    for seed in [1u64, 0xBEEF, 0x5EED_CAFE] {
+        let mut r = seed;
+        let mut pool = PhysicalPool::new(config(128, 1, 2)).unwrap();
+        let mut vivos = Vec::new();
+        let mut huecos = Vec::new();
+        for paso in 0..3_000 {
+            r = r
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            match (r >> 33) % 8 {
+                0..=2 => {
+                    if let Ok(h) = pool.allocate() {
+                        vivos.push(h);
+                    }
+                }
+                3 | 4 if !vivos.is_empty() => {
+                    let h = vivos.swap_remove((r as usize >> 7) % vivos.len());
+                    if let DestroyOutcome::Hole(t) = pool.destroy(h, r & 1 == 0).unwrap().outcome {
+                        huecos.push(t);
+                    }
+                }
+                5 if !huecos.is_empty() => {
+                    vivos.push(pool.reuse_hole(huecos.pop().unwrap()).unwrap())
+                }
+                6 if !huecos.is_empty() => {
+                    pool.release_hole(huecos.pop().unwrap()).unwrap();
+                }
+                7 => pool
+                    .set_faults(FaultPlan::new().fail_nth(FaultOp::HeaderWrite, 1))
+                    .unwrap(),
+                _ => {
+                    pool.repair().unwrap();
+                }
+            }
+            pool.check_invariants()
+                .unwrap_or_else(|e| panic!("semilla {seed:#x}, paso {paso}: {e:?}"));
+        }
+        pool.set_faults(FaultPlan::new()).unwrap();
+        pool.repair().unwrap();
+        assert_eq!(pool.dirty_headers(), 0);
+        pool.check_invariants().unwrap();
+    }
+}
