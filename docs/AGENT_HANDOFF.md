@@ -1,5 +1,64 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-14 — Cierre de bloqueos P0 (overflow, tipado meta y probe físico) y validación PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`.
+No se modificaron workflows de CI ni se forzó push.
+
+### Bloqueos P0 resueltos
+
+1. **P0.1 — Overflow de contadores y ordinales**:
+   - `FaultPlan`: saturación controlada de `counts` en `u64::MAX` con retorno `FaultOutcome::Completed` en saturación para evitar fallos anómalos o desbordamientos; comprobación `checked_add` en `fail_nth` y `schedule` con guardia `n > 0`.
+   - `OsCalls`: suma saturante en `total()`; incremento con `saturating_add(1)` en todas las transiciones reales y adversariales.
+   - `NEXT_POOL_ID`: reserva atómica con `try_update` que comprueba el límite `u64::MAX`, fallando controladamente con `PoolError::InvalidConfig("pool ID counter exhausted")` en lugar de reiniciar IDs en 0.
+   - `AddressSpaceMetrics`: multiplicaciones de conteos de páginas por tamaño de página protegidas con `saturating_mul`.
+   - `DensityIndex`: guardias estrictas contra `free == 0`, `free > 64`, `free > buckets.len()` y desbordamiento de bits en `summary` o fuera de palabras.
+   - `epoca_destruccion`: avance mediante `saturating_add(1)` y `saturating_add(a.epoca)`. En saturación a `u64::MAX`, la validación de sellos rechaza enlaces obsoletos de forma segura en lugar de permitir colisiones por wraparound.
+   - Métricas de runtime (`rt/metricas.rs` y `rt/maquina.rs`): todas las estadísticas de accesos, revalidaciones, ausencias, lecturas y drop-flags migradas a `saturating_add`.
+   - `platform/linux.rs`: aritmética de alineación y recorte de prefijo/sufijo protegida con `checked_add` y manejo seguro de memoria antes de abortar.
+
+2. **P0.2 — Tipado seguro de `meta()` y `meta_mut()`**:
+   - Eliminados todos los `expect("superpágina inicializada")` de `PhysicalPool`.
+   - Definido el tipo testigo `SuperpageIndex(usize)` para ordinales de superpágina dentro del límite y con inicialización confirmada.
+   - `meta(sp)` y `meta_mut(sp)` retornan ahora `Result<&SuperpageMeta, PoolError>` y `Result<&mut SuperpageMeta, PoolError>`, mapeando accesos fuera de rango o superpáginas no inicializadas a `Err(PoolError::Invariant(...))` sin entrar en pánico.
+   - Incorporados los métodos de inspección y validación `is_superpage_initialized(sp)` y `validate_superpage(sp) -> Result<SuperpageIndex, PoolError>`.
+   - Propagación y preservación segura de capacidades (`Handle`, `HoleToken`) en caso de inconsistencia interna en `destroy`, `reuse_hole`, `release_hole`, `allocate` y las rutinas de reclaim/espejo.
+
+3. **P0.3 — Prueba física en proceso hijo aislado**:
+   - Implementada suite integral en `crates/nexo/tests/child_isolation.rs` (5 pruebas).
+   - Comprobación en proceso hijo: reserva -> confirmación -> escritura/lectura -> desconfirmación/protección -> intento de acceso volátil.
+   - Verificado el comportamiento del hardware/SO ante el fallo de página real:
+     - **Windows/MSVC**: terminación con código `STATUS_ACCESS_VIOLATION` (`0xC0000005`) tanto en lectura como en escritura sobre páginas protegidas.
+     - **Linux (WSL2/glibc)**: terminación por señal `SIGSEGV` (señal 11) capturada mediante `ExitStatusExt::signal()`.
+   - El proceso padre de pruebas permanece completamente aislado e inmune a las excepciones/señales de fallo del hijo.
+   - Ciclo de reconfirmación verificado con éxito (recommit restaura acceso físico).
+   - Capa segura (`AddressSpace::read`, `write`) comprobada rechazando accesos desconfirmados antes de cualquier desreferenciación.
+
+### Validación real ejecutada
+
+- **Windows/MSVC**:
+  - `cargo fmt --all --check`: limpio.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: limpio (0 advertencias).
+  - `cargo test -p ele-nexo -- --test-threads=1`: 191 aprobadas (190 unitarias/integración + 1 doctest), 0 fallidas, 0 ignoradas.
+  - `cargo test --workspace --no-fail-fast -- --test-threads=1`: **779 aprobadas**, 0 fallidas, 3 ignoradas (microbenchmarks de préstamos).
+  - `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+  - `tests/child_isolation.rs`: 5/5 aprobadas con verificación de `0xC0000005`.
+- **Linux (WSL2 / glibc)**:
+  - `cargo test -p ele-nexo -- --test-threads=1`: 192 aprobadas (191 unitarias/integración + 1 doctest, incluyendo prueba específica de Linux), 0 fallidas, 0 ignoradas.
+  - `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+  - `tests/child_isolation.rs`: 5/5 aprobadas con verificación de `SIGSEGV` (señal 11).
+- **GitHub Actions**:
+  - Permanece bloqueado por cuota agotada de la cuenta. No se modificaron workflows de CI.
+
+### Worktrees e integridad del repositorio
+
+- 23 worktrees inventariados y respetados; no se modificó, limpió ni descartó ningún árbol ajeno.
+- El worktree principal `ELE` conserva intacto su estado previo.
+- El trabajo de este incremento queda confinado exclusivamente a `target/nexo-v0.3-physical-memory` sobre `feat/nexo-v0.3-physical-memory`.
+
+---
+
 ## Actualización 2026-11-14 — PFS, cierre propietario y gate de PR #69
 
 Rama `feat/nexo-v0.3-physical-memory`, worktree
