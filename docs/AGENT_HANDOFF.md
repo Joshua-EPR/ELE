@@ -1,5 +1,47 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-13 — NEXO v0.3 físico / PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, basada en `main @ 2712a1b`. El PR #69 está
+abierto como borrador y no debe fusionarse sin autorización. La rama publicada
+llegaba a `9cb8622`; el commit local nuevo `e5a1ad3` alinea los casos de
+seguridad ante fallos físicos como S01–S12 y registra validación Linux/glibc.
+
+Estado implementado: reserva/commit/protección/decommit reales para Windows y
+Linux, allocator Bi-Slab físico, generaciones y huecos lineales, recuperación
+reintentable, espejo físico de cabecera, F01–F20, S01–S12, adaptador y fuzzer
+diferencial, benchmarks, especificación formal y plan de port a ELE. No está
+integrado en Stage 0, Stage 1, ELE-LIR ni ABI; no implica Stage 2 ni
+self-hosting.
+
+Validación real sobre `e5a1ad3`: Windows/MSVC fmt y Clippy workspace limpios;
+`ele-nexo` 160/160; workspace 744 aprobadas, 0 fallidas, 3 ignoradas;
+S01–S12 13/13 contando S02b específico de Windows; fuzzer con fallos 256 ×
+5.000 = 1.280.000 comandos, 127.546 inyecciones, sin divergencias. Ubuntu
+WSL2/glibc: `ele-nexo` 160/160, S01–S12 12/12 y otros 1.280.000 comandos de
+fuzzing con fallos sin divergencias. El kernel WSL2 es 5.10.16 con páginas de
+4 KiB. Falta validación en un host Linux fuera de WSL2 y fallos reales del SO
+dentro de una syscall; la inyección ocurre antes de llamadas nativas.
+
+GitHub Actions está bloqueado por cuota agotada. Los jobs con cero pasos no
+son evidencia de fallo de compilación. No se investigaron ni modificaron
+workflows. El PR debe documentar este bloqueo y permanecer en borrador.
+
+Inventario de 23 worktrees inspeccionado sin modificar árboles ajenos. WIP de
+código que debe conservarse: cinco worktrees `.claude` (PE64, gaps LIR, tipos
+intermódulo, préstamos/retornos y fuentes v2), `ELE-wt/agent-exports` y
+`ELE-wt/agent-owned`. `ELE-wt/fable-append` está limpio en
+`eb436c5` sobre `fix/native-append-text-by-value`; no se perdió el test de
+`native_print_l.rs`. Hay cachés `__pycache__` no rastreadas en varios árboles;
+no se borraron. El worktree principal solo tiene `.claude/` no rastreado.
+
+Siguiente paso: publicar `e5a1ad3` y el commit de este registro, actualizar la
+descripción del PR #69 con los comandos/SHAs finales y la cuota, mantenerlo en
+borrador, y revisar los riesgos pendientes antes de cualquier merge.
+
+---
+
 ## Actualización 2026-11-13 — interfaces LIR de Stage 1
 
 `origin/main` verificado tras `git fetch origin --prune`: `ebec0847e938b98f0cc6fea9da5943e66e4e4b04`.

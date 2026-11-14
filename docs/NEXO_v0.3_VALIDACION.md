@@ -1,5 +1,41 @@
 # NEXO v0.3 — registro de validación (2026-11-13)
 
+## Revalidación S01–S12 y Linux/glibc — commit `e5a1ad3`
+
+La nomenclatura de los casos de seguridad ante fallos físicos parciales se
+alineó como S01–S12. No cambió su semántica: cubren fallo de protección,
+descarte posterior a protección, reintento, fallos repetidos, consumo único de
+destrucción y hueco, enlaces obsoletos, reactivación, cierre, matriz de puntos
+de inyección, espejo de cabecera y equivalencia diferencial recuperada.
+
+Resultados ejecutados sobre `e5a1ad3`:
+
+| Plataforma / comando | Resultado |
+| --- | --- |
+| Windows/MSVC `cargo fmt --all --check` | aprobado |
+| Windows/MSVC `cargo clippy --workspace --all-targets -- -D warnings` | aprobado |
+| Windows/MSVC `cargo test -p ele-nexo -- --test-threads=1` | 160 aprobadas, 0 fallidas |
+| Windows/MSVC `cargo test --workspace --no-fail-fast -- --test-threads=1` | 744 aprobadas, 0 fallidas, 3 ignoradas, exit 0 |
+| Windows/MSVC `cargo test -p ele-nexo --test recuperacion -- --test-threads=1` | 13/13 (S01–S12 + S02b de Windows) |
+| Windows/MSVC `nexo-physical-fuzz --fallos 5000 256` | 1.280.000 comandos, 127.546 inyecciones, sin divergencias |
+| Ubuntu WSL2/glibc `cargo test -p ele-nexo -- --test-threads=1` | 160 aprobadas, 0 fallidas |
+| Ubuntu WSL2/glibc `recuperacion` dentro de la suite | 12/12 S01–S12 |
+| Ubuntu WSL2/glibc `nexo-physical-fuzz --fallos 5000 256` | 1.280.000 comandos, 127.546 inyecciones, sin divergencias |
+
+El toolchain Linux/glibc se instaló dentro de Ubuntu WSL2 y los binarios se
+compilaron y ejecutaron allí; ya no es solo una validación cruzada musl. Sigue
+faltando un host Linux fuera de WSL2.
+
+GitHub Actions está bloqueado por agotamiento de cuota. Los trabajos con cero
+pasos ejecutados no son fallos de compilación y no se modificaron
+`.github/workflows/`. La validación anterior es local.
+
+Limitación central: `FaultPlan` interrumpe antes de cada syscall; S02 sí cubre
+el estado parcial entre dos syscalls (protección aplicada y descarte fallido),
+pero no se fuerza al kernel a fallar después de haber aplicado parcialmente
+una syscall individual. `Drop` tampoco puede reportar un fallo real de
+liberación. Estos riesgos permanecen abiertos.
+
 Base: `main` en `2712a1b` (incluye NEXO v0.2, PR #66, y el arreglo del
 fixture de Stage 1, PR #67). Entorno: Windows 10 x86-64, Rust 1.99.1,
 toolchain `stable-x86_64-pc-windows-msvc`.
