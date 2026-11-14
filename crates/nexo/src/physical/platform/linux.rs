@@ -138,18 +138,29 @@ pub(in crate::physical) unsafe fn protect_none(
     }
 }
 
-pub(in crate::physical) unsafe fn decommit(
+/// En Linux, `madvise(MADV_DONTNEED)` no quita la protección: sin un
+/// `mprotect(PROT_NONE)` previo, la página descartada seguiría siendo
+/// legible (como ceros). `AddressSpace` protege siempre antes de descartar,
+/// de modo que un fallo de `madvise` deja la página `Protected`, nunca
+/// accesible.
+pub(in crate::physical) const PROTECT_BEFORE_DISCARD_REQUIRED: bool = true;
+
+/// Descarta el backing de un rango ya protegido (`PROT_NONE`). Una
+/// reconfirmación posterior (`mprotect(PROT_READ|PROT_WRITE)`) lo ve a cero.
+///
+/// # Safety
+/// El rango está alineado a página y pertenece a una reserva viva.
+pub(in crate::physical) unsafe fn discard(
     base: NonNull<u8>,
     len: usize,
 ) -> Result<(), PhysicalError> {
-    // SAFETY: caller guarantees this is a page-aligned live reservation range.
+    // SAFETY: el llamador garantiza un rango alineado de una reserva viva;
+    // MADV_DONTNEED sobre un mapping anónimo privado PROT_NONE es válido.
     if unsafe { madvise(base.as_ptr().cast(), len, MADV_DONTNEED) } != 0 {
-        return Err(last_error("madvise MADV_DONTNEED"));
+        Err(last_error("madvise MADV_DONTNEED"))
+    } else {
+        Ok(())
     }
-    // Protect only after a successful discard. Thus every error leaves the
-    // range accessible as tracked by AddressSpace; a successful call leaves
-    // it inaccessible and eligible for a later commit.
-    unsafe { protect_none(base, len) }
 }
 
 pub(in crate::physical) unsafe fn release(reservation: &Reservation) -> Result<(), PhysicalError> {

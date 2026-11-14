@@ -118,7 +118,16 @@ pub(in crate::physical) unsafe fn protect_none(
     }
 }
 
-pub(in crate::physical) unsafe fn decommit(
+/// Se conserva la secuencia de v0.3: `VirtualProtect(PAGE_NOACCESS)` y después
+/// `VirtualFree(MEM_DECOMMIT)`. Si el segundo paso falla, la página queda
+/// protegida (`Protected`) y la reclamación es reintentable.
+pub(in crate::physical) const PROTECT_BEFORE_DISCARD_REQUIRED: bool = true;
+
+/// Desconfirma un rango (`MEM_DECOMMIT`).
+///
+/// # Safety
+/// El rango está alineado a página y pertenece a una reserva viva.
+pub(in crate::physical) unsafe fn discard(
     base: NonNull<u8>,
     len: usize,
 ) -> Result<(), PhysicalError> {

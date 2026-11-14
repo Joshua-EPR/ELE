@@ -1,6 +1,9 @@
 //! F01–F20: memoria virtual real y correspondencia con el modelo abstracto.
 
-use nexo::physical::{DestroyOutcome, PageState, PhysicalPool, PoolConfig, PoolError};
+use nexo::physical::{
+    DestroyOutcome, DestroyReport, HeaderStatus, PageState, PhysicalPool, PoolConfig, PoolError,
+    ReclaimStatus,
+};
 use nexo::rt::pool::{Eventos, GEN_RETIRADO, Palabra, Pool, SUPERPAGINA};
 
 fn config(slot_size: u32, fields: usize, max_superpages: u32) -> PoolConfig {
@@ -16,7 +19,7 @@ fn config(slot_size: u32, fields: usize, max_superpages: u32) -> PoolConfig {
 fn f01_reserva_virtual_real_y_base_estable() {
     let mut pool = PhysicalPool::new(config(64, 2, 2)).unwrap();
     let base = pool.base_addr().unwrap();
-    let _ = pool.allocate().unwrap();
+    let _h = pool.allocate().unwrap();
     assert_eq!(pool.base_addr().unwrap(), base);
     assert_eq!(
         pool.address_metrics().unwrap().reserved_bytes,
@@ -35,14 +38,14 @@ fn f03_layout_de_cabecera_y_offsets() {
     let pool = PhysicalPool::new(config(64, 8, 1)).unwrap();
     assert_eq!(pool.slots_per_subpage(), 64);
     assert_eq!(pool.slots_per_superpage(), 960);
-    assert_eq!(960 * 4 + 15 * 8 + 15 * 8 + 15, 4095);
+    assert_eq!(960 * 4 + 15 * 8 + 15 * 8 + 15, nexo::physical::HEADER_USED);
 }
 
 #[test]
 fn f04_confirmacion_de_memoria() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     assert_eq!(pool.address_metrics().unwrap().committed_bytes, 0);
-    pool.allocate().unwrap();
+    let _h = pool.allocate().unwrap();
     assert_eq!(pool.address_metrics().unwrap().committed_bytes, 8192);
 }
 
@@ -50,20 +53,24 @@ fn f04_confirmacion_de_memoria() {
 fn f05_lectura_y_escritura_tipadas() {
     let mut pool = PhysicalPool::new(config(64, 2, 1)).unwrap();
     let handle = pool.allocate().unwrap();
-    pool.write_int(handle, 0, -42).unwrap();
-    pool.write_link(handle, 1, handle.link()).unwrap();
-    assert_eq!(pool.read_int(handle, 0).unwrap(), -42);
-    assert_eq!(pool.read_link(handle, 1).unwrap(), handle.link());
+    pool.write_int(handle.obj(), 0, -42).unwrap();
+    pool.write_link(handle.obj(), 1, handle.link()).unwrap();
+    assert_eq!(pool.read_int(handle.obj(), 0).unwrap(), -42);
+    assert_eq!(pool.read_link(handle.obj(), 1).unwrap(), handle.link());
 }
 
 #[test]
 fn f06_destruccion_segura() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let handle = pool.allocate().unwrap();
-    assert!(matches!(
-        pool.destroy(handle, false),
-        Ok(DestroyOutcome::Free)
-    ));
+    assert_eq!(
+        pool.destroy(handle, false).unwrap(),
+        DestroyReport {
+            outcome: DestroyOutcome::Free,
+            reclaim: ReclaimStatus::Completed,
+            header: HeaderStatus::Synced,
+        }
+    );
     assert_eq!(pool.live_count(), 0);
     pool.check_invariants().unwrap();
 }
@@ -72,9 +79,14 @@ fn f06_destruccion_segura() {
 fn f07_obsoleto_rechazado_antes_de_dereferenciar() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let handle = pool.allocate().unwrap();
+    let obj = handle.obj();
     pool.destroy(handle, false).unwrap();
     assert!(matches!(
-        pool.read_int(handle, 0),
+        pool.read_int(obj, 0),
+        Err(PoolError::StaleGeneration)
+    ));
+    assert!(matches!(
+        pool.revalidate(obj.link()),
         Err(PoolError::StaleGeneration)
     ));
 }
@@ -83,23 +95,34 @@ fn f07_obsoleto_rechazado_antes_de_dereferenciar() {
 fn f08_reutilizacion_lineal_de_hueco() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let first = pool.allocate().unwrap();
-    let DestroyOutcome::Hole(hole) = pool.destroy(first, true).unwrap() else {
+    let (slot, generation) = (first.slot(), first.generation());
+    let DestroyOutcome::Hole(hole) = pool.destroy(first, true).unwrap().outcome else {
         panic!("se esperaba hueco")
     };
     let second = pool.reuse_hole(hole).unwrap();
-    assert_eq!(second.slot, first.slot);
-    assert_eq!(second.generation, first.generation + 2);
+    assert_eq!(second.slot(), slot);
+    assert_eq!(second.generation(), generation + 2);
 }
 
+/// La doble destrucción es imposible con la API segura: `Handle` es lineal
+/// y `destroy` lo consume (ver el doctest `compile_fail` de `Handle`). La
+/// única vía restante es un acceso copiable (`ObjRef`/`Link`) obsoleto, que
+/// no puede destruir ni revalidarse en un dueño, y cuyo acceso se rechaza.
 #[test]
 fn f09_doble_liberacion_rechazada() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let handle = pool.allocate().unwrap();
+    let obj = handle.obj();
     pool.destroy(handle, false).unwrap();
     assert!(matches!(
-        pool.destroy(handle, false),
-        Err(PoolError::DoubleFree)
+        pool.revalidate(obj.link()),
+        Err(PoolError::StaleGeneration)
     ));
+    assert!(matches!(
+        pool.write_int(obj, 0, 1),
+        Err(PoolError::StaleGeneration)
+    ));
+    assert_eq!(pool.metrics().destructions, 1);
     pool.check_invariants().unwrap();
 }
 
@@ -107,8 +130,9 @@ fn f09_doble_liberacion_rechazada() {
 fn f10_subpagina_vacia_devuelta_realmente() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let handle = pool.allocate().unwrap();
+    let slot = handle.slot();
     pool.destroy(handle, false).unwrap();
-    assert_eq!(pool.page_state(handle.slot).unwrap(), PageState::Returned);
+    assert_eq!(pool.page_state(slot).unwrap(), PageState::Returned);
     assert_eq!(pool.address_metrics().unwrap().committed_bytes, 4096);
     assert_eq!(pool.metrics().data_returned, 1);
 }
@@ -117,21 +141,26 @@ fn f10_subpagina_vacia_devuelta_realmente() {
 fn f11_reconfirmacion_de_pagina_devuelta() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let first = pool.allocate().unwrap();
+    let slot = first.slot();
     pool.destroy(first, false).unwrap();
     let second = pool.allocate().unwrap();
-    assert_eq!(second.slot, first.slot);
+    assert_eq!(second.slot(), slot);
     assert_eq!(pool.metrics().data_recommitted, 1);
-    assert_eq!(pool.page_state(second.slot).unwrap(), PageState::Committed);
+    assert_eq!(
+        pool.page_state(second.slot()).unwrap(),
+        PageState::Committed
+    );
 }
 
 #[test]
 fn f12_generaciones_sobreviven_al_reclaim() {
     let mut pool = PhysicalPool::new(config(64, 1, 1)).unwrap();
     let first = pool.allocate().unwrap();
+    let (slot, generation) = (first.slot(), first.generation());
     pool.destroy(first, false).unwrap();
-    assert_eq!(pool.generation(first.slot).unwrap(), first.generation + 1);
+    assert_eq!(pool.generation(slot).unwrap(), generation + 1);
     let second = pool.allocate().unwrap();
-    assert_eq!(second.generation, first.generation + 2);
+    assert_eq!(second.generation(), generation + 2);
 }
 
 #[test]
@@ -140,13 +169,14 @@ fn f13_agotamiento_retira_slot_sin_wraparound() {
     cfg.initial_generation = GEN_RETIRADO - 2;
     let mut pool = PhysicalPool::new(cfg).unwrap();
     let handle = pool.allocate().unwrap();
-    assert_eq!(handle.generation, GEN_RETIRADO - 1);
-    assert!(matches!(
-        pool.destroy(handle, false),
-        Ok(DestroyOutcome::Retired)
-    ));
-    assert_eq!(pool.generation(handle.slot).unwrap(), GEN_RETIRADO);
-    assert_ne!(pool.allocate().unwrap().slot, handle.slot);
+    let slot = handle.slot();
+    assert_eq!(handle.generation(), GEN_RETIRADO - 1);
+    assert_eq!(
+        pool.destroy(handle, false).unwrap().outcome,
+        DestroyOutcome::Retired
+    );
+    assert_eq!(pool.generation(slot).unwrap(), GEN_RETIRADO);
+    assert_ne!(pool.allocate().unwrap().slot(), slot);
 }
 
 #[test]
@@ -187,7 +217,7 @@ fn f16_cierre_rechaza_fugas_y_luego_libera_mapping() {
         pool.close(),
         Err(PoolError::Leak { live: 1, holes: 0 })
     ));
-    assert_eq!(pool.read_int(handle, 0).unwrap(), 0);
+    assert_eq!(pool.read_int(handle.obj(), 0).unwrap(), 0);
     pool.destroy(handle, false).unwrap();
     pool.close().unwrap();
     assert!(matches!(pool.base_addr(), Err(PoolError::Closed)));
@@ -210,8 +240,8 @@ fn f18_clases_de_tamano_y_alineacion() {
     for size in [64, 72, 96, 128, 200, 1000, 2048, 3000, 4096] {
         let mut pool = PhysicalPool::new(config(size, 1, 1)).unwrap();
         let handle = pool.allocate().unwrap();
-        pool.write_int(handle, 0, size as i64).unwrap();
-        assert_eq!(pool.read_int(handle, 0).unwrap(), size as i64);
+        pool.write_int(handle.obj(), 0, size as i64).unwrap();
+        assert_eq!(pool.read_int(handle.obj(), 0).unwrap(), size as i64);
         pool.destroy(handle, false).unwrap();
     }
 }
@@ -225,10 +255,10 @@ fn f19_indices_adversariales_no_tocan_memoria() {
         Err(PoolError::OutOfBounds)
     ));
     assert!(matches!(
-        pool.read_int(handle, usize::MAX),
+        pool.read_int(handle.obj(), usize::MAX),
         Err(PoolError::InvalidField)
     ));
-    assert_eq!(pool.read_int(handle, 0).unwrap(), 0);
+    assert_eq!(pool.read_int(handle.obj(), 0).unwrap(), 0);
 }
 
 #[test]
@@ -246,12 +276,14 @@ fn f20_diferencial_largo_con_semilla_fija() {
                 let physical_handle = physical_pool.allocate().unwrap();
                 assert_eq!(
                     abstract_handle,
-                    (physical_handle.slot, physical_handle.generation)
+                    (physical_handle.slot(), physical_handle.generation())
                 );
                 abstract_pool
                     .escribir(abstract_handle.0, abstract_handle.1, 0, Palabra::Int(step))
                     .unwrap();
-                physical_pool.write_int(physical_handle, 0, step).unwrap();
+                physical_pool
+                    .write_int(physical_handle.obj(), 0, step)
+                    .unwrap();
                 live.push((abstract_handle, physical_handle));
             } else {
                 let index = (random as usize) % live.len();
@@ -260,7 +292,7 @@ fn f20_diferencial_largo_con_semilla_fija() {
                     abstract_pool
                         .leer(abstract_handle.0, abstract_handle.1, 0)
                         .unwrap(),
-                    Palabra::Int(physical_pool.read_int(physical_handle, 0).unwrap())
+                    Palabra::Int(physical_pool.read_int(physical_handle.obj(), 0).unwrap())
                 );
                 abstract_pool
                     .destruir(

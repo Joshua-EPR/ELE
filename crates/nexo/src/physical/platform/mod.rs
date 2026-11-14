@@ -64,9 +64,15 @@ pub(super) unsafe fn protect_none(_base: NonNull<u8>, _len: usize) -> Result<(),
     all(target_os = "windows", target_arch = "x86_64"),
     all(target_os = "linux", target_arch = "x86_64")
 )))]
-pub(super) unsafe fn decommit(_base: NonNull<u8>, _len: usize) -> Result<(), PhysicalError> {
+pub(super) unsafe fn discard(_base: NonNull<u8>, _len: usize) -> Result<(), PhysicalError> {
     Err(PhysicalError::UnsupportedPlatform(std::env::consts::OS))
 }
+
+#[cfg(not(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+)))]
+pub(super) const PROTECT_BEFORE_DISCARD_REQUIRED: bool = true;
 
 #[cfg(not(any(
     all(target_os = "windows", target_arch = "x86_64"),

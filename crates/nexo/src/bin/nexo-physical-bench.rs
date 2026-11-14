@@ -63,7 +63,7 @@ fn physical_hole(iterations: usize) -> Duration {
     let mut handle = pool.allocate().unwrap();
     let start = Instant::now();
     for _ in 0..iterations {
-        let DestroyOutcome::Hole(hole) = pool.destroy(handle, true).unwrap() else {
+        let DestroyOutcome::Hole(hole) = pool.destroy(handle, true).unwrap().outcome else {
             unreachable!()
         };
         handle = black_box(pool.reuse_hole(hole).unwrap());
