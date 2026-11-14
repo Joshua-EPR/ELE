@@ -1,9 +1,30 @@
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::PhysicalError;
 use super::platform::{self, Reservation};
+use super::{CloseFailure, PhysicalError};
 
 const REQUIRED_PAGE_SIZE: usize = 4 * 1024;
+const DROP_RELEASE_ATTEMPTS: usize = 3;
+
+static TERMINAL_RELEASE_FAILURES: AtomicU64 = AtomicU64::new(0);
+static POSSIBLY_LEAKED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Diagnóstico agregado de reservas cuyo `Drop` agotó los reintentos. Es
+/// telemetría de un recurso posiblemente filtrado, no una garantía de que el
+/// mapping siga íntegro ni una capacidad que permita reutilizarlo.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DropReleaseDiagnostics {
+    pub terminal_failures: u64,
+    pub possibly_leaked_bytes: u64,
+}
+
+pub fn drop_release_diagnostics() -> DropReleaseDiagnostics {
+    DropReleaseDiagnostics {
+        terminal_failures: TERMINAL_RELEASE_FAILURES.load(Ordering::Relaxed),
+        possibly_leaked_bytes: POSSIBLY_LEAKED_BYTES.load(Ordering::Relaxed),
+    }
+}
 
 /// Estado físico de una página de la reserva, tal como lo dejó la última
 /// llamada al SO **que tuvo éxito**. Cada transición se registra solo después
@@ -40,6 +61,30 @@ pub enum FaultOp {
     HeaderWrite,
 }
 
+/// Resultado adversarial simulado para una operación nativa. No afirma que
+/// la syscall real tenga este contrato: el harness aplica cambios página por
+/// página y después devuelve el error indicado.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FaultOutcome {
+    /// La operación completa normalmente.
+    Completed,
+    /// La operación se rechaza antes de modificar el rango.
+    Rejected,
+    /// Todo el rango cambia, pero se simula una respuesta de error.
+    CompletedWithError,
+    /// Cambian las primeras `pages` páginas y el resto conserva su estado.
+    Partial { pages: usize },
+    /// El resultado físico deja de ser confiable hasta reconciliarlo.
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScheduledOutcome {
+    op: FaultOp,
+    occurrence: u64,
+    outcome: FaultOutcome,
+}
+
 const N_FAULT_OPS: usize = 7;
 
 impl FaultOp {
@@ -55,6 +100,7 @@ impl FaultOp {
 pub struct FaultPlan {
     nth: Vec<(FaultOp, u64)>,
     always: Vec<FaultOp>,
+    outcomes: Vec<ScheduledOutcome>,
     counts: [u64; N_FAULT_OPS],
 }
 
@@ -75,9 +121,36 @@ impl FaultPlan {
         self
     }
 
+    /// La N-ésima operación se aplica completa y luego informa error.
+    pub fn complete_then_error_nth(mut self, op: FaultOp, n: u64) -> Self {
+        self.schedule(op, n, FaultOutcome::CompletedWithError);
+        self
+    }
+
+    /// La N-ésima operación aplica `pages` páginas antes de informar error.
+    pub fn partial_nth(mut self, op: FaultOp, n: u64, pages: usize) -> Self {
+        self.schedule(op, n, FaultOutcome::Partial { pages });
+        self
+    }
+
+    /// La N-ésima operación produce un resultado físico desconocido.
+    pub fn unknown_nth(mut self, op: FaultOp, n: u64) -> Self {
+        self.schedule(op, n, FaultOutcome::Unknown);
+        self
+    }
+
+    fn schedule(&mut self, op: FaultOp, n: u64, outcome: FaultOutcome) {
+        self.outcomes.push(ScheduledOutcome {
+            op,
+            occurrence: self.counts[op.index()] + n,
+            outcome,
+        });
+    }
+
     pub fn stop_failing(&mut self, op: FaultOp) {
         self.always.retain(|o| *o != op);
         self.nth.retain(|(o, _)| *o != op);
+        self.outcomes.retain(|scheduled| scheduled.op != op);
     }
 
     /// Ocurrencias observadas de `op` (incluidas las que fallaron).
@@ -85,13 +158,25 @@ impl FaultPlan {
         self.counts[op.index()]
     }
 
-    pub(super) fn check(&mut self, op: FaultOp) -> Result<(), PhysicalError> {
+    fn outcome(&mut self, op: FaultOp) -> FaultOutcome {
         self.counts[op.index()] += 1;
         let n = self.counts[op.index()];
         if self.always.contains(&op) || self.nth.iter().any(|(o, k)| *o == op && *k == n) {
-            Err(PhysicalError::Injected(op))
-        } else {
-            Ok(())
+            return FaultOutcome::Rejected;
+        }
+        self.outcomes
+            .iter()
+            .find(|scheduled| scheduled.op == op && scheduled.occurrence == n)
+            .map_or(FaultOutcome::Completed, |scheduled| scheduled.outcome)
+    }
+
+    pub(super) fn check(&mut self, op: FaultOp) -> Result<(), PhysicalError> {
+        match self.outcome(op) {
+            FaultOutcome::Completed => Ok(()),
+            FaultOutcome::Rejected => Err(PhysicalError::Injected(op)),
+            FaultOutcome::CompletedWithError
+            | FaultOutcome::Partial { .. }
+            | FaultOutcome::Unknown => Err(PhysicalError::InvalidFaultPlan(op)),
         }
     }
 }
@@ -118,6 +203,8 @@ pub struct AddressSpaceMetrics {
     /// Páginas con backing confirmado (`Accessible` o `Protected`).
     pub committed_bytes: usize,
     pub accessible_bytes: usize,
+    /// Rango que la API mantiene inaccesible hasta reconciliar por página.
+    pub quarantined_bytes: usize,
     pub page_size: usize,
     pub allocation_granularity: usize,
     pub os_calls: OsCalls,
@@ -135,7 +222,14 @@ pub struct AddressSpace {
     page_size: usize,
     allocation_granularity: usize,
     pages: Vec<PageAccess>,
+    /// Estado realmente aplicado por el backend adversarial. `None` modela
+    /// que la respuesta no permite conocer el estado de esa página.
+    actual_pages: Vec<Option<PageAccess>>,
+    quarantined: Vec<bool>,
     released: bool,
+    /// Un `release` real devolvió error y el contrato no permite afirmar que
+    /// la reserva siga íntegra. Solo se permite reintentar `release`.
+    release_uncertain: bool,
     /// Windows: proteger antes de `MEM_DECOMMIT` (redundante, solo para
     /// pruebas de fallo parcial y comparación de coste). Linux: siempre.
     protect_before_discard: bool,
@@ -181,7 +275,10 @@ impl AddressSpace {
             page_size: info.page_size,
             allocation_granularity: info.allocation_granularity,
             pages: vec![PageAccess::Reserved; page_count],
+            actual_pages: vec![Some(PageAccess::Reserved); page_count],
+            quarantined: vec![false; page_count],
             released: false,
+            release_uncertain: false,
             protect_before_discard: platform::PROTECT_BEFORE_DISCARD_REQUIRED,
             faults,
             calls: OsCalls {
@@ -217,12 +314,22 @@ impl AddressSpace {
     }
 
     pub fn metrics(&self) -> AddressSpaceMetrics {
-        let count = |pred: fn(&PageAccess) -> bool| self.pages.iter().filter(|p| pred(p)).count();
+        let committed = self
+            .actual_pages
+            .iter()
+            .filter(|state| matches!(state, Some(PageAccess::Accessible | PageAccess::Protected)))
+            .count();
+        let accessible = self
+            .pages
+            .iter()
+            .zip(&self.quarantined)
+            .filter(|(state, quarantined)| **state == PageAccess::Accessible && !**quarantined)
+            .count();
         AddressSpaceMetrics {
             reserved_bytes: self.len(),
-            committed_bytes: count(|p| matches!(p, PageAccess::Accessible | PageAccess::Protected))
-                * self.page_size,
-            accessible_bytes: count(|p| *p == PageAccess::Accessible) * self.page_size,
+            committed_bytes: committed * self.page_size,
+            accessible_bytes: accessible * self.page_size,
+            quarantined_bytes: self.quarantined.iter().filter(|q| **q).count() * self.page_size,
             page_size: self.page_size,
             allocation_granularity: self.allocation_granularity,
             os_calls: self.calls,
@@ -253,7 +360,24 @@ impl AddressSpace {
         if offset >= self.len() {
             return Err(PhysicalError::InvalidRange);
         }
-        Ok(self.pages[offset / self.page_size])
+        let page = offset / self.page_size;
+        Ok(if self.quarantined[page] {
+            PageAccess::Protected
+        } else {
+            self.pages[page]
+        })
+    }
+
+    pub fn is_quarantined(&self, offset: usize) -> Result<bool, PhysicalError> {
+        self.ensure_live()?;
+        if offset >= self.len() {
+            return Err(PhysicalError::InvalidRange);
+        }
+        Ok(self.quarantined[offset / self.page_size])
+    }
+
+    pub fn quarantined_pages(&self) -> usize {
+        self.quarantined.iter().filter(|state| **state).count()
     }
 
     /// Confirma lectura/escritura. Sobre páginas `Protected` o `Discarded`
@@ -269,13 +393,21 @@ impl AddressSpace {
         } else {
             FaultOp::Recommit
         };
-        self.faults.check(op)?;
         let base = self.range_base(offset)?;
+        let outcome = self.faults.outcome(op);
+        if outcome != FaultOutcome::Completed {
+            return self.adversarial_commit(base, pages, op, outcome);
+        }
         // SAFETY: page_range comprobó alineación a página y contención en la
         // reserva viva.
-        unsafe { platform::commit(base, len)? };
+        if let Err(error) = unsafe { platform::commit(base, len) } {
+            self.quarantine_unknown(pages.clone());
+            return Err(error);
+        }
         self.calls.commit += 1;
-        self.pages[pages].fill(PageAccess::Accessible);
+        self.pages[pages.clone()].fill(PageAccess::Accessible);
+        self.actual_pages[pages.clone()].fill(Some(PageAccess::Accessible));
+        self.quarantined[pages].fill(false);
         Ok(())
     }
 
@@ -289,12 +421,20 @@ impl AddressSpace {
         {
             return Err(PhysicalError::Uncommitted);
         }
-        self.faults.check(FaultOp::Protect)?;
         let base = self.range_base(offset)?;
+        let outcome = self.faults.outcome(FaultOp::Protect);
+        if outcome != FaultOutcome::Completed {
+            return self.adversarial_protect(base, pages, outcome);
+        }
         // SAFETY: el rango está confirmado, alineado y dentro de la reserva.
-        unsafe { platform::protect_none(base, len)? };
+        if let Err(error) = unsafe { platform::protect_none(base, len) } {
+            self.quarantine_unknown(pages.clone());
+            return Err(error);
+        }
         self.calls.protect += 1;
-        self.pages[pages].fill(PageAccess::Protected);
+        self.pages[pages.clone()].fill(PageAccess::Protected);
+        self.actual_pages[pages.clone()].fill(Some(PageAccess::Protected));
+        self.quarantined[pages].fill(false);
         Ok(())
     }
 
@@ -321,23 +461,88 @@ impl AddressSpace {
         if self.protect_before_discard
             && self.pages[pages.clone()].contains(&PageAccess::Accessible)
         {
-            self.faults.check(FaultOp::Protect)?;
+            let outcome = self.faults.outcome(FaultOp::Protect);
+            if outcome != FaultOutcome::Completed {
+                return self.adversarial_protect(base, pages, outcome);
+            }
             // SAFETY: rango alineado, confirmado y dentro de la reserva.
-            unsafe { platform::protect_none(base, len)? };
+            if let Err(error) = unsafe { platform::protect_none(base, len) } {
+                self.quarantine_unknown(pages.clone());
+                return Err(error);
+            }
             self.calls.protect += 1;
             for p in &mut self.pages[pages.clone()] {
                 if *p == PageAccess::Accessible {
                     *p = PageAccess::Protected;
                 }
             }
+            self.actual_pages[pages.clone()].fill(Some(PageAccess::Protected));
         }
-        self.faults.check(FaultOp::Decommit)?;
+        let outcome = self.faults.outcome(FaultOp::Decommit);
+        if outcome != FaultOutcome::Completed {
+            return self.adversarial_discard(base, pages, outcome);
+        }
         // SAFETY: rango alineado y dentro de la reserva viva; tras el paso 1
         // ningún acceso físico de esta API lo toca.
-        unsafe { platform::discard(base, len)? };
+        if let Err(error) = unsafe { platform::discard(base, len) } {
+            self.quarantine_unknown(pages.clone());
+            return Err(error);
+        }
         self.calls.discard += 1;
-        self.pages[pages].fill(PageAccess::Discarded);
+        self.pages[pages.clone()].fill(PageAccess::Discarded);
+        self.actual_pages[pages.clone()].fill(Some(PageAccess::Discarded));
+        self.quarantined[pages].fill(false);
         Ok(())
+    }
+
+    /// Reestablece página por página un estado conocido e inaccesible. Ante
+    /// cualquier nuevo error la página permanece en cuarentena y la llamada es
+    /// reintentable.
+    pub fn reconcile(&mut self, offset: usize, len: usize) -> Result<usize, PhysicalError> {
+        self.ensure_live()?;
+        let pages = self.page_range(offset, len)?;
+        let mut repaired = 0;
+        for page in pages {
+            if !self.quarantined[page] {
+                continue;
+            }
+            let page_offset = page * self.page_size;
+            let base = self.range_base(page_offset)?;
+            match self.actual_pages[page] {
+                Some(PageAccess::Protected) => {}
+                Some(PageAccess::Accessible) => {
+                    self.faults.check(FaultOp::Protect)?;
+                    // SAFETY: página confirmada conocida dentro de la reserva.
+                    if let Err(error) = unsafe { platform::protect_none(base, self.page_size) } {
+                        self.actual_pages[page] = None;
+                        return Err(error);
+                    }
+                    self.calls.protect += 1;
+                }
+                Some(PageAccess::Reserved | PageAccess::Discarded) | None => {
+                    self.faults.check(FaultOp::Recommit)?;
+                    // SAFETY: página alineada dentro de la reserva viva.
+                    if let Err(error) = unsafe { platform::commit(base, self.page_size) } {
+                        self.actual_pages[page] = None;
+                        return Err(error);
+                    }
+                    self.calls.commit += 1;
+                    self.actual_pages[page] = Some(PageAccess::Accessible);
+                    self.faults.check(FaultOp::Protect)?;
+                    // SAFETY: la confirmación anterior tuvo éxito.
+                    if let Err(error) = unsafe { platform::protect_none(base, self.page_size) } {
+                        self.actual_pages[page] = None;
+                        return Err(error);
+                    }
+                    self.calls.protect += 1;
+                }
+            }
+            self.actual_pages[page] = Some(PageAccess::Protected);
+            self.pages[page] = PageAccess::Protected;
+            self.quarantined[page] = false;
+            repaired += 1;
+        }
+        Ok(repaired)
     }
 
     pub fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), PhysicalError> {
@@ -389,21 +594,51 @@ impl AddressSpace {
     }
 
     /// Libera la reserva. Es idempotente. Si el SO (o un fallo inyectado)
-    /// rechaza la liberación, el espacio sigue vivo y puede reintentarse.
-    /// `Drop` intenta una sola vez y, si falla, la reserva se pierde (fuga de
-    /// direcciones, nunca un acceso indebido).
+    /// rechaza la liberación, el dueño conserva la capacidad de reintentar. Si
+    /// el resultado real es incierto, ninguna otra operación queda habilitada.
+    /// `Drop` hace un número acotado de intentos y contabiliza el fallo final;
+    /// no puede garantizar la liberación ante un rechazo persistente.
     pub fn release(&mut self) -> Result<(), PhysicalError> {
         if self.released {
             return Ok(());
         }
-        self.faults.check(FaultOp::Release)?;
+        match self.faults.outcome(FaultOp::Release) {
+            FaultOutcome::Completed => {}
+            FaultOutcome::Rejected => return Err(PhysicalError::Injected(FaultOp::Release)),
+            FaultOutcome::Unknown => {
+                self.release_uncertain = true;
+                self.actual_pages.fill(None);
+                self.quarantined.fill(true);
+                return Err(PhysicalError::UnknownState(FaultOp::Release));
+            }
+            FaultOutcome::CompletedWithError | FaultOutcome::Partial { .. } => {
+                return Err(PhysicalError::InvalidFaultPlan(FaultOp::Release));
+            }
+        }
         // SAFETY: AddressSpace posee de forma exclusiva esta reserva viva y
         // `released` impide liberarla dos veces.
-        unsafe { platform::release(&self.reservation)? };
+        if let Err(error) = unsafe { platform::release(&self.reservation) } {
+            self.release_uncertain = true;
+            self.actual_pages.fill(None);
+            self.quarantined.fill(true);
+            return Err(error);
+        }
         self.calls.release += 1;
         self.released = true;
+        self.release_uncertain = false;
         self.pages.fill(PageAccess::Reserved);
+        self.actual_pages.fill(Some(PageAccess::Reserved));
+        self.quarantined.fill(false);
         Ok(())
+    }
+
+    /// Cierre propietario verificable. En error devuelve el mismo dueño vivo,
+    /// de modo que la reserva conserva una única capacidad y puede reintentarse.
+    pub fn try_close(mut self) -> Result<(), Box<CloseFailure<Self, PhysicalError>>> {
+        match self.release() {
+            Ok(()) => Ok(()),
+            Err(error) => Err(Box::new(CloseFailure::new(self, error))),
+        }
     }
 
     /// Comprueba un fallo inyectado en una operación del llamador que no es
@@ -412,12 +647,180 @@ impl AddressSpace {
         self.faults.check(op)
     }
 
+    fn adversarial_commit(
+        &mut self,
+        base: NonNull<u8>,
+        pages: std::ops::Range<usize>,
+        op: FaultOp,
+        outcome: FaultOutcome,
+    ) -> Result<(), PhysicalError> {
+        let total = pages.len();
+        match outcome {
+            FaultOutcome::Completed => unreachable!(),
+            FaultOutcome::Rejected => Err(PhysicalError::Injected(op)),
+            FaultOutcome::Unknown => {
+                self.actual_pages[pages.clone()].fill(None);
+                self.quarantined[pages].fill(true);
+                Err(PhysicalError::UnknownState(op))
+            }
+            FaultOutcome::CompletedWithError | FaultOutcome::Partial { .. } => {
+                let (applied, completed_with_error) = match outcome {
+                    FaultOutcome::CompletedWithError => (total, true),
+                    FaultOutcome::Partial { pages: 0 } => {
+                        return Err(PhysicalError::InvalidFaultPlan(op));
+                    }
+                    FaultOutcome::Partial { pages } if pages >= total => (total, true),
+                    FaultOutcome::Partial { pages } => (pages, false),
+                    _ => unreachable!(),
+                };
+                for relative in 0..applied {
+                    // SAFETY: cada página pertenece al rango validado.
+                    let page_base = unsafe { base.add(relative * self.page_size) };
+                    // SAFETY: página alineada dentro de la reserva viva.
+                    if let Err(error) = unsafe { platform::commit(page_base, self.page_size) } {
+                        self.actual_pages[pages.start + relative] = None;
+                        self.quarantined[pages.clone()].fill(true);
+                        return Err(error);
+                    }
+                    self.calls.commit += 1;
+                    let index = pages.start + relative;
+                    self.pages[index] = PageAccess::Accessible;
+                    self.actual_pages[index] = Some(PageAccess::Accessible);
+                }
+                self.quarantined[pages.clone()].fill(true);
+                if completed_with_error {
+                    Err(PhysicalError::CompletedWithError(op))
+                } else {
+                    Err(PhysicalError::PartiallyApplied { op, applied, total })
+                }
+            }
+        }
+    }
+
+    fn adversarial_protect(
+        &mut self,
+        base: NonNull<u8>,
+        pages: std::ops::Range<usize>,
+        outcome: FaultOutcome,
+    ) -> Result<(), PhysicalError> {
+        let total = pages.len();
+        match outcome {
+            FaultOutcome::Completed => unreachable!(),
+            FaultOutcome::Rejected => Err(PhysicalError::Injected(FaultOp::Protect)),
+            FaultOutcome::Unknown => {
+                self.actual_pages[pages.clone()].fill(None);
+                self.quarantined[pages].fill(true);
+                Err(PhysicalError::UnknownState(FaultOp::Protect))
+            }
+            FaultOutcome::CompletedWithError | FaultOutcome::Partial { .. } => {
+                let (applied, completed_with_error) = match outcome {
+                    FaultOutcome::CompletedWithError => (total, true),
+                    FaultOutcome::Partial { pages: 0 } => {
+                        return Err(PhysicalError::InvalidFaultPlan(FaultOp::Protect));
+                    }
+                    FaultOutcome::Partial { pages } if pages >= total => (total, true),
+                    FaultOutcome::Partial { pages } => (pages, false),
+                    _ => unreachable!(),
+                };
+                for relative in 0..applied {
+                    // SAFETY: cada página pertenece al rango validado.
+                    let page_base = unsafe { base.add(relative * self.page_size) };
+                    // SAFETY: el llamador verificó que el rango estaba confirmado.
+                    if let Err(error) = unsafe { platform::protect_none(page_base, self.page_size) }
+                    {
+                        self.actual_pages[pages.start + relative] = None;
+                        self.quarantined[pages.clone()].fill(true);
+                        return Err(error);
+                    }
+                    self.calls.protect += 1;
+                    let index = pages.start + relative;
+                    self.pages[index] = PageAccess::Protected;
+                    self.actual_pages[index] = Some(PageAccess::Protected);
+                }
+                self.quarantined[pages.clone()].fill(true);
+                if completed_with_error {
+                    Err(PhysicalError::CompletedWithError(FaultOp::Protect))
+                } else {
+                    Err(PhysicalError::PartiallyApplied {
+                        op: FaultOp::Protect,
+                        applied,
+                        total,
+                    })
+                }
+            }
+        }
+    }
+
+    fn adversarial_discard(
+        &mut self,
+        base: NonNull<u8>,
+        pages: std::ops::Range<usize>,
+        outcome: FaultOutcome,
+    ) -> Result<(), PhysicalError> {
+        let total = pages.len();
+        match outcome {
+            FaultOutcome::Completed => unreachable!(),
+            FaultOutcome::Rejected => Err(PhysicalError::Injected(FaultOp::Decommit)),
+            FaultOutcome::Unknown => {
+                self.actual_pages[pages.clone()].fill(None);
+                self.quarantined[pages].fill(true);
+                Err(PhysicalError::UnknownState(FaultOp::Decommit))
+            }
+            FaultOutcome::CompletedWithError | FaultOutcome::Partial { .. } => {
+                let (applied, completed_with_error) = match outcome {
+                    FaultOutcome::CompletedWithError => (total, true),
+                    FaultOutcome::Partial { pages: 0 } => {
+                        return Err(PhysicalError::InvalidFaultPlan(FaultOp::Decommit));
+                    }
+                    FaultOutcome::Partial { pages } if pages >= total => (total, true),
+                    FaultOutcome::Partial { pages } => (pages, false),
+                    _ => unreachable!(),
+                };
+                for relative in 0..applied {
+                    // SAFETY: cada página pertenece al rango validado.
+                    let page_base = unsafe { base.add(relative * self.page_size) };
+                    // SAFETY: página alineada dentro de la reserva viva.
+                    if let Err(error) = unsafe { platform::discard(page_base, self.page_size) } {
+                        self.actual_pages[pages.start + relative] = None;
+                        self.quarantined[pages.clone()].fill(true);
+                        return Err(error);
+                    }
+                    self.calls.discard += 1;
+                    let index = pages.start + relative;
+                    self.pages[index] = PageAccess::Discarded;
+                    self.actual_pages[index] = Some(PageAccess::Discarded);
+                }
+                self.quarantined[pages.clone()].fill(true);
+                if completed_with_error {
+                    Err(PhysicalError::CompletedWithError(FaultOp::Decommit))
+                } else {
+                    Err(PhysicalError::PartiallyApplied {
+                        op: FaultOp::Decommit,
+                        applied,
+                        total,
+                    })
+                }
+            }
+        }
+    }
+
     fn ensure_live(&self) -> Result<(), PhysicalError> {
         if self.released {
             Err(PhysicalError::Released)
+        } else if self.release_uncertain {
+            Err(PhysicalError::ReleaseUncertain)
         } else {
             Ok(())
         }
+    }
+
+    pub(super) fn ensure_operational(&self) -> Result<(), PhysicalError> {
+        self.ensure_live()
+    }
+
+    fn quarantine_unknown(&mut self, pages: std::ops::Range<usize>) {
+        self.actual_pages[pages.clone()].fill(None);
+        self.quarantined[pages].fill(true);
     }
 
     fn check_accessible(&self, offset: usize, len: usize) -> Result<(), PhysicalError> {
@@ -430,6 +833,9 @@ impl AddressSpace {
         }
         let first = offset / self.page_size;
         let last = (end - 1) / self.page_size;
+        if self.quarantined[first..=last].iter().any(|state| *state) {
+            return Err(PhysicalError::Quarantined);
+        }
         for p in &self.pages[first..=last] {
             match p {
                 PageAccess::Accessible => {}
@@ -470,10 +876,22 @@ impl AddressSpace {
 
 impl Drop for AddressSpace {
     fn drop(&mut self) {
-        // Los fallos inyectados no deben impedir devolver la reserva al SO
-        // en la destrucción del objeto.
-        self.faults.stop_failing(FaultOp::Release);
-        let _ = self.release();
+        // Último recurso acotado: el cierre explícito/propietario es el único
+        // canal que puede entregar el error al llamador. Nunca se bloquea el
+        // destructor indefinidamente.
+        for _ in 0..DROP_RELEASE_ATTEMPTS {
+            if self.release().is_ok() {
+                return;
+            }
+        }
+        let leaked = u64::try_from(self.len()).unwrap_or(u64::MAX);
+        let _ =
+            TERMINAL_RELEASE_FAILURES.try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                Some(value.saturating_add(1))
+            });
+        let _ = POSSIBLY_LEAKED_BYTES.try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            Some(value.saturating_add(leaked))
+        });
     }
 }
 

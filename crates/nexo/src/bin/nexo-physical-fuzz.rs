@@ -14,11 +14,15 @@
 //! termina con código 1.
 
 use nexo::physical::{
-    Command, CommandResult, DifferentialHarness, FaultOp, PoolConfig, ReclaimPolicy,
+    AddressSpace, Command, CommandResult, DifferentialHarness, FaultOp, FaultPlan, PageAccess,
+    PageState, PhysicalError, PhysicalPool, PoolConfig, PoolError, ReclaimPolicy, ReclaimStatus,
 };
 use nexo::rt::pool::GEN_RETIRADO;
 
 const SEEDS: [u64; 4] = [0x4E45_584F, 0xC0FF_EE03, 0x0BAD_5EED, 0xF01D_2026];
+const PAGE: usize = 4 * 1024;
+const SUPERPAGE: usize = 64 * 1024;
+const PFS_PAGES: usize = 8;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -171,6 +175,8 @@ struct Totals {
     pending_reclaims_seen: u64,
     injections: u64,
     repairs: u64,
+    pfs_outcomes: u64,
+    pfs_pool_recoveries: u64,
 }
 
 impl Totals {
@@ -182,6 +188,8 @@ impl Totals {
         self.pending_reclaims_seen += o.pending_reclaims_seen;
         self.injections += o.injections;
         self.repairs += o.repairs;
+        self.pfs_outcomes += o.pfs_outcomes;
+        self.pfs_pool_recoveries += o.pfs_pool_recoveries;
     }
 }
 
@@ -238,7 +246,204 @@ fn execute(seed: u64, commands: &[Command]) -> Result<Totals, String> {
         return Err(format!("estado no recuperado tras reparar: {snap:?}"));
     }
     h.finish()?;
+    let pfs = pfs_probe(seed)?;
+    t.add(&pfs);
     Ok(t)
+}
+
+#[derive(Clone, Copy, Debug)]
+enum AdversarialOutcome {
+    Partial,
+    CompletedWithError,
+    Unknown,
+}
+
+fn plan(op: FaultOp, outcome: AdversarialOutcome, applied: usize) -> FaultPlan {
+    match outcome {
+        AdversarialOutcome::Partial => FaultPlan::new().partial_nth(op, 1, applied),
+        AdversarialOutcome::CompletedWithError => FaultPlan::new().complete_then_error_nth(op, 1),
+        AdversarialOutcome::Unknown => FaultPlan::new().unknown_nth(op, 1),
+    }
+}
+
+fn expected_error(
+    result: Result<(), PhysicalError>,
+    op: FaultOp,
+    outcome: AdversarialOutcome,
+    applied: usize,
+) -> bool {
+    match (outcome, result) {
+        (
+            AdversarialOutcome::Partial,
+            Err(PhysicalError::PartiallyApplied {
+                op: actual,
+                applied: actual_applied,
+                total,
+            }),
+        ) => actual == op && actual_applied == applied && total == PFS_PAGES,
+        (
+            AdversarialOutcome::CompletedWithError,
+            Err(PhysicalError::CompletedWithError(actual)),
+        ) => actual == op,
+        (AdversarialOutcome::Unknown, Err(PhysicalError::UnknownState(actual))) => actual == op,
+        _ => false,
+    }
+}
+
+fn prepare(space: &mut AddressSpace, op: FaultOp) -> Result<(), String> {
+    match op {
+        FaultOp::Commit => Ok(()),
+        FaultOp::Protect => space
+            .commit(0, PFS_PAGES * PAGE)
+            .map_err(|e| format!("PFS prepare Protect: {e}")),
+        FaultOp::Decommit => {
+            space
+                .commit(0, PFS_PAGES * PAGE)
+                .map_err(|e| format!("PFS prepare Decommit: {e}"))?;
+            space.set_protect_before_discard(true);
+            Ok(())
+        }
+        FaultOp::Recommit => {
+            space
+                .commit(0, PFS_PAGES * PAGE)
+                .map_err(|e| format!("PFS prepare Recommit commit: {e}"))?;
+            space
+                .decommit(0, PFS_PAGES * PAGE)
+                .map_err(|e| format!("PFS prepare Recommit decommit: {e}"))
+        }
+        _ => Err(format!("PFS operation not page-ranged: {op:?}")),
+    }
+}
+
+fn apply(space: &mut AddressSpace, op: FaultOp) -> Result<(), PhysicalError> {
+    match op {
+        FaultOp::Commit | FaultOp::Recommit => space.commit(0, PFS_PAGES * PAGE),
+        FaultOp::Protect => space.protect_none(0, PFS_PAGES * PAGE),
+        FaultOp::Decommit => space.decommit(0, PFS_PAGES * PAGE),
+        _ => Err(PhysicalError::InvalidFaultPlan(op)),
+    }
+}
+
+/// Matriz adversarial acotada. Cada campaña ejecuta los doce pares
+/// operación×resultado, por lo que incluso una sola semilla cubre Partial,
+/// CompletedWithError y Unknown para commit/protect/decommit/recommit.
+fn pfs_probe(seed: u64) -> Result<Totals, String> {
+    let operations = [
+        FaultOp::Commit,
+        FaultOp::Protect,
+        FaultOp::Decommit,
+        FaultOp::Recommit,
+    ];
+    let outcomes = [
+        AdversarialOutcome::Partial,
+        AdversarialOutcome::CompletedWithError,
+        AdversarialOutcome::Unknown,
+    ];
+    let applied = 1 + (seed as usize % (PFS_PAGES - 1));
+    let mut totals = Totals::default();
+    for op in operations {
+        for outcome in outcomes {
+            let mut space = AddressSpace::reserve(SUPERPAGE, SUPERPAGE)
+                .map_err(|e| format!("PFS reserve {op:?}/{outcome:?}: {e}"))?;
+            prepare(&mut space, op)?;
+            space.set_faults(plan(op, outcome, applied));
+            let result = apply(&mut space, op);
+            let result_debug = format!("{result:?}");
+            if !expected_error(result, op, outcome, applied) {
+                return Err(format!(
+                    "PFS {op:?}/{outcome:?}: resultado inesperado {result_debug}"
+                ));
+            }
+            if space.quarantined_pages() != PFS_PAGES
+                || space.metrics().accessible_bytes != 0
+                || space.peek(0, &mut [0]).is_ok()
+            {
+                return Err(format!(
+                    "PFS {op:?}/{outcome:?}: el rango incierto quedó expuesto"
+                ));
+            }
+            space
+                .reconcile(0, PFS_PAGES * PAGE)
+                .map_err(|e| format!("PFS reconcile {op:?}/{outcome:?}: {e}"))?;
+            for page in 0..PFS_PAGES {
+                if space.is_quarantined(page * PAGE) != Ok(false)
+                    || space.page_access(page * PAGE) != Ok(PageAccess::Protected)
+                {
+                    return Err(format!(
+                        "PFS {op:?}/{outcome:?}: página {page} no reconciliada"
+                    ));
+                }
+            }
+            space
+                .commit(0, PFS_PAGES * PAGE)
+                .map_err(|e| format!("PFS recommit {op:?}/{outcome:?}: {e}"))?;
+            space
+                .fill(0, PFS_PAGES * PAGE, 0xA5)
+                .map_err(|e| format!("PFS fill {op:?}/{outcome:?}: {e}"))?;
+            let mut byte = [0];
+            space
+                .peek((PFS_PAGES - 1) * PAGE, &mut byte)
+                .map_err(|e| format!("PFS readback {op:?}/{outcome:?}: {e}"))?;
+            if byte != [0xA5] {
+                return Err(format!("PFS {op:?}/{outcome:?}: readback {byte:?}"));
+            }
+            space
+                .release()
+                .map_err(|e| format!("PFS release {op:?}/{outcome:?}: {e}"))?;
+            totals.pfs_outcomes += 1;
+        }
+    }
+    pfs_pool_probe(seed, &mut totals)?;
+    Ok(totals)
+}
+
+fn pfs_pool_probe(_seed: u64, totals: &mut Totals) -> Result<(), String> {
+    let outcomes = [
+        AdversarialOutcome::CompletedWithError,
+        AdversarialOutcome::Unknown,
+    ];
+    for outcome in outcomes {
+        let mut pool = PhysicalPool::new(PoolConfig {
+            max_superpages: 1,
+            protect_before_discard: true,
+            ..PoolConfig::default()
+        })
+        .map_err(|e| format!("PFS pool {outcome:?}: {e:?}"))?;
+        let handle = pool
+            .allocate()
+            .map_err(|e| format!("PFS pool allocate {outcome:?}: {e:?}"))?;
+        let (slot, link) = (handle.slot(), handle.link());
+        pool.set_faults(plan(FaultOp::Decommit, outcome, 0))
+            .map_err(|e| format!("PFS pool plan {outcome:?}: {e:?}"))?;
+        let report = pool
+            .destroy(handle, false)
+            .map_err(|(_, e)| format!("PFS pool destroy {outcome:?}: {e:?}"))?;
+        if !matches!(report.reclaim, ReclaimStatus::Pending { .. })
+            || pool.page_state(slot) != Ok(PageState::Quarantined)
+            || pool.revalidate(link) != Err(PoolError::StaleGeneration)
+        {
+            return Err(format!(
+                "PFS pool {outcome:?}: identidad o cuarentena incorrecta"
+            ));
+        }
+        pool.check_invariants()
+            .map_err(|e| format!("PFS pool invariant {outcome:?}: {e:?}"))?;
+        let repaired = pool
+            .repair()
+            .map_err(|e| format!("PFS pool repair {outcome:?}: {e:?}"))?;
+        if repaired.reclaimed != 1
+            || repaired.still_pending != 0
+            || pool.page_state(slot) != Ok(PageState::Returned)
+        {
+            return Err(format!("PFS pool {outcome:?}: reparación incompleta"));
+        }
+        pool.check_invariants()
+            .map_err(|e| format!("PFS pool repaired invariant {outcome:?}: {e:?}"))?;
+        pool.close()
+            .map_err(|e| format!("PFS pool close {outcome:?}: {e:?}"))?;
+        totals.pfs_pool_recoveries += 1;
+    }
+    Ok(())
 }
 
 fn generate(seed: u64, steps: usize) -> Vec<Command> {
@@ -294,7 +499,7 @@ fn faults_campaign(seed: u64, steps: usize) -> Result<Totals, (Vec<Command>, Str
 }
 
 /// Reducción: borra tramos de comandos mientras el fallo persista.
-fn shrink(seed: u64, commands: &[Command], _error: &str) -> Vec<Command> {
+fn shrink(seed: u64, commands: &[Command], error: &str) -> Vec<Command> {
     let mut current = commands.to_vec();
     let mut chunk = current.len() / 2;
     while chunk >= 1 {
@@ -302,13 +507,50 @@ fn shrink(seed: u64, commands: &[Command], _error: &str) -> Vec<Command> {
         while i + chunk <= current.len() {
             let mut candidate = current.clone();
             candidate.drain(i..i + chunk);
-            if execute(seed, &candidate).is_err() {
-                current = candidate;
-            } else {
-                i += chunk;
+            match execute(seed, &candidate) {
+                Err(candidate_error) if same_failure_class(error, &candidate_error) => {
+                    current = candidate;
+                }
+                _ => i += chunk,
             }
         }
         chunk /= 2;
     }
     current
+}
+
+fn same_failure_class(expected: &str, actual: &str) -> bool {
+    match (expected.strip_prefix("PFS "), actual.strip_prefix("PFS ")) {
+        (Some(expected), Some(actual)) => expected.split(':').next() == actual.split(':').next(),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pfs_matrix_is_deterministic_and_bounded() {
+        let totals = pfs_probe(0x5EED).unwrap();
+        assert_eq!(totals.pfs_outcomes, 12);
+        assert_eq!(totals.pfs_pool_recoveries, 2);
+    }
+
+    #[test]
+    fn reducer_does_not_replace_a_pfs_failure_with_an_unrelated_error() {
+        assert!(same_failure_class(
+            "PFS Commit/Unknown: quarantined",
+            "PFS Commit/Unknown: readback"
+        ));
+        assert!(!same_failure_class(
+            "PFS Commit/Unknown: quarantined",
+            "PFS Protect/Unknown: quarantined"
+        ));
+        assert!(!same_failure_class(
+            "PFS Commit/Unknown: quarantined",
+            "paso 3: mismatch"
+        ));
+    }
 }

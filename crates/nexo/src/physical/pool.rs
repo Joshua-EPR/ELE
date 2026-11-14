@@ -19,12 +19,14 @@
 //! | `Reserved` | no | no | no | sí (confirma) | — |
 //! | `Committed` | sí | sí | sí, o ninguno si está en la caché diferida | sí | — |
 //! | `ReclaimPending` | sí (`Accessible` si falló la protección, `Protected` si falló el descarte) | no garantizado | no | sí (reconfirma) | sí |
+//! | `Quarantined` | desconocido; la API lo mantiene inaccesible | no garantizado | no | no, hasta `repair` | sí |
 //! | `Returned` | no (descartada) | no | no | sí (reconfirma, contenido a cero) | — |
 //!
 //! Transiciones legales: `Reserved → Committed` (asignar); `Committed →
 //! Returned | ReclaimPending` (vaciar con reclaim inmediato o al vaciar la
 //! caché); `ReclaimPending → Returned` (reintento con éxito);
-//! `ReclaimPending | Returned → Committed` (reactivar al asignar).
+//! `ReclaimPending | Returned → Committed` (reactivar al asignar);
+//! `Quarantined → Returned | ReclaimPending` (reconciliación por página).
 //!
 //! En `ReclaimPending` los bytes de objetos destruidos pueden seguir
 //! físicamente en memoria, pero ningún acceso los alcanza: toda lectura o
@@ -58,7 +60,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::address_space::FaultPlan;
 use super::generation;
-use super::{AddressSpace, AddressSpaceMetrics, PageAccess, PhysicalError};
+use super::{AddressSpace, AddressSpaceMetrics, CloseFailure, PageAccess, PhysicalError};
 use crate::rt::pool::{
     CABECERA, GEN_RETIRADO, MAX_SUPERPAGINAS, SUBPAGINA, SUBPAGINAS_DATOS, SUPERPAGINA,
 };
@@ -303,6 +305,9 @@ pub enum PageState {
     Reserved,
     Committed,
     ReclaimPending,
+    /// El backend adversarial no permite afirmar el estado físico. La
+    /// subpágina queda fuera del índice de asignación hasta `repair()`.
+    Quarantined,
     Returned,
 }
 
@@ -522,6 +527,7 @@ impl PhysicalPool {
     }
 
     pub fn allocate(&mut self) -> Result<Handle, PoolError> {
+        self.ensure_operational()?;
         let g = match self.density.first() {
             Some(g) => g,
             None => {
@@ -594,6 +600,9 @@ impl PhysicalPool {
         handle: Handle,
         reserve_hole: bool,
     ) -> Result<DestroyReport, (Handle, PoolError)> {
+        if let Err(error) = self.ensure_operational() {
+            return Err((handle, error));
+        }
         let (sp, sub, bit) = match self.validate(handle.pool, handle.slot, handle.generation) {
             Ok(x) => x,
             Err(e) => return Err((handle, e)),
@@ -644,6 +653,9 @@ impl PhysicalPool {
 
     /// Reutiliza un hueco in situ (`gen` +1). `Err` devuelve el token intacto.
     pub fn reuse_hole(&mut self, token: HoleToken) -> Result<Handle, (HoleToken, PoolError)> {
+        if let Err(error) = self.ensure_operational() {
+            return Err((token, error));
+        }
         let (sp, sub, bit) = match self.validate_hole(&token) {
             Ok(x) => x,
             Err(e) => return Err((token, e)),
@@ -684,6 +696,9 @@ impl PhysicalPool {
         &mut self,
         token: HoleToken,
     ) -> Result<ReleaseReport, (HoleToken, PoolError)> {
+        if let Err(error) = self.ensure_operational() {
+            return Err((token, error));
+        }
         let (sp, sub, bit) = match self.validate_hole(&token) {
             Ok(x) => x,
             Err(e) => return Err((token, e)),
@@ -710,6 +725,7 @@ impl PhysicalPool {
     /// Revalida un enlace: devuelve un acceso no propietario si la identidad
     /// sigue viva. Nunca fabrica un `Handle`.
     pub fn revalidate(&self, link: Link) -> Result<ObjRef, PoolError> {
+        self.ensure_operational()?;
         self.validate(link.pool, link.slot, link.generation)?;
         Ok(ObjRef {
             pool: link.pool,
@@ -775,7 +791,7 @@ impl PhysicalPool {
 
     /// Reintenta las reclamaciones pendientes y rehace los espejos sucios.
     pub fn repair(&mut self) -> Result<RepairReport, PoolError> {
-        self.space()?;
+        self.ensure_operational()?;
         let mut report = RepairReport::default();
         for g in self.pending.clone() {
             let (sp, sub) = (g / SUBPAGINAS_DATOS, g % SUBPAGINAS_DATOS);
@@ -810,6 +826,7 @@ impl PhysicalPool {
     /// Modo de presión de memoria: devuelve al SO toda la caché diferida y
     /// reintenta lo pendiente.
     pub fn reclaim_all(&mut self) -> Result<RepairReport, PoolError> {
+        self.ensure_operational()?;
         for g in std::mem::take(&mut self.deferred) {
             let (sp, sub) = (g / SUBPAGINAS_DATOS, g % SUBPAGINAS_DATOS);
             let _ = self.try_reclaim(sp, sub);
@@ -859,27 +876,41 @@ impl PhysicalPool {
                 }
                 let free = meta.free[sub].count_ones();
                 for k in 1..=self.slots_per_subpage {
-                    if self.density.contains(g, k) != (k == free) {
+                    let indexed = meta.state[sub] != PageState::Quarantined && k == free;
+                    if self.density.contains(g, k) != indexed {
                         return inv(format!("subpage {g}: density index mismatch"));
                     }
                 }
                 let access = space.page_access(self.data_offset(sp, sub))?;
+                let quarantined = space.is_quarantined(self.data_offset(sp, sub))?;
                 let in_deferred = self.deferred.contains(&g);
                 let in_pending = self.pending.contains(&g);
                 let ok = match meta.state[sub] {
-                    PageState::Reserved => access == PageAccess::Reserved && occupied == 0,
+                    PageState::Reserved => {
+                        !quarantined && access == PageAccess::Reserved && occupied == 0
+                    }
                     PageState::Committed => {
-                        access == PageAccess::Accessible && (occupied > 0) != in_deferred
+                        !quarantined
+                            && access == PageAccess::Accessible
+                            && (occupied > 0) != in_deferred
                     }
                     PageState::ReclaimPending => {
                         occupied == 0
                             && in_pending
+                            && !quarantined
                             && matches!(access, PageAccess::Accessible | PageAccess::Protected)
                     }
-                    PageState::Returned => access == PageAccess::Discarded && occupied == 0,
+                    PageState::Quarantined => occupied == 0 && in_pending && quarantined,
+                    PageState::Returned => {
+                        !quarantined && access == PageAccess::Discarded && occupied == 0
+                    }
                 };
                 if !ok
-                    || (in_pending && meta.state[sub] != PageState::ReclaimPending)
+                    || (in_pending
+                        && !matches!(
+                            meta.state[sub],
+                            PageState::ReclaimPending | PageState::Quarantined
+                        ))
                     || (in_deferred && meta.state[sub] != PageState::Committed)
                 {
                     return inv(format!(
@@ -926,6 +957,16 @@ impl PhysicalPool {
         Ok(())
     }
 
+    /// Variante propietaria de [`Self::close`]. Si el pool contiene recursos
+    /// vivos o el SO rechaza la liberación, el error devuelve el mismo pool
+    /// abierto para resolver las capacidades y reintentar.
+    pub fn try_close(mut self) -> Result<(), Box<CloseFailure<Self, PoolError>>> {
+        match self.close() {
+            Ok(()) => Ok(()),
+            Err(error) => Err(Box::new(CloseFailure::new(self, error))),
+        }
+    }
+
     // ------------------------------------------------------------ internos
 
     fn meta(&self, sp: usize) -> &SuperpageMeta {
@@ -954,6 +995,11 @@ impl PhysicalPool {
 
     fn space_mut(&mut self) -> Result<&mut AddressSpace, PoolError> {
         self.space.as_mut().ok_or(PoolError::Closed)
+    }
+
+    fn ensure_operational(&self) -> Result<(), PoolError> {
+        self.space()?.ensure_operational()?;
+        Ok(())
     }
 
     fn initialize_superpage(&mut self, sp: usize) -> Result<(), PoolError> {
@@ -1007,31 +1053,75 @@ impl PhysicalPool {
     fn try_reclaim(&mut self, sp: usize, sub: usize) -> ReclaimStatus {
         let g = sp * SUBPAGINAS_DATOS + sub;
         let offset = self.data_offset(sp, sub);
+        let Some(space) = self.space.as_ref() else {
+            return ReclaimStatus::Pending {
+                error: PhysicalError::Released,
+                access: PageAccess::Reserved,
+            };
+        };
+        if space.is_quarantined(offset).unwrap_or(true) {
+            let Some(space) = self.space.as_mut() else {
+                return ReclaimStatus::Pending {
+                    error: PhysicalError::Released,
+                    access: PageAccess::Reserved,
+                };
+            };
+            let result = space.reconcile(offset, SUBPAGINA as usize);
+            if let Err(error) = result {
+                return self.mark_reclaim_pending(sp, sub, error);
+            }
+        }
         let Some(space) = self.space.as_mut() else {
             return ReclaimStatus::Pending {
                 error: PhysicalError::Released,
                 access: PageAccess::Reserved,
             };
         };
-        match space.decommit(offset, SUBPAGINA as usize) {
+        let result = space.decommit(offset, SUBPAGINA as usize);
+        match result {
             Ok(()) => {
                 self.meta_mut(sp).state[sub] = PageState::Returned;
                 self.pending.retain(|p| *p != g);
                 self.deferred.retain(|p| *p != g);
+                let free = self.meta(sp).free[sub].count_ones();
+                self.density.set(g, free, true);
                 self.metrics.data_returned += 1;
                 ReclaimStatus::Completed
             }
-            Err(error) => {
-                let access = space.page_access(offset).unwrap_or(PageAccess::Protected);
-                self.meta_mut(sp).state[sub] = PageState::ReclaimPending;
-                self.deferred.retain(|p| *p != g);
-                if !self.pending.contains(&g) {
-                    self.pending.push(g);
-                }
-                self.metrics.reclaim_failures += 1;
-                ReclaimStatus::Pending { error, access }
-            }
+            Err(error) => self.mark_reclaim_pending(sp, sub, error),
         }
+    }
+
+    fn mark_reclaim_pending(
+        &mut self,
+        sp: usize,
+        sub: usize,
+        error: PhysicalError,
+    ) -> ReclaimStatus {
+        let g = sp * SUBPAGINAS_DATOS + sub;
+        let offset = self.data_offset(sp, sub);
+        let (access, quarantined) =
+            self.space
+                .as_ref()
+                .map_or((PageAccess::Protected, true), |space| {
+                    (
+                        space.page_access(offset).unwrap_or(PageAccess::Protected),
+                        space.is_quarantined(offset).unwrap_or(true),
+                    )
+                });
+        self.meta_mut(sp).state[sub] = if quarantined {
+            PageState::Quarantined
+        } else {
+            PageState::ReclaimPending
+        };
+        self.deferred.retain(|p| *p != g);
+        if !self.pending.contains(&g) {
+            self.pending.push(g);
+        }
+        let free = self.meta(sp).free[sub].count_ones();
+        self.density.set(g, free, !quarantined);
+        self.metrics.reclaim_failures += 1;
+        ReclaimStatus::Pending { error, access }
     }
 
     /// Escritura incremental del espejo: generación, bitmaps y ocupación de la
