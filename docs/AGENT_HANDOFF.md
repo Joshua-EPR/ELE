@@ -1,5 +1,72 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-14 — PFS, cierre propietario y gate de PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, PR #69 en borrador. HEAD documental:
+`23488b8c879fa511bbbdf309c62a3398ce53c3e3`; implementación P0:
+`fb0c58b60cf8ab70377d9305965e5cc6179b297b`. No se fusionó nada y no se
+modificaron workflows.
+
+Implementado: resultados adversariales `Rejected`, `Partial`,
+`CompletedWithError` y `Unknown`; cuarentena de rango completo; reconciliación
+por página; `PageState::Quarantined` fuera del índice de densidad; cuarentena
+también ante errores reales de commit/protect/discard; `ReleaseUncertain` que
+bloquea toda operación salvo reintentar cierre; `try_close` propietario que
+devuelve el único dueño; tres intentos acotados en `Drop` y diagnóstico agregado
+de fallos terminales. El fuzzer físico cubre una matriz determinista 4×3 y
+preserva la clase del fallo durante reducción. PFS es simulación adversarial:
+no se afirma haber provocado un fallo parcial real del kernel.
+
+Validación real:
+
+- Windows/MSVC: `cargo fmt --all --check` y
+  `cargo clippy --workspace --all-targets -- -D warnings` aprobados;
+  `ele-nexo` 185/185; PFS 16/16; cierre 7/7; workspace 769 aprobadas,
+  0 fallidas, 3 ignoradas. El log final contiene 85 líneas
+  `test result: ok` y cero marcadores de fallo.
+- Windows/MSVC fuzzer: `--fallos 256 16`, 4.096 comandos, 192 resultados PFS,
+  32 recuperaciones de pool, sin divergencias.
+- Ubuntu WSL2/glibc: `ele-nexo` 185/185; mismo fuzzer 4.096/192/32 sin
+  divergencias. No se validó un host Linux externo.
+- GitHub Actions sigue bloqueado por cuota. Un job con cero pasos no se trató
+  como fallo de compilación.
+
+Revisión independiente: no quedan bloqueos P0 conocidos en este delta. Deuda
+explícita: `FaultPlan` aún necesita política de overflow; `meta`/`meta_mut` y el
+índice de densidad conservan invariantes no expresadas por tipos; falta probe
+físico aislado en proceso hijo; `Drop` no puede garantizar release frente a un
+rechazo persistente. L03/L04/L06/L07/L09 siguen sin implementarse; no se
+declaran T1–T4/I11 demostrados, concurrencia nativa, integración ELE, Stage 2 ni
+self-hosting.
+
+Inventario real de 23 worktrees, inspeccionado sin descartar nada:
+
+- `ELE`: `main @ 2712a1b`, solo `.claude/` no rastreado.
+- `.claude/worktrees`: `agent-a05...` limpio (behind 4); WIP preservado en
+  `agent-a1d...` (PE64, cuatro archivos nuevos), `agent-a211...` (seis archivos
+  sema), `agent-a47...` (dos archivos de tipos entre módulos), `agent-a582...`
+  (ocho archivos de préstamos/retornos) y `agent-ab759...`
+  (`examples_ele_v2.rs`).
+- `target/handoff-2026-11-12` limpio; `target/nexo-enca-audit-20261113`,
+  `target/p0-lir-interfaces-20261113` y `target/verify-pr63-pr64-20261113`
+  conservan únicamente cachés `__pycache__` no rastreadas; el worktree NEXO es
+  el de este incremento.
+- `ELE-baseline` limpio, behind 1.
+- `ELE-wt/agent-exports` conserva `stmt.l` modificado y dos rutas no
+  rastreadas; `agent-owned` conserva dos archivos modificados. `agent-builtins`,
+  `agent-listlit`, `agent-result`, `cycle2`, `fable-b2` y `fable-main` solo
+  muestran cachés no rastreadas. `fable-append @ eb436c5` está limpio;
+  `integration` y `nexo` están limpios. No se tocó ninguno.
+
+Próximo paso inmediato: publicar `fb0c58b`, `23488b8` y este handoff; actualizar
+la descripción del PR #69 con comandos, SHAs, cuota y limitaciones; mantenerlo
+en borrador. Después, cerrar L05 localmente antes de abrir ramas arquitectónicas
+independientes para metadatos/cabeceras, concurrencia, formalización e
+integración experimental.
+
+---
+
 ## Actualización 2026-11-13 — NEXO v0.3 físico / PR #69
 
 Rama `feat/nexo-v0.3-physical-memory`, worktree
