@@ -565,6 +565,83 @@ I11 admite una simulación con tartamudeo (`\epsilon*`) porque commit,
 modelo abstracto. No admite reordenar publicación de identidad antes de que la
 memoria sea segura.
 
+### 9.1 Reclamación transaccional (corrección de v0.3)
+
+**Defecto original.** `destroy` y `release_hole` modificaban generación,
+bitmaps y contadores y después llamaban a `protect_none`/`decommit`; si el SO
+fallaba, la subpágina quedaba `Committed` sin ocupantes (estado que ninguna
+transición contemplaba) y el llamador recibía `Err` con la capacidad ya
+consumida, induciendo a repetir la destrucción. En Linux, `decommit` hacía
+`madvise` antes de `mprotect`, sin estado intermedio registrado.
+
+**Dos capas de estado.** El estado *físico* de cada página (`AddressSpace`)
+se registra solo tras la confirmación del SO de cada paso:
+
+| Físico | Backing | Acceso | Transiciones |
+|---|---|---|---|
+| `Reserved` | no | no | → `Accessible` (commit) |
+| `Accessible` | sí | RW | → `Protected` (protect) · → `Discarded` (descarte de un paso, Windows) |
+| `Protected` | sí | no | → `Discarded` (descarte) · → `Accessible` (recommit) |
+| `Discarded` | no | no | → `Accessible` (recommit, contenido a cero) |
+
+El estado *lógico* de cada subpágina de datos (`PhysicalPool`):
+
+| Lógico | Confirmada | Acceso físico | Vivos/huecos | Asignable | Reintento | Metadatos conservados |
+|---|---|---|---|---|---|---|
+| `Reserved` | no | no | no | sí (commit) | — | generaciones iniciales |
+| `Committed` | sí | `Accessible` | sí, o ninguno si está en la caché diferida | sí | — | todos |
+| `ReclaimPending` | sí | `Accessible` (falló la protección) o `Protected` (falló el descarte) | no | sí (recommit) | sí (`repair`) | todos |
+| `Returned` | no | `Discarded` | no | sí (recommit) | — | generaciones, bitmaps, ocupación |
+
+Transiciones legales: `Reserved → Committed`; `Committed → Returned |
+ReclaimPending | Committed(caché)`; `ReclaimPending → Returned |
+Committed`; `Returned → Committed`. `check_invariants` verifica la
+combinación lógico×físico de cada subpágina.
+
+**Contratos.**
+- *Destrucción lógica*: `destroy(h)` devuelve `Err((h, e))` solo antes del
+  punto sin retorno (avance de generación) y entonces `h` vuelve intacto;
+  `Ok(DestroyReport)` significa que la identidad antigua quedó invalidada para
+  siempre, y separa el estado de la reclamación y del espejo de cabecera.
+  `Handle` es lineal (no `Copy`/`Clone`): la doble destrucción no compila.
+- *Hueco*: `reuse_hole`/`release_hole` siguen el mismo contrato con
+  `HoleToken`; ningún error pierde ni duplica el token.
+- *Reclamación física*: un fallo deja la subpágina `ReclaimPending` con el
+  estado físico real; ninguna lectura alcanza objetos destruidos porque toda
+  validez se decide por generación en los metadatos lógicos, que nunca
+  retroceden.
+- *Recuperación*: `repair` reintenta reclamaciones y rehace espejos; una
+  página pendiente puede reactivarse al asignar (recommit, puesta a cero del
+  slot, generación +2); si el recommit falla, nada se publica.
+- *Cabecera*: espejo verificado de los metadatos; un fallo de escritura la
+  marca sucia sin afectar a la validez.
+- *Cierre*: `close` rechaza fugas; si la liberación falla, el pool sigue abierto
+  y consistente.
+
+**Secuencias por plataforma.** Linux: `mprotect(PROT_NONE)` → `madvise(
+MADV_DONTNEED)` (la protección previa es obligatoria porque `madvise` no
+quita acceso); recommit `mprotect(RW)`. Windows: `VirtualFree(MEM_DECOMMIT)`
+en un paso (tras éxito, cualquier acceso falla; tras fallo, nada cambió);
+recommit `VirtualAlloc(MEM_COMMIT)`, verificado en ejecución también sobre
+páginas protegidas.
+
+**Refinamiento ampliado.** Las observaciones semánticas (identidades,
+valores, resultados, rechazos, contadores, agotamiento) coinciden exactamente.
+Un `Devuelta` abstracto se corresponde con `Returned`, `ReclaimPending` o
+`Committed` vacío en caché; un `Confirmada` abstracto, con `Committed`. Los
+fallos inyectados solo afectan al pool físico; una operación que falla antes de
+consumir no se aplica al abstracto.
+
+### 9.2 Estado de T1–T4 e I11
+
+| Enunciado | Estado | Evidencia |
+|---|---|---|
+| T1 progreso seguro | **enunciado, no demostrado** | sin pánicos en las campañas; los `expect` internos de `pool.rs` dependen de invariantes verificados, no de una prueba |
+| T2 preservación | **enunciado, no demostrado** | verificador + N01–N28 |
+| T3 ausencia de carreras (modelo) | **enunciado, no demostrado** | detector de la máquina abstracta; el pool físico no es `Send`/`Sync` |
+| T4 destrucción determinista | **enunciado, no demostrado** | drop flags, R05, `close` |
+| I11 correspondencia abstracto–físico | **probado por casos, no demostrado** | arnés diferencial tras cada operación; R12; campañas Windows y Linux |
+
 ## 10. Efectos y concurrencia
 
 El orden parcial de efectos se interpreta como una cota, no como una lista de
@@ -604,11 +681,11 @@ atómica ni un modelo de memoria de CPU.
 | O10 | No-ABA global | Retirada y tests de agotamiento | Probar todas las mutaciones físicas |
 | O11 | Layout físico cabe y está alineado | Aún dependiente del backend | Aserciones de offsets/tamaños por plataforma |
 | O12 | `unsafe` respeta aliasing y validez | No aplica al abstracto | Auditoría de cada bloque físico |
-| O13 | Correspondencia I11 | Diseño de `R` en este documento | Adaptador diferencial y prueba de simulación |
-| O14 | Fallos de SO son atómicos y limpian recursos | No cubierto por v0.2 | Inyección de fallos y argumento de rollback |
-| O15 | Reclaim hace datos inaccesibles | Estado lógico en v0.2 | Pruebas aisladas de protección física |
-| O16 | No quedan mappings al destruir pool | Contadores abstractos | Medición/handles físicos y pruebas F16 |
-| O17 | Progreso sin pánicos internos | Abortos tipados parciales | Eliminar/justificar `expect` alcanzables |
+| O13 | Correspondencia I11 | Arnés diferencial tras cada operación (identidad, valores, contadores, refinamiento de páginas), R12, fuzz Windows y Linux | Prueba de simulación |
+| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, R01–R12, fuzz con fallos | Argumento formal por transición; fallos reales del SO (solo inyectados) |
+| O15 | Reclaim hace datos inaccesibles | Seguimiento físico por página, pruebas de `AddressSpace` (Windows y Linux reales) | Prueba de que ninguna ruta accede a `Protected`/`Discarded` |
+| O16 | No quedan mappings al destruir pool | F16, R09, liberación reintentable | Fuga de reserva si `Drop` falla (documentada) |
+| O17 | Progreso sin pánicos internos | Sin pánicos en las campañas | Justificar los `expect` de `pool.rs` (superpágina inicializada) |
 | O18 | Concurrencia nativa | Fuera de v0.2 | Modelo de memoria y primitivas sincronizadas |
 
 ## 12. Correspondencia con pruebas existentes
@@ -634,9 +711,10 @@ real, protección de páginas o ausencia de fugas de mappings.
   ejecuta trabajadores nativos simultáneos.
 - La recuperación de v0.2 elimina un `Vec` y cambia un estado lógico; no prueba
   semántica de `mmap`, `mprotect`, `madvise`, `VirtualAlloc` o `VirtualFree`.
-- Los detalles físicos, el layout binario y las rutas `unsafe` deberán validarse
-  por plataforma. Un backend compilado en Windows no constituye evidencia de
-  ejecución en Linux, ni viceversa.
+- Los detalles físicos, el layout binario y las rutas `unsafe` se validan por
+  plataforma: Windows x86-64 de forma nativa y Linux x86-64 ejecutando en WSL2
+  (kernel 5.10) binarios compilados para `x86_64-unknown-linux-musl`. Linux con
+  glibc y un kernel nativo no se han probado.
 - Esta formalización no integra NEXO en ELE, no cambia ABI, LIR, ownership ni
   sintaxis pública y no implica Stage 2 ni self-hosting.
 
