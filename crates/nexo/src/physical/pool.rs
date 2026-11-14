@@ -157,6 +157,10 @@ pub struct Handle {
 }
 
 impl Handle {
+    pub fn pool(&self) -> u64 {
+        self.pool
+    }
+
     pub fn slot(&self) -> u32 {
         self.slot
     }
@@ -238,8 +242,16 @@ pub struct HoleToken {
 }
 
 impl HoleToken {
+    pub fn pool(&self) -> u64 {
+        self.pool
+    }
+
     pub fn slot(&self) -> u32 {
         self.slot
+    }
+
+    pub fn generation(&self) -> u32 {
+        self.generation
     }
 }
 
@@ -499,6 +511,10 @@ impl PhysicalPool {
         })
     }
 
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn base_addr(&self) -> Result<usize, PoolError> {
         Ok(self.space()?.base_addr())
     }
@@ -559,6 +575,15 @@ impl PhysicalPool {
 
     pub fn allocate(&mut self) -> Result<Handle, PoolError> {
         self.ensure_operational()?;
+
+        // Fase A — Prevalidación:
+        // 1. Verificación de capacidad y desbordamiento de contadores de seguridad.
+        let next_live = self.live.checked_add(1).ok_or(PoolError::OutOfSpace)?;
+        if next_live > self.capacity() {
+            return Err(PoolError::OutOfSpace);
+        }
+
+        // 2. Localización de subpágina y slot objetivo.
         let g = match self.density.first() {
             Some(g) => g,
             None => {
@@ -573,8 +598,16 @@ impl PhysicalPool {
         };
         let (sp, sub) = (g / SUBPAGINAS_DATOS, g % SUBPAGINAS_DATOS);
         let previous_state = self.meta(sp)?.state[sub];
-        let bit = self.meta(sp)?.free[sub].trailing_zeros() as usize;
+        let free_mask = self.meta(sp)?.free[sub];
+        let bit = free_mask.trailing_zeros() as usize;
+        if bit >= self.slots_per_subpage as usize {
+            return Err(PoolError::Invariant(
+                "density index free count desynchronized".into(),
+            ));
+        }
         let index = sub * self.slots_per_subpage as usize + bit;
+
+        // 3. Transición de generación validada antes de mutar estado físico o lógico.
         let live_generation = generation::allocate(self.meta(sp)?.generations[index]).map_err(
             |error| match error {
                 generation::GenerationError::Retired => PoolError::Retired,
@@ -582,8 +615,15 @@ impl PhysicalPool {
             },
         )?;
 
-        // Física primero: confirmar (si hace falta) y poner a cero. Si algo
-        // falla, ninguna identidad nueva se ha publicado.
+        // 4. Verificación de invariante de ocupación.
+        if self.meta(sp)?.occupied[sub] >= self.slots_per_subpage as u8 {
+            return Err(PoolError::Invariant(
+                "subpage occupied counter overflow".into(),
+            ));
+        }
+
+        // 5. Preparación física: confirmación de página y puesta a cero del slot.
+        // Si cualquier paso físico falla, ninguna identidad lógica se ha publicado.
         if previous_state != PageState::Committed {
             self.commit_page(self.data_offset(sp, sub))?;
             self.meta_mut(sp)?.state[sub] = PageState::Committed;
@@ -609,7 +649,8 @@ impl PhysicalPool {
             return Err(e.into());
         }
 
-        // Transición lógica (sin fallos posibles a partir de aquí).
+        // Fase B — Commit lógico:
+        // Transición atómica infalible para la capacidad.
         let free_before = self.meta(sp)?.free[sub].count_ones();
         self.density.set(g, free_before, false);
         let meta = self.meta_mut(sp)?;
@@ -617,8 +658,10 @@ impl PhysicalPool {
         meta.occupied[sub] += 1;
         meta.generations[index] = live_generation;
         self.density.set(g, free_before - 1, true);
-        self.live = self.live.checked_add(1).ok_or(PoolError::OutOfSpace)?;
+        self.live = next_live;
         self.metrics.allocations = self.metrics.allocations.saturating_add(1);
+
+        // Efectos físicos posteriores al commit: fallos no invalidan la asignación lógica.
         let _ = self.mirror(sp, sub, index);
         Ok(Handle {
             pool: self.id,
@@ -635,33 +678,83 @@ impl PhysicalPool {
         handle: Handle,
         reserve_hole: bool,
     ) -> Result<DestroyReport, (Handle, PoolError)> {
+        // Fase A — Prevalidación:
+        // 1. Comprobar operatividad.
         if let Err(error) = self.ensure_operational() {
             return Err((handle, error));
         }
+
+        // 2. Validar identidad y pertenencia al pool.
         let (sp, sub, bit) = match self.validate(handle.pool, handle.slot, handle.generation) {
             Ok(x) => x,
             Err(e) => return Err((handle, e)),
         };
         let index = sub * self.slots_per_subpage as usize + bit;
+
+        // 3. Validar transición de generación.
         let next = match generation::destroy(handle.generation) {
             Ok(n) => n,
             Err(_) => return Err((handle, PoolError::StaleGeneration)),
         };
-        let g = sp * SUBPAGINAS_DATOS + sub;
-        // Punto sin retorno: la generación antigua deja de ser válida.
-        let meta = match self.meta_mut(sp) {
+
+        // 4. Validar disponibilidad de metadatos.
+        let meta = match self.meta(sp) {
             Ok(m) => m,
             Err(e) => return Err((handle, e)),
         };
-        meta.generations[index] = next;
-        self.live = self.live.saturating_sub(1);
-        self.metrics.destructions = self.metrics.destructions.saturating_add(1);
+
+        // 5. Validar subdesbordamiento de contadores de seguridad (live y occupied).
+        let next_live = match self.live.checked_sub(1) {
+            Some(l) => l,
+            None => {
+                return Err((
+                    handle,
+                    PoolError::Invariant("live counter underflow in destroy".into()),
+                ));
+            }
+        };
+        if meta.occupied[sub] == 0 {
+            return Err((
+                handle,
+                PoolError::Invariant("subpage occupied counter underflow in destroy".into()),
+            ));
+        }
+
+        // 6. Validar condiciones previas según destino del slot (hueco, retiro o libre).
+        let next_holes = if reserve_hole && next != GEN_RETIRADO {
+            if meta.holes[sub] & (1u64 << bit) != 0 {
+                return Err((
+                    handle,
+                    PoolError::Invariant("hole bit already set for live slot".into()),
+                ));
+            }
+            match self.holes.checked_add(1) {
+                Some(h) => h,
+                None => return Err((handle, PoolError::OutOfSpace)),
+            }
+        } else {
+            self.holes
+        };
+
+        if !reserve_hole && next != GEN_RETIRADO && meta.free[sub] & (1u64 << bit) != 0 {
+            return Err((
+                handle,
+                PoolError::Invariant("free bit already set for live slot".into()),
+            ));
+        }
+
+        // Fase B — Commit lógico:
+        // Punto de no retorno: la capacidad se consume y el slot transiciona.
+        let g = sp * SUBPAGINAS_DATOS + sub;
         let outcome = if next == GEN_RETIRADO {
             let meta = match self.meta_mut(sp) {
                 Ok(m) => m,
                 Err(e) => return Err((handle, e)),
             };
+            meta.generations[index] = next;
             meta.occupied[sub] -= 1;
+            self.live = next_live;
+            self.metrics.destructions = self.metrics.destructions.saturating_add(1);
             self.metrics.retired_slots = self.metrics.retired_slots.saturating_add(1);
             DestroyOutcome::Retired
         } else if reserve_hole {
@@ -669,11 +762,11 @@ impl PhysicalPool {
                 Ok(m) => m,
                 Err(e) => return Err((handle, e)),
             };
+            meta.generations[index] = next;
             meta.holes[sub] |= 1u64 << bit;
-            self.holes = match self.holes.checked_add(1) {
-                Some(h) => h,
-                None => return Err((handle, PoolError::OutOfSpace)),
-            };
+            self.live = next_live;
+            self.holes = next_holes;
+            self.metrics.destructions = self.metrics.destructions.saturating_add(1);
             DestroyOutcome::Hole(HoleToken {
                 pool: self.id,
                 slot: handle.slot,
@@ -687,13 +780,21 @@ impl PhysicalPool {
             self.density.set(g, free_before, false);
             let meta = match self.meta_mut(sp) {
                 Ok(m) => m,
-                Err(e) => return Err((handle, e)),
+                Err(e) => {
+                    self.density.set(g, free_before, true);
+                    return Err((handle, e));
+                }
             };
+            meta.generations[index] = next;
             meta.free[sub] |= 1u64 << bit;
             meta.occupied[sub] -= 1;
             self.density.set(g, free_before + 1, true);
+            self.live = next_live;
+            self.metrics.destructions = self.metrics.destructions.saturating_add(1);
             DestroyOutcome::Free
         };
+
+        // Efectos físicos posteriores al commit: no afectan la invalidación de la capacidad.
         let header = self.mirror(sp, sub, index);
         let reclaim = if self.meta(sp).is_ok_and(|m| m.occupied[sub] == 0) {
             self.on_empty(sp, sub)
@@ -709,18 +810,55 @@ impl PhysicalPool {
 
     /// Reutiliza un hueco in situ (`gen` +1). `Err` devuelve el token intacto.
     pub fn reuse_hole(&mut self, token: HoleToken) -> Result<Handle, (HoleToken, PoolError)> {
+        // Fase A — Prevalidación:
+        // 1. Comprobar operatividad.
         if let Err(error) = self.ensure_operational() {
             return Err((token, error));
         }
+
+        // 2. Validar token del hueco.
         let (sp, sub, bit) = match self.validate_hole(&token) {
             Ok(x) => x,
             Err(e) => return Err((token, e)),
         };
         let index = sub * self.slots_per_subpage as usize + bit;
+
+        // 3. Validar transición de generación.
         let generation = match generation::allocate(token.generation) {
             Ok(g) => g,
             Err(_) => return Err((token, PoolError::Retired)),
         };
+
+        // 4. Validar disponibilidad de metadatos.
+        let meta = match self.meta(sp) {
+            Ok(m) => m,
+            Err(e) => return Err((token, e)),
+        };
+
+        // 5. Validar contadores de seguridad (holes underflow y live overflow/capacity).
+        let next_holes = match self.holes.checked_sub(1) {
+            Some(h) => h,
+            None => {
+                return Err((
+                    token,
+                    PoolError::Invariant("holes counter underflow in reuse_hole".into()),
+                ));
+            }
+        };
+        let next_live = match self.live.checked_add(1) {
+            Some(l) => l,
+            None => return Err((token, PoolError::OutOfSpace)),
+        };
+        if next_live > self.capacity() {
+            return Err((token, PoolError::OutOfSpace));
+        }
+
+        // 6. Validar presencia del hueco en el bitmap.
+        if meta.holes[sub] & (1u64 << bit) == 0 {
+            return Err((token, PoolError::InventedHole));
+        }
+
+        // 7. Preparación física: puesta a cero del slot.
         let slot_offset = self.data_offset(sp, sub) + bit * self.config.slot_size as usize;
         let slot_size = self.config.slot_size as usize;
         let zeroed = match self.space_mut() {
@@ -732,19 +870,21 @@ impl PhysicalPool {
         if let Err(e) = zeroed {
             return Err((token, e));
         }
+
+        // Fase B — Commit lógico:
+        // Transición atómica infalible para el token.
         let meta = match self.meta_mut(sp) {
             Ok(m) => m,
             Err(e) => return Err((token, e)),
         };
         meta.holes[sub] &= !(1u64 << bit);
         meta.generations[index] = generation;
-        self.holes = self.holes.saturating_sub(1);
-        self.live = match self.live.checked_add(1) {
-            Some(l) => l,
-            None => return Err((token, PoolError::OutOfSpace)),
-        };
+        self.holes = next_holes;
+        self.live = next_live;
         self.metrics.allocations = self.metrics.allocations.saturating_add(1);
         self.metrics.hole_reuses = self.metrics.hole_reuses.saturating_add(1);
+
+        // Efectos físicos posteriores al commit.
         let _ = self.mirror(sp, sub, index);
         Ok(Handle {
             pool: self.id,
@@ -758,14 +898,55 @@ impl PhysicalPool {
         &mut self,
         token: HoleToken,
     ) -> Result<ReleaseReport, (HoleToken, PoolError)> {
+        // Fase A — Prevalidación:
+        // 1. Comprobar operatividad.
         if let Err(error) = self.ensure_operational() {
             return Err((token, error));
         }
+
+        // 2. Validar token del hueco.
         let (sp, sub, bit) = match self.validate_hole(&token) {
             Ok(x) => x,
             Err(e) => return Err((token, e)),
         };
         let index = sub * self.slots_per_subpage as usize + bit;
+
+        // 3. Validar disponibilidad de metadatos.
+        let meta = match self.meta(sp) {
+            Ok(m) => m,
+            Err(e) => return Err((token, e)),
+        };
+
+        // 4. Validar contadores de seguridad (holes y occupied underflow).
+        let next_holes = match self.holes.checked_sub(1) {
+            Some(h) => h,
+            None => {
+                return Err((
+                    token,
+                    PoolError::Invariant("holes counter underflow in release_hole".into()),
+                ));
+            }
+        };
+        if meta.occupied[sub] == 0 {
+            return Err((
+                token,
+                PoolError::Invariant("subpage occupied counter underflow in release_hole".into()),
+            ));
+        }
+
+        // 5. Validar bitmaps de hueco y libres.
+        if meta.holes[sub] & (1u64 << bit) == 0 {
+            return Err((token, PoolError::InventedHole));
+        }
+        if meta.free[sub] & (1u64 << bit) != 0 {
+            return Err((
+                token,
+                PoolError::Invariant("hole slot already present in free bitmap".into()),
+            ));
+        }
+
+        // Fase B — Commit lógico:
+        // Transición atómica infalible para el token.
         let g = sp * SUBPAGINAS_DATOS + sub;
         let free_before = match self.meta(sp) {
             Ok(m) => m.free[sub].count_ones(),
@@ -774,13 +955,18 @@ impl PhysicalPool {
         self.density.set(g, free_before, false);
         let meta = match self.meta_mut(sp) {
             Ok(m) => m,
-            Err(e) => return Err((token, e)),
+            Err(e) => {
+                self.density.set(g, free_before, true);
+                return Err((token, e));
+            }
         };
         meta.holes[sub] &= !(1u64 << bit);
         meta.free[sub] |= 1u64 << bit;
         meta.occupied[sub] -= 1;
         self.density.set(g, free_before + 1, true);
-        self.holes = self.holes.saturating_sub(1);
+        self.holes = next_holes;
+
+        // Efectos físicos posteriores al commit.
         let header = self.mirror(sp, sub, index);
         let reclaim = if self.meta(sp).is_ok_and(|m| m.occupied[sub] == 0) {
             self.on_empty(sp, sub)
@@ -1385,6 +1571,73 @@ impl PhysicalPool {
 
     fn data_offset(&self, sp: usize, sub: usize) -> usize {
         sp * SUPERPAGINA as usize + CABECERA as usize + sub * SUBPAGINA as usize
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_live(&mut self, live: u64) {
+        self.live = live;
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_holes(&mut self, holes: u64) {
+        self.holes = holes;
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_occupied(&mut self, sp: usize, sub: usize, occupied: u8) {
+        if let Ok(meta) = self.meta_mut(sp) {
+            meta.occupied[sub] = occupied;
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_generation(&mut self, slot: u32, generation: u32) {
+        let slots_per_sub = self.slots_per_subpage as usize;
+        if let Ok((sp, sub, bit)) = self.locate(slot)
+            && let Ok(meta) = self.meta_mut(sp)
+        {
+            meta.generations[sub * slots_per_sub + bit] = generation;
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_free_bit(&mut self, sp: usize, sub: usize, bit: usize, set: bool) {
+        if let Ok(meta) = self.meta_mut(sp) {
+            if set {
+                meta.free[sub] |= 1u64 << bit;
+            } else {
+                meta.free[sub] &= !(1u64 << bit);
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn __test_corrupt_hole_bit(&mut self, sp: usize, sub: usize, bit: usize, set: bool) {
+        if let Ok(meta) = self.meta_mut(sp) {
+            if set {
+                meta.holes[sub] |= 1u64 << bit;
+            } else {
+                meta.holes[sub] &= !(1u64 << bit);
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn __test_craft_handle(&self, slot: u32, generation: u32) -> Handle {
+        Handle {
+            pool: self.id,
+            slot,
+            generation,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn __test_craft_hole_token(&self, slot: u32, generation: u32) -> HoleToken {
+        HoleToken {
+            pool: self.id,
+            slot,
+            generation,
+        }
     }
 }
 
