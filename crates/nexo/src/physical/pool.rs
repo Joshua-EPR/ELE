@@ -334,6 +334,58 @@ struct SuperpageMeta {
     header_dirty: bool,
 }
 
+/// Índice por densidad: `buckets[k - 1]` contiene las subpáginas globales
+/// (`sp · 15 + sub`) con exactamente `k` slots libres; `summary` marca los
+/// buckets no vacíos. La subpágina elegida es la de menor `k` y, a igual `k`,
+/// la de menor índice: el mismo orden que el modelo abstracto, que es la
+/// relación que exige el oráculo diferencial.
+struct DensityIndex {
+    buckets: Vec<Vec<u64>>,
+    summary: u64,
+}
+
+impl DensityIndex {
+    fn new(slots_per_subpage: u32, subpages: usize) -> Self {
+        let words = subpages.div_ceil(64);
+        Self {
+            buckets: (0..slots_per_subpage).map(|_| vec![0; words]).collect(),
+            summary: 0,
+        }
+    }
+
+    fn set(&mut self, g: usize, free: u32, on: bool) {
+        if free == 0 {
+            return;
+        }
+        let b = &mut self.buckets[free as usize - 1];
+        if on {
+            b[g / 64] |= 1 << (g % 64);
+            self.summary |= 1 << (free - 1);
+        } else {
+            b[g / 64] &= !(1 << (g % 64));
+            if b.iter().all(|w| *w == 0) {
+                self.summary &= !(1 << (free - 1));
+            }
+        }
+    }
+
+    fn contains(&self, g: usize, free: u32) -> bool {
+        free != 0 && self.buckets[free as usize - 1][g / 64] & (1 << (g % 64)) != 0
+    }
+
+    fn first(&self) -> Option<usize> {
+        if self.summary == 0 {
+            return None;
+        }
+        let k = self.summary.trailing_zeros() as usize;
+        self.buckets[k]
+            .iter()
+            .enumerate()
+            .find(|(_, w)| **w != 0)
+            .map(|(i, w)| i * 64 + w.trailing_zeros() as usize)
+    }
+}
+
 /// Pool físico. Ninguna referencia ni slice a su reserva sale de esta API.
 pub struct PhysicalPool {
     id: u64,
@@ -341,6 +393,7 @@ pub struct PhysicalPool {
     slots_per_subpage: u32,
     space: Option<AddressSpace>,
     superpages: Vec<Option<SuperpageMeta>>,
+    density: DensityIndex,
     /// Subpágina globales vacías conservadas por la política diferida.
     deferred: Vec<usize>,
     /// Subpáginas globales en `ReclaimPending`.
@@ -398,6 +451,10 @@ impl PhysicalPool {
             slots_per_subpage,
             space: Some(space),
             superpages: (0..config.max_superpages).map(|_| None).collect(),
+            density: DensityIndex::new(
+                slots_per_subpage,
+                config.max_superpages as usize * SUBPAGINAS_DATOS,
+            ),
             deferred: Vec::new(),
             pending: Vec::new(),
             live: 0,
@@ -465,7 +522,7 @@ impl PhysicalPool {
     }
 
     pub fn allocate(&mut self) -> Result<Handle, PoolError> {
-        let g = match self.densest_linear() {
+        let g = match self.density.first() {
             Some(g) => g,
             None => {
                 let sp = self
@@ -512,10 +569,13 @@ impl PhysicalPool {
         }
 
         // Transición lógica (sin fallos posibles a partir de aquí).
+        let free_before = self.meta(sp).free[sub].count_ones();
+        self.density.set(g, free_before, false);
         let meta = self.meta_mut(sp);
         meta.free[sub] &= !(1u64 << bit);
         meta.occupied[sub] += 1;
         meta.generations[index] = live_generation;
+        self.density.set(g, free_before - 1, true);
         self.live += 1;
         self.metrics.allocations += 1;
         let _ = self.mirror(sp, sub, index);
@@ -543,6 +603,7 @@ impl PhysicalPool {
             Ok(n) => n,
             Err(_) => return Err((handle, PoolError::StaleGeneration)),
         };
+        let g = sp * SUBPAGINAS_DATOS + sub;
         // Punto sin retorno: la generación antigua deja de ser válida.
         self.meta_mut(sp).generations[index] = next;
         self.live -= 1;
@@ -560,9 +621,12 @@ impl PhysicalPool {
                 generation: next,
             })
         } else {
+            let free_before = self.meta(sp).free[sub].count_ones();
+            self.density.set(g, free_before, false);
             let meta = self.meta_mut(sp);
             meta.free[sub] |= 1u64 << bit;
             meta.occupied[sub] -= 1;
+            self.density.set(g, free_before + 1, true);
             DestroyOutcome::Free
         };
         let header = self.mirror(sp, sub, index);
@@ -625,10 +689,14 @@ impl PhysicalPool {
             Err(e) => return Err((token, e)),
         };
         let index = sub * self.slots_per_subpage as usize + bit;
+        let g = sp * SUBPAGINAS_DATOS + sub;
+        let free_before = self.meta(sp).free[sub].count_ones();
+        self.density.set(g, free_before, false);
         let meta = self.meta_mut(sp);
         meta.holes[sub] &= !(1u64 << bit);
         meta.free[sub] |= 1u64 << bit;
         meta.occupied[sub] -= 1;
+        self.density.set(g, free_before + 1, true);
         self.holes -= 1;
         let header = self.mirror(sp, sub, index);
         let reclaim = if self.meta(sp).occupied[sub] == 0 {
@@ -789,6 +857,12 @@ impl PhysicalPool {
                 if occupied != meta.occupied[sub] {
                     return inv(format!("subpage {g}: occupancy mismatch"));
                 }
+                let free = meta.free[sub].count_ones();
+                for k in 1..=self.slots_per_subpage {
+                    if self.density.contains(g, k) != (k == free) {
+                        return inv(format!("subpage {g}: density index mismatch"));
+                    }
+                }
                 let access = space.page_access(self.data_offset(sp, sub))?;
                 let in_deferred = self.deferred.contains(&g);
                 let in_pending = self.pending.contains(&g);
@@ -874,24 +948,6 @@ impl PhysicalPool {
         }
     }
 
-    /// Subpágina con menos slots libres (y, a igualdad, menor índice):
-    /// búsqueda lineal sobre todas las subpáginas inicializadas.
-    fn densest_linear(&self) -> Option<usize> {
-        self.superpages
-            .iter()
-            .enumerate()
-            .filter_map(|(sp, meta)| meta.as_ref().map(|meta| (sp, meta)))
-            .flat_map(|(sp, meta)| {
-                meta.free
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, bitmap)| **bitmap != 0)
-                    .map(move |(sub, bitmap)| (bitmap.count_ones(), sp * SUBPAGINAS_DATOS + sub))
-            })
-            .min()
-            .map(|(_, g)| g)
-    }
-
     fn space(&self) -> Result<&AddressSpace, PoolError> {
         self.space.as_ref().ok_or(PoolError::Closed)
     }
@@ -915,6 +971,10 @@ impl PhysicalPool {
             header_dirty: true,
         };
         self.superpages[sp] = Some(meta);
+        for sub in 0..SUBPAGINAS_DATOS {
+            self.density
+                .set(sp * SUBPAGINAS_DATOS + sub, self.slots_per_subpage, true);
+        }
         self.metrics.headers_committed += 1;
         // Escritura completa inicial (única vez); si falla, queda sucia.
         let _ = self.resync_header(sp);

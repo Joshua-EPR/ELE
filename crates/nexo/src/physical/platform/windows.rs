@@ -118,10 +118,12 @@ pub(in crate::physical) unsafe fn protect_none(
     }
 }
 
-/// Se conserva la secuencia de v0.3: `VirtualProtect(PAGE_NOACCESS)` y después
-/// `VirtualFree(MEM_DECOMMIT)`. Si el segundo paso falla, la página queda
-/// protegida (`Protected`) y la reclamación es reintentable.
-pub(in crate::physical) const PROTECT_BEFORE_DISCARD_REQUIRED: bool = true;
+/// `VirtualFree(MEM_DECOMMIT)` devuelve las páginas al estado reservado: tras
+/// un éxito cualquier acceso produce una violación de acceso, así que la
+/// protección previa es redundante. Si falla, las páginas conservan su estado
+/// anterior. `AddressSpace` puede activar la protección previa solo para
+/// pruebas de fallo parcial y comparación de coste.
+pub(in crate::physical) const PROTECT_BEFORE_DISCARD_REQUIRED: bool = false;
 
 /// Desconfirma un rango (`MEM_DECOMMIT`).
 ///

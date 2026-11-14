@@ -86,6 +86,40 @@ fn r02_proteccion_correcta_y_fallo_del_descarte() {
     pool.check_invariants().unwrap();
 }
 
+/// En Windows sin protección previa la reclamación es un solo paso: si falla
+/// el descarte, la página sigue accesible (y su objeto ya es inalcanzable).
+#[cfg(target_os = "windows")]
+#[test]
+fn r02b_windows_un_solo_paso() {
+    let mut pool = PhysicalPool::new(PoolConfig {
+        max_superpages: 1,
+        ..PoolConfig::default()
+    })
+    .unwrap();
+    let h = pool.allocate().unwrap();
+    let slot = h.slot();
+    let antes = pool.address_metrics().unwrap().os_calls;
+    falla(&mut pool, FaultOp::Decommit);
+    let r = pool.destroy(h, false).unwrap();
+    assert_eq!(
+        r.reclaim,
+        pendiente(PageAccess::Accessible, FaultOp::Decommit)
+    );
+    assert_eq!(
+        pool.address_metrics().unwrap().os_calls.protect,
+        antes.protect,
+        "sin VirtualProtect"
+    );
+    pool.repair().unwrap();
+    assert_eq!(pool.physical_access(slot).unwrap(), PageAccess::Discarded);
+    let despues = pool.address_metrics().unwrap().os_calls;
+    assert_eq!(
+        (despues.protect, despues.discard - antes.discard),
+        (antes.protect, 1)
+    );
+    pool.check_invariants().unwrap();
+}
+
 /// R03: reclamación pendiente y reintento con éxito.
 #[test]
 fn r03_reintento_con_exito() {
