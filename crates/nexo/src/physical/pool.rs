@@ -330,6 +330,19 @@ pub struct PoolMetrics {
     pub deferred_reused: u64,
 }
 
+/// Identificador validado de una superpágina dentro del pool.
+/// Garantiza que el índice corresponde a un ordinal dentro del límite
+/// de la reserva y que los metadatos físicos han sido inicializados.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct SuperpageIndex(pub(crate) usize);
+
+impl SuperpageIndex {
+    #[inline]
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
 struct SuperpageMeta {
     generations: Vec<u32>,
     free: [u64; SUBPAGINAS_DATOS],
@@ -359,23 +372,36 @@ impl DensityIndex {
     }
 
     fn set(&mut self, g: usize, free: u32, on: bool) {
-        if free == 0 {
+        if free == 0 || free > 64 || free as usize > self.buckets.len() {
             return;
         }
         let b = &mut self.buckets[free as usize - 1];
+        let word_idx = g / 64;
+        if word_idx >= b.len() {
+            return;
+        }
+        let bit = 1u64 << (g % 64);
         if on {
-            b[g / 64] |= 1 << (g % 64);
-            self.summary |= 1 << (free - 1);
+            b[word_idx] |= bit;
+            self.summary |= 1u64 << (free - 1);
         } else {
-            b[g / 64] &= !(1 << (g % 64));
+            b[word_idx] &= !bit;
             if b.iter().all(|w| *w == 0) {
-                self.summary &= !(1 << (free - 1));
+                self.summary &= !(1u64 << (free - 1));
             }
         }
     }
 
     fn contains(&self, g: usize, free: u32) -> bool {
-        free != 0 && self.buckets[free as usize - 1][g / 64] & (1 << (g % 64)) != 0
+        if free == 0 || free > 64 || free as usize > self.buckets.len() {
+            return false;
+        }
+        let b = &self.buckets[free as usize - 1];
+        let word_idx = g / 64;
+        if word_idx >= b.len() {
+            return false;
+        }
+        b[word_idx] & (1u64 << (g % 64)) != 0
     }
 
     fn first(&self) -> Option<usize> {
@@ -450,8 +476,13 @@ impl PhysicalPool {
         let mut space = AddressSpace::reserve_with_faults(len, SUPERPAGINA as usize, faults)?;
         space.set_protect_before_discard(config.protect_before_discard);
         let slots_per_subpage = SUBPAGINA as u32 / config.slot_size;
+        let id = NEXT_POOL_ID
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+                if id == u64::MAX { None } else { Some(id + 1) }
+            })
+            .map_err(|_| PoolError::InvalidConfig("pool ID counter exhausted"))?;
         Ok(Self {
-            id: NEXT_POOL_ID.fetch_add(1, Ordering::Relaxed),
+            id,
             config,
             slots_per_subpage,
             space: Some(space),
@@ -473,7 +504,7 @@ impl PhysicalPool {
     }
 
     pub fn capacity(&self) -> u64 {
-        self.config.max_superpages as u64 * self.slots_per_superpage() as u64
+        (self.config.max_superpages as u64).saturating_mul(self.slots_per_superpage() as u64)
     }
 
     pub fn slots_per_subpage(&self) -> u32 {
@@ -541,10 +572,10 @@ impl PhysicalPool {
             }
         };
         let (sp, sub) = (g / SUBPAGINAS_DATOS, g % SUBPAGINAS_DATOS);
-        let previous_state = self.meta(sp).state[sub];
-        let bit = self.meta(sp).free[sub].trailing_zeros() as usize;
+        let previous_state = self.meta(sp)?.state[sub];
+        let bit = self.meta(sp)?.free[sub].trailing_zeros() as usize;
         let index = sub * self.slots_per_subpage as usize + bit;
-        let live_generation = generation::allocate(self.meta(sp).generations[index]).map_err(
+        let live_generation = generation::allocate(self.meta(sp)?.generations[index]).map_err(
             |error| match error {
                 generation::GenerationError::Retired => PoolError::Retired,
                 _ => PoolError::Invariant("free bitmap points to a non-free generation".into()),
@@ -555,35 +586,39 @@ impl PhysicalPool {
         // falla, ninguna identidad nueva se ha publicado.
         if previous_state != PageState::Committed {
             self.commit_page(self.data_offset(sp, sub))?;
-            self.meta_mut(sp).state[sub] = PageState::Committed;
+            self.meta_mut(sp)?.state[sub] = PageState::Committed;
             self.pending.retain(|p| *p != g);
             match previous_state {
-                PageState::Reserved => self.metrics.data_committed += 1,
-                _ => self.metrics.data_recommitted += 1,
+                PageState::Reserved => {
+                    self.metrics.data_committed = self.metrics.data_committed.saturating_add(1)
+                }
+                _ => {
+                    self.metrics.data_recommitted = self.metrics.data_recommitted.saturating_add(1)
+                }
             }
         } else if let Some(i) = self.deferred.iter().position(|p| *p == g) {
             self.deferred.swap_remove(i);
-            self.metrics.deferred_reused += 1;
+            self.metrics.deferred_reused = self.metrics.deferred_reused.saturating_add(1);
         }
         let slot_offset = self.data_offset(sp, sub) + bit * self.config.slot_size as usize;
         let slot_size = self.config.slot_size as usize;
         if let Err(e) = self.space_mut()?.fill(slot_offset, slot_size, 0) {
-            if self.meta(sp).occupied[sub] == 0 {
+            if self.meta(sp).is_ok_and(|m| m.occupied[sub] == 0) {
                 let _ = self.on_empty(sp, sub);
             }
             return Err(e.into());
         }
 
         // Transición lógica (sin fallos posibles a partir de aquí).
-        let free_before = self.meta(sp).free[sub].count_ones();
+        let free_before = self.meta(sp)?.free[sub].count_ones();
         self.density.set(g, free_before, false);
-        let meta = self.meta_mut(sp);
+        let meta = self.meta_mut(sp)?;
         meta.free[sub] &= !(1u64 << bit);
         meta.occupied[sub] += 1;
         meta.generations[index] = live_generation;
         self.density.set(g, free_before - 1, true);
-        self.live += 1;
-        self.metrics.allocations += 1;
+        self.live = self.live.checked_add(1).ok_or(PoolError::OutOfSpace)?;
+        self.metrics.allocations = self.metrics.allocations.saturating_add(1);
         let _ = self.mirror(sp, sub, index);
         Ok(Handle {
             pool: self.id,
@@ -614,32 +649,53 @@ impl PhysicalPool {
         };
         let g = sp * SUBPAGINAS_DATOS + sub;
         // Punto sin retorno: la generación antigua deja de ser válida.
-        self.meta_mut(sp).generations[index] = next;
-        self.live -= 1;
-        self.metrics.destructions += 1;
+        let meta = match self.meta_mut(sp) {
+            Ok(m) => m,
+            Err(e) => return Err((handle, e)),
+        };
+        meta.generations[index] = next;
+        self.live = self.live.saturating_sub(1);
+        self.metrics.destructions = self.metrics.destructions.saturating_add(1);
         let outcome = if next == GEN_RETIRADO {
-            self.meta_mut(sp).occupied[sub] -= 1;
-            self.metrics.retired_slots += 1;
+            let meta = match self.meta_mut(sp) {
+                Ok(m) => m,
+                Err(e) => return Err((handle, e)),
+            };
+            meta.occupied[sub] -= 1;
+            self.metrics.retired_slots = self.metrics.retired_slots.saturating_add(1);
             DestroyOutcome::Retired
         } else if reserve_hole {
-            self.meta_mut(sp).holes[sub] |= 1u64 << bit;
-            self.holes += 1;
+            let meta = match self.meta_mut(sp) {
+                Ok(m) => m,
+                Err(e) => return Err((handle, e)),
+            };
+            meta.holes[sub] |= 1u64 << bit;
+            self.holes = match self.holes.checked_add(1) {
+                Some(h) => h,
+                None => return Err((handle, PoolError::OutOfSpace)),
+            };
             DestroyOutcome::Hole(HoleToken {
                 pool: self.id,
                 slot: handle.slot,
                 generation: next,
             })
         } else {
-            let free_before = self.meta(sp).free[sub].count_ones();
+            let free_before = match self.meta(sp) {
+                Ok(m) => m.free[sub].count_ones(),
+                Err(e) => return Err((handle, e)),
+            };
             self.density.set(g, free_before, false);
-            let meta = self.meta_mut(sp);
+            let meta = match self.meta_mut(sp) {
+                Ok(m) => m,
+                Err(e) => return Err((handle, e)),
+            };
             meta.free[sub] |= 1u64 << bit;
             meta.occupied[sub] -= 1;
             self.density.set(g, free_before + 1, true);
             DestroyOutcome::Free
         };
         let header = self.mirror(sp, sub, index);
-        let reclaim = if self.meta(sp).occupied[sub] == 0 {
+        let reclaim = if self.meta(sp).is_ok_and(|m| m.occupied[sub] == 0) {
             self.on_empty(sp, sub)
         } else {
             ReclaimStatus::NotNeeded
@@ -676,13 +732,19 @@ impl PhysicalPool {
         if let Err(e) = zeroed {
             return Err((token, e));
         }
-        let meta = self.meta_mut(sp);
+        let meta = match self.meta_mut(sp) {
+            Ok(m) => m,
+            Err(e) => return Err((token, e)),
+        };
         meta.holes[sub] &= !(1u64 << bit);
         meta.generations[index] = generation;
-        self.holes -= 1;
-        self.live += 1;
-        self.metrics.allocations += 1;
-        self.metrics.hole_reuses += 1;
+        self.holes = self.holes.saturating_sub(1);
+        self.live = match self.live.checked_add(1) {
+            Some(l) => l,
+            None => return Err((token, PoolError::OutOfSpace)),
+        };
+        self.metrics.allocations = self.metrics.allocations.saturating_add(1);
+        self.metrics.hole_reuses = self.metrics.hole_reuses.saturating_add(1);
         let _ = self.mirror(sp, sub, index);
         Ok(Handle {
             pool: self.id,
@@ -705,16 +767,22 @@ impl PhysicalPool {
         };
         let index = sub * self.slots_per_subpage as usize + bit;
         let g = sp * SUBPAGINAS_DATOS + sub;
-        let free_before = self.meta(sp).free[sub].count_ones();
+        let free_before = match self.meta(sp) {
+            Ok(m) => m.free[sub].count_ones(),
+            Err(e) => return Err((token, e)),
+        };
         self.density.set(g, free_before, false);
-        let meta = self.meta_mut(sp);
+        let meta = match self.meta_mut(sp) {
+            Ok(m) => m,
+            Err(e) => return Err((token, e)),
+        };
         meta.holes[sub] &= !(1u64 << bit);
         meta.free[sub] |= 1u64 << bit;
         meta.occupied[sub] -= 1;
         self.density.set(g, free_before + 1, true);
-        self.holes -= 1;
+        self.holes = self.holes.saturating_sub(1);
         let header = self.mirror(sp, sub, index);
-        let reclaim = if self.meta(sp).occupied[sub] == 0 {
+        let reclaim = if self.meta(sp).is_ok_and(|m| m.occupied[sub] == 0) {
             self.on_empty(sp, sub)
         } else {
             ReclaimStatus::NotNeeded
@@ -967,18 +1035,39 @@ impl PhysicalPool {
         }
     }
 
-    // ------------------------------------------------------------ internos
-
-    fn meta(&self, sp: usize) -> &SuperpageMeta {
-        self.superpages[sp]
-            .as_ref()
-            .expect("superpágina inicializada")
+    /// Comprueba si la superpágina `sp` ha sido inicializada.
+    pub fn is_superpage_initialized(&self, sp: usize) -> bool {
+        self.superpages.get(sp).and_then(Option::as_ref).is_some()
     }
 
-    fn meta_mut(&mut self, sp: usize) -> &mut SuperpageMeta {
-        self.superpages[sp]
-            .as_mut()
-            .expect("superpágina inicializada")
+    /// Valida que el ordinal `sp` corresponde a una superpágina inicializada en este pool.
+    pub fn validate_superpage(&self, sp: usize) -> Result<SuperpageIndex, PoolError> {
+        if sp >= self.superpages.len() {
+            return Err(PoolError::OutOfBounds);
+        }
+        if self.is_superpage_initialized(sp) {
+            Ok(SuperpageIndex(sp))
+        } else {
+            Err(PoolError::Invariant(format!(
+                "superpágina {sp} no inicializada"
+            )))
+        }
+    }
+
+    // ------------------------------------------------------------ internos
+
+    fn meta(&self, sp: usize) -> Result<&SuperpageMeta, PoolError> {
+        self.superpages
+            .get(sp)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| PoolError::Invariant(format!("superpágina {sp} no inicializada")))
+    }
+
+    fn meta_mut(&mut self, sp: usize) -> Result<&mut SuperpageMeta, PoolError> {
+        self.superpages
+            .get_mut(sp)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| PoolError::Invariant(format!("superpágina {sp} no inicializada")))
     }
 
     fn full_mask(&self) -> u64 {
@@ -1040,11 +1129,13 @@ impl PhysicalPool {
     fn on_empty(&mut self, sp: usize, sub: usize) -> ReclaimStatus {
         let g = sp * SUBPAGINAS_DATOS + sub;
         if let ReclaimPolicy::Deferred { keep_empty } = self.config.reclaim
-            && self.meta(sp).state[sub] == PageState::Committed
+            && self
+                .meta(sp)
+                .is_ok_and(|m| m.state[sub] == PageState::Committed)
             && self.deferred.len() < keep_empty as usize
         {
             self.deferred.push(g);
-            self.metrics.deferred_kept += 1;
+            self.metrics.deferred_kept = self.metrics.deferred_kept.saturating_add(1);
             return ReclaimStatus::Deferred;
         }
         self.try_reclaim(sp, sub)
@@ -1080,12 +1171,14 @@ impl PhysicalPool {
         let result = space.decommit(offset, SUBPAGINA as usize);
         match result {
             Ok(()) => {
-                self.meta_mut(sp).state[sub] = PageState::Returned;
+                if let Ok(m) = self.meta_mut(sp) {
+                    m.state[sub] = PageState::Returned;
+                }
                 self.pending.retain(|p| *p != g);
                 self.deferred.retain(|p| *p != g);
-                let free = self.meta(sp).free[sub].count_ones();
+                let free = self.meta(sp).map_or(0, |m| m.free[sub].count_ones());
                 self.density.set(g, free, true);
-                self.metrics.data_returned += 1;
+                self.metrics.data_returned = self.metrics.data_returned.saturating_add(1);
                 ReclaimStatus::Completed
             }
             Err(error) => self.mark_reclaim_pending(sp, sub, error),
@@ -1109,18 +1202,20 @@ impl PhysicalPool {
                         space.is_quarantined(offset).unwrap_or(true),
                     )
                 });
-        self.meta_mut(sp).state[sub] = if quarantined {
-            PageState::Quarantined
-        } else {
-            PageState::ReclaimPending
-        };
+        if let Ok(m) = self.meta_mut(sp) {
+            m.state[sub] = if quarantined {
+                PageState::Quarantined
+            } else {
+                PageState::ReclaimPending
+            };
+        }
         self.deferred.retain(|p| *p != g);
         if !self.pending.contains(&g) {
             self.pending.push(g);
         }
-        let free = self.meta(sp).free[sub].count_ones();
+        let free = self.meta(sp).map_or(0, |m| m.free[sub].count_ones());
         self.density.set(g, free, !quarantined);
-        self.metrics.reclaim_failures += 1;
+        self.metrics.reclaim_failures = self.metrics.reclaim_failures.saturating_add(1);
         ReclaimStatus::Pending { error, access }
     }
 
@@ -1128,13 +1223,16 @@ impl PhysicalPool {
     /// subpágina tocada (21 bytes). Un único punto de inyección por
     /// transición, comprobado antes de escribir nada.
     fn mirror(&mut self, sp: usize, sub: usize, index: usize) -> HeaderStatus {
-        if self.meta(sp).header_dirty {
+        if self.meta(sp).map_or(true, |m| m.header_dirty) {
             return match self.resync_header(sp) {
                 Ok(()) => HeaderStatus::Synced,
                 Err(e) => HeaderStatus::Stale(e),
             };
         }
-        let meta = self.meta(sp);
+        let meta = match self.meta(sp) {
+            Ok(m) => m,
+            Err(_) => return HeaderStatus::Synced,
+        };
         let generation = meta.generations[index].to_le_bytes();
         let free = meta.free[sub].to_le_bytes();
         let holes = meta.holes[sub].to_le_bytes();
@@ -1151,12 +1249,16 @@ impl PhysicalPool {
         })();
         match result {
             Ok(()) => {
-                self.metrics.header_bytes_written += 21;
+                self.metrics.header_bytes_written =
+                    self.metrics.header_bytes_written.saturating_add(21);
                 HeaderStatus::Synced
             }
             Err(e) => {
-                self.meta_mut(sp).header_dirty = true;
-                self.metrics.header_mirror_failures += 1;
+                if let Ok(m) = self.meta_mut(sp) {
+                    m.header_dirty = true;
+                }
+                self.metrics.header_mirror_failures =
+                    self.metrics.header_mirror_failures.saturating_add(1);
                 HeaderStatus::Stale(e)
             }
         }
@@ -1178,20 +1280,31 @@ impl PhysicalPool {
     }
 
     fn resync_header(&mut self, sp: usize) -> Result<(), PhysicalError> {
-        let header = self.expected_header(self.meta(sp));
+        let header = match self.meta(sp) {
+            Ok(m) => self.expected_header(m),
+            Err(_) => return Ok(()),
+        };
         let space = self.space.as_mut().ok_or(PhysicalError::Released)?;
         let result = space
             .inject(super::FaultOp::HeaderWrite)
             .and_then(|()| space.write(sp * SUPERPAGINA as usize, &header));
         match result {
             Ok(()) => {
-                self.meta_mut(sp).header_dirty = false;
-                self.metrics.header_bytes_written += HEADER_USED as u64;
+                if let Ok(m) = self.meta_mut(sp) {
+                    m.header_dirty = false;
+                }
+                self.metrics.header_bytes_written = self
+                    .metrics
+                    .header_bytes_written
+                    .saturating_add(HEADER_USED as u64);
                 Ok(())
             }
             Err(e) => {
-                self.meta_mut(sp).header_dirty = true;
-                self.metrics.header_mirror_failures += 1;
+                if let Ok(m) = self.meta_mut(sp) {
+                    m.header_dirty = true;
+                }
+                self.metrics.header_mirror_failures =
+                    self.metrics.header_mirror_failures.saturating_add(1);
                 Err(e)
             }
         }
@@ -1272,5 +1385,71 @@ impl PhysicalPool {
 
     fn data_offset(&self, sp: usize, sub: usize) -> usize {
         sp * SUPERPAGINA as usize + CABECERA as usize + sub * SUBPAGINA as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn superpage_typed_validation_and_meta_safety() {
+        let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+        // Superpage 0 starts uninitialized
+        assert!(!pool.is_superpage_initialized(0));
+        assert!(matches!(
+            pool.validate_superpage(0),
+            Err(PoolError::Invariant(_))
+        ));
+        assert!(matches!(pool.meta(0), Err(PoolError::Invariant(_))));
+        assert!(matches!(pool.meta_mut(0), Err(PoolError::Invariant(_))));
+
+        // Out of bounds superpage
+        assert!(matches!(
+            pool.validate_superpage(999),
+            Err(PoolError::OutOfBounds)
+        ));
+        assert!(matches!(pool.meta(999), Err(PoolError::Invariant(_))));
+        assert!(matches!(pool.meta_mut(999), Err(PoolError::Invariant(_))));
+
+        // After an allocation, superpage 0 becomes initialized
+        let handle = pool.allocate().unwrap();
+        assert!(pool.is_superpage_initialized(0));
+        let sp_idx = pool.validate_superpage(0).unwrap();
+        assert_eq!(sp_idx.get(), 0);
+        assert!(pool.meta(0).is_ok());
+        assert!(pool.meta_mut(0).is_ok());
+
+        // Destroy handle
+        assert!(pool.destroy(handle, false).is_ok());
+        pool.close().unwrap();
+    }
+
+    #[test]
+    fn density_index_boundaries_and_shift_safety() {
+        let mut density = DensityIndex::new(64, 120);
+        // free = 0 does nothing and does not panic
+        density.set(0, 0, true);
+        assert!(!density.contains(0, 0));
+        // free > 64 does nothing and does not panic
+        density.set(0, 65, true);
+        assert!(!density.contains(0, 65));
+        density.set(0, u32::MAX, true);
+        assert!(!density.contains(0, u32::MAX));
+        // g beyond words does not panic
+        density.set(usize::MAX, 32, true);
+        assert!(!density.contains(usize::MAX, 32));
+    }
+
+    #[test]
+    fn pool_metrics_and_counters_saturation() {
+        let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+        pool.metrics.allocations = u64::MAX;
+        pool.metrics.destructions = u64::MAX;
+        pool.metrics.allocations = pool.metrics.allocations.saturating_add(1);
+        pool.metrics.destructions = pool.metrics.destructions.saturating_add(1);
+        assert_eq!(pool.metrics.allocations, u64::MAX);
+        assert_eq!(pool.metrics.destructions, u64::MAX);
+        pool.close().unwrap();
     }
 }
