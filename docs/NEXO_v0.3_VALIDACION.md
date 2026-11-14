@@ -73,7 +73,7 @@ Base: `cb16d5d` (cabeza inicial del PR #69). Commits:
 | Commit | Contenido |
 | --- | --- |
 | `b675cf0` | Reclamación transaccional: estados físicos por página y lógicos por subpágina, reclaim por pasos reintentable, `FaultPlan`, contrato de errores que devuelve la capacidad, espejo de cabecera verificado, API lineal (`Handle` no `Copy`, `ObjRef`, `revalidate` no fabrica dueños) |
-| `c5cab59` | R01–R12 y modo `--fallos` del fuzzer físico |
+| `c5cab59` | Casos hoy denominados S01–S12 y modo `--fallos` del fuzzer físico |
 | `a66105e` | Espejo de cabecera incremental y puesta a cero sin heap |
 | `f78a5b4` | Índice de densidad y `MEM_DECOMMIT` de un solo paso en Windows |
 | `6943dbc` | Benchmark ampliado (estadísticas, SO, cabecera, asignaciones, memoria) |
@@ -140,8 +140,9 @@ con `rust-lld`) y **ejecutados** en WSL2. No es Linux nativo ni glibc.
 | `nexo-physical-fuzz 100000` | 4 × 100.000 sin divergencias |
 | `nexo-physical-fuzz --fallos 5000 256` | 1.280.000 comandos sin divergencias; 1.062 reclamaciones pendientes |
 
-El CI de GitHub Actions del PR no se pudo consultar desde esta máquina (sin
-`gh` y sin sesión de GitHub en el navegador).
+El CI de GitHub Actions del PR no ejecutó pasos porque la cuota disponible de
+Actions está agotada. Es un bloqueo de cuota, no evidencia de fallo de
+compilación. No se modifican workflows para eludirlo.
 
 ### Validación del poder de las pruebas
 
@@ -154,8 +155,8 @@ fuzzer de fallos, que las reduce a 8, 4 y 1 comandos.
 
 | # | Problema | Estado |
 | --- | --- | --- |
-| 1 | Linux no ejecutado | **Resuelto en parte**: ejecutado en WSL2 (musl); falta Linux nativo/glibc |
-| 2 | Atomicidad del reclaim | **Corregido** (R01–R12, fuzz con fallos) |
+| 1 | Linux no ejecutado | **Resuelto en WSL2**: ejecutado con musl y glibc; falta un host Linux fuera de WSL2 |
+| 2 | Atomicidad del reclaim | **Corregido** (S01–S12, fuzz con fallos) |
 | 3 | Rendimiento | **Mejorado**: caliente 10,1× → 3,5× `Box` en la misma sesión (Windows); reclaim 44,7× → 37,8× |
 | 4 | Medición | **Mejorado**: percentiles, CV entre corridas, SO, cabecera, asignaciones, WS/RSS; sigue sin aislamiento de CPU ni perfilador |
 | 5 | Metadatos duplicados | **Pendiente** (el espejo ya no se reescribe entero) |

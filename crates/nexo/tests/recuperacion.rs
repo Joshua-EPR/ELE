@@ -1,4 +1,4 @@
-//! R01–R12: recuperación ante fallos del SO y de la cabecera.
+//! S01–S12: seguridad y recuperación ante fallos físicos parciales.
 //!
 //! Los fallos se inyectan de forma determinista antes de la llamada al SO
 //! (`FaultPlan`), así que el estado externo tras el fallo es exactamente el
@@ -31,9 +31,9 @@ fn pendiente(access: PageAccess, op: FaultOp) -> ReclaimStatus {
     }
 }
 
-/// R01: falla `protect_none` antes de cambiar la protección.
+/// S01: falla `protect_none` antes de cambiar la protección.
 #[test]
-fn r01_falla_la_proteccion_antes_de_cambiar_nada() {
+fn s01_falla_la_proteccion_antes_de_cambiar_nada() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     let (slot, obj) = (h.slot(), h.obj());
@@ -56,9 +56,9 @@ fn r01_falla_la_proteccion_antes_de_cambiar_nada() {
     pool.check_invariants().unwrap();
 }
 
-/// R02: la protección tiene éxito y falla el descarte posterior.
+/// S02: la protección tiene éxito y falla el descarte posterior.
 #[test]
-fn r02_proteccion_correcta_y_fallo_del_descarte() {
+fn s02_proteccion_correcta_y_fallo_del_descarte() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     let (slot, obj) = (h.slot(), h.obj());
@@ -90,7 +90,7 @@ fn r02_proteccion_correcta_y_fallo_del_descarte() {
 /// el descarte, la página sigue accesible (y su objeto ya es inalcanzable).
 #[cfg(target_os = "windows")]
 #[test]
-fn r02b_windows_un_solo_paso() {
+fn s02b_windows_un_solo_paso() {
     let mut pool = PhysicalPool::new(PoolConfig {
         max_superpages: 1,
         ..PoolConfig::default()
@@ -120,9 +120,9 @@ fn r02b_windows_un_solo_paso() {
     pool.check_invariants().unwrap();
 }
 
-/// R03: reclamación pendiente y reintento con éxito.
+/// S03: reclamación pendiente y reintento con éxito.
 #[test]
-fn r03_reintento_con_exito() {
+fn s03_reintento_con_exito() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     let slot = h.slot();
@@ -142,10 +142,10 @@ fn r03_reintento_con_exito() {
     pool.check_invariants().unwrap();
 }
 
-/// R04: fallos repetidos: la página permanece en un estado seguro y
+/// S04: fallos repetidos: la página permanece en un estado seguro y
 /// reintentable; nunca se marca devuelta sin que el SO lo confirme.
 #[test]
-fn r04_fallos_repetidos() {
+fn s04_fallos_repetidos() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     let slot = h.slot();
@@ -170,10 +170,10 @@ fn r04_fallos_repetidos() {
     pool.check_invariants().unwrap();
 }
 
-/// R05: la destrucción lógica se consume una sola vez. Un error previo al
+/// S05: la destrucción lógica se consume una sola vez. Un error previo al
 /// consumo devuelve el `Handle`; tras el consumo, ninguna vía lo repite.
 #[test]
-fn r05_destruccion_consumida_una_vez() {
+fn s05_destruccion_consumida_una_vez() {
     let mut pool = pool_dos_fases();
     let mut otro = pool_dos_fases();
     let h = pool.allocate().unwrap();
@@ -194,10 +194,10 @@ fn r05_destruccion_consumida_una_vez() {
     pool.check_invariants().unwrap();
 }
 
-/// R06: un enlace antiguo se rechaza durante la reclamación pendiente, tanto
+/// S06: un enlace antiguo se rechaza durante la reclamación pendiente, tanto
 /// si la página quedó accesible (falló la protección) como protegida.
 #[test]
-fn r06_enlace_antiguo_rechazado_durante_pendiente() {
+fn s06_enlace_antiguo_rechazado_durante_pendiente() {
     for op in [FaultOp::Protect, FaultOp::Decommit] {
         let mut pool = pool_dos_fases();
         let h = pool.allocate().unwrap();
@@ -214,9 +214,9 @@ fn r06_enlace_antiguo_rechazado_durante_pendiente() {
     }
 }
 
-/// R07: el hueco lineal se consume exactamente una vez ante fallos.
+/// S07: el hueco lineal se consume exactamente una vez ante fallos.
 #[test]
-fn r07_hueco_lineal_ante_fallos() {
+fn s07_hueco_lineal_ante_fallos() {
     let mut pool = pool_dos_fases();
     let mut otro = pool_dos_fases();
     let ancla = pool.allocate().unwrap();
@@ -254,11 +254,11 @@ fn r07_hueco_lineal_ante_fallos() {
     pool.check_invariants().unwrap();
 }
 
-/// R08: reactivación segura de una página pendiente: confirmada de nuevo,
+/// S08: reactivación segura de una página pendiente: confirmada de nuevo,
 /// slot a cero, generación +2 y el enlace viejo sigue muerto. Si la
 /// reconfirmación falla, la página sigue pendiente y nada se publica.
 #[test]
-fn r08_reactivacion_de_pagina_pendiente() {
+fn s08_reactivacion_de_pagina_pendiente() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     let (slot, generation, link) = (h.slot(), h.generation(), h.link());
@@ -289,10 +289,10 @@ fn r08_reactivacion_de_pagina_pendiente() {
     pool.check_invariants().unwrap();
 }
 
-/// R09: cierre del pool con reclamaciones pendientes, y cierre cuya
+/// S09: cierre del pool con reclamaciones pendientes, y cierre cuya
 /// liberación falla (el pool sigue abierto, consistente y reintentable).
 #[test]
-fn r09_cierre_con_reclamaciones_pendientes() {
+fn s09_cierre_con_reclamaciones_pendientes() {
     let mut pool = pool_dos_fases();
     let h = pool.allocate().unwrap();
     pool.set_faults(FaultPlan::new().fail_always(FaultOp::Decommit))
@@ -314,10 +314,10 @@ fn r09_cierre_con_reclamaciones_pendientes() {
     assert_eq!(pool.pending_reclaims(), 0, "desaparecen con la reserva");
 }
 
-/// R10: invariantes consistentes tras cada fallo inyectado, para cada punto
+/// S10: invariantes consistentes tras cada fallo inyectado, para cada punto
 /// de inyección y varias posiciones, en una secuencia fija de operaciones.
 #[test]
-fn r10_invariantes_tras_cada_fallo() {
+fn s10_invariantes_tras_cada_fallo() {
     let ops = [
         FaultOp::Commit,
         FaultOp::Recommit,
@@ -364,11 +364,11 @@ fn r10_invariantes_tras_cada_fallo() {
     }
 }
 
-/// R11: un fallo al sincronizar la cabecera no expone ninguna identidad
+/// S11: un fallo al sincronizar la cabecera no expone ninguna identidad
 /// inválida: la validez se decide con los metadatos lógicos, el espejo queda
 /// marcado como sucio y `repair` lo rehace.
 #[test]
-fn r11_fallo_de_cabecera_sin_identidad_invalida() {
+fn s11_fallo_de_cabecera_sin_identidad_invalida() {
     let mut pool = pool_dos_fases();
     let ancla = pool.allocate().unwrap();
     let h = pool.allocate().unwrap();
@@ -400,11 +400,11 @@ fn r11_fallo_de_cabecera_sin_identidad_invalida() {
     pool.check_invariants().unwrap();
 }
 
-/// R12: equivalencia observable con el modelo abstracto después de
+/// S12: equivalencia observable con el modelo abstracto después de
 /// recuperar fallos (el arnés compara identidades, valores y contadores en
 /// cada paso y el refinamiento del estado de página).
 #[test]
-fn r12_equivalencia_tras_recuperar() {
+fn s12_equivalencia_tras_recuperar() {
     let mut h = DifferentialHarness::new(PoolConfig {
         max_superpages: 1,
         slot_size: 1024,

@@ -116,7 +116,8 @@ programas ELE reales.
 ## Límites comprobados
 
 Windows x86-64 se ejecutó de forma nativa. Linux x86-64 se ejecutó en WSL2
-(kernel 5.10.16, páginas de 4 KiB) con binarios compilados en Windows para
-`x86_64-unknown-linux-musl` y enlazados con `rust-lld`: compilación cruzada,
-ejecución real sobre el kernel Linux. No se probaron Linux nativo ni glibc. Una página del SO distinta de 4 KiB produce un error de
+(kernel 5.10.16, páginas de 4 KiB), primero con binarios
+`x86_64-unknown-linux-musl` y después con el toolchain Linux/glibc de Ubuntu.
+Esto ejecuta las llamadas contra un kernel Linux, pero no sustituye una máquina
+Linux fuera de WSL2. Una página del SO distinta de 4 KiB produce un error de
 plataforma controlado; no se anuncia soporte adaptado para ella.

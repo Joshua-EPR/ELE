@@ -639,8 +639,8 @@ consumir no se aplica al abstracto.
 | T1 progreso seguro | **enunciado, no demostrado** | sin pánicos en las campañas; los `expect` internos de `pool.rs` dependen de invariantes verificados, no de una prueba |
 | T2 preservación | **enunciado, no demostrado** | verificador + N01–N28 |
 | T3 ausencia de carreras (modelo) | **enunciado, no demostrado** | detector de la máquina abstracta; el pool físico no es `Send`/`Sync` |
-| T4 destrucción determinista | **enunciado, no demostrado** | drop flags, R05, `close` |
-| I11 correspondencia abstracto–físico | **probado por casos, no demostrado** | arnés diferencial tras cada operación; R12; campañas Windows y Linux |
+| T4 destrucción determinista | **enunciado, no demostrado** | drop flags, S05, `close` |
+| I11 correspondencia abstracto–físico | **probado por casos, no demostrado** | arnés diferencial tras cada operación; S12; campañas Windows y Linux |
 
 ## 10. Efectos y concurrencia
 
@@ -681,10 +681,10 @@ atómica ni un modelo de memoria de CPU.
 | O10 | No-ABA global | Retirada y tests de agotamiento | Probar todas las mutaciones físicas |
 | O11 | Layout físico cabe y está alineado | Aún dependiente del backend | Aserciones de offsets/tamaños por plataforma |
 | O12 | `unsafe` respeta aliasing y validez | No aplica al abstracto | Auditoría de cada bloque físico |
-| O13 | Correspondencia I11 | Arnés diferencial tras cada operación (identidad, valores, contadores, refinamiento de páginas), R12, fuzz Windows y Linux | Prueba de simulación |
-| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, R01–R12, fuzz con fallos | Argumento formal por transición; fallos reales del SO (solo inyectados) |
+| O13 | Correspondencia I11 | Arnés diferencial tras cada operación (identidad, valores, contadores, refinamiento de páginas), S12, fuzz Windows y Linux | Prueba de simulación |
+| O14 | Fallos de SO no dejan estados inconsistentes | Máquina de estados de §9.1, `FaultPlan`, S01–S12, fuzz con fallos | Argumento formal por transición; fallos reales del SO (solo inyectados) |
 | O15 | Reclaim hace datos inaccesibles | Seguimiento físico por página, pruebas de `AddressSpace` (Windows y Linux reales) | Prueba de que ninguna ruta accede a `Protected`/`Discarded` |
-| O16 | No quedan mappings al destruir pool | F16, R09, liberación reintentable | Fuga de reserva si `Drop` falla (documentada) |
+| O16 | No quedan mappings al destruir pool | F16, S09, liberación reintentable | Fuga de reserva si `Drop` falla (documentada) |
 | O17 | Progreso sin pánicos internos | Sin pánicos en las campañas | Justificar los `expect` de `pool.rs` (superpágina inicializada) |
 | O18 | Concurrencia nativa | Fuera de v0.2 | Modelo de memoria y primitivas sincronizadas |
 
@@ -713,8 +713,9 @@ real, protección de páginas o ausencia de fugas de mappings.
   semántica de `mmap`, `mprotect`, `madvise`, `VirtualAlloc` o `VirtualFree`.
 - Los detalles físicos, el layout binario y las rutas `unsafe` se validan por
   plataforma: Windows x86-64 de forma nativa y Linux x86-64 ejecutando en WSL2
-  (kernel 5.10) binarios compilados para `x86_64-unknown-linux-musl`. Linux con
-  glibc y un kernel nativo no se han probado.
+  (kernel 5.10), tanto con binarios `x86_64-unknown-linux-musl` como con el
+  toolchain Linux/glibc de Ubuntu. Un kernel Linux fuera de WSL2 no se ha
+  probado.
 - Esta formalización no integra NEXO en ELE, no cambia ABI, LIR, ownership ni
   sintaxis pública y no implica Stage 2 ni self-hosting.
 
