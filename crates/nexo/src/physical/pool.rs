@@ -239,6 +239,10 @@ pub struct Link {
 }
 
 impl Link {
+    pub fn pool(&self) -> u64 {
+        self.pool
+    }
+
     pub fn slot(&self) -> u32 {
         self.slot
     }

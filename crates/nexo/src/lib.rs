@@ -13,6 +13,7 @@
 pub mod diag;
 pub mod fuzz;
 pub mod ir;
+pub mod next;
 pub mod physical;
 pub mod pretty;
 pub mod rt;
