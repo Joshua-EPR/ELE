@@ -8,4 +8,11 @@ description = "NEXO v0.2: modelo de memoria de ELE (IR NEXO-Core, verificador es
 [lib]
 name = "nexo"
 
+[features]
+default = []
+test-internals = []
+
+[dev-dependencies]
+ele-nexo = { path = ".", features = ["test-internals"] }
+
 [dependencies]

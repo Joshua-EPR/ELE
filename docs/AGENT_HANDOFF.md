@@ -1,5 +1,17 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-15 — Cierre de P0: encapsulación de API pública y aislamiento de instrumentación (PR #69)
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
+
+### 1. Resolución de exposición de helpers adversariales
+- Se eliminó la exposición incondicional de los métodos de prueba (`__test_craft_handle`, `__test_craft_hole_token`, `__test_corrupt_live`, `__test_corrupt_holes`, `__test_corrupt_generation`, `__test_corrupt_occupied`, `__test_corrupt_free_bit`, `__test_corrupt_hole_bit`) mediante la feature interna `test-internals`. En compilación de producción (`cargo build` / `cargo build --release`), estos métodos son inexistentes.
+- Se implementaron pruebas negativas de compilación externa (`crates/nexo/tests/api_security.rs` y fixture `crates/nexo/tests/fixtures/external_consumer/`) que verifican que un consumidor normal no puede invocar dichos métodos (`error[E0599]`) ni construir instancias directas de `Handle` o `HoleToken` (`error[E0451]`).
+- Se añadieron doctests `compile_fail` demostrando la no clonabilidad de `Handle` y `HoleToken` (`error[E0599]`).
+- Validación: 216 pruebas aprobadas en Windows MSVC, 214 pruebas aprobadas en Linux WSL2 glibc.
+
+---
+
 ## Actualización 2026-11-14 — Auditoría final de seguridad: atomicidad en dos fases (Fase A / Fase B), separación de contadores y casos adversariales A01–A12 (PR #69)
 
 Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.

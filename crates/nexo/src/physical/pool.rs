@@ -140,14 +140,29 @@ impl From<PhysicalError> for PoolError {
 }
 
 /// Capacidad propietaria de un objeto vivo. Lineal: no es `Copy` ni `Clone`,
-/// y no tiene constructor público. La doble destrucción no compila:
+/// y no tiene constructor público.
 ///
+/// La doble destrucción no compila:
 /// ```compile_fail,E0382
 /// use nexo::physical::{PhysicalPool, PoolConfig};
 /// let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
 /// let h = pool.allocate().unwrap();
 /// let _ = pool.destroy(h, false);
 /// let _ = pool.destroy(h, false); // uso de un valor movido
+/// ```
+///
+/// Los campos son privados y no pueden construirse externamente:
+/// ```compile_fail,E0451
+/// use nexo::physical::Handle;
+/// let _h = Handle { pool: 0, slot: 0, generation: 1 };
+/// ```
+///
+/// No implementa `Clone` ni `Copy`:
+/// ```compile_fail,E0599
+/// use nexo::physical::{PhysicalPool, PoolConfig};
+/// let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+/// let h = pool.allocate().unwrap();
+/// let _h2 = h.clone();
 /// ```
 #[derive(Debug, Eq, PartialEq)]
 pub struct Handle {
@@ -233,7 +248,25 @@ impl Link {
     }
 }
 
-/// Capacidad lineal de hueco: deliberadamente no implementa `Clone` ni `Copy`.
+/// Capacidad lineal de hueco: deliberadamente no implementa `Clone` ni `Copy`,
+/// y sus campos son estrictamente privados.
+///
+/// Los campos son privados y no pueden construirse externamente:
+/// ```compile_fail,E0451
+/// use nexo::physical::HoleToken;
+/// let _t = HoleToken { pool: 0, slot: 0, generation: 1 };
+/// ```
+///
+/// No implementa `Clone` ni `Copy`:
+/// ```compile_fail,E0599
+/// use nexo::physical::{DestroyOutcome, PhysicalPool, PoolConfig};
+/// let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+/// let h = pool.allocate().unwrap();
+/// let rep = pool.destroy(h, true).unwrap();
+/// if let DestroyOutcome::Hole(t) = rep.outcome {
+///     let _t2 = t.clone();
+/// }
+/// ```
 #[derive(Debug, Eq, PartialEq)]
 pub struct HoleToken {
     pool: u64,
@@ -1572,7 +1605,13 @@ impl PhysicalPool {
     fn data_offset(&self, sp: usize, sub: usize) -> usize {
         sp * SUPERPAGINA as usize + CABECERA as usize + sub * SUBPAGINA as usize
     }
+}
 
+/// Métodos auxiliares de instrumentación adversarial y pruebas de corrupción.
+/// No están presentes en la API pública de producción y se compilan exclusivamente
+/// bajo la feature interna `test-internals` utilizada por las suites de prueba.
+#[cfg(feature = "test-internals")]
+impl PhysicalPool {
     #[doc(hidden)]
     pub fn __test_corrupt_live(&mut self, live: u64) {
         self.live = live;
