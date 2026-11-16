@@ -138,7 +138,7 @@ fn closed_pool_rejects_generation_page_state_and_physical_access() {
     assert_eq!(pool.page_state(slot), Err(PoolError::Closed));
     assert_eq!(pool.physical_access(slot), Err(PoolError::Closed));
     assert_eq!(pool.revalidate(link), Err(PoolError::Closed));
-    assert_eq!(pool.validate_superpage(0), Err(PoolError::OutOfBounds));
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
 }
 
 #[test]
@@ -244,6 +244,14 @@ fn release_uncertain_blocks_all_authority_and_revalidations() {
         pool.allocate(),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
+    assert_eq!(
+        pool.validate_superpage(0),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.check_invariants(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
 
     // 11. Preservación de la capacidad de reintentar el cierre y cierre exitoso tras retirar fallo
     pool.set_faults(FaultPlan::new()).unwrap();
@@ -255,4 +263,123 @@ fn release_uncertain_blocks_all_authority_and_revalidations() {
     assert!(!pool.is_release_uncertain());
     assert!(!pool.is_operational());
     assert_eq!(pool.ensure_operational(), Err(PoolError::Closed));
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
+    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
+}
+
+#[test]
+fn superpage_validation_lifecycle_and_operational_invariants() {
+    let mut pool = PhysicalPool::new(PoolConfig {
+        max_superpages: 4,
+        ..PoolConfig::default()
+    })
+    .unwrap();
+
+    // 1. Superpágina fuera de rango
+    assert_eq!(pool.validate_superpage(4), Err(PoolError::OutOfBounds));
+    assert_eq!(pool.validate_superpage(999), Err(PoolError::OutOfBounds));
+
+    // 2. Superpágina dentro de rango pero no inicializada
+    assert_eq!(
+        pool.validate_superpage(0),
+        Err(PoolError::Invariant(
+            "superpágina 0 no inicializada".to_string()
+        ))
+    );
+
+    // 3. Superpágina inicializada y pool operativo
+    let handle = pool.allocate().unwrap();
+    let slot = handle.slot();
+    let link = handle.link();
+    let sp_idx = pool
+        .validate_superpage(0)
+        .expect("superpágina 0 debe ser válida");
+    assert_eq!(sp_idx.get(), 0);
+
+    // Superpágina 1 sigue no inicializada
+    assert_eq!(
+        pool.validate_superpage(1),
+        Err(PoolError::Invariant(
+            "superpágina 1 no inicializada".to_string()
+        ))
+    );
+
+    // Snapshot de estado y métricas
+    let dirty_before = pool.dirty_headers();
+
+    // 4. Inyección de fallo ambiguo en release
+    pool.destroy(handle, false).unwrap();
+    pool.set_faults(FaultPlan::new().unknown_nth(FaultOp::Release, 1))
+        .unwrap();
+    let failure = match pool.try_close() {
+        Ok(()) => panic!("cierre debía fallar con estado ambiguo"),
+        Err(f) => f,
+    };
+    assert_eq!(
+        failure.error(),
+        &PoolError::Physical(PhysicalError::UnknownState(FaultOp::Release))
+    );
+    let (mut pool, _) = (*failure).into_parts();
+
+    // 5. Estado ReleaseUncertain rechaza toda validación operativa de superpáginas
+    assert!(pool.is_release_uncertain());
+    assert_eq!(
+        pool.validate_superpage(0),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.validate_superpage(sp_idx.get()),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.validate_superpage(1),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.validate_superpage(999),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 6. Rechazo de reutilización indebida de un índice previamente validado:
+    // Las operaciones que dependan del índice o del slot fallan cerrado
+    assert_eq!(
+        pool.generation(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.page_state(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.physical_access(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.revalidate(link),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.check_invariants(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 7. Ausencia de modificaciones de metadatos después de un rechazo
+    assert_eq!(pool.live_count(), 0);
+    assert_eq!(pool.hole_count(), 0);
+    assert_eq!(pool.dirty_headers(), dirty_before);
+
+    // 8. Reintento exitoso de cierre tras retirar fallos
+    pool.set_faults(FaultPlan::new()).unwrap();
+    assert!(pool.close().is_ok());
+
+    // 9. Pool cerrado: validate_superpage y check_invariants devuelven PoolError::Closed
+    assert!(pool.is_closed());
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
+    assert_eq!(
+        pool.validate_superpage(sp_idx.get()),
+        Err(PoolError::Closed)
+    );
+    assert_eq!(pool.validate_superpage(1), Err(PoolError::Closed));
+    assert_eq!(pool.validate_superpage(999), Err(PoolError::Closed));
+    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
 }
