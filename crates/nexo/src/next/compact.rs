@@ -32,6 +32,10 @@ pub enum CompactPoolError {
     },
     /// El pool físico se encuentra cerrado y no puede registrarse ni adaptarse.
     PoolClosed,
+    /// El pool físico se encuentra en estado ambiguo de liberación y no puede registrarse ni adaptarse.
+    ReleaseUncertain,
+    /// El registro global de pools se encuentra en un estado inconsistente o irrecuperable.
+    RegistryCorrupted,
 }
 
 impl fmt::Display for CompactPoolError {
@@ -49,6 +53,18 @@ impl fmt::Display for CompactPoolError {
                 write!(
                     f,
                     "physical pool is closed and cannot be registered or adapted"
+                )
+            }
+            Self::ReleaseUncertain => {
+                write!(
+                    f,
+                    "physical pool has uncertain release status and cannot be registered or adapted"
+                )
+            }
+            Self::RegistryCorrupted => {
+                write!(
+                    f,
+                    "compact pool registry state is corrupted and refuses to issue authority"
                 )
             }
         }
@@ -111,10 +127,17 @@ impl CompactIdAllocator8 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RegisteredPool8 {
+    physical_pool_id: u64,
+    compact_id: u8,
+}
+
 /// Instancia de registro acotado de identificadores de pools compactos de 8 bits (1..=255).
 pub(crate) struct CompactPoolRegistryInstance {
     allocator: CompactIdAllocator8,
-    registered_pools: std::sync::Mutex<Vec<u64>>,
+    registered_pools: std::sync::Mutex<Vec<RegisteredPool8>>,
+    corrupted: std::sync::atomic::AtomicBool,
 }
 
 impl Default for CompactPoolRegistryInstance {
@@ -128,29 +151,73 @@ impl CompactPoolRegistryInstance {
         Self {
             allocator: CompactIdAllocator8::new(),
             registered_pools: std::sync::Mutex::new(Vec::new()),
+            corrupted: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
-    /// Registra un pool físico de manera atómica e infalsificable.
+    fn audit_and_recover_8(&self, guard: &mut Vec<RegisteredPool8>) -> bool {
+        guard.sort_unstable_by_key(|e| e.physical_pool_id);
+
+        let allocated = self.allocator.allocated_count();
+        let mut seen_compact = [false; 256];
+
+        let mut i = 0;
+        while i < guard.len() {
+            let entry = guard[i];
+            if entry.compact_id == 0 || entry.compact_id > allocated {
+                return false;
+            }
+            if i + 1 < guard.len() && guard[i + 1].physical_pool_id == entry.physical_pool_id {
+                if guard[i + 1].compact_id != entry.compact_id {
+                    return false;
+                }
+                guard.remove(i + 1);
+                continue;
+            }
+            if seen_compact[entry.compact_id as usize] {
+                return false;
+            }
+            seen_compact[entry.compact_id as usize] = true;
+            i += 1;
+        }
+        true
+    }
+
+    /// Registra un pool físico de manera atómica, transaccional e infalsificable.
     ///
     /// # Errores
     /// - Retorna [`CompactPoolError::AlreadyRegistered`] si el pool ya fue registrado previamente.
     /// - Retorna [`CompactPoolError::PoolIdExhausted`] si se han agotado los 255 identificadores.
+    /// - Retorna [`CompactPoolError::RegistryCorrupted`] si el estado interno fue corrompido de forma irrecuperable.
     pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken, CompactPoolError> {
+        if self.corrupted.load(Ordering::SeqCst) {
+            return Err(CompactPoolError::RegistryCorrupted);
+        }
+
         let mut pools = match self.registered_pools.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 let mut guard = poisoned.into_inner();
-                guard.sort_unstable();
-                guard.dedup();
+                if !self.audit_and_recover_8(&mut guard) {
+                    self.corrupted.store(true, Ordering::SeqCst);
+                    return Err(CompactPoolError::RegistryCorrupted);
+                }
                 guard
             }
         };
-        match pools.binary_search(&physical_pool_id) {
+
+        match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
+                pools.reserve(1);
                 let compact_id = self.allocator.allocate_id()?;
-                pools.insert(insert_idx, physical_pool_id);
+                pools.insert(
+                    insert_idx,
+                    RegisteredPool8 {
+                        physical_pool_id,
+                        compact_id,
+                    },
+                );
                 Ok(CompactPoolToken {
                     compact_id,
                     physical_pool_id,
@@ -168,11 +235,23 @@ impl CompactPoolRegistryInstance {
     }
 
     pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
+        if self.corrupted.load(Ordering::SeqCst) {
+            return false;
+        }
         let pools = match self.registered_pools.lock() {
             Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                if !self.audit_and_recover_8(&mut guard) {
+                    self.corrupted.store(true, Ordering::SeqCst);
+                    return false;
+                }
+                guard
+            }
         };
-        pools.binary_search(&physical_pool_id).is_ok()
+        pools
+            .binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id)
+            .is_ok()
     }
 }
 
@@ -221,6 +300,11 @@ impl CompactPoolRegistry {
         if pool.is_closed() {
             return Err(CompactPoolError::PoolClosed);
         }
+        if pool.is_release_uncertain() {
+            return Err(CompactPoolError::ReleaseUncertain);
+        }
+        pool.ensure_operational()
+            .map_err(|_| CompactPoolError::ReleaseUncertain)?;
         GLOBAL_COMPACT_REGISTRY.register(pool.id())
     }
 
@@ -294,10 +378,17 @@ impl CompactIdAllocator16 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RegisteredPool16 {
+    physical_pool_id: u64,
+    compact_id: u16,
+}
+
 /// Instancia de registro acotado de identificadores de pools compactos de 16 bits (1..=65.535).
 pub(crate) struct CompactPoolRegistryInstance16 {
     allocator: CompactIdAllocator16,
-    registered_pools: std::sync::Mutex<Vec<u64>>,
+    registered_pools: std::sync::Mutex<Vec<RegisteredPool16>>,
+    corrupted: std::sync::atomic::AtomicBool,
 }
 
 impl Default for CompactPoolRegistryInstance16 {
@@ -311,25 +402,72 @@ impl CompactPoolRegistryInstance16 {
         Self {
             allocator: CompactIdAllocator16::new(),
             registered_pools: std::sync::Mutex::new(Vec::new()),
+            corrupted: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
-    /// Registra un pool físico de manera atómica e infalsificable en 16 bits.
+    fn audit_and_recover_16(&self, guard: &mut Vec<RegisteredPool16>) -> bool {
+        guard.sort_unstable_by_key(|e| e.physical_pool_id);
+
+        let allocated = self.allocator.allocated_count();
+
+        let mut i = 0;
+        while i < guard.len() {
+            let entry = guard[i];
+            if entry.compact_id == 0 || entry.compact_id > allocated {
+                return false;
+            }
+            if i + 1 < guard.len() && guard[i + 1].physical_pool_id == entry.physical_pool_id {
+                if guard[i + 1].compact_id != entry.compact_id {
+                    return false;
+                }
+                guard.remove(i + 1);
+                continue;
+            }
+            i += 1;
+        }
+
+        let mut compact_ids: Vec<u16> = guard.iter().map(|e| e.compact_id).collect();
+        compact_ids.sort_unstable();
+        for w in compact_ids.windows(2) {
+            if w[0] == w[1] {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Registra un pool físico de manera atómica, transaccional e infalsificable en 16 bits.
     pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken16, CompactPoolError> {
+        if self.corrupted.load(Ordering::SeqCst) {
+            return Err(CompactPoolError::RegistryCorrupted);
+        }
+
         let mut pools = match self.registered_pools.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 let mut guard = poisoned.into_inner();
-                guard.sort_unstable();
-                guard.dedup();
+                if !self.audit_and_recover_16(&mut guard) {
+                    self.corrupted.store(true, Ordering::SeqCst);
+                    return Err(CompactPoolError::RegistryCorrupted);
+                }
                 guard
             }
         };
-        match pools.binary_search(&physical_pool_id) {
+
+        match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
+                pools.reserve(1);
                 let compact_id = self.allocator.allocate_id()?;
-                pools.insert(insert_idx, physical_pool_id);
+                pools.insert(
+                    insert_idx,
+                    RegisteredPool16 {
+                        physical_pool_id,
+                        compact_id,
+                    },
+                );
                 Ok(CompactPoolToken16 {
                     compact_id,
                     physical_pool_id,
@@ -347,11 +485,23 @@ impl CompactPoolRegistryInstance16 {
     }
 
     pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
+        if self.corrupted.load(Ordering::SeqCst) {
+            return false;
+        }
         let pools = match self.registered_pools.lock() {
             Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                if !self.audit_and_recover_16(&mut guard) {
+                    self.corrupted.store(true, Ordering::SeqCst);
+                    return false;
+                }
+                guard
+            }
         };
-        pools.binary_search(&physical_pool_id).is_ok()
+        pools
+            .binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id)
+            .is_ok()
     }
 }
 
@@ -393,6 +543,11 @@ impl CompactPoolRegistry16 {
         if pool.is_closed() {
             return Err(CompactPoolError::PoolClosed);
         }
+        if pool.is_release_uncertain() {
+            return Err(CompactPoolError::ReleaseUncertain);
+        }
+        pool.ensure_operational()
+            .map_err(|_| CompactPoolError::ReleaseUncertain)?;
         GLOBAL_COMPACT_REGISTRY_16.register(pool.id())
     }
 
@@ -674,6 +829,8 @@ pub enum CompactRevalidateError {
     SubpageQuarantined,
     /// El pool físico de respaldo ha sido cerrado.
     PoolClosed,
+    /// El pool físico se encuentra en estado ambiguo de liberación (`ReleaseUncertain`).
+    ReleaseUncertain,
     /// Fallo físico u operativo de bajo nivel en el subsistema de memoria virtual.
     Physical(crate::physical::PhysicalError),
     /// Violación de invariante interna del pool físico.
@@ -697,6 +854,9 @@ impl fmt::Display for CompactRevalidateError {
                 )
             }
             Self::PoolClosed => write!(f, "compact link target pool is closed"),
+            Self::ReleaseUncertain => {
+                write!(f, "compact link target pool has uncertain release status")
+            }
             Self::Physical(err) => write!(f, "physical memory error during revalidation: {err}"),
             Self::Invariant(msg) => write!(f, "pool invariant error during revalidation: {msg}"),
         }
@@ -1165,5 +1325,33 @@ mod tests {
             .expect("El registro16 debe recuperarse de mutex envenenado");
         assert_eq!(token16.physical_pool_id(), 8888);
         assert!(registry16.is_pool_registered(8888));
+    }
+
+    #[test]
+    fn test_registry_mutex_poisoning_corrupted_invariants_fails_closed() {
+        use std::sync::Arc;
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+
+        // Inyectar estado corrupto: dos pools físicos distintos con el mismo compact_id
+        let reg_clone = registry.clone();
+        let handle = std::thread::spawn(move || {
+            let mut guard = reg_clone.registered_pools.lock().unwrap();
+            guard.push(RegisteredPool8 {
+                physical_pool_id: 111,
+                compact_id: 1,
+            });
+            guard.push(RegisteredPool8 {
+                physical_pool_id: 222,
+                compact_id: 1, // Colisión de compact_id!
+            });
+            panic!("pánico con estado corrupto en registro");
+        });
+        assert!(handle.join().is_err());
+
+        // Al intentar registrar sobre estado corrupto irrecuperable, debe fallar cerrado
+        let err = registry.register(333).unwrap_err();
+        assert_eq!(err, CompactPoolError::RegistryCorrupted);
+        assert!(!registry.is_pool_registered(111));
+        assert!(!registry.is_pool_registered(333));
     }
 }
