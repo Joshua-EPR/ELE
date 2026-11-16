@@ -294,13 +294,17 @@ fn ampliado() {
     ];
     println!("\n== ampliado: {RUNS} corridas × lotes de {BATCH} ops; ns/op");
     println!(
-        "{:<46} {:>9} {:>9} {:>9} {:>9} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>9}",
+        "{:<44} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>7} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>9}",
         "escenario",
         "media",
         "mediana",
+        "min",
+        "max",
         "p95",
         "p99",
+        "sd",
         "cv%",
+        "muestras",
         "alloc/op",
         "so/op",
         "cab B/op",
@@ -329,15 +333,29 @@ fn ampliado() {
         }
         let media = medias.iter().sum::<f64>() / RUNS as f64;
         let sd = (medias.iter().map(|x| (x - media).powi(2)).sum::<f64>() / RUNS as f64).sqrt();
+        let min_val = todas.lotes.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_val = todas
+            .lotes
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let n_muestras = todas.lotes.len();
+        let p50 = percentil(&mut todas.lotes, 0.5);
+        let p95 = percentil(&mut todas.lotes, 0.95);
+        let p99 = percentil(&mut todas.lotes, 0.99);
         let total_ops = RUNS as f64 * e.ops as f64;
         println!(
-            "{:<46} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>7.1} {:>8.3} {:>8.3} {:>8.1} {:>8.3} {:>8.3} {:>9.3}",
+            "{:<44} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>7.1} {:>5.1}% {:>8} {:>8.3} {:>8.3} {:>8.1} {:>8.3} {:>8.3} {:>9.3}",
             e.nombre,
             media,
-            percentil(&mut todas.lotes, 0.5),
-            percentil(&mut todas.lotes, 0.95),
-            percentil(&mut todas.lotes, 0.99),
+            p50,
+            min_val,
+            max_val,
+            p95,
+            p99,
+            sd,
             100.0 * sd / media,
+            n_muestras,
             allocs as f64 / total_ops,
             total_c.os_calls as f64 / total_ops,
             total_c.header_bytes as f64 / total_ops,

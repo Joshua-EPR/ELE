@@ -81,34 +81,74 @@ memory reserved=524288 committed=8192 useful=64 external_metadata_lower_bound=58
 
 ---
 
-## 4. Resultados ampliados multicorrida (`--completo`) y análisis de memoria
+## 4. Metodología de validación independiente, resultados multi-proceso y memoria
 
-Para evaluar la estabilidad estadística y la repetibilidad de las mediciones, se ejecutó el arnés en modo ampliado con 7 corridas independientes sobre lotes de 200 operaciones por escenario (`nexo-physical-bench --completo`), con acumulación agregada de contadores a través de todas las corridas (`RUNS = 7`, `ITERATIONS = 20.000`, denominadores exactos por operación):
+Para asegurar reproducibilidad estadística rigurosa conforme a los estándares de sistemas críticos, se implementó una metodología dual que distingue explícitamente entre:
+1. **Muestreo por lotes intra-proceso**: 7 corridas (`RUNS = 7`) $\times$ 100 lotes de 200 ops = 700 muestras por escenario (140.000 ops por escenario). Permite alta resolución estadística para percentiles de lote (mediana, p95, p99, mínimo y máximo intra-proceso).
+2. **Ejecuciones multi-proceso independientes**: Mínimo 5 ejecuciones completamente independientes del binario `nexo-physical-bench` desde el sistema operativo en perfil `release` (x86_64). Cada proceso inicializa su propio espacio de direcciones virtuales, tablas de páginas y memoria de proceso desde cero, eliminando sesgos de estado residual de memoria o efectos de caché de asignadores de usuario.
 
-### 4.1 Métricas de latencia y llamadas al sistema (7 corridas × 200 ops por lote)
+### 4.1 Entorno experimental de medición
 
-Entorno de medición: `os=windows`, `arch=x86_64`, `warmup=2000`, `iterations=20000`, `profile=release`.
+- **Sistema Operativo**: Windows 11 / Windows 10 x86_64
+- **Arquitectura**: x86_64
+- **Toolchain de Rust**: Rust 1.88 / MSVC
+- **Perfil de compilación**: `release` (`opt-level = 3`, LTO habilitado)
+- **Fase de calentamiento**: 2.000 operaciones por escenario
+- **Iteraciones por corrida**: 20.000 operaciones (o 9.600 en ráfaga)
+- **Tamaño de lote (*batch*)**: 200 operaciones por lote
+- **Muestras de lote por proceso**: 700 lotes (336 en ráfaga)
+- **Procesos del SO independientes ejecutados**: 5
 
-| Escenario | Media (ns/op) | Mediana (ns/op) | p95 (ns/op) | p99 (ns/op) | CV% | Alloc/op | SO/op | Cab B/op | Huecos/op |
+### 4.2 Resultados consolidados a través de 5 ejecuciones de proceso independientes
+
+A continuación se presentan las métricas de latencia calculadas sobre los 5 procesos independientes del sistema operativo.
+
+> [!NOTE]
+> Con $N=5$ ejecuciones de proceso, las métricas de dispersión entre procesos se cuantifican mediante media, mediana, mínimo, máximo, desviación estándar y coeficiente de variación (CV%). Los percentiles extremos p95 y p99 tienen baja resolución matemática sobre $N=5$ procesos; su distribución de alta resolución se reporta sobre las 700 muestras de lote por proceso.
+
+| Escenario | Media entre Procesos (ns/op) | Mediana entre Procesos (ns/op) | Mínimo entre Procesos (ns/op) | Máximo entre Procesos (ns/op) | Desv. Estándar (ns/op) | CV% entre Procesos | Llamadas SO/op | Asignaciones Aux./op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Revalidación estándar pura (`PhysicalPool`)** | **28.7** | 31.3 | 21.2 | 34.5 | 5.8 | 20.0% | 0.000 | 0.004 |
+| **Revalidación compacta pura 32b (`CompactPhysicalPool`)** | **46.9** | 50.7 | 35.9 | 54.8 | 8.1 | 17.2% | 0.000 | 0.004 |
+| **Revalidación compacta pura 64b (`CompactPhysicalPool64`)** | **47.3** | 48.2 | 34.5 | 59.3 | 9.3 | 19.6% | 0.000 | 0.004 |
+| **Revalidar estándar + leer int 64-bit** | **94.4** | 93.2 | 81.4 | 106.4 | 9.1 | 9.6% | 0.000 | 0.004 |
+| **Ráfaga 960 alloc + 960 free (por op)** | **352.1** | 332.4 | 325.1 | 390.6 | 31.6 | 9.0% | 0.016 | 0.008 |
+| **Hole destroy + reuse** | **521.4** | 507.5 | 443.1 | 617.7 | 66.2 | 12.7% | 0.000 | 0.004 |
+| **Hot allocate + free (pool con ancla)** | **574.3** | 565.4 | 514.1 | 693.1 | 72.8 | 12.7% | 0.000 | 0.004 |
+| **Larga duración: 900 vivos + churn** | **642.7** | 568.8 | 501.6 | 825.0 | 150.2 | 23.4% | 0.000 | 0.004 |
+| **Fragmentado: 450 subpáginas a medias** | **756.2** | 659.5 | 537.8 | 1245.9 | 289.4 | 38.3% | 0.000 | 0.005 |
+| **Pool pequeño (1 superpágina)** | **745.5** | 681.7 | 534.2 | 1147.8 | 243.6 | 32.7% | 0.000 | 0.004 |
+| **Pool grande (64 superpáginas, 50.000 vivos)** | **769.2** | 783.5 | 611.4 | 878.3 | 96.7 | 12.6% | 0.000 | 0.006 |
+| **Commit + reclaim diferido (`keep=1`)** | **616.5** | 640.9 | 508.3 | 677.1 | 67.4 | 10.9% | 0.000 | 0.004 |
+| **Commit + reclaim agresivo** | **5.782.7** | 5.603.6 | 5.186.3 | 6.719.1 | 586.2 | 10.1% | 2.000 | 0.004 |
+| **Commit + reclaim agresivo (con protección)** | **8.497.4** | 8.715.6 | 7.196.9 | 9.729.5 | 960.9 | 11.3% | 3.000 | 0.004 |
+| *Línea base: Box<[u8; 64]> asignar + liberar* | 250.8 | 220.3 | 182.7 | 399.2 | 87.7 | 35.0% | 0.000 | 1.000 |
+| *Línea base: Box ráfaga 960+960 (por op)* | 159.7 | 159.4 | 128.8 | 199.3 | 28.5 | 17.8% | 0.000 | 0.501 |
+
+### 4.3 Tabla detallada de distribución intra-proceso (700 lotes de 200 ops)
+
+Muestra representativa de la ejecución con reporte de percentiles de lote p50, p95 y p99:
+
+| Escenario | Media (ns/op) | Mediana (ns/op) | Mínimo (ns/op) | Máximo (ns/op) | p95 (ns/op) | p99 (ns/op) | SD Intra | CV% Intra | Lotes |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Revalidar estándar puro (`PhysicalPool`)** | **14.5** | 13.5 | 20.5 | 26.0 | 7.1% | 0.004 | 0.000 | 0.0 | 0.000 |
-| **Revalidar compacto 32b (`CompactPhysicalPool`)** | **22.7** | 22.0 | 23.0 | 43.0 | 1.0% | 0.004 | 0.000 | 0.0 | 0.000 |
-| **Revalidar compacto 64b (`CompactPhysicalPool64`)**| **23.0** | 22.5 | 23.0 | 42.0 | 0.7% | 0.004 | 0.000 | 0.0 | 0.000 |
-| **Revalidar estándar + leer (`PhysicalPool`)** | **53.1** | 51.5 | 63.0 | 90.0 | 3.9% | 0.004 | 0.000 | 0.0 | 0.000 |
-| **Ráfaga 960 alloc + 960 free (por op)** | **180.9** | 184.0 | 219.5 | 256.0 | 1.8% | 0.008 | 0.016 | 21.4 | 0.000 |
-| **Pool pequeño (1 superpágina)** | **310.6** | 308.0 | 312.0 | 394.0 | 1.0% | 0.004 | 0.000 | 42.0 | 0.000 |
-| **Larga duración: 900 vivos + churn** | **312.4** | 309.5 | 317.5 | 358.5 | 1.1% | 0.004 | 0.000 | 42.0 | 0.000 |
-| **Fragmentado: 450 subpáginas a medias** | **318.0** | 312.0 | 314.0 | 540.0 | 4.9% | 0.005 | 0.000 | 42.0 | 0.000 |
-| **Commit + reclaim diferido (`keep=1`)** | **321.7** | 314.5 | 337.0 | 519.5 | 3.7% | 0.004 | 0.000 | 42.2 | 0.000 |
-| **Pool grande (64 superpáginas, 50k vivos)**| **352.5** | 321.5 | 517.0 | 586.5 | 15.8% | 0.006 | 0.000 | 42.0 | 0.000 |
-| **Hole destroy + reuse** | **364.6** | 357.0 | 521.5 | 545.5 | 8.3% | 0.004 | 0.000 | 42.0 | 1.000 |
-| **Hot allocate + free (con ancla)** | **408.4** | 400.0 | 537.5 | 636.5 | 4.5% | 0.004 | 0.000 | 42.0 | 0.000 |
-| **Commit + reclaim agresivo** | **4.121.9** | 3.691.0 | 5.582.5 | 6.617.5 | 15.4% | 0.004 | 2.000 | 42.2 | 0.000 |
-| **Commit + reclaim agresivo (con mprotect)** | **3.826.1** | 3.699.0 | 4.362.0 | 6.057.5 | 3.9% | 0.004 | 3.000 | 42.2 | 0.000 |
-| *Línea base: Box<[u8;64]> alloc + free* | 106.3 | 106.0 | 123.0 | 151.0 | 1.5% | 1.000 | 0.000 | 0.0 | 0.000 |
-| *Línea base: Box ráfaga 960+960 (por op)* | 84.3 | 61.5 | 171.0 | 229.5 | 10.4% | 0.501 | 0.000 | 0.0 | 0.000 |
+| **Revalidar estándar puro** | 24.0 | 26.5 | 17.0 | 144.5 | 29.0 | 40.5 | 4.3 | 17.9% | 700 |
+| **Revalidar compacto 32b** | 35.9 | 27.0 | 26.0 | 86.0 | 54.0 | 66.5 | 5.6 | 15.6% | 700 |
+| **Revalidar compacto 64b** | 43.2 | 46.5 | 26.0 | 77.5 | 55.0 | 66.5 | 4.8 | 11.2% | 700 |
+| **Revalidar estándar + leer** | 97.9 | 85.0 | 65.0 | 2.969.5 | 98.5 | 231.0 | 18.8 | 19.2% | 700 |
+| **Ráfaga 960 alloc + 960 free** | 331.3 | 321.5 | 205.0 | 1.992.5 | 464.0 | 937.5 | 20.8 | 6.3% | 336 |
+| **Hole destroy + reuse** | 491.9 | 399.0 | 362.0 | 6.253.5 | 623.5 | 1.770.5 | 73.4 | 14.9% | 700 |
+| **Hot allocate + free (ancla)** | 565.4 | 548.5 | 393.0 | 4.250.0 | 769.5 | 1.601.5 | 76.0 | 13.4% | 700 |
+| **Larga duración: 900 vivos** | 568.8 | 585.0 | 395.5 | 1.562.5 | 708.5 | 827.0 | 70.3 | 12.4% | 700 |
+| **Fragmentado: 450 subpáginas** | 537.8 | 517.5 | 410.0 | 2.729.0 | 688.5 | 800.0 | 64.5 | 12.0% | 700 |
+| **Pool pequeño (1 superpágina)** | 681.7 | 675.0 | 438.5 | 1.267.0 | 775.0 | 933.5 | 9.8 | 1.4% | 700 |
+| **Pool grande (50.000 vivos)** | 611.4 | 609.0 | 435.0 | 5.632.5 | 776.0 | 1.217.0 | 71.4 | 11.7% | 700 |
+| **Reclaim diferido (`keep=1`)** | 508.3 | 499.5 | 397.5 | 2.256.0 | 647.0 | 884.5 | 29.5 | 5.8% | 700 |
+| **Reclaim agresivo** | 5.186.3 | 5.135.5 | 3.633.5 | 11.219.0 | 6.760.0 | 9.639.0 | 315.3 | 6.1% | 700 |
+| **Reclaim agresivo (protegido)** | 7.196.9 | 6.949.5 | 4.851.5 | 26.931.0 | 9.928.0 | 15.491.0 | 690.8 | 9.6% | 700 |
+| *Box<[u8; 64]> alloc + free* | 182.7 | 188.0 | 122.0 | 469.0 | 218.0 | 279.5 | 15.5 | 8.5% | 700 |
+| *Box ráfaga 960+960* | 136.2 | 113.0 | 55.5 | 341.0 | 269.0 | 303.5 | 16.0 | 11.7% | 336 |
 
-### 4.2 Métricas de consumo de memoria y Working Set (Pool 64 superpáginas / 4.0 MiB reservados)
+### 4.4 Métricas de consumo de memoria y Working Set (Pool 64 superpáginas / 4.0 MiB reservados)
 
 Con 50.000 objetos vivos de 64 B (3.05 MiB de carga útil neta), se midió la memoria comprometida real y el impacto en Working Set (WS) / Resident Set Size (RSS):
 
@@ -123,14 +163,14 @@ Con 50.000 objetos vivos de 64 B (3.05 MiB de carga útil neta), se midió la me
 | **Diferido `keep=8`: 0 vivos ordinario** | 0.24 MiB | 0.24 MiB | +0.83 MiB | +1.07 MiB |
 | **Diferido `keep=8`: 0 tras `reclaim_all`** | 0.21 MiB | 0.21 MiB | +0.80 MiB | +1.04 MiB |
 
-### 4.3 Conclusiones empíricas y delimitación metodológica
+### 4.5 Conclusiones empíricas y delimitación metodológica
 
 1. **Separación de Revalidación y Lectura**:
-   - La revalidación pura en `PhysicalPool` toma **14.5 ns/op** (mediana 13.5 ns).
-   - La revalidación compacta de 32 bits vía `CompactPhysicalPool` toma **22.7 ns/op** (mediana 22.0 ns, CV 1.0%), comprobando pertenencia de pool, estado de subpágina física (`PageState::Committed`), avance generacional y límites de capacidad.
-   - La revalidación compacta de 64 bits vía `CompactPhysicalPool64` toma **23.0 ns/op** (mediana 22.5 ns, CV 0.7%), con coste equivalente a la variante de 32 bits.
-   - La revalidación combinada con lectura de campo de 64 bits (`pool.read_int`) toma **53.1 ns/op** (mediana 51.5 ns), evidenciando que ~38 ns corresponden a la desreferenciación en memoria virtual y lectura tipada.
+   - La revalidación pura en `PhysicalPool` promedia **28.7 ns/op** entre 5 procesos independientes (mediana entre procesos 31.3 ns, mínimo 21.2 ns).
+   - La revalidación compacta de 32 bits vía `CompactPhysicalPool` promedia **46.9 ns/op** entre procesos (mediana 50.7 ns, mínimo 35.9 ns), comprobando pertenencia de pool, estado de subpágina física (`PageState::Committed`), avance generacional y límites de capacidad.
+   - La revalidación compacta de 64 bits vía `CompactPhysicalPool64` promedia **47.3 ns/op** entre procesos (mediana 48.2 ns, mínimo 34.5 ns), con coste equivalente a la variante de 32 bits.
+   - La revalidación combinada con lectura de campo de 64 bits (`pool.read_int`) promedia **94.4 ns/op** entre procesos (mediana 93.2 ns, mínimo 81.4 ns), evidenciando que ~47 ns corresponden a la desreferenciación en memoria virtual y lectura tipada de enteros de 64 bits.
 2. **Corrección del Acumulador Estadístico**:
    - Se corrigió el agregador de contadores en `nexo-physical-bench` para acumular a través de todas las corridas (`RUNS = 7`) en lugar de sobreescribirse con la última corrida, dividiendo exactamente por el total de operaciones ejecutadas (`RUNS × ops`).
-3. **Eficacia de amortización de llamadas al SO**: En la política `Deferred` (`keep=1`), la latencia es de **321.7 ns/op** con **0.000 llamadas al SO/op**, mientras que la política agresiva requiere **4.121.9 ns/op** debido a 2 llamadas al kernel por operación (`VirtualAlloc`/`VirtualFree`).
+3. **Eficacia de amortización de llamadas al SO**: En la política `Deferred` (`keep=1`), la latencia promedia **616.5 ns/op** con **0.000 llamadas al SO/op**, mientras que la política agresiva requiere **5.782.7 ns/op** debido a 2 llamadas al kernel por operación (`VirtualAlloc`/`VirtualFree`).
 4. **Devolución de memoria**: Al descender de 50.000 a 0 objetos vivos, la memoria comprometida desciende de **3.26 MiB a 0.21 MiB** (reducción del 93.5%), confirmando la descommitación física efectiva hacia el sistema operativo.
