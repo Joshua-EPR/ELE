@@ -13,8 +13,9 @@
 //! [`CompactObjRef`] acotado por la vida útil del préstamo (`'a`).
 
 use super::compact::{
-    CompactPoolAuthority, CompactPoolAuthority64, CompactPoolToken, CompactPoolToken16,
-    CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16, private,
+    CompactPoolAuthority, CompactPoolAuthority64, CompactPoolError, CompactPoolToken,
+    CompactPoolToken16, CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16,
+    MAX_SLOT_COMPACT_32, private,
 };
 use crate::physical::{PageState, PhysicalPool};
 
@@ -24,9 +25,29 @@ pub struct CompactPhysicalPool<'a> {
     token: &'a CompactPoolToken,
 }
 
+impl<'a> std::fmt::Debug for CompactPhysicalPool<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactPhysicalPool")
+            .field("pool_id", &self.pool.id())
+            .field("token", &self.token)
+            .finish()
+    }
+}
+
 impl<'a> CompactPhysicalPool<'a> {
-    pub fn new(pool: &'a PhysicalPool, token: &'a CompactPoolToken) -> Self {
-        Self { pool, token }
+    /// Construye un nuevo adaptador vinculando el pool físico con su token de autoridad legítimo.
+    ///
+    /// # Errores
+    /// Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
+    /// específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
+    pub fn new(
+        pool: &'a PhysicalPool,
+        token: &'a CompactPoolToken,
+    ) -> Result<Self, CompactPoolError> {
+        if token.physical_pool_id() != pool.id() {
+            return Err(CompactPoolError::PoolMismatch);
+        }
+        Ok(Self { pool, token })
     }
 
     pub fn pool(&self) -> &'a PhysicalPool {
@@ -41,12 +62,16 @@ impl<'a> CompactPhysicalPool<'a> {
 impl<'a> private::Sealed for CompactPhysicalPool<'a> {}
 
 impl<'a> CompactPoolAuthority for CompactPhysicalPool<'a> {
+    fn __seal_authority(&self, _: private::InternalSeal) {}
+
     fn compact_id(&self) -> u8 {
         self.token.id()
     }
 
     fn slot_capacity(&self) -> u32 {
-        u32::try_from(self.pool.capacity()).unwrap_or(u32::MAX)
+        let pool_cap = self.pool.capacity();
+        let max_compact = (MAX_SLOT_COMPACT_32 as u64) + 1;
+        pool_cap.min(max_compact) as u32
     }
 
     fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError> {
@@ -96,9 +121,29 @@ pub struct CompactPhysicalPool64<'a> {
     token: &'a CompactPoolToken16,
 }
 
+impl<'a> std::fmt::Debug for CompactPhysicalPool64<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactPhysicalPool64")
+            .field("pool_id", &self.pool.id())
+            .field("token", &self.token)
+            .finish()
+    }
+}
+
 impl<'a> CompactPhysicalPool64<'a> {
-    pub fn new(pool: &'a PhysicalPool, token: &'a CompactPoolToken16) -> Self {
-        Self { pool, token }
+    /// Construye un nuevo adaptador vinculando el pool físico con su token de autoridad de 16 bits.
+    ///
+    /// # Errores
+    /// Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
+    /// específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
+    pub fn new(
+        pool: &'a PhysicalPool,
+        token: &'a CompactPoolToken16,
+    ) -> Result<Self, CompactPoolError> {
+        if token.physical_pool_id() != pool.id() {
+            return Err(CompactPoolError::PoolMismatch);
+        }
+        Ok(Self { pool, token })
     }
 
     pub fn pool(&self) -> &'a PhysicalPool {
@@ -113,6 +158,8 @@ impl<'a> CompactPhysicalPool64<'a> {
 impl<'a> private::Sealed for CompactPhysicalPool64<'a> {}
 
 impl<'a> CompactPoolAuthority64 for CompactPhysicalPool64<'a> {
+    fn __seal_authority(&self, _: private::InternalSeal) {}
+
     fn compact_id(&self) -> u16 {
         self.token.id()
     }

@@ -17,9 +17,8 @@ pub use arena::{
 pub use compact::{
     CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactObjRef,
     CompactObjRef64, CompactPoolAuthority, CompactPoolAuthority64, CompactPoolError,
-    CompactPoolRegistry, CompactPoolRegistry16, CompactPoolRegistryInstance,
-    CompactPoolRegistryInstance16, CompactPoolToken, CompactPoolToken16, CompactRevalidateError,
-    GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID, INVALID_COMPACT_POOL_ID_16,
-    MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
+    CompactPoolRegistry, CompactPoolRegistry16, CompactPoolToken, CompactPoolToken16,
+    CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID,
+    INVALID_COMPACT_POOL_ID_16, MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
 };
 pub use optimize::{BatchRevalidator, HoistSafety};

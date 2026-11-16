@@ -7,6 +7,8 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 
+use crate::physical::PhysicalPool;
+
 pub const INVALID_COMPACT_POOL_ID: u8 = 0;
 pub const MAX_COMPACT_POOLS: u8 = 255;
 pub const INVALID_COMPACT_POOL_ID_16: u16 = 0;
@@ -22,6 +24,8 @@ pub enum CompactPoolError {
     /// Queda terminantemente prohibido el reciclaje o wraparound silencioso.
     PoolIdExhausted,
     InvalidPoolId,
+    /// El token de autoridad no corresponde al pool físico proporcionado.
+    PoolMismatch,
 }
 
 impl fmt::Display for CompactPoolError {
@@ -29,6 +33,9 @@ impl fmt::Display for CompactPoolError {
         match self {
             Self::PoolIdExhausted => write!(f, "compact pool identifier space exhausted"),
             Self::InvalidPoolId => write!(f, "invalid compact pool identifier"),
+            Self::PoolMismatch => {
+                write!(f, "compact pool token does not belong to the target pool")
+            }
         }
     }
 }
@@ -36,7 +43,7 @@ impl fmt::Display for CompactPoolError {
 impl std::error::Error for CompactPoolError {}
 
 /// Instancia de registro acotado de identificadores de pools compactos de 8 bits (1..=255).
-pub struct CompactPoolRegistryInstance {
+pub(crate) struct CompactPoolRegistryInstance {
     allocated: AtomicU8,
 }
 
@@ -88,15 +95,27 @@ static GLOBAL_COMPACT_REGISTRY: CompactPoolRegistryInstance = CompactPoolRegistr
 /// Invariantes de seguridad (R1-R9):
 /// 1. Campos estrictamente privados: ningún consumidor externo puede falsificarlo.
 /// 2. No implementa `Clone` ni `Copy`: no puede duplicarse ni compartirse espuriamente.
-/// 3. Emitible exclusivamente a través de [`CompactPoolRegistry::acquire_token`].
+/// 3. Vinculado de manera infalsificable a la identidad única de un `PhysicalPool` (`physical_pool_id`).
+/// 4. Emitible exclusivamente a través de [`CompactPoolRegistry::register_pool`].
 #[derive(Debug)]
 pub struct CompactPoolToken {
-    id: u8,
+    compact_id: u8,
+    physical_pool_id: u64,
 }
 
 impl CompactPoolToken {
+    pub fn compact_id(&self) -> u8 {
+        self.compact_id
+    }
+
+    /// Identificador de pool compacto (1..=255).
     pub fn id(&self) -> u8 {
-        self.id
+        self.compact_id
+    }
+
+    /// Identificador único del pool físico propietario vinculado a este token.
+    pub fn physical_pool_id(&self) -> u64 {
+        self.physical_pool_id
     }
 }
 
@@ -113,10 +132,28 @@ impl CompactPoolRegistry {
         GLOBAL_COMPACT_REGISTRY.acquire_id()
     }
 
-    /// Emite un token lineal único e infalsificable de autoridad para un pool compacto de 8 bits.
+    /// Registra un `PhysicalPool` real y emite un token de autoridad infalsificable
+    /// vinculado unívocamente a su identificador de memoria física.
+    pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken, CompactPoolError> {
+        let compact_id = Self::acquire_id()?;
+        Ok(CompactPoolToken {
+            compact_id,
+            physical_pool_id: pool.id(),
+        })
+    }
+
+    /// Emite un token acoplado a un identificador de pool físico explícito.
+    pub fn acquire_token_for(physical_pool_id: u64) -> Result<CompactPoolToken, CompactPoolError> {
+        let compact_id = Self::acquire_id()?;
+        Ok(CompactPoolToken {
+            compact_id,
+            physical_pool_id,
+        })
+    }
+
+    /// Emite un token desvinculado (`physical_pool_id = 0`) para entornos aislados o de prueba.
     pub fn acquire_token() -> Result<CompactPoolToken, CompactPoolError> {
-        let id = Self::acquire_id()?;
-        Ok(CompactPoolToken { id })
+        Self::acquire_token_for(0)
     }
 
     /// Comprueba si un identificador se encuentra dentro del rango asignado legítimamente.
@@ -135,7 +172,7 @@ impl CompactPoolRegistry {
 }
 
 /// Instancia de registro acotado de identificadores de pools compactos de 16 bits (1..=65.535).
-pub struct CompactPoolRegistryInstance16 {
+pub(crate) struct CompactPoolRegistryInstance16 {
     allocated: AtomicU16,
 }
 
@@ -186,12 +223,21 @@ static GLOBAL_COMPACT_REGISTRY_16: CompactPoolRegistryInstance16 =
 /// Token lineal de autoridad única emitido para un pool compacto de 16 bits (1..=65.535).
 #[derive(Debug)]
 pub struct CompactPoolToken16 {
-    id: u16,
+    compact_id: u16,
+    physical_pool_id: u64,
 }
 
 impl CompactPoolToken16 {
+    pub fn compact_id(&self) -> u16 {
+        self.compact_id
+    }
+
     pub fn id(&self) -> u16 {
-        self.id
+        self.compact_id
+    }
+
+    pub fn physical_pool_id(&self) -> u64 {
+        self.physical_pool_id
     }
 }
 
@@ -203,10 +249,29 @@ impl CompactPoolRegistry16 {
         GLOBAL_COMPACT_REGISTRY_16.acquire_id()
     }
 
+    /// Registra un `PhysicalPool` real y emite un token de autoridad infalsificable
+    /// vinculado unívocamente a su identificador de memoria física.
+    pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken16, CompactPoolError> {
+        let compact_id = Self::acquire_id()?;
+        Ok(CompactPoolToken16 {
+            compact_id,
+            physical_pool_id: pool.id(),
+        })
+    }
+
+    pub fn acquire_token_for(
+        physical_pool_id: u64,
+    ) -> Result<CompactPoolToken16, CompactPoolError> {
+        let compact_id = Self::acquire_id()?;
+        Ok(CompactPoolToken16 {
+            compact_id,
+            physical_pool_id,
+        })
+    }
+
     /// Emite un token lineal único e infalsificable de autoridad para un pool compacto de 16 bits.
     pub fn acquire_token() -> Result<CompactPoolToken16, CompactPoolError> {
-        let id = Self::acquire_id()?;
-        Ok(CompactPoolToken16 { id })
+        Self::acquire_token_for(0)
     }
 
     pub fn is_valid_id(id: u16) -> bool {
@@ -503,8 +568,10 @@ impl std::error::Error for CompactRevalidateError {}
 /// [`CompactPoolAuthority`] o [`CompactPoolAuthority64`], evitando que entidades
 /// no verificadas puedan fabricar tokens de acceso o eludir las comprobaciones
 /// de seguridad física.
-pub mod private {
+pub(crate) mod private {
     pub trait Sealed {}
+    #[derive(Debug)]
+    pub struct InternalSeal;
 }
 
 /// Token de acceso no propietario obtenido exclusivamente tras una revalidación autorizada
@@ -517,6 +584,12 @@ pub mod private {
 /// 4. Vinculado a la vida útil del préstamo del pool (`'a`): expira al finalizar el ámbito del préstamo,
 ///    impidiendo el acceso tras la destrucción, reutilización o cierre del pool.
 /// 5. No puede convertirse a `Handle`: un enlace jamás confiere capacidad de posesión o destrucción.
+///
+/// No puede construirse externamente:
+/// ```compile_fail,E0423
+/// use nexo::next::CompactObjRef;
+/// let _r = CompactObjRef { pool_id: 1, slot: 0, generation: 1, _marker: std::marker::PhantomData };
+/// ```
 #[derive(Debug)]
 pub struct CompactObjRef<'a> {
     pool_id: u8,
@@ -540,6 +613,12 @@ impl<'a> CompactObjRef<'a> {
 }
 
 /// Token de acceso no propietario obtenido tras revalidación de un enlace compacto de 8 bytes ([`CompactLink64`]).
+///
+/// No puede construirse externamente:
+/// ```compile_fail,E0423
+/// use nexo::next::CompactObjRef64;
+/// let _r = CompactObjRef64 { pool_id: 1, slot: 0, generation: 1, _marker: std::marker::PhantomData };
+/// ```
 #[derive(Debug)]
 pub struct CompactObjRef64<'a> {
     pool_id: u16,
@@ -564,9 +643,24 @@ impl<'a> CompactObjRef64<'a> {
 
 /// Autoridad de revalidación para pools con soporte de enlaces compactos de 4 bytes.
 ///
-/// Este trait está sellado mediante [`private::Sealed`]: solo implementaciones
-/// auditadas dentro del runtime de NEXO pueden actuar como autoridad de revalidación.
+/// Este trait está sellado de manera auténtica mediante [`private::Sealed`] y un método interno
+/// oculto que requiere [`private::InternalSeal`]: solo implementaciones auditadas dentro
+/// del runtime de NEXO pueden actuar como autoridad de revalidación.
+///
+/// Tipos externos no pueden implementar este trait:
+/// ```compile_fail,E0277
+/// use nexo::next::CompactPoolAuthority;
+/// struct RoguePool;
+/// impl CompactPoolAuthority for RoguePool {
+///     fn compact_id(&self) -> u8 { 1 }
+///     fn slot_capacity(&self) -> u32 { 10 }
+///     fn current_compact_generation(&self, _: u32) -> Result<u8, nexo::next::CompactRevalidateError> { Ok(1) }
+/// }
+/// ```
 pub trait CompactPoolAuthority: private::Sealed {
+    #[doc(hidden)]
+    fn __seal_authority(&self, _: private::InternalSeal);
+
     fn compact_id(&self) -> u8;
     fn slot_capacity(&self) -> u32;
     fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError>;
@@ -602,7 +696,21 @@ pub trait CompactPoolAuthority: private::Sealed {
 }
 
 /// Autoridad de revalidación para pools con soporte de enlaces compactos de 8 bytes.
+///
+/// Tipos externos no pueden implementar este trait:
+/// ```compile_fail,E0277
+/// use nexo::next::CompactPoolAuthority64;
+/// struct RoguePool64;
+/// impl CompactPoolAuthority64 for RoguePool64 {
+///     fn compact_id(&self) -> u16 { 1 }
+///     fn slot_capacity(&self) -> u32 { 10 }
+///     fn current_compact_generation(&self, _: u32) -> Result<u16, nexo::next::CompactRevalidateError> { Ok(1) }
+/// }
+/// ```
 pub trait CompactPoolAuthority64: private::Sealed {
+    #[doc(hidden)]
+    fn __seal_authority(&self, _: private::InternalSeal);
+
     fn compact_id(&self) -> u16;
     fn slot_capacity(&self) -> u32;
     fn current_compact_generation(&self, slot: u32) -> Result<u16, CompactRevalidateError>;
@@ -637,6 +745,7 @@ pub trait CompactPoolAuthority64: private::Sealed {
     }
 }
 
+#[cfg(any(test, feature = "test-mocks"))]
 pub mod testing {
     use super::*;
 
@@ -660,6 +769,8 @@ pub mod testing {
     impl private::Sealed for MockCompactPool {}
 
     impl CompactPoolAuthority for MockCompactPool {
+        fn __seal_authority(&self, _: private::InternalSeal) {}
+
         fn compact_id(&self) -> u8 {
             self.id
         }
@@ -696,6 +807,8 @@ pub mod testing {
     impl private::Sealed for MockCompactPool64 {}
 
     impl CompactPoolAuthority64 for MockCompactPool64 {
+        fn __seal_authority(&self, _: private::InternalSeal) {}
+
         fn compact_id(&self) -> u16 {
             self.id
         }
@@ -792,6 +905,55 @@ mod tests {
         assert!(registry.is_valid_id(1));
         assert!(!registry.is_valid_id(2));
         assert_eq!(registry.allocated_count(), 1);
+
+        // Asignar IDs hasta alcanzar el límite exacto de 255
+        let mut allocated = vec![id1];
+        while let Ok(id) = registry.acquire_id() {
+            assert_ne!(id, INVALID_COMPACT_POOL_ID);
+            allocated.push(id);
+        }
+
+        assert_eq!(allocated.len(), MAX_COMPACT_POOLS as usize);
+        assert_eq!(allocated[0], 1);
+        assert_eq!(allocated[MAX_COMPACT_POOLS as usize - 1], MAX_COMPACT_POOLS);
+
+        // Agotado: PoolIdExhausted sin wraparound
+        assert_eq!(
+            registry.acquire_id().unwrap_err(),
+            CompactPoolError::PoolIdExhausted
+        );
+        assert!(registry.is_valid_id(1));
+        assert!(registry.is_valid_id(MAX_COMPACT_POOLS));
+        assert!(!registry.is_valid_id(INVALID_COMPACT_POOL_ID));
+        assert_eq!(registry.allocated_count(), MAX_COMPACT_POOLS);
+    }
+
+    #[test]
+    fn test_isolated_compact_pool_registry_instance_concurrency() {
+        use std::sync::Arc;
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let mut handles = Vec::new();
+
+        for _ in 0..8 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut issued = Vec::new();
+                while let Ok(id) = reg.acquire_id() {
+                    issued.push(id);
+                }
+                issued
+            }));
+        }
+
+        let mut all_issued = Vec::new();
+        for h in handles {
+            all_issued.extend(h.join().unwrap());
+        }
+
+        assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
+        all_issued.sort_unstable();
+        all_issued.dedup();
+        assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
     }
 
     #[test]

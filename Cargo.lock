@@ -213,6 +213,9 @@ dependencies = [
 [[package]]
 name = "ele-nexo"
 version = "0.2.0"
+dependencies = [
+ "ele-nexo",
+]
 
 [[package]]
 name = "equivalent"
