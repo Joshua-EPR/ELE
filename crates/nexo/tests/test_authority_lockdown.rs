@@ -193,17 +193,59 @@ fn test_auth_harden_05_cross_pool_pairing_mismatch_64bit() {
 fn test_auth_harden_06_closed_pool_fails_closed() {
     let mut pool = PhysicalPool::new(test_pool_config()).unwrap();
     let token = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let token16 = CompactPoolRegistry16::register_pool(&pool).unwrap();
     let handle = pool.allocate().unwrap();
-    let slot = handle.slot();
-    let link = CompactLink::new(token.id(), slot, 1).unwrap();
+    let orig_link = handle.link();
+
+    // 1. Antes de cerrar: crear adaptadores de 32 y 64 bits es válido con pool abierto
+    assert!(CompactPhysicalPool::new(&pool, &token).is_ok());
+    assert!(CompactPhysicalPool64::new(&pool, &token16).is_ok());
 
     // Destruimos el handle para que close() no falle por leak
     let _ = pool.destroy(handle, false).unwrap();
     pool.close().unwrap();
+    assert!(
+        pool.is_closed(),
+        "El pool físico debe reportar is_closed() == true"
+    );
 
-    let adapter = CompactPhysicalPool::new(&pool, &token).unwrap();
-    let err = adapter.revalidate_compact(link);
-    assert!(err.is_err(), "Revalidación sobre pool cerrado debe fallar");
+    // 2. Intentar crear adaptador de 32 bits sobre pool cerrado debe fallar con PoolClosed
+    let err_adapter32 = CompactPhysicalPool::new(&pool, &token);
+    assert_eq!(
+        err_adapter32.unwrap_err(),
+        CompactPoolError::PoolClosed,
+        "Creación de adaptador 32b sobre pool cerrado debe fallar con PoolClosed"
+    );
+
+    // 3. Intentar crear adaptador de 64 bits sobre pool cerrado debe fallar con PoolClosed
+    let err_adapter64 = CompactPhysicalPool64::new(&pool, &token16);
+    assert_eq!(
+        err_adapter64.unwrap_err(),
+        CompactPoolError::PoolClosed,
+        "Creación de adaptador 64b sobre pool cerrado debe fallar con PoolClosed"
+    );
+
+    // 4. Intentar registrar un pool ya cerrado en los registros globales debe fallar con PoolClosed
+    let err_reg32 = CompactPoolRegistry::register_pool(&pool);
+    assert_eq!(
+        err_reg32.unwrap_err(),
+        CompactPoolError::PoolClosed,
+        "Registrar pool cerrado en registro de 8 bits debe fallar con PoolClosed"
+    );
+
+    let err_reg16 = CompactPoolRegistry16::register_pool(&pool);
+    assert_eq!(
+        err_reg16.unwrap_err(),
+        CompactPoolError::PoolClosed,
+        "Registrar pool cerrado en registro de 16 bits debe fallar con PoolClosed"
+    );
+
+    // 5. Revalidación directa sobre pool cerrado preserva el error explícito PoolClosed
+    assert_eq!(
+        pool.revalidate(orig_link),
+        Err(nexo::physical::PoolError::Closed),
+        "Revalidación directa en PhysicalPool cerrado debe retornar PoolError::Closed"
+    );
 }
 
 // ============================================================================

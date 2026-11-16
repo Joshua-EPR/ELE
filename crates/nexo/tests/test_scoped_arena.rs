@@ -1567,3 +1567,112 @@ fn test_drop_16_isolated_child_panic_resilience() {
         "El pánico debió ser capturado y contenido sin abortar el proceso"
     );
 }
+
+/// DROP-17: Rechazo estricto de marcador fuera de orden y recuperación intacta.
+#[test]
+fn test_drop_17_out_of_order_marker_rejection_and_recovery() {
+    let mut arena = ScopedArena::new(2048).unwrap();
+    let m1 = arena.begin_scope().unwrap();
+    let m2 = arena.begin_scope().unwrap();
+
+    let err = arena.close_scope(m1).unwrap_err();
+    assert_eq!(err.error, ArenaError::ScopeMismatch);
+    let (recovered_m1, _) = err.into_parts();
+
+    // El orden correcto es LIFO: cerrar m2 primero
+    arena.close_scope(m2).unwrap();
+    // Luego m1 recuperado cierra limpiamente
+    arena.close_scope(recovered_m1).unwrap();
+    assert_eq!(arena.used_bytes(), 0);
+}
+
+/// DROP-18: Marcador de arena foránea es rechazado preservando el marcador.
+#[test]
+fn test_drop_18_foreign_arena_marker_rejection() {
+    let mut arena_a = ScopedArena::new(1024).unwrap();
+    let mut arena_b = ScopedArena::new(1024).unwrap();
+
+    let ma = arena_a.begin_scope().unwrap();
+    let mb = arena_b.begin_scope().unwrap();
+
+    let err = arena_a.close_scope(mb).unwrap_err();
+    assert_eq!(err.error, ArenaError::ScopeMismatch);
+    let (recovered_mb, _) = err.into_parts();
+
+    arena_a.close_scope(ma).unwrap();
+    arena_b.close_scope(recovered_mb).unwrap();
+}
+
+/// DROP-19: Intento de cierre sobre arena envenenada devuelve el marcador intacto.
+#[test]
+fn test_drop_19_recovering_marker_from_poisoned_arena() {
+    let outer_dropped = Arc::new(AtomicBool::new(false));
+    let mut arena = ScopedArena::new(4096).unwrap();
+
+    let m_outer = arena.begin_scope().unwrap();
+    struct OuterTracker(Arc<AtomicBool>);
+    impl Drop for OuterTracker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let _ = arena
+        .alloc(&m_outer, OuterTracker(outer_dropped.clone()))
+        .unwrap();
+
+    let m_inner = arena.begin_scope().unwrap();
+    struct Bomb;
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            panic!("bomba de pánico en ámbito interior");
+        }
+    }
+    let _ = arena.alloc(&m_inner, Bomb).unwrap();
+
+    // El cierre del ámbito interior entra en pánico
+    let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(m_inner);
+    }));
+    assert!(panic_res.is_err(), "close_scope debió propagar el pánico");
+    assert!(arena.is_poisoned(), "Arena debió pasar a estado Poisoned");
+
+    // Intento de cerrar m_outer sobre arena envenenada retorna error Poisoned y devuelve m_outer
+    let err = arena.close_scope(m_outer).unwrap_err();
+    assert_eq!(err.error, ArenaError::Poisoned);
+    let (_recovered_outer, _) = err.into_parts();
+
+    // Al hacer drop final de la arena, el objeto del ámbito exterior es drenado de forma segura
+    drop(arena);
+    assert!(
+        outer_dropped.load(Ordering::SeqCst),
+        "El objeto exterior debió ser destruido en drop final"
+    );
+}
+
+/// DROP-20: Asignación de ZST con alineación extrema al límite exacto de capacidad.
+#[test]
+fn test_drop_20_zst_alignment_boundary_at_capacity() {
+    let mut arena = ScopedArena::new(128).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    // Llenar la arena exactamente con 128 bytes
+    let _ = arena.alloc(&marker, [0u8; 128]).unwrap();
+    assert_eq!(arena.used_bytes(), 128);
+
+    // ZST con alineación 1 en el límite exacto no avanza offset y tiene éxito
+    let _ = arena.alloc(&marker, ()).unwrap();
+    assert_eq!(arena.used_bytes(), 128);
+
+    // ZST con alineación 128: 128 ya es múltiplo de 128, align_offset = 0 -> éxito
+    #[repr(align(128))]
+    struct ZstAligned128;
+    let _ = arena.alloc(&marker, ZstAligned128).unwrap();
+    assert_eq!(arena.used_bytes(), 128);
+
+    // Asignación de 1 byte adicional debe fallar con OutOfMemory
+    let err = arena.alloc(&marker, 1u8).unwrap_err();
+    assert_eq!(err, ArenaError::OutOfMemory);
+
+    arena.close_scope(marker).unwrap();
+    assert_eq!(arena.used_bytes(), 0);
+}

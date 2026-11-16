@@ -481,3 +481,107 @@ fn test_compact_pool_64_revalidation_and_adapter() {
         );
     }
 }
+
+/// Prueba dirigida de preservación de errores y equivalencia estricta entre 32 y 64 bits.
+#[test]
+fn test_adapter_32_and_64_equivalence_and_error_preservation() {
+    let mut pool = PhysicalPool::new(PoolConfig {
+        slot_size: 64,
+        fields: 2,
+        max_superpages: 1,
+        ..PoolConfig::default()
+    })
+    .unwrap();
+
+    let token32 = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let token64 = CompactPoolRegistry16::register_pool(&pool).unwrap();
+
+    let h1 = pool.allocate().unwrap();
+    let slot = h1.slot();
+    let gen_val = h1.generation() as u16;
+    let link32 = CompactLink::new(token32.id(), slot, gen_val).unwrap();
+    let link64 = CompactLink64::new(token64.id(), slot, gen_val).unwrap();
+
+    // 1. Éxito simétrico
+    {
+        let adapter32 = CompactPhysicalPool::new(&pool, &token32).unwrap();
+        let adapter64 = CompactPhysicalPool64::new(&pool, &token64).unwrap();
+        assert!(adapter32.revalidate_compact(link32).is_ok());
+        assert!(adapter64.revalidate_compact_64(link64).is_ok());
+    }
+
+    // 2. ForeignPool simétrico
+    {
+        let adapter32 = CompactPhysicalPool::new(&pool, &token32).unwrap();
+        let adapter64 = CompactPhysicalPool64::new(&pool, &token64).unwrap();
+        let foreign32 = CompactLink::new(token32.id().wrapping_add(1), slot, gen_val).unwrap();
+        let foreign64 = CompactLink64::new(token64.id().wrapping_add(1), slot, gen_val).unwrap();
+
+        assert_eq!(
+            adapter32.revalidate_compact(foreign32).unwrap_err(),
+            CompactRevalidateError::ForeignPool
+        );
+        assert_eq!(
+            adapter64.revalidate_compact_64(foreign64).unwrap_err(),
+            CompactRevalidateError::ForeignPool
+        );
+    }
+
+    // 3. OutOfBounds simétrico
+    {
+        let adapter32 = CompactPhysicalPool::new(&pool, &token32).unwrap();
+        let adapter64 = CompactPhysicalPool64::new(&pool, &token64).unwrap();
+        let oob_slot = adapter32.slot_capacity();
+        let oob32 = CompactLink::new(token32.id(), oob_slot, 1).unwrap();
+        let oob64 = CompactLink64::new(token64.id(), oob_slot, 1).unwrap();
+
+        assert_eq!(
+            adapter32.revalidate_compact(oob32).unwrap_err(),
+            CompactRevalidateError::OutOfBounds
+        );
+        assert_eq!(
+            adapter64.revalidate_compact_64(oob64).unwrap_err(),
+            CompactRevalidateError::OutOfBounds
+        );
+    }
+
+    // 4. StaleGeneration simétrico tras destruir y reasignar slot
+    pool.destroy(h1, false).unwrap();
+    let h2 = pool.allocate().unwrap();
+    assert_eq!(h2.slot(), slot);
+    assert_eq!(h2.generation(), (gen_val + 2) as u32);
+    {
+        let adapter32 = CompactPhysicalPool::new(&pool, &token32).unwrap();
+        let adapter64 = CompactPhysicalPool64::new(&pool, &token64).unwrap();
+
+        assert_eq!(
+            adapter32.revalidate_compact(link32).unwrap_err(),
+            CompactRevalidateError::StaleGeneration
+        );
+        assert_eq!(
+            adapter64.revalidate_compact_64(link64).unwrap_err(),
+            CompactRevalidateError::StaleGeneration
+        );
+    }
+
+    // 5. Destrucción final y cierre del pool
+    let orig_link = h2.link();
+    pool.destroy(h2, false).unwrap();
+    pool.close().unwrap();
+
+    // 6. Rechazo en constructores de adaptador sobre pool cerrado
+    assert_eq!(
+        CompactPhysicalPool::new(&pool, &token32).unwrap_err(),
+        nexo::next::CompactPoolError::PoolClosed
+    );
+    assert_eq!(
+        CompactPhysicalPool64::new(&pool, &token64).unwrap_err(),
+        nexo::next::CompactPoolError::PoolClosed
+    );
+
+    // 7. Revalidación directa sobre pool cerrado preserva error Closed
+    assert_eq!(
+        pool.revalidate(orig_link),
+        Err(nexo::physical::PoolError::Closed)
+    );
+}
