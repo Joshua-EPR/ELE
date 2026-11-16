@@ -1,5 +1,61 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Endurecimiento ReleaseUncertain y Consistencia de Autoridad — fix/nexo-v04-release-uncertain-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown histórica (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: Rama base de consolidación (`a1c05b3083e54bcd541144230f9a222c5eb99b76`).
+- `fix/nexo-v04-release-uncertain-hardening`: **Rama activa de corrección**, creada a partir de `a1c05b3`.
+
+### 1. Defectos P1/P2 Cerrados en esta Fase
+1. **P1-013 (Bloqueo absoluto de autoridad durante `ReleaseUncertain`)**:
+   - `AddressSpace` expone `is_released()` e `is_release_uncertain()`.
+   - `PhysicalPool` preserva la distinción entre `is_closed()`, `is_open()`, `is_release_uncertain()` e `is_operational()`.
+   - `PhysicalPool::ensure_operational()` valida que el pool esté abierto y no incierto antes de permitir accesos.
+   - `CompactPoolRegistry::register_pool` y `CompactPoolRegistry16::register_pool` rechazan pools en `ReleaseUncertain` con `Err(CompactPoolError::ReleaseUncertain)`.
+   - `CompactPhysicalPool::new` y `CompactPhysicalPool64::new` rechazan pools en `ReleaseUncertain` con `Err(CompactPoolError::ReleaseUncertain)`.
+   - `generation()`, `page_state()`, `physical_access()`, `base_addr()` y `validate()` invocan `ensure_operational()`, fallando cerrado con `Err(PoolError::Physical(PhysicalError::ReleaseUncertain))`.
+   - Suite completa de 12 puntos implementada y validada en `crates/nexo/tests/close_contract.rs::release_uncertain_blocks_all_authority_and_revalidations`.
+2. **P1-014 (Conversión exhaustiva y tipada de errores en adaptadores compactos)**:
+   - Eliminación total del comodín `_ => OutOfBounds` en `convert_pool_error`.
+   - Mapeo explícito y exhaustivo de las 13 variantes de `PoolError`.
+   - Mapeo de `PhysicalError::ReleaseUncertain` a `CompactRevalidateError::ReleaseUncertain`.
+   - Prueba unitaria exhaustiva validada en `crates/nexo/src/next/adapter.rs::tests::test_convert_pool_error_exhaustive_coverage`.
+3. **P1-015 (Atomicidad transaccional y auditoría de invariantes tras envenenamiento de Mutex)**:
+   - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` asocian atómicamente `(physical_pool_id, compact_id)`.
+   - Pre-reserva infalible de capacidad vectorial (`pools.reserve(1)`) antes de asignar IDs.
+   - Auditoría de invariantes tras recuperación de mutex envenenado (`audit_and_recover_8` / `audit_and_recover_16`): verifica unicidad de IDs físicos y compactos, límites numéricos, y consistencia de orden. Ante corrupción detectada, la instancia pasa a `corrupted = true` y falla cerrado con `CompactPoolError::RegistryCorrupted`.
+   - Pruebas unitarias validadas en `crates/nexo/src/next/compact.rs`.
+4. **P2-016 (Erradicación de wraparound en pruebas de enlaces compactos)**:
+   - Eliminación de `wrapping_add(1)` en `test_compact_nexo.rs`, utilizando pools foráneos legítimos.
+   - Adición de prueba de cotas mínimas (1), máximas (255 / 65535) y rechazo de ID cero en `test_compact_id_boundary_invariants`.
+5. **P2-017 (Diferenciación metodológica de benchmarks de revalidación y agregación exacta)**:
+   - Separación estricta de revalidación estándar pura (14.5 ns), revalidación estándar con lectura (53.1 ns), revalidación compacta 32b (22.7 ns) y 64b (23.0 ns) en `nexo-physical-bench`.
+   - Corrección del acumulador estadístico para agregar llamadas al SO, bytes de cabecera y commits a través de todas las corridas (`RUNS = 7`) con denominadores normalizados exactos.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 40/41 | **40/40 APROBADAS** | **41/41 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+---
+
 ## Actualización 2026-11-16 (Operación Finalización y Endurecimiento Definitivo — fix/nexo-v04-security-finalization)
 
 Ramas y estado de Git:

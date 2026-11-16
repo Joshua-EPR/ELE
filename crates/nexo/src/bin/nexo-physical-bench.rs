@@ -14,6 +14,11 @@ use std::hint::black_box;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use nexo::next::adapter::{CompactPhysicalPool, CompactPhysicalPool64};
+use nexo::next::compact::{
+    CompactLink, CompactLink64, CompactPoolAuthority, CompactPoolAuthority64, CompactPoolRegistry,
+    CompactPoolRegistry16,
+};
 use nexo::physical::{DestroyOutcome, Handle, PhysicalPool, PoolConfig, ReclaimPolicy};
 use nexo::rt::pool::{Eventos, Pool};
 
@@ -49,11 +54,16 @@ static GLOBAL: Contador = Contador;
 fn main() {
     let completo = std::env::args().any(|a| a == "--completo");
     println!(
-        "nexo-physical-bench os={} arch={} warmup={} iterations={}",
+        "nexo-physical-bench os={} arch={} warmup={} iterations={} profile={}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         WARMUP,
-        ITERATIONS
+        ITERATIONS,
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     );
     // Escenarios originales (mismo formato de salida que v0.3).
     bench("physical hot allocate+free", physical_hot);
@@ -252,9 +262,24 @@ fn ampliado() {
             run: e_grande,
         },
         Escenario {
-            nombre: "revalidar enlace + leer",
+            nombre: "revalidar estándar + leer (PhysicalPool)",
             ops: ITERATIONS,
-            run: e_revalidar,
+            run: e_revalidar_estandar,
+        },
+        Escenario {
+            nombre: "revalidar estándar puro (PhysicalPool)",
+            ops: ITERATIONS,
+            run: e_revalidar_estandar_puro,
+        },
+        Escenario {
+            nombre: "revalidar compacto 32b (CompactPhysicalPool)",
+            ops: ITERATIONS,
+            run: e_revalidar_compacto_32,
+        },
+        Escenario {
+            nombre: "revalidar compacto 64b (CompactPhysicalPool64)",
+            ops: ITERATIONS,
+            run: e_revalidar_compacto_64,
         },
         Escenario {
             nombre: "Box<[u8;64]> asignar+liberar",
@@ -286,20 +311,25 @@ fn ampliado() {
     for e in &escenarios {
         let mut medias = Vec::new();
         let mut todas = Muestras::default();
-        let mut c = Contadores::default();
+        let mut total_c = Contadores::default();
         let mut allocs = 0u64;
         black_box((e.run)(e.ops / 10, &mut Muestras::default()));
         for _ in 0..RUNS {
             let mut m = Muestras::default();
             let a0 = ALLOCS.load(Ordering::Relaxed);
-            c = (e.run)(e.ops, &mut m);
+            let c = (e.run)(e.ops, &mut m);
             allocs += ALLOCS.load(Ordering::Relaxed) - a0;
+            total_c.os_calls += c.os_calls;
+            total_c.header_bytes += c.header_bytes;
+            total_c.commits += c.commits;
+            total_c.returns += c.returns;
+            total_c.hole_reuses += c.hole_reuses;
             medias.push(m.lotes.iter().sum::<f64>() / m.lotes.len() as f64);
             todas.lotes.extend(m.lotes);
         }
         let media = medias.iter().sum::<f64>() / RUNS as f64;
         let sd = (medias.iter().map(|x| (x - media).powi(2)).sum::<f64>() / RUNS as f64).sqrt();
-        let ops = e.ops as f64;
+        let total_ops = RUNS as f64 * e.ops as f64;
         println!(
             "{:<46} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>7.1} {:>8.3} {:>8.3} {:>8.1} {:>8.3} {:>8.3} {:>9.3}",
             e.nombre,
@@ -308,12 +338,12 @@ fn ampliado() {
             percentil(&mut todas.lotes, 0.95),
             percentil(&mut todas.lotes, 0.99),
             100.0 * sd / media,
-            allocs as f64 / (RUNS as f64 * ops),
-            c.os_calls as f64 / ops,
-            c.header_bytes as f64 / ops,
-            c.commits as f64 / ops,
-            c.returns as f64 / ops,
-            c.hole_reuses as f64 / ops,
+            allocs as f64 / total_ops,
+            total_c.os_calls as f64 / total_ops,
+            total_c.header_bytes as f64 / total_ops,
+            total_c.commits as f64 / total_ops,
+            total_c.returns as f64 / total_ops,
+            total_c.hole_reuses as f64 / total_ops,
         );
     }
     println!(
@@ -485,7 +515,7 @@ fn e_grande(ops: usize, m: &mut Muestras) -> Contadores {
     churn(pool, vivos, ops, m)
 }
 
-fn e_revalidar(ops: usize, m: &mut Muestras) -> Contadores {
+fn e_revalidar_estandar(ops: usize, m: &mut Muestras) -> Contadores {
     let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
     let h = pool.allocate().unwrap();
     let link = h.link();
@@ -493,6 +523,49 @@ fn e_revalidar(ops: usize, m: &mut Muestras) -> Contadores {
     m.medir(ops, || {
         let obj = black_box(pool.revalidate(black_box(link)).unwrap());
         black_box(pool.read_int(obj, 0).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_estandar_puro(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = h.link();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(pool.revalidate(black_box(link)).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_compacto_32(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let token = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = CompactLink::new(token.id(), h.slot(), h.generation() as u16).unwrap();
+    let adapter = CompactPhysicalPool::new(&pool, &token).unwrap();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(adapter.revalidate_compact(black_box(link)).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_compacto_64(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let token = CompactPoolRegistry16::register_pool(&pool).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = CompactLink64::new(token.id(), h.slot(), h.generation() as u16).unwrap();
+    let adapter = CompactPhysicalPool64::new(&pool, &token).unwrap();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(adapter.revalidate_compact_64(black_box(link)).unwrap());
     });
     let c = contadores(&pool, b);
     pool.destroy(h, false).unwrap();
