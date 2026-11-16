@@ -212,21 +212,21 @@ reevaluarse todas las filas dependientes y no limitarse a actualizar su texto.
 
 ---
 
-## Registro de auditoría y cierre de soundness P0/P1 en NEXO v0.4
+## Registro de auditoría y cierre de soundness P0/P1 en NEXO v0.4 (Operación Security Lockdown)
 
-Durante la auditoría profunda de autoridad e identidad de NEXO v0.4 se detectaron y cerraron los siguientes defectos críticos de seguridad:
+Durante la auditoría profunda de autoridad e identidad y la operación de cierre de autoridad de NEXO v0.4 se detectaron, cerraron y verificaron los siguientes defectos críticos de seguridad:
 
-1. **P0-001 (Sellado auténtico de trait de autoridad)**: Se eliminó el pseudo-sellado `pub mod private` reemplazándolo por `pub(crate) mod private` con método privado sellado `fn __seal_authority(&self, _: private::InternalSeal)` y pruebas doctest negativas con `compile_fail`.
-2. **P0-002 (Vinculación infalsificable Pool ↔ Token)**: Se eliminó el emparejamiento no verificado de tokens arbitrarios. `CompactPoolToken` y `CompactPoolToken16` almacenan el `physical_pool_id: u64` y el adaptador aborta con `CompactPoolError::PoolMismatch` ante discrepancias de pool.
-3. **P0-003 (Confinamiento de mocks de prueba)**: Se aislaron `MockCompactPool` y `MockCompactPool64` detrás de `#[cfg(any(test, feature = "test-mocks"))]`, impidiendo su inclusión en artefactos de producción.
-4. **P1-004 (Confinamiento de registros independientes)**: `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` fueron restringidos a `pub(crate)` y retirados de la re-exportación pública.
-5. **P1-005 (Aislamiento de contador global en pruebas de agotamiento)**: Se refactorizó la asignación de ID de arena a `allocate_arena_id(&AtomicU64)`, eliminando la mutación del contador global en pruebas multi-hilo.
-6. **P1-006 (Acotamiento de capacidad de slots en adaptador 32 bits)**: `CompactPhysicalPool::slot_capacity()` fue acotado a 65.536 slots, impidiendo desbordamientos en la representación de 16 bits de `CompactLink`.
+1. **P0-001 (Eliminación de emisión de autoridad arbitraria)**: Se eliminaron terminantemente `CompactPoolRegistry::acquire_token_for(physical_pool_id: u64)` y `acquire_token()`. Ningún token de autoridad puede emitirse a partir de enteros numéricos. La única vía pública es `register_pool(&PhysicalPool)`.
+2. **P0-002 (Invariante de registro único de pool físico)**: Se impide el registro múltiple o duplicado de un mismo pool físico en `CompactPoolRegistry` y `CompactPoolRegistry16`. Cualquier intento duplicado es rechazado atómicamente con `CompactPoolError::AlreadyRegistered { physical_pool_id }`, garantizando una correspondencia biyectiva $1:1$.
+3. **P0-003 (Cierre de cadena física y reporte de cuarentena)**: `CompactPhysicalPool` y `CompactPhysicalPool64` verifican el estado completo de la memoria física. Ante subpáginas en estado `PageState::Quarantined` se retorna el error dedicado y tipado `CompactRevalidateError::SubpageQuarantined`.
+4. **P1-004 (Eliminación de mocks privilegiados del API distribuido)**: Se erradicó la feature `test-mocks` de `crates/nexo/Cargo.toml` y el módulo público `pub mod testing` de `compact.rs`. Los mocks de prueba residen exclusivamente en `#[cfg(test)] mod tests` para pruebas unitarias internas.
+5. **P1-005 (Prohibición de agotamiento del registro global en pruebas)**: Se factorizaron `CompactIdAllocator8` y `CompactIdAllocator16` como asignadores numéricos atómicos puros desacoplados de autoridad de memoria, permitiendo que pruebas de agotamiento y concurrencia se ejecuten en instancias aisladas sin contaminar ni agotar los singletons globales.
+6. **P1-006 (Reparación de pruebas adversariales con fallos reales de compilación)**: Se migraron las pruebas de comentarios a pruebas reales de compilación externa ejecutadas con arnés `run_fixture_check` contra `crates/nexo/tests/fixtures/external_consumer` (`E0277`, `E0433`, `E0502`, `E0515`, `E0560`, `E0599`). Se añadieron las suites `AUTH-01..20` (soundness) y `AUTH-HARDEN-01..20` (lockdown) con paso determinista tanto en `--test-threads=1` como en `--test-threads=8`.
 
 ### Estado de Infraestructura de Integración Continua Externa
 
 > [!IMPORTANT]
-> **CI EXTERNO: BLOQUEADO POR CUOTA DE GITHUB ACTIONS**
+> **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA**
 > La infraestructura remota de GitHub Actions se encuentra actualmente bloqueada debido al agotamiento total de la cuota mensual asignada de la cuenta (`0 minutes remaining`). Conforme a las directrices de seguridad y gobernanza del proyecto:
-> - NO se modifican los flujos de trabajo en `.github/workflows/` para eludir la restricción.
-> - La validación exhaustiva se ejecuta y certifica localmente en modo Dual-OS (Windows MSVC nativo + Linux WSL2 / glibc) sobre los worktrees autorizados.
+> - NO se modifican los flujos de trabajo en `.github/workflows/` para eludir la restricción ni se solicitan tokens/claves no autorizadas.
+> - La validación exhaustiva se ejecuta y certifica localmente en modo Dual-OS (Windows MSVC nativo + Linux WSL2 / glibc) sobre los worktrees autorizados, aprobando el 100% de las suites unitarias, adversariales, de integración y de aislamiento físico con hardware/SO.

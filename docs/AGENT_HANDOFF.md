@@ -1,5 +1,64 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Security Lockdown — fix/nexo-v0.4-authority-lockdown)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama previa (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: **Nueva rama de trabajo**, creada a partir de `cac1dcb`, donde se ejecutó el cierre total y definitivo de autoridad e identidad.
+
+### 1. Defectos P0 y P1 Cerrados en Security Lockdown
+
+1. **P0-001 (Eliminación Terminante de Emisión Arbitraria de Autoridad)**:
+   - Se erradicaron por completo `CompactPoolRegistry::acquire_token_for(physical_pool_id: u64)` y `CompactPoolRegistry::acquire_token()`. Ningún token de autoridad puede ser emitido a partir de enteros numéricos.
+   - La única vía legal y pública de emisión es `register_pool(&PhysicalPool)`, requiriendo la posesión de una referencia viva a la memoria física.
+2. **P0-002 (Invariante de Registro Único de Pool Físico)**:
+   - `CompactPoolRegistry` y `CompactPoolRegistry16` rechazan de forma atómica e idempotente el registro duplicado de un mismo pool físico con `CompactPoolError::AlreadyRegistered { physical_pool_id }`.
+   - Garantiza una correspondencia biyectiva $1:1$ entre el `PhysicalPool` en memoria virtual y su token de autoridad `CompactPoolToken`.
+3. **P0-003 (Cierre de Cadena Física y Reporte Explícito de Cuarentena)**:
+   - Los adaptadores `CompactPhysicalPool` y `CompactPhysicalPool64` validan la cadena de autoridad completa sobre `PhysicalPool`.
+   - Ante subpáginas en estado `PageState::Quarantined`, retornan el error tipado y dedicado `CompactRevalidateError::SubpageQuarantined`.
+4. **P1-004 (Eliminación Absoluta de Mocks Privilegiados de la Distribución)**:
+   - Se eliminó la feature `test-mocks` de `crates/nexo/Cargo.toml` y el módulo público `pub mod testing` de `compact.rs`.
+   - Los mocks privilegiados residen estrictamente en `#[cfg(test)] mod tests` para pruebas unitarias internas. Las compilaciones de producción (incluso con `--all-features`) tienen cero mocks expuestos.
+5. **P1-005 (Desacoplamiento de Asignadores Numéricos Puros)**:
+   - Se factorizaron `CompactIdAllocator8` y `CompactIdAllocator16` como asignadores numéricos atómicos puros (1..=255 y 1..=65535) sin autoridad de memoria.
+   - Permiten probar agotamiento y concurrencia en instancias aisladas sin contaminar ni agotar los singletons globales `GLOBAL_COMPACT_REGISTRY` y `GLOBAL_COMPACT_REGISTRY_16`.
+6. **P1-006 (Reparación de Pruebas Adversariales con Fallos Reales de Compilación)**:
+   - Se migraron las pruebas de comentarios a pruebas reales de compilación externa ejecutadas con arnés `run_fixture_check` contra `crates/nexo/tests/fixtures/external_consumer` (`E0277`, `E0433`, `E0502`, `E0515`, `E0560`, `E0599`).
+   - Se implementó la nueva suite de 20 escenarios `AUTH-HARDEN-01..20` en `crates/nexo/tests/test_authority_lockdown.rs`.
+   - Se eliminaron condiciones `if` de escape en `AUTH-15` y `AUTH-HARDEN-13` para asegurar verificación incondicional.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 12 | **12/12 APROBADAS** | **12/12 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 32 | **32/32 APROBADAS** | **32/32 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests lib.rs** | `crates/nexo/src/lib.rs` | 36/37 | **36/36 APROBADAS** | **37/37 APROBADAS** |
+| **Physical Fuzz tests** | `crates/nexo/src/bin/nexo-physical-fuzz.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Revalidation Opt** | `crates/nexo/tests/test_revalidation_opt.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+Determinismo multi-hilo certificado:
+- `cargo test -p ele-nexo --test test_authority_soundness --test test_authority_lockdown -- --test-threads=1` -> 40/40 OK.
+- `cargo test -p ele-nexo --test test_authority_soundness --test test_authority_lockdown -- --test-threads=8` -> 40/40 OK.
+
+### 3. Estado de CI Remoto
+- **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA** (`0 minutes remaining` en GitHub Actions).
+- No se han modificado flujos en `.github/` para evadir restricciones.
+- Toda validación está certificada localmente de forma reproducible y exhaustiva en modo Dual-OS.
+
+---
+
 ## Actualización 2026-11-16 (Auditoría Definitiva de Autoridad e Identidad — fix/nexo-v0.4-authority-soundness)
 
 Ramas auditadas:

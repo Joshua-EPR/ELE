@@ -81,13 +81,23 @@ crates/nexo/src/
 
 ---
 
-## 3. Estado de resolución de defectos de seguridad (P0 / P1)
+## 3. Estado de resolución de defectos de seguridad (P0 / P1 Lockdown)
 
 | Defecto | Clasificación | Solución implementada | Validación |
 |---|---|---|---|
-| **P0-001** | Pseudo-sellado de `CompactPoolAuthority` (`pub mod private`) | Módulo `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }` con método sellado `__seal_authority` y doctests `compile_fail`. | `AUTH-01`, `AUTH-02`, 9 doctests |
-| **P0-002** | Emparejamiento no verificado de Pool ↔ Token | `CompactPoolToken` y `CompactPoolToken16` almacenan `physical_pool_id: u64`; constructores de adaptadores validan coincidencia exacta con `pool.id()`. | `AUTH-05`, `AUTH-06`, `AUTH-07`, `AUTH-08`, `AUTH-09` |
-| **P0-003** | Fuga de `MockCompactPool` a producción | Aislados detrás de `#[cfg(any(test, feature = "test-mocks"))]`. Crate de producción no exporta mocks. | `AUTH-04`, compilación de producción |
-| **P1-004** | Exposición pública de registros independientes | `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` son `pub(crate)` y excluidos de la API pública. | `AUTH-19`, `AUTH-20`, pruebas unitarias |
-| **P1-005** | Mutación de contador global en pruebas de agotamiento | `next_arena_id` refactorizado para delegar en `allocate_arena_id(&AtomicU64)`. Pruebas usan contadores atómicos locales. | Pruebas concurrentes en `arena.rs` |
-| **P1-006** | Capacidad de slot desbordaba representación de 16 bits | `slot_capacity()` en `CompactPhysicalPool` acotado a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32`. | `AUTH-16` |
+| **P0-001** | Emisión de tokens de autoridad desde enteros arbitrarios (`acquire_token_for`) | Eliminados totalmente `acquire_token_for(u64)` y `acquire_token()`. La autoridad solo se emite mediante `register_pool(&PhysicalPool)`. | `AUTH-HARDEN-01`, `run_fixture_check("call-acquire-token-for")` (E0599) |
+| **P0-002** | Registros duplicados descontrolados de un mismo pool físico | `CompactPoolRegistry` y `CompactPoolRegistry16` imponen registro atómico único ($1:1$) rechazando duplicados con `AlreadyRegistered { physical_pool_id }`. | `AUTH-08`, `AUTH-HARDEN-03`, `AUTH-HARDEN-14` |
+| **P0-003** | Falta de reporte explícito de subpáginas en cuarentena | Adaptadores `CompactPhysicalPool` y `CompactPhysicalPool64` distinguen `PageState::Quarantined` y retornan `SubpageQuarantined`. | `AUTH-14`, `AUTH-HARDEN-11` |
+| **P1-004** | Exposición de mocks privilegiados bajo feature flag en producción | Eliminada la feature `test-mocks` de `Cargo.toml` y retirado `pub mod testing`. Mocks confinados a `#[cfg(test)] mod tests` de `compact.rs`. | `AUTH-04`, `AUTH-HARDEN-18`, `run_fixture_check("access-mock-compact-pool")` (E0433) |
+| **P1-005** | Contaminación y agotamiento del registro global en pruebas | Factorizados `CompactIdAllocator8` y `CompactIdAllocator16` para instancias aisladas de prueba de agotamiento y concurrencia sin alterar los singletons. | `AUTH-19`, `AUTH-20`, `AUTH-HARDEN-15`, `AUTH-HARDEN-16` |
+| **P1-006** | Pruebas adversariales insuficientes o basadas en comentarios | Convertidas en pruebas reales mediante `run_fixture_check` contra `external_consumer` verificando errores de compilación (`E0277`, `E0433`, `E0502`, `E0515`, `E0560`, `E0599`). | `AUTH-01..20`, `AUTH-HARDEN-01..20` |
+
+---
+
+## 4. Suites de Validación de Autoridad y Seguridad
+
+- **`test_authority_soundness.rs` (AUTH-01..20)**: Validación completa de sellado, vinculación de pool físico, rechazo de estados corruptos/retirados, no-ABA y confinamiento de préstamos.
+- **`test_authority_lockdown.rs` (AUTH-HARDEN-01..20)**: Validación adversarial de endurecimiento exhaustivo que cubre las 20 invariantes de cierre de autoridad.
+- **`api_security.rs` (11 pruebas)**: Encapsulación de capacidades lineales y helpers internos.
+- **`test_compact_nexo.rs` (12 pruebas)**: Integración de adaptadores compactos, enlaces de 32/64 bits y dominios de generación.
+- **`child_isolation.rs` (5 pruebas)**: Verificación a nivel de SO y hardware de aislamiento de memoria física en procesos hijos con captura de SIGSEGV.

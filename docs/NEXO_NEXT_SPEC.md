@@ -98,21 +98,29 @@ NEXO v0.4 es la evolución incremental del modelo de memoria de ELE diseñado pa
 - **Hoisting fuera de bucles**: Si un bucle ejecuta lecturas repetidas mediante un `Link` sobre un pool $P$, y el análisis de efectos del cuerpo del bucle demuestra que ningún efecto de mutación (`Destroy`, `Reorder`, `Invalidate`) afecta a $P$, la comprobación `revalidate` se eleva fuera del bucle (*loop-invariant code motion*).
 - **Revalidación en lote (*Batch Revalidation*)**: Validación vectorizada de múltiples enlaces pertenecientes al mismo pool amortizando el acceso a la superpágina.
 
-### 3.8 Frontera de autoridad auténtica, sellado e identidad infalsificable (P0/P1 Soundness)
+### 3.8 Frontera de autoridad auténtica, sellado e identidad infalsificable (P0/P1 Soundness & Lockdown)
 - **Sellado auténtico (*Authentic Sealed Trait*)**:
   - Los traits `CompactPoolAuthority` y `CompactPoolAuthority64` utilizan el patrón canónico de sellado de Rust:
     - Supertrait `private::Sealed` definido en un submódulo `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }`.
     - Método sellado obligatorio `fn __seal_authority(&self, _: private::InternalSeal)` que imposibilita la implementación por crates externas incluso si el supertrait fuera accesible.
-    - Se verifica mediante doctests negativos con directiva `compile_fail`.
-- **Vinculación infalsificable de pool físico y token (`CompactPoolToken`)**:
-  - Los tokens de autoridad `CompactPoolToken` y `CompactPoolToken16` incorporan no solo el `compact_id` sino también el `physical_pool_id: u64` correspondiente al `PhysicalPool` registrado.
-  - La construcción de adaptadores autorizados (`CompactPhysicalPool::new(&pool, &token)` y `CompactPhysicalPool64::new(&pool, &token)`) devuelve `Result<Self, CompactPoolError>` y valida estrictamente `token.physical_pool_id() == pool.id()`, fallando con `CompactPoolError::PoolMismatch` ante cualquier intento de emparejamiento cruzado de tokens foráneos.
+    - Se verifica mediante pruebas externas de compilación (`run_fixture_check`) y doctests negativos con directiva `compile_fail`.
+- **Eliminación total de emisión arbitraria de autoridad (P0-001)**:
+  - Se eliminaron por completo `CompactPoolRegistry::acquire_token_for(physical_pool_id: u64)` y `CompactPoolRegistry::acquire_token()` sin pool. Ningún token de autoridad puede ser emitido a partir de un entero arbitrario.
+  - La única vía legal y pública de emisión es `register_pool(&PhysicalPool)`, requiriendo la posesión de una referencia viva a la memoria física.
+- **Invariante de registro único y prevención de colisiones (P0-002)**:
+  - `CompactPoolRegistry` y `CompactPoolRegistry16` rechazan registros duplicados del mismo pool físico (`AlreadyRegistered { physical_pool_id }`).
+  - Esto garantiza una biyección estricta $1:1$ entre el `PhysicalPool` en memoria virtual y su token de autoridad `CompactPoolToken`, impidiendo multiplicidad de dominios y agotamiento espurio.
+- **Validación física completa y reporte explícito de cuarentena (P0-003)**:
+  - Los adaptadores `CompactPhysicalPool` y `CompactPhysicalPool64` validan la cadena de autoridad completa sobre `PhysicalPool`.
+  - Ante subpáginas en estado `PageState::Quarantined` (por fallos parciales o inconsistencias de protección del SO), retornan el error dedicado `CompactRevalidateError::SubpageQuarantined`, distinguiéndolo claramente de slots no confirmados o no asignados (`SlotNotAllocated`).
+- **Eliminación absoluta de mocks privilegiados de la distribución (P1-004)**:
+  - Se eliminó la feature `test-mocks` de `crates/nexo/Cargo.toml` y el módulo público `pub mod testing` de `compact.rs`.
+  - Los mocks privilegiados residen estrictamente en `#[cfg(test)] mod tests` para pruebas unitarias internas. Las compilaciones de producción (incluso con `--all-features`) tienen cero mocks expuestos.
+- **Desacoplamiento de asignadores numéricos puros (P1-005)**:
+  - Se factorizaron `CompactIdAllocator8` y `CompactIdAllocator16` como asignadores numéricos atómicos puros (1..=255 y 1..=65535) sin autoridad de memoria.
+  - Permiten probar agotamiento y concurrencia en instancias aisladas sin contaminar ni agotar los singletons globales `GLOBAL_COMPACT_REGISTRY` y `GLOBAL_COMPACT_REGISTRY_16`.
 - **Agotamiento acotado de capacidad en adaptadores**:
   - `CompactPhysicalPool::slot_capacity()` acota la capacidad reportada a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32` (máximo 65.536 slots), garantizando que un pool físico de tamaño mayor nunca exponga un slot inalcanzable o truncable por la representación de 16 bits de `CompactLink`.
-- **Aislamiento absoluto de mocks de prueba**:
-  - `MockCompactPool` y `MockCompactPool64` están condicionados a `#[cfg(any(test, feature = "test-mocks"))]`, imposibilitando su existencia o compilación en binarios de producción sin la bandera explícita.
-- **Confinamiento de registros independientes**:
-  - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` quedan confinados a visibilidad `pub(crate)` y excluidos de las re-exportaciones públicas de `nexo::next`, garantizando que la emisión pública de tokens solo proceda de los registros monotónicos globales.
 
 ---
 
