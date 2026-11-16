@@ -332,7 +332,11 @@ impl ScopedArena {
                 error: ArenaError::Poisoned,
             });
         }
-        if marker.arena_id != self.id || marker.scope_id != self.active_scopes {
+        if marker.arena_id != self.id
+            || marker.scope_id != self.active_scopes
+            || marker.offset > self.offset
+            || marker.drop_count > self.drops.len()
+        {
             return Err(CloseScopeError {
                 marker,
                 error: ArenaError::ScopeMismatch,
@@ -475,5 +479,34 @@ mod tests {
         let isolated = AtomicU64::new(u64::MAX);
         let res = allocate_arena_id(&isolated);
         assert_eq!(res.unwrap_err(), ArenaError::ArenaIdExhausted);
+    }
+
+    #[test]
+    fn test_marker_defensive_bounds_validation() {
+        let mut arena = ScopedArena::new(1024).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        // 1. Marker con offset adulterado que excede el offset actual de la arena
+        let bad_offset_marker = ScopeMarker {
+            arena_id: arena.id,
+            scope_id: arena.active_scopes,
+            offset: arena.offset + 10,
+            drop_count: marker.drop_count,
+        };
+        let err = arena.close_scope(bad_offset_marker).unwrap_err();
+        assert_eq!(err.error, ArenaError::ScopeMismatch);
+
+        // 2. Marker con drop_count adulterado que excede la cantidad de drops registrados
+        let bad_drop_marker = ScopeMarker {
+            arena_id: arena.id,
+            scope_id: arena.active_scopes,
+            offset: marker.offset,
+            drop_count: arena.drops.len() + 5,
+        };
+        let err = arena.close_scope(bad_drop_marker).unwrap_err();
+        assert_eq!(err.error, ArenaError::ScopeMismatch);
+
+        // El marker legítimo original aún cierra el ámbito limpiamente
+        assert!(arena.close_scope(marker).is_ok());
     }
 }

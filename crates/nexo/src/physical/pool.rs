@@ -1061,12 +1061,14 @@ impl PhysicalPool {
     }
 
     pub fn generation(&self, slot: u32) -> Result<u32, PoolError> {
+        self.space()?;
         let (sp, sub, bit) = self.locate(slot)?;
         let meta = self.superpages[sp].as_ref().ok_or(PoolError::OutOfBounds)?;
         Ok(meta.generations[sub * self.slots_per_subpage as usize + bit])
     }
 
     pub fn page_state(&self, slot: u32) -> Result<PageState, PoolError> {
+        self.space()?;
         let (sp, sub, _) = self.locate(slot)?;
         Ok(self.superpages[sp]
             .as_ref()
@@ -1245,6 +1247,7 @@ impl PhysicalPool {
         self.space = None;
         self.pending.clear();
         self.deferred.clear();
+        self.superpages.clear();
         Ok(())
     }
 

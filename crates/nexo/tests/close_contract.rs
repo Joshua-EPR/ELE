@@ -123,3 +123,20 @@ fn drop_reintenta_acotadamente_y_registra_fallo_terminal() {
         before.possibly_leaked_bytes + SUPERPAGE as u64
     );
 }
+
+#[test]
+fn closed_pool_rejects_generation_page_state_and_physical_access() {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let handle = pool.allocate().unwrap();
+    let slot = handle.slot();
+    let link = handle.link();
+    pool.destroy(handle, false).unwrap();
+    assert!(pool.close().is_ok());
+
+    // Pool está cerrado: toda inspección de metadatos o acceso físico debe fallar cerrado
+    assert_eq!(pool.generation(slot), Err(PoolError::Closed));
+    assert_eq!(pool.page_state(slot), Err(PoolError::Closed));
+    assert_eq!(pool.physical_access(slot), Err(PoolError::Closed));
+    assert_eq!(pool.revalidate(link), Err(PoolError::Closed));
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::OutOfBounds));
+}
