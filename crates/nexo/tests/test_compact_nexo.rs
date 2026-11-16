@@ -264,8 +264,10 @@ fn test_compact_link_authorized_revalidation_boundary() {
     assert_eq!(obj.slot(), 0);
     assert_eq!(obj.generation(), 1);
 
-    // Revalidación fallida por pool foráneo
-    let foreign = CompactLink::new(token.id().wrapping_add(1), 0, 1).unwrap();
+    // Revalidación fallida por pool foráneo legítimo
+    let pool_other = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let token_other = CompactPoolRegistry::register_pool(&pool_other).unwrap();
+    let foreign = CompactLink::new(token_other.id(), 0, 1).unwrap();
     assert_eq!(
         adapter.revalidate_compact(foreign).unwrap_err(),
         CompactRevalidateError::ForeignPool
@@ -510,12 +512,22 @@ fn test_adapter_32_and_64_equivalence_and_error_preservation() {
         assert!(adapter64.revalidate_compact_64(link64).is_ok());
     }
 
-    // 2. ForeignPool simétrico
+    // 2. ForeignPool simétrico mediante un segundo pool legítimo
     {
+        let foreign_pool = PhysicalPool::new(PoolConfig {
+            slot_size: 64,
+            fields: 2,
+            max_superpages: 1,
+            ..PoolConfig::default()
+        })
+        .unwrap();
+        let foreign_tok32 = CompactPoolRegistry::register_pool(&foreign_pool).unwrap();
+        let foreign_tok64 = CompactPoolRegistry16::register_pool(&foreign_pool).unwrap();
+
         let adapter32 = CompactPhysicalPool::new(&pool, &token32).unwrap();
         let adapter64 = CompactPhysicalPool64::new(&pool, &token64).unwrap();
-        let foreign32 = CompactLink::new(token32.id().wrapping_add(1), slot, gen_val).unwrap();
-        let foreign64 = CompactLink64::new(token64.id().wrapping_add(1), slot, gen_val).unwrap();
+        let foreign32 = CompactLink::new(foreign_tok32.id(), slot, gen_val).unwrap();
+        let foreign64 = CompactLink64::new(foreign_tok64.id(), slot, gen_val).unwrap();
 
         assert_eq!(
             adapter32.revalidate_compact(foreign32).unwrap_err(),
@@ -584,4 +596,59 @@ fn test_adapter_32_and_64_equivalence_and_error_preservation() {
         pool.revalidate(orig_link),
         Err(nexo::physical::PoolError::Closed)
     );
+}
+
+/// Verifica exhaustivamente las cotas de identificadores compactos:
+/// ID mínimo (1), ID máximo (255 y 65535), ID cero inválido (0),
+/// agotamiento sin colisiones y rechazo estricto de identidades foráneas.
+#[test]
+fn test_compact_id_boundary_invariants() {
+    // 1. ID cero es inválido en enlaces compactos de 32 y 64 bits
+    assert_eq!(
+        CompactLink::new(0, 0, 1).unwrap_err(),
+        nexo::next::compact::CompactLinkError::InvalidPoolId
+    );
+    assert_eq!(
+        CompactLink64::new(0, 0, 1).unwrap_err(),
+        nexo::next::compact::CompactLinkError::InvalidPoolId
+    );
+
+    // 2. ID mínimo legítimo es 1
+    assert!(CompactLink::new(1, 0, 1).is_ok());
+    assert!(CompactLink64::new(1, 0, 1).is_ok());
+
+    // 3. ID máximo legítimo: 255 para 8-bit, 65535 para 16-bit
+    assert!(CompactLink::new(255, 0, 1).is_ok());
+    assert!(CompactLink64::new(65535, 0, 1).is_ok());
+
+    // 4. Agotamiento y ausencia de colisiones en asignador aislado de 8 bits
+    let alloc8 = nexo::next::compact::CompactIdAllocator8::new();
+    assert_eq!(alloc8.allocated_count(), 0);
+    assert!(!alloc8.is_valid_id(0));
+    assert!(!alloc8.is_valid_id(1));
+
+    let mut ids = std::collections::HashSet::new();
+    for _ in 1..=255u8 {
+        let id = alloc8.allocate_id().unwrap();
+        assert!(id >= 1);
+        assert!(
+            ids.insert(id),
+            "Colisión detectada en ID compacto 8b: {}",
+            id
+        );
+    }
+    assert_eq!(ids.len(), 255);
+    assert_eq!(alloc8.allocated_count(), 255);
+    assert_eq!(
+        alloc8.allocate_id().unwrap_err(),
+        nexo::next::CompactPoolError::PoolIdExhausted
+    );
+
+    // 5. Asignador de 16 bits: verificar límites mínimo, máximo y agotamiento
+    let alloc16 = nexo::next::compact::CompactIdAllocator16::new();
+    let id1 = alloc16.allocate_id().unwrap();
+    assert_eq!(id1, 1);
+    assert!(alloc16.is_valid_id(1));
+    assert!(!alloc16.is_valid_id(0));
+    assert_eq!(alloc16.allocated_count(), 1);
 }
