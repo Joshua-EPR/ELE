@@ -39,10 +39,35 @@ struct Aligned128 {
     data: [u8; 128],
 }
 
+#[repr(align(256))]
+#[allow(dead_code)]
+struct Aligned256 {
+    data: [u8; 256],
+}
+
+#[repr(align(512))]
+#[allow(dead_code)]
+struct Aligned512 {
+    data: [u8; 512],
+}
+
 struct ZstDrop;
 impl Drop for ZstDrop {
     fn drop(&mut self) {
         DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+struct PanicDropper {
+    should_panic: bool,
+}
+
+impl Drop for PanicDropper {
+    fn drop(&mut self) {
+        DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+        if self.should_panic {
+            panic!("pánico intencional en destructor para prueba de seguridad");
+        }
     }
 }
 
@@ -107,7 +132,7 @@ fn test_out_of_memory_handled_cleanly() {
 }
 
 #[test]
-fn test_scope_mismatch_and_cross_arena_rejected() {
+fn test_scope_mismatch_and_linear_marker_recovery() {
     let mut arena1 = ScopedArena::new(1024).unwrap();
     let mut arena2 = ScopedArena::new(1024).unwrap();
 
@@ -124,17 +149,38 @@ fn test_scope_mismatch_and_cross_arena_rejected() {
     let cross_alloc = arena1.alloc(&marker2, 42u32);
     assert_eq!(cross_alloc.unwrap_err(), ArenaError::ScopeMismatch);
 
-    // Rechazo de cierre cruzado entre arenas
-    let cross_close = arena1.close_scope(marker2);
-    assert_eq!(cross_close.unwrap_err(), ArenaError::ScopeMismatch);
+    // Rechazo de cierre cruzado entre arenas devuelve el marcador intacto
+    let cross_close_err = arena1.close_scope(marker2).unwrap_err();
+    assert_eq!(cross_close_err.error, ArenaError::ScopeMismatch);
+    let (recovered_marker2, error_kind) = cross_close_err.into_parts();
+    assert_eq!(error_kind, ArenaError::ScopeMismatch);
 
-    // Cierre normal en cada arena correspondiente
+    // El marcador devuelto puede cerrar legítimamente arena2
+    arena2.close_scope(recovered_marker2).unwrap();
     arena1.close_scope(marker1).unwrap();
 }
 
 #[test]
-fn test_alignments_greater_than_16() {
-    let mut arena = ScopedArena::new(2048).unwrap();
+fn test_out_of_order_close_recovers_marker() {
+    let mut arena = ScopedArena::new(1024).unwrap();
+    let outer = arena.begin_scope();
+    let inner = arena.begin_scope();
+
+    // Intentar cerrar el ámbito exterior antes de cerrar el interior falla pero preserva el marcador
+    let err = arena.close_scope(outer).unwrap_err();
+    assert_eq!(err.error, ArenaError::ScopeMismatch);
+    let (recovered_outer, _) = err.into_parts();
+
+    // Cerrar el interior primero
+    arena.close_scope(inner).unwrap();
+
+    // Ahora el exterior se cierra exitosamente con el marcador recuperado
+    arena.close_scope(recovered_outer).unwrap();
+}
+
+#[test]
+fn test_alignments_up_to_512() {
+    let mut arena = ScopedArena::new(4096).unwrap();
     let marker = arena.begin_scope();
 
     let a32 = arena.alloc(&marker, Aligned32 { data: [1; 32] }).unwrap();
@@ -153,8 +199,36 @@ fn test_alignments_greater_than_16() {
         "Alineación a 128 bytes debe respetarse"
     );
 
+    let a256 = arena.alloc(&marker, Aligned256 { data: [4; 256] }).unwrap();
+    let ptr_val256 = (a256 as *const Aligned256) as usize;
+    assert_eq!(
+        ptr_val256 % 256,
+        0,
+        "Alineación a 256 bytes debe respetarse"
+    );
+
+    let a512 = arena.alloc(&marker, Aligned512 { data: [5; 512] }).unwrap();
+    let ptr_val512 = (a512 as *const Aligned512) as usize;
+    assert_eq!(
+        ptr_val512 % 512,
+        0,
+        "Alineación a 512 bytes debe respetarse"
+    );
+
     arena.close_scope(marker).unwrap();
     assert_eq!(arena.used_bytes(), 0);
+}
+
+#[test]
+fn test_custom_base_alignment() {
+    let mut arena = ScopedArena::new_with_alignment(2048, 256).unwrap();
+    let marker = arena.begin_scope();
+
+    let a256 = arena.alloc(&marker, Aligned256 { data: [0; 256] }).unwrap();
+    let ptr_val = (a256 as *const Aligned256) as usize;
+    assert_eq!(ptr_val % 256, 0);
+
+    arena.close_scope(marker).unwrap();
 }
 
 #[test]
@@ -168,7 +242,6 @@ fn test_zst_allocation_and_drop() {
     let _z2 = arena.alloc(&marker, ZstDrop).unwrap();
     let offset_after = arena.used_bytes();
 
-    // Las estructuras de tamaño 0 no consumen espacio de datos más allá de padding
     assert_eq!(offset_before, offset_after);
 
     arena.close_scope(marker).unwrap();
@@ -177,4 +250,35 @@ fn test_zst_allocation_and_drop() {
         1,
         "El drop de ZstDrop debió ejecutarse"
     );
+}
+
+#[test]
+fn test_panic_in_destructor_is_handled_cleanly_without_double_drop() {
+    DROP_COUNTER.store(0, Ordering::SeqCst);
+    let mut arena = ScopedArena::new(1024).unwrap();
+    let outer = arena.begin_scope();
+
+    let _d1 = arena.alloc(&outer, DropTracker { _id: 1 }).unwrap();
+
+    let inner = arena.begin_scope();
+    let _p = arena
+        .alloc(&inner, PanicDropper { should_panic: true })
+        .unwrap();
+
+    // Intentar cerrar el ámbito interior con un destructor que entra en pánico
+    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(inner);
+    }));
+    assert!(
+        panic_result.is_err(),
+        "El destructor debió causar un pánico capturado"
+    );
+
+    // El contador de drops incrementó 1 (el objeto que entró en pánico)
+    assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 1);
+
+    // Al salir del ámbito y dropear la arena, d1 del ámbito exterior debe dropearse normalmente
+    // sin doble drop de p
+    drop(arena);
+    assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 2);
 }

@@ -69,12 +69,17 @@ NEXO v0.4 es la evolución incremental del modelo de memoria de ELE diseñado pa
   - Saturación estricta: ante el intento de incrementar más allá de $65533$, el slot transiciona irreversiblemente a `g_ret` y se marca como permanentemente retirado.
 - **Propiedad No-ABA**: Debido a que la generación retirada jamás se reutiliza y no hay wraparound aritmético, un enlace antiguo con generación $g_{old}$ jamás coincidirá con un slot reciclado.
 
-### 3.4 Enlaces compactos (4 bytes)
-- **Estructura**: `CompactLink` codificado en 32 bits exactos:
+### 3.4 Enlaces compactos (4 bytes y 8 bytes)
+- **Estructura 32 bits (`CompactLink`)**: Codificado en 32 bits exactos:
   - Bits 0–15 (16 bits): Índice de slot (soporta hasta $65.536$ slots por pool compacto).
   - Bits 16–23 (8 bits): Generación viva compacta ($1..253$), con retiro estricto irreversible en $254$ (`GEN_RETIRADO_8 = 0xfe`).
-  - Bits 24–31 (8 bits): Identificador de pool de origen ($0..255$) para aislamiento estricto entre pools.
-- **Inmunidad absoluta contra colisiones de hash**: Al retirar el slot definitivamente al alcanzar $254$, las generaciones impares vivas jamás se reutilizan ni sufren wraparound (eliminando colisiones como gen 1 vs gen 257). Un enlace antiguo jamás puede revalidar un objeto posterior.
+  - Bits 24–31 (8 bits): Identificador de pool de origen ($1..255$) gestionado por `CompactPoolRegistry`.
+- **Registro global acotado (`CompactPoolRegistry`)**: Asignación atómica monotónica sin reciclaje. Tras alcanzar 255 pools, falla explícitamente con `CompactPoolError::PoolIdExhausted`, impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
+- **Estructura 64 bits (`CompactLink64`)**: Para grafos o sistemas de larga duración con más de 255 pools:
+  - Bits 0–31 (32 bits): Índice de slot (hasta $4.294.967.295$ slots).
+  - Bits 32–47 (16 bits): Generación de vida completa ($1..65533$, retira en $65534$).
+  - Bits 48–63 (16 bits): Identificador de pool extendido ($1..65535$).
+- **Inmunidad absoluta contra colisiones de hash**: Al retirar el slot definitivamente al alcanzar $254$ (o $65534$), las generaciones impares vivas jamás se reutilizan ni sufren wraparound (eliminando colisiones como gen 1 vs gen 257). Un enlace antiguo jamás puede revalidar un objeto posterior.
 - **Ámbito de aplicación**: Destinado a grafos de datos densos en memoria donde la sobrecarga de 8 o 12 bytes por enlace limita la densidad de caché. Requiere configuración explícita del pool (`PoolConfig::compact_links = true`).
 
 ### 3.5 Destrucción diferida por épocas

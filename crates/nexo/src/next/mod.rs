@@ -9,9 +9,10 @@ pub mod arena;
 pub mod compact;
 pub mod optimize;
 
-pub use arena::{ArenaError, ScopeMarker, ScopedArena};
+pub use arena::{ARENA_BASE_ALIGN, ArenaError, CloseScopeError, ScopeMarker, ScopedArena};
 pub use compact::{
-    CompactGen, CompactGenError, CompactLink, CompactLinkError, GEN_RETIRADO_8, GEN_RETIRADO_16,
-    MAX_SLOT_COMPACT_32,
+    CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactPoolError,
+    CompactPoolRegistry, GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID,
+    MAX_COMPACT_POOLS, MAX_SLOT_COMPACT_32,
 };
 pub use optimize::{BatchRevalidator, HoistSafety};

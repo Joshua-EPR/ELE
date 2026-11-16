@@ -36,15 +36,18 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
   4. La generación 257 jamás puede ser alcanzada ni creada para ese slot, eliminando de forma absoluta cualquier colisión de hash módulo 256.
   5. `CompactLink::matches()` comprueba tanto la coincidencia estricta de `pool_id`, la no paridad (`is_live`, impar), el límite de retiro, y la igualdad exacta.
 
-### T4: Seguridad de Ámbitos, Arenas (`ScopedArena`) y Aislamiento de Hilos
-- **Teorema**: Ningún préstamo o puntero derivado de `ScopedArena` puede sobrevivir a `close_scope(marker)`, ni transferirse incorrectamente entre arenas o hilos.
+### T4: Seguridad de Ámbitos, Arenas (`ScopedArena`), Lifetimes y Aislamiento de Hilos
+- **Teorema**: Ningún préstamo o puntero derivado de `ScopedArena` puede sobrevivir a `close_scope(marker)`, ni transferirse incorrectamente entre arenas o hilos, ni retener referencias efímeras en destructores.
 - **Demostración**:
   1. `ScopedArena::begin_scope()` genera un `ScopeMarker` lineal que contiene tanto el identificador atómico único de arena (`arena_id`) como el nivel de ámbito activo (`scope_id`).
-  2. `alloc()` y `close_scope()` validan estrictamente la coincidencia de `arena_id` y `scope_id`. Cualquier marcador foráneo o de orden incorrecto es rechazado inmediatamente con `ArenaError::ScopeMismatch` sin corromper el estado ni ejecutar destructores erróneos.
-  3. `close_scope` consume el `ScopeMarker` por valor.
-  4. Si existiese cualquier préstamo activo de la arena, el borrow checker rechaza la llamada a `close_scope` por solapamiento de préstamos vivos.
-  5. `ScopedArena` no implementa `Send` ni `Sync` (retiene punteros crudos `NonNull<u8>`), impidiendo formalmente que tipos no aptos para concurrencia (como `Rc`) sean transferidos entre hilos a través de la arena.
-  6. La arena garantiza alineación base de 128 bytes y soporta alineaciones arbitrarias de tipos sin desbordamiento aritmético gracias a `align_offset` y comprobaciones `checked_add`. Tipos de tamaño cero (ZST) no consumen capacidad de memoria y ejecutan sus destructores deterministamente.
+  2. `alloc()` restringe el tipo a `T: 'static`, impidiendo formalmente en safe Rust que se almacenen objetos con referencias de vida más corta que la arena que luego puedan ser accedidas tras expirar por sus destructores.
+  3. `alloc()` y `close_scope()` validan estrictamente la coincidencia de `arena_id` y `scope_id`. Cualquier marcador foráneo o de orden incorrecto es rechazado inmediatamente con `CloseScopeError`, devolviendo el `ScopeMarker` intacto al llamador para permitir recuperación y cierre ordenado sin clonación.
+  4. Pre-reserva estricta: `alloc()` ejecuta `drops.try_reserve(1)` antes de escribir el valor, previniendo objetos vivos no registrados en caso de OOM.
+  5. Si un destructor entra en pánico durante `close_scope`, un guard de limpieza (`CleanupGuard`) restaura el offset y nivel de ámbito de forma infalible, previniendo dobles destrucciones de objetos ya procesados.
+  6. `close_scope` consume el `ScopeMarker` por valor.
+  7. Si existiese cualquier préstamo activo de la arena, el borrow checker rechaza la llamada a `close_scope` por solapamiento de préstamos vivos.
+  8. `ScopedArena` no implementa `Send` ni `Sync` (retiene punteros crudos `NonNull<u8>`), impidiendo formalmente que tipos no aptos para concurrencia (como `Rc`) sean transferidos entre hilos a través de la arena.
+  9. La arena garantiza alineación base de 128 bytes (o configurable como potencia de dos) y soporta alineaciones arbitrarias de tipos (hasta 4096 bytes) sin desbordamiento aritmético gracias a `align_offset` y comprobaciones `checked_add`. Tipos de tamaño cero (ZST) no consumen capacidad de memoria y ejecutan sus destructores deterministamente.
 
 ---
 

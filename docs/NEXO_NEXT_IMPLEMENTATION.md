@@ -43,15 +43,24 @@ crates/nexo/src/
 
 ### 2.2 Generaciones y Enlaces compactos (`next/compact.rs`)
 - `CompactGen`:
-  - Generación de 16 bits.
+  - Soporte dual de 16 bits (`GEN_RETIRADO_16 = 0xfffe`) y 8 bits (`GEN_RETIRADO_8 = 0xfe`).
   - Inicia en 1 (impar, vivo).
   - Incremento por 2 en cada ciclo de asignación.
-  - Al alcanzar $65533$, se retira permanentemente con `GEN_RETIRADO_16 = 0xfffe`.
+  - Al alcanzar 253 (8 bits) o 65533 (16 bits), se retira permanentemente sin wraparound.
   - Demostración de No-ABA por saturación en retiro.
-- `CompactLink`:
-  - Enlace de 4 bytes (`u32`).
-  - 24 bits para índice de slot (hasta 16.777.216 slots).
-  - 8 bits para generación truncada de validación rápida.
+- `CompactPoolRegistry`:
+  - Registro acotado de identificadores únicos de pool compacto (1..=255).
+  - Monotónico y sin reciclaje para evitar que un pool posterior reutilice la identidad de enlaces antiguos.
+  - Al agotar los 255 IDs, falla con `CompactPoolError::PoolIdExhausted`.
+- `CompactLink` (32 bits, 4 bytes):
+  - 16 bits para índice de slot (0..65.535 slots por pool).
+  - 8 bits para generación compacta viva (1..253).
+  - 8 bits para identidad de pool de origen (1..255).
+  - Cero colisiones generacionales (gen 1 vs gen 257 eliminado).
+- `CompactLink64` (64 bits, 8 bytes):
+  - 32 bits para índice de slot (hasta 4.294.967.295).
+  - 16 bits para generación completa de 16 bits (retira en 65534).
+  - 16 bits para identificador de pool extendido (1..65535).
 
 ### 2.3 Optimizaciones de revalidación (`next/optimize.rs`)
 - `BatchRevalidator`:
