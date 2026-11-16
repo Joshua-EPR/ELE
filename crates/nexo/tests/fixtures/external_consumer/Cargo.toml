@@ -11,6 +11,8 @@ ele-nexo = { path = "../../..", default-features = false }
 [features]
 default = []
 call-test-craft-handle = []
+call-craft-handle-for-test = []
 construct-handle-struct = []
 construct-hole-token = []
 call-test-corrupt-live = []
+call-corrupt-live-for-test = []

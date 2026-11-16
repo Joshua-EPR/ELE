@@ -5,6 +5,11 @@ pub fn call_craft_handle(p: &nexo::physical::PhysicalPool) {
     let _ = p.__test_craft_handle(0, 1);
 }
 
+#[cfg(feature = "call-craft-handle-for-test")]
+pub fn call_craft_handle_for_test(p: &nexo::physical::PhysicalPool) {
+    let _ = p.craft_handle_for_test(0, 1);
+}
+
 #[cfg(feature = "construct-handle-struct")]
 pub fn construct_handle() {
     let _h = nexo::physical::Handle {
@@ -26,4 +31,9 @@ pub fn construct_hole_token() {
 #[cfg(feature = "call-test-corrupt-live")]
 pub fn call_corrupt_live(p: &mut nexo::physical::PhysicalPool) {
     p.__test_corrupt_live(0);
+}
+
+#[cfg(feature = "call-corrupt-live-for-test")]
+pub fn call_corrupt_live_for_test(p: &mut nexo::physical::PhysicalPool) {
+    p.corrupt_live_for_test(0);
 }

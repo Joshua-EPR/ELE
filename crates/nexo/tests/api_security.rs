@@ -53,6 +53,19 @@ fn test_external_consumer_cannot_call_craft_handle() {
 }
 
 #[test]
+fn test_external_consumer_cannot_call_craft_handle_for_test() {
+    let (success, stderr) = run_fixture_check("call-craft-handle-for-test");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar invocar craft_handle_for_test"
+    );
+    assert!(
+        stderr.contains("E0599") && stderr.contains("craft_handle_for_test"),
+        "Se esperaba error E0599 por método inexistente/privado en API externa, recibido:\n{stderr}"
+    );
+}
+
+#[test]
 fn test_external_consumer_cannot_call_corrupt_live() {
     let (success, stderr) = run_fixture_check("call-test-corrupt-live");
     assert!(
@@ -62,6 +75,19 @@ fn test_external_consumer_cannot_call_corrupt_live() {
     assert!(
         stderr.contains("E0599") && stderr.contains("__test_corrupt_live"),
         "Se esperaba error E0599 por método inexistente en API de producción, recibido:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_external_consumer_cannot_call_corrupt_live_for_test() {
+    let (success, stderr) = run_fixture_check("call-corrupt-live-for-test");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar invocar corrupt_live_for_test"
+    );
+    assert!(
+        stderr.contains("E0599") && stderr.contains("corrupt_live_for_test"),
+        "Se esperaba error E0599 por método inexistente/privado en API externa, recibido:\n{stderr}"
     );
 }
 

@@ -3,13 +3,14 @@
 ## Cierre de P0: encapsulación de la API pública y aislamiento de instrumentación — 2026-11-15
 
 Este incremento resuelve el P0 de seguridad sobre la API pública de `PhysicalPool`:
-1. **Eliminación de helpers en producción**: Los métodos de instrumentación adversarial (`__test_craft_handle`, `__test_craft_hole_token`, `__test_corrupt_live`, `__test_corrupt_holes`, `__test_corrupt_generation`, `__test_corrupt_occupied`, `__test_corrupt_free_bit`, `__test_corrupt_hole_bit`) quedaron condicionados a la feature interna `test-internals`. En compilaciones estándar (`dev` y `release`), estos métodos no forman parte del crate ni son visibles.
-2. **Pruebas negativas de compilación externa (`tests/api_security.rs` y fixture `external_consumer`)**: Se implementó una suite de integración que ejecuta `cargo check` desde un crate consumidor externo aislado, demostrando:
-   - Rechazo de compilación con `error[E0599]` al intentar invocar `__test_craft_handle` o `__test_corrupt_live`.
+1. **Eliminación absoluta de helpers y features en producción**: Los métodos de instrumentación adversarial (`craft_handle_for_test`, `craft_hole_token_for_test`, `corrupt_live_for_test`, `corrupt_holes_for_test`, `corrupt_generation_for_test`, `corrupt_occupied_for_test`, `corrupt_free_bit_for_test`, `corrupt_hole_bit_for_test`) fueron encapsulados estrictamente bajo `#[cfg(test)]` y visibilidad `pub(crate)` dentro de `crates/nexo/src/physical/pool.rs`, eliminando por completo cualquier feature activable por consumidores externos (como `test-internals`). En compilaciones externas (`cargo check`, `cargo build`, `cargo build --release` o `--all-features`), estos métodos no forman parte del crate ni son visibles.
+2. **Migración de A01–A12 a suite interna de pruebas unitarias (`crates/nexo/src/physical/adversarial_tests.rs`)**: La suite A01–A12 se ejecuta directamente dentro del módulo de pruebas de la capa física con acceso de crate, sin contaminar la interfaz pública de la biblioteca.
+3. **Pruebas negativas de compilación externa (`tests/api_security.rs` y fixture `external_consumer`)**: Se implementó una suite de integración que ejecuta `cargo check` desde un crate consumidor externo aislado, demostrando:
+   - Rechazo de compilación con `error[E0599]` al intentar invocar métodos de prueba (`craft_handle_for_test`, `corrupt_live_for_test`, `__test_*`).
    - Rechazo de compilación con `error[E0451]` al intentar instanciar `Handle` directamente debido a sus campos privados.
    - Rechazo de compilación con `error[E0451]` al intentar instanciar `HoleToken` directamente.
-3. **Doctests de linealidad**: Se incorporaron doctests `compile_fail` demostrando que `Handle` y `HoleToken` no implementan `Clone` ni `Copy` (`E0599`) y que sus campos son estrictamente privados (`E0451`).
-4. **Verificación dual**:
+4. **Doctests de linealidad**: Se incorporaron doctests `compile_fail` demostrando que `Handle` y `HoleToken` no implementan `Clone` ni `Copy` (`E0599`) y que sus campos son estrictamente privados (`E0451`).
+5. **Verificación dual**:
    - Windows/MSVC: 216 pruebas aprobadas (211 unitarias/integración + 5 doctests).
    - Linux WSL2/glibc: 214 pruebas aprobadas (209 unitarias/integración + 5 doctests).
 
@@ -70,7 +71,7 @@ operaciones fallibles o condiciones de error interno.
   `bytes_allocated`, etc.) utilizan `saturating_add` para evitar desbordamientos sin degradar
   la consistencia ni ocultar corrupciones de seguridad.
 
-### Batería adversarial A01–A12 (`crates/nexo/tests/adversarial_atomicity.rs`)
+### Batería adversarial A01–A12 (`crates/nexo/src/physical/adversarial_tests.rs`)
 
 | Caso | Invariante / Prueba adversarial | Resultado |
 | --- | --- | --- |

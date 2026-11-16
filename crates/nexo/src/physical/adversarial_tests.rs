@@ -10,7 +10,7 @@
 //! - Los contadores de seguridad (`live`, `holes`, `occupied`) no enmascaran
 //!   subdesbordamientos ni inconsistencias mediante saturación.
 
-use nexo::physical::{
+use crate::physical::{
     DestroyOutcome, FaultOp, FaultPlan, Handle, HeaderStatus, HoleToken, PageState, PhysicalPool,
     PoolConfig, PoolError, ReclaimStatus,
 };
@@ -38,7 +38,7 @@ fn a01_live_underflow_rejected_in_phase_a_without_mutating_generation() {
     assert_eq!(pool.live_count(), 1);
 
     // Corromper el contador live a 0 simulando una inconsistencia
-    pool.__test_corrupt_live(0);
+    pool.corrupt_live_for_test(0);
 
     // destroy debe fallar en Fase A por underflow de live
     let err = pool.destroy(handle, false);
@@ -58,7 +58,7 @@ fn a01_live_underflow_rejected_in_phase_a_without_mutating_generation() {
     assert_eq!(returned_handle.slot(), slot);
 
     // Restaurar live para completar la destrucción legítima
-    pool.__test_corrupt_live(1);
+    pool.corrupt_live_for_test(1);
     let report = pool.destroy(returned_handle, false).unwrap();
     assert_eq!(report.outcome, DestroyOutcome::Free);
     assert_eq!(pool.live_count(), 0);
@@ -82,7 +82,7 @@ fn a02_holes_underflow_rejected_in_phase_a_without_consuming_token() {
     assert_eq!(pool.hole_count(), 1);
 
     // Corromper holes a 0
-    pool.__test_corrupt_holes(0);
+    pool.corrupt_holes_for_test(0);
 
     // release_hole debe fallar en Fase A
     let (token, pool_err) = match pool.release_hole(token) {
@@ -105,7 +105,7 @@ fn a02_holes_underflow_rejected_in_phase_a_without_consuming_token() {
     );
 
     // Restaurar holes y reutilizar el token exitosamente
-    pool.__test_corrupt_holes(1);
+    pool.corrupt_holes_for_test(1);
     let handle = pool.reuse_hole(token).unwrap();
     assert_eq!(pool.hole_count(), 0);
     assert_eq!(pool.live_count(), 1);
@@ -122,7 +122,7 @@ fn a03_live_overflow_rejected_before_publishing_allocation() {
     let mut pool = test_pool(1);
 
     // Simular live == u64::MAX
-    pool.__test_corrupt_live(u64::MAX);
+    pool.corrupt_live_for_test(u64::MAX);
 
     let res = pool.allocate();
     assert!(
@@ -131,7 +131,7 @@ fn a03_live_overflow_rejected_before_publishing_allocation() {
     );
 
     // Restaurar y verificar que el pool asigna normalmente
-    pool.__test_corrupt_live(0);
+    pool.corrupt_live_for_test(0);
     let handle = pool.allocate().unwrap();
     assert_eq!(pool.live_count(), 1);
 
@@ -150,7 +150,7 @@ fn a04_holes_overflow_rejected_before_invalidating_handle() {
     let gen_before = pool.generation(slot).unwrap();
 
     // Simular holes == u64::MAX
-    pool.__test_corrupt_holes(u64::MAX);
+    pool.corrupt_holes_for_test(u64::MAX);
 
     let (handle, err) = match pool.destroy(handle, true) {
         Err((h, e)) => (h, e),
@@ -166,7 +166,7 @@ fn a04_holes_overflow_rejected_before_invalidating_handle() {
     assert_eq!(handle.generation(), gen_before);
 
     // Restaurar holes y destruir normalmente
-    pool.__test_corrupt_holes(0);
+    pool.corrupt_holes_for_test(0);
     let report = pool.destroy(handle, false).unwrap();
     assert_eq!(report.outcome, DestroyOutcome::Free);
 
@@ -184,7 +184,7 @@ fn a05_uninitialized_superpage_metadata_returns_capability_intact() {
 
     // Fabricar handle que apunta a la superpágina 1 (no inicializada aún)
     let fake_slot = pool.slots_per_superpage(); // Primer slot de superpágina 1
-    let fake_handle = pool.__test_craft_handle(fake_slot, 1);
+    let fake_handle = pool.craft_handle_for_test(fake_slot, 1);
 
     let (returned_h, err) = match pool.destroy(fake_handle, false) {
         Err((h, e)) => (h, e),
@@ -214,7 +214,7 @@ fn a06_pre_commit_failure_preserves_token_for_subsequent_reuse() {
     };
 
     // Provocar fallo previo en Fase A corrompiendo temporalmente holes a 0
-    pool.__test_corrupt_holes(0);
+    pool.corrupt_holes_for_test(0);
     let (token, err) = match pool.reuse_hole(token) {
         Err((t, e)) => (t, e),
         Ok(_) => panic!("A06: reuse_hole debió fallar en Fase A"),
@@ -222,7 +222,7 @@ fn a06_pre_commit_failure_preserves_token_for_subsequent_reuse() {
     assert!(matches!(err, PoolError::Invariant(_)));
 
     // El token sigue siendo completamente válido; restauramos el estado y lo reutilizamos
-    pool.__test_corrupt_holes(1);
+    pool.corrupt_holes_for_test(1);
     let h2 = pool.reuse_hole(token).unwrap();
     assert_eq!(pool.live_count(), 1);
     assert_eq!(pool.hole_count(), 0);

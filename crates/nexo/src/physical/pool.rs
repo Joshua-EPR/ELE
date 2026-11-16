@@ -1612,29 +1612,26 @@ impl PhysicalPool {
 }
 
 /// Métodos auxiliares de instrumentación adversarial y pruebas de corrupción.
-/// No están presentes en la API pública de producción y se compilan exclusivamente
-/// bajo la feature interna `test-internals` utilizada por las suites de prueba.
-#[cfg(feature = "test-internals")]
+/// No forman parte de la API del crate ni existen en compilaciones que no sean de prueba (cfg(test)),
+/// y tienen visibilidad restringida al crate (`pub(crate)`).
+#[cfg(test)]
+#[allow(dead_code)]
 impl PhysicalPool {
-    #[doc(hidden)]
-    pub fn __test_corrupt_live(&mut self, live: u64) {
+    pub(crate) fn corrupt_live_for_test(&mut self, live: u64) {
         self.live = live;
     }
 
-    #[doc(hidden)]
-    pub fn __test_corrupt_holes(&mut self, holes: u64) {
+    pub(crate) fn corrupt_holes_for_test(&mut self, holes: u64) {
         self.holes = holes;
     }
 
-    #[doc(hidden)]
-    pub fn __test_corrupt_occupied(&mut self, sp: usize, sub: usize, occupied: u8) {
+    pub(crate) fn corrupt_occupied_for_test(&mut self, sp: usize, sub: usize, occupied: u8) {
         if let Ok(meta) = self.meta_mut(sp) {
             meta.occupied[sub] = occupied;
         }
     }
 
-    #[doc(hidden)]
-    pub fn __test_corrupt_generation(&mut self, slot: u32, generation: u32) {
+    pub(crate) fn corrupt_generation_for_test(&mut self, slot: u32, generation: u32) {
         let slots_per_sub = self.slots_per_subpage as usize;
         if let Ok((sp, sub, bit)) = self.locate(slot)
             && let Ok(meta) = self.meta_mut(sp)
@@ -1643,8 +1640,13 @@ impl PhysicalPool {
         }
     }
 
-    #[doc(hidden)]
-    pub fn __test_corrupt_free_bit(&mut self, sp: usize, sub: usize, bit: usize, set: bool) {
+    pub(crate) fn corrupt_free_bit_for_test(
+        &mut self,
+        sp: usize,
+        sub: usize,
+        bit: usize,
+        set: bool,
+    ) {
         if let Ok(meta) = self.meta_mut(sp) {
             if set {
                 meta.free[sub] |= 1u64 << bit;
@@ -1654,8 +1656,13 @@ impl PhysicalPool {
         }
     }
 
-    #[doc(hidden)]
-    pub fn __test_corrupt_hole_bit(&mut self, sp: usize, sub: usize, bit: usize, set: bool) {
+    pub(crate) fn corrupt_hole_bit_for_test(
+        &mut self,
+        sp: usize,
+        sub: usize,
+        bit: usize,
+        set: bool,
+    ) {
         if let Ok(meta) = self.meta_mut(sp) {
             if set {
                 meta.holes[sub] |= 1u64 << bit;
@@ -1665,8 +1672,7 @@ impl PhysicalPool {
         }
     }
 
-    #[doc(hidden)]
-    pub fn __test_craft_handle(&self, slot: u32, generation: u32) -> Handle {
+    pub(crate) fn craft_handle_for_test(&self, slot: u32, generation: u32) -> Handle {
         Handle {
             pool: self.id,
             slot,
@@ -1674,8 +1680,7 @@ impl PhysicalPool {
         }
     }
 
-    #[doc(hidden)]
-    pub fn __test_craft_hole_token(&self, slot: u32, generation: u32) -> HoleToken {
+    pub(crate) fn craft_hole_token_for_test(&self, slot: u32, generation: u32) -> HoleToken {
         HoleToken {
             pool: self.id,
             slot,
