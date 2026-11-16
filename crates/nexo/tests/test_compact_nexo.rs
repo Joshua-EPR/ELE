@@ -627,28 +627,178 @@ fn test_compact_id_boundary_invariants() {
     assert!(!alloc8.is_valid_id(0));
     assert!(!alloc8.is_valid_id(1));
 
-    let mut ids = std::collections::HashSet::new();
-    for _ in 1..=255u8 {
+    for expected in 1..=255u8 {
         let id = alloc8.allocate_id().unwrap();
-        assert!(id >= 1);
-        assert!(
-            ids.insert(id),
-            "Colisión detectada en ID compacto 8b: {}",
-            id
+        assert_eq!(
+            id, expected,
+            "ID debe ser estrictamente monótono y esperado"
         );
+        assert!(alloc8.is_valid_id(id));
     }
-    assert_eq!(ids.len(), 255);
     assert_eq!(alloc8.allocated_count(), 255);
     assert_eq!(
         alloc8.allocate_id().unwrap_err(),
         nexo::next::CompactPoolError::PoolIdExhausted
     );
+    // Verificar que el contador no se desborda y reintentos fallan cerrado
+    assert_eq!(alloc8.allocated_count(), 255);
+    assert_eq!(
+        alloc8.allocate_id().unwrap_err(),
+        nexo::next::CompactPoolError::PoolIdExhausted
+    );
+    assert!(!alloc8.is_valid_id(0));
+    assert!(alloc8.is_valid_id(255));
 
-    // 5. Asignador de 16 bits: verificar límites mínimo, máximo y agotamiento
+    // 5. Asignador de 16 bits: verificación exhaustiva de los 65.535 IDs y agotamiento
     let alloc16 = nexo::next::compact::CompactIdAllocator16::new();
-    let id1 = alloc16.allocate_id().unwrap();
-    assert_eq!(id1, 1);
-    assert!(alloc16.is_valid_id(1));
+    assert_eq!(alloc16.allocated_count(), 0);
     assert!(!alloc16.is_valid_id(0));
-    assert_eq!(alloc16.allocated_count(), 1);
+    assert!(!alloc16.is_valid_id(1));
+
+    for expected in 1..=65535u16 {
+        let id = alloc16.allocate_id().unwrap();
+        assert_eq!(id, expected, "ID 16b debe ser monótono y sin colisión");
+        assert!(alloc16.is_valid_id(id));
+    }
+    assert_eq!(alloc16.allocated_count(), 65535);
+
+    // Intento 65.536 debe fallar cerrado con PoolIdExhausted
+    assert_eq!(
+        alloc16.allocate_id().unwrap_err(),
+        nexo::next::CompactPoolError::PoolIdExhausted
+    );
+    // Verificar que no hay wraparound de u16
+    assert_eq!(alloc16.allocated_count(), 65535);
+    assert_eq!(
+        alloc16.allocate_id().unwrap_err(),
+        nexo::next::CompactPoolError::PoolIdExhausted
+    );
+    assert!(!alloc16.is_valid_id(0));
+    assert!(alloc16.is_valid_id(65535));
+}
+
+#[test]
+fn test_concurrent_compact_id_allocator_exhaustion_and_contention() {
+    use std::sync::Arc;
+    use std::thread;
+
+    // 1. Asignador de 16 bits bajo contención concurrente entre 8 hilos
+    let alloc16 = Arc::new(nexo::next::compact::CompactIdAllocator16::new());
+    let mut handles = Vec::new();
+
+    for _ in 0..8 {
+        let a = Arc::clone(&alloc16);
+        handles.push(thread::spawn(move || {
+            let mut issued = Vec::with_capacity(10_000);
+            loop {
+                match a.allocate_id() {
+                    Ok(id) => issued.push(id),
+                    Err(nexo::next::CompactPoolError::PoolIdExhausted) => break,
+                    Err(other) => panic!("error inesperado: {:?}", other),
+                }
+            }
+            issued
+        }));
+    }
+
+    let mut all_ids_16 = Vec::with_capacity(65535);
+    for h in handles {
+        let thread_ids = h
+            .join()
+            .expect("hilo de asignación no debe entrar en pánico");
+        all_ids_16.extend(thread_ids);
+    }
+
+    assert_eq!(
+        all_ids_16.len(),
+        65535,
+        "Total de IDs 16b asignados concurrentemente debe ser exactamente 65.535"
+    );
+    all_ids_16.sort_unstable();
+    for (i, &id) in all_ids_16.iter().enumerate() {
+        assert_eq!(
+            id,
+            (i + 1) as u16,
+            "Cada ID 16b entre 1 y 65535 debe haberse emitido exactamente una vez"
+        );
+    }
+    assert_eq!(alloc16.allocated_count(), 65535);
+
+    // Contención concurrente post-agotamiento: ningún hilo debe recibir jamás un ID
+    let mut post_handles = Vec::new();
+    for _ in 0..8 {
+        let a = Arc::clone(&alloc16);
+        post_handles.push(thread::spawn(move || {
+            for _ in 0..100 {
+                assert_eq!(
+                    a.allocate_id().unwrap_err(),
+                    nexo::next::CompactPoolError::PoolIdExhausted
+                );
+            }
+        }));
+    }
+    for h in post_handles {
+        h.join()
+            .expect("hilo post-agotamiento debe terminar con éxito");
+    }
+    assert_eq!(alloc16.allocated_count(), 65535);
+
+    // 2. Asignador de 8 bits bajo contención concurrente entre 8 hilos
+    let alloc8 = Arc::new(nexo::next::compact::CompactIdAllocator8::new());
+    let mut handles8 = Vec::new();
+
+    for _ in 0..8 {
+        let a = Arc::clone(&alloc8);
+        handles8.push(thread::spawn(move || {
+            let mut issued = Vec::new();
+            loop {
+                match a.allocate_id() {
+                    Ok(id) => issued.push(id),
+                    Err(nexo::next::CompactPoolError::PoolIdExhausted) => break,
+                    Err(other) => panic!("error inesperado: {:?}", other),
+                }
+            }
+            issued
+        }));
+    }
+
+    let mut all_ids_8 = Vec::with_capacity(255);
+    for h in handles8 {
+        let thread_ids = h.join().expect("hilo 8b no debe entrar en pánico");
+        all_ids_8.extend(thread_ids);
+    }
+
+    assert_eq!(
+        all_ids_8.len(),
+        255,
+        "Total de IDs 8b asignados concurrentemente debe ser exactamente 255"
+    );
+    all_ids_8.sort_unstable();
+    for (i, &id) in all_ids_8.iter().enumerate() {
+        assert_eq!(
+            id,
+            (i + 1) as u8,
+            "Cada ID 8b entre 1 y 255 debe haberse emitido exactamente una vez"
+        );
+    }
+    assert_eq!(alloc8.allocated_count(), 255);
+
+    // Contención concurrente post-agotamiento 8b
+    let mut post_handles8 = Vec::new();
+    for _ in 0..8 {
+        let a = Arc::clone(&alloc8);
+        post_handles8.push(thread::spawn(move || {
+            for _ in 0..100 {
+                assert_eq!(
+                    a.allocate_id().unwrap_err(),
+                    nexo::next::CompactPoolError::PoolIdExhausted
+                );
+            }
+        }));
+    }
+    for h in post_handles8 {
+        h.join()
+            .expect("hilo post-agotamiento 8b debe terminar con éxito");
+    }
+    assert_eq!(alloc8.allocated_count(), 255);
 }

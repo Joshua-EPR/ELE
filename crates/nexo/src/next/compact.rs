@@ -36,6 +36,8 @@ pub enum CompactPoolError {
     ReleaseUncertain,
     /// El registro global de pools se encuentra en un estado inconsistente o irrecuperable.
     RegistryCorrupted,
+    /// Fallo de asignación de memoria al intentar expandir la capacidad del registro.
+    OutOfMemory,
 }
 
 impl fmt::Display for CompactPoolError {
@@ -66,6 +68,9 @@ impl fmt::Display for CompactPoolError {
                     f,
                     "compact pool registry state is corrupted and refuses to issue authority"
                 )
+            }
+            Self::OutOfMemory => {
+                write!(f, "failed to allocate memory for compact pool registry")
             }
         }
     }
@@ -209,7 +214,9 @@ impl CompactPoolRegistryInstance {
         match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
-                pools.reserve(1);
+                pools
+                    .try_reserve(1)
+                    .map_err(|_| CompactPoolError::OutOfMemory)?;
                 let compact_id = self.allocator.allocate_id()?;
                 pools.insert(
                     insert_idx,
@@ -459,7 +466,9 @@ impl CompactPoolRegistryInstance16 {
         match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
-                pools.reserve(1);
+                pools
+                    .try_reserve(1)
+                    .map_err(|_| CompactPoolError::OutOfMemory)?;
                 let compact_id = self.allocator.allocate_id()?;
                 pools.insert(
                     insert_idx,
