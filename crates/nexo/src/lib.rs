@@ -17,6 +17,7 @@ pub mod next;
 pub mod physical;
 pub mod pretty;
 pub mod rt;
+pub mod stats;
 pub mod verif;
 
 pub use diag::{Diagnostico, Regla};

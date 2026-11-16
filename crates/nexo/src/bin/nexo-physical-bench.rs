@@ -21,6 +21,7 @@ use nexo::next::compact::{
 };
 use nexo::physical::{DestroyOutcome, Handle, PhysicalPool, PoolConfig, ReclaimPolicy};
 use nexo::rt::pool::{Eventos, Pool};
+use nexo::stats::{DistributionStats, compute_stats, verify_samuelson_bounds};
 
 const WARMUP: usize = 2_000;
 const ITERATIONS: usize = 20_000;
@@ -53,6 +54,21 @@ static GLOBAL: Contador = Contador;
 
 fn main() {
     let completo = std::env::args().any(|a| a == "--completo");
+    let json_flag = std::env::args().any(|a| a == "--json");
+    let json_out_path = {
+        let args: Vec<String> = std::env::args().collect();
+        let mut path = None;
+        let mut i = 0;
+        while i < args.len() {
+            if args[i] == "--json-out" && i + 1 < args.len() {
+                path = Some(args[i + 1].clone());
+                break;
+            }
+            i += 1;
+        }
+        path
+    };
+
     println!(
         "nexo-physical-bench os={} arch={} warmup={} iterations={} profile={}",
         std::env::consts::OS,
@@ -82,8 +98,8 @@ fn main() {
         std::mem::size_of_val(&pool),
     );
     pool.destroy(handle, false).unwrap();
-    if completo {
-        ampliado();
+    if completo || json_flag || json_out_path.is_some() {
+        ampliado(json_flag, json_out_path.as_deref());
     }
 }
 
@@ -203,13 +219,178 @@ impl Muestras {
     }
 }
 
-fn percentil(v: &mut [f64], p: f64) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let i = ((v.len() as f64 - 1.0) * p).round() as usize;
-    v[i]
+struct EscenarioResult {
+    nombre: &'static str,
+    batch_stats: DistributionStats,
+    run_stats: DistributionStats,
+    run_means: Vec<f64>,
+    batch_samples: Vec<f64>,
+    total_ops: f64,
+    allocs_per_op: f64,
+    os_calls_per_op: f64,
+    header_bytes_per_op: f64,
+    commits_per_op: f64,
+    returns_per_op: f64,
+    hole_reuses_per_op: f64,
 }
 
-fn ampliado() {
+fn serialize_json_results(results: &[EscenarioResult], warmup: usize, iterations: usize) -> String {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"version\": \"v0.4\",\n");
+    out.push_str(&format!("  \"os\": \"{}\",\n", std::env::consts::OS));
+    out.push_str(&format!("  \"arch\": \"{}\",\n", std::env::consts::ARCH));
+    out.push_str(&format!(
+        "  \"profile\": \"{}\",\n",
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    ));
+    out.push_str(&format!("  \"warmup\": {warmup},\n"));
+    out.push_str(&format!("  \"iterations\": {iterations},\n"));
+    out.push_str(&format!("  \"runs\": {RUNS},\n"));
+    out.push_str(&format!("  \"batch_size\": {BATCH},\n"));
+    out.push_str("  \"scenarios\": [\n");
+    for (i, r) in results.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            r.nombre.replace('\"', "\\\"")
+        ));
+
+        // batch_stats
+        out.push_str("      \"batch_stats\": {\n");
+        out.push_str(&format!("        \"count\": {},\n", r.batch_stats.count));
+        out.push_str(&format!("        \"mean\": {:.4},\n", r.batch_stats.mean));
+        out.push_str(&format!(
+            "        \"variance_sample\": {:.4},\n",
+            r.batch_stats.variance_sample
+        ));
+        out.push_str(&format!(
+            "        \"variance_pop\": {:.4},\n",
+            r.batch_stats.variance_pop
+        ));
+        out.push_str(&format!(
+            "        \"stddev_sample\": {:.4},\n",
+            r.batch_stats.std_dev_sample
+        ));
+        out.push_str(&format!(
+            "        \"stddev_pop\": {:.4},\n",
+            r.batch_stats.std_dev_pop
+        ));
+        out.push_str(&format!(
+            "        \"cv_sample\": {:.4},\n",
+            r.batch_stats.cv_sample
+        ));
+        out.push_str(&format!(
+            "        \"cv_pop\": {:.4},\n",
+            r.batch_stats.cv_pop
+        ));
+        out.push_str(&format!("        \"min\": {:.4},\n", r.batch_stats.min));
+        out.push_str(&format!("        \"max\": {:.4},\n", r.batch_stats.max));
+        out.push_str(&format!(
+            "        \"median\": {:.4},\n",
+            r.batch_stats.median
+        ));
+        out.push_str(&format!("        \"p95\": {:.4},\n", r.batch_stats.p95));
+        out.push_str(&format!("        \"p99\": {:.4}\n", r.batch_stats.p99));
+        out.push_str("      },\n");
+
+        // run_stats
+        out.push_str("      \"run_stats\": {\n");
+        out.push_str(&format!("        \"count\": {},\n", r.run_stats.count));
+        out.push_str(&format!("        \"mean\": {:.4},\n", r.run_stats.mean));
+        out.push_str(&format!(
+            "        \"variance_sample\": {:.4},\n",
+            r.run_stats.variance_sample
+        ));
+        out.push_str(&format!(
+            "        \"variance_pop\": {:.4},\n",
+            r.run_stats.variance_pop
+        ));
+        out.push_str(&format!(
+            "        \"stddev_sample\": {:.4},\n",
+            r.run_stats.std_dev_sample
+        ));
+        out.push_str(&format!(
+            "        \"stddev_pop\": {:.4},\n",
+            r.run_stats.std_dev_pop
+        ));
+        out.push_str(&format!(
+            "        \"cv_sample\": {:.4},\n",
+            r.run_stats.cv_sample
+        ));
+        out.push_str(&format!("        \"cv_pop\": {:.4},\n", r.run_stats.cv_pop));
+        out.push_str(&format!("        \"min\": {:.4},\n", r.run_stats.min));
+        out.push_str(&format!("        \"max\": {:.4},\n", r.run_stats.max));
+        out.push_str(&format!("        \"median\": {:.4},\n", r.run_stats.median));
+        out.push_str(&format!("        \"p95\": {:.4},\n", r.run_stats.p95));
+        out.push_str(&format!("        \"p99\": {:.4}\n", r.run_stats.p99));
+        out.push_str("      },\n");
+
+        // counters
+        out.push_str("      \"counters\": {\n");
+        out.push_str(&format!("        \"total_ops\": {:.0},\n", r.total_ops));
+        out.push_str(&format!(
+            "        \"alloc_per_op\": {:.4},\n",
+            r.allocs_per_op
+        ));
+        out.push_str(&format!(
+            "        \"os_calls_per_op\": {:.4},\n",
+            r.os_calls_per_op
+        ));
+        out.push_str(&format!(
+            "        \"header_bytes_per_op\": {:.4},\n",
+            r.header_bytes_per_op
+        ));
+        out.push_str(&format!(
+            "        \"commits_per_op\": {:.4},\n",
+            r.commits_per_op
+        ));
+        out.push_str(&format!(
+            "        \"returns_per_op\": {:.4},\n",
+            r.returns_per_op
+        ));
+        out.push_str(&format!(
+            "        \"hole_reuses_per_op\": {:.4}\n",
+            r.hole_reuses_per_op
+        ));
+        out.push_str("      },\n");
+
+        // run_means
+        out.push_str("      \"run_means\": [");
+        for (j, m) in r.run_means.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{:.4}", m));
+        }
+        out.push_str("],\n");
+
+        // batch_samples
+        out.push_str("      \"batch_samples\": [");
+        for (j, s) in r.batch_samples.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{:.4}", s));
+        }
+        out.push_str("]\n");
+
+        if i + 1 < results.len() {
+            out.push_str("    },\n");
+        } else {
+            out.push_str("    }\n");
+        }
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    out
+}
+
+fn ampliado(json_flag: bool, json_out_path: Option<&str>) {
     let escenarios = [
         Escenario {
             nombre: "hot allocate+free (pool con ancla)",
@@ -292,19 +473,22 @@ fn ampliado() {
             run: e_box_rafaga,
         },
     ];
-    println!("\n== ampliado: {RUNS} corridas × lotes de {BATCH} ops; ns/op");
+
     println!(
-        "{:<44} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>7} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>9}",
+        "\n== ampliado: {RUNS} corridas × lotes de {BATCH} ops; ns/op (estadísticas desagregadas: lote vs corrida)"
+    );
+    println!(
+        "{:<44} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>12} {:>10} {:>11} {:>8} {:>8} {:>8} {:>9} {:>8} {:>9}",
         "escenario",
-        "media",
-        "mediana",
-        "min",
-        "max",
-        "p95",
-        "p99",
-        "sd",
-        "cv%",
-        "muestras",
+        "batch_mean",
+        "batch_median",
+        "batch_min",
+        "batch_max",
+        "batch_p95",
+        "batch_p99",
+        "batch_stddev",
+        "run_stddev",
+        "batch_count",
         "alloc/op",
         "so/op",
         "cab B/op",
@@ -312,6 +496,9 @@ fn ampliado() {
         "devol/op",
         "huecos/op"
     );
+
+    let mut results = Vec::new();
+
     for e in &escenarios {
         let mut medias = Vec::new();
         let mut todas = Muestras::default();
@@ -331,43 +518,77 @@ fn ampliado() {
             medias.push(m.lotes.iter().sum::<f64>() / m.lotes.len() as f64);
             todas.lotes.extend(m.lotes);
         }
-        let media = medias.iter().sum::<f64>() / RUNS as f64;
-        let sd = (medias.iter().map(|x| (x - media).powi(2)).sum::<f64>() / RUNS as f64).sqrt();
-        let min_val = todas.lotes.iter().copied().fold(f64::INFINITY, f64::min);
-        let max_val = todas
-            .lotes
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, f64::max);
-        let n_muestras = todas.lotes.len();
-        let p50 = percentil(&mut todas.lotes, 0.5);
-        let p95 = percentil(&mut todas.lotes, 0.95);
-        let p99 = percentil(&mut todas.lotes, 0.99);
+
+        let batch_stats = compute_stats(&todas.lotes).expect("Valores de lote válidos");
+        let run_stats = compute_stats(&medias).expect("Valores de corrida válidos");
+        verify_samuelson_bounds(&batch_stats).expect("Cota de Samuelson en lotes");
+        verify_samuelson_bounds(&run_stats).expect("Cota de Samuelson en corridas");
+
         let total_ops = RUNS as f64 * e.ops as f64;
+        let allocs_per_op = allocs as f64 / total_ops;
+        let os_calls_per_op = total_c.os_calls as f64 / total_ops;
+        let header_bytes_per_op = total_c.header_bytes as f64 / total_ops;
+        let commits_per_op = total_c.commits as f64 / total_ops;
+        let returns_per_op = total_c.returns as f64 / total_ops;
+        let hole_reuses_per_op = total_c.hole_reuses as f64 / total_ops;
+
         println!(
-            "{:<44} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>7.1} {:>5.1}% {:>8} {:>8.3} {:>8.3} {:>8.1} {:>8.3} {:>8.3} {:>9.3}",
+            "{:<44} {:>10.1} {:>12.1} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>12.2} {:>10.2} {:>11} {:>8.3} {:>8.3} {:>8.1} {:>9.3} {:>8.3} {:>9.3}",
             e.nombre,
-            media,
-            p50,
-            min_val,
-            max_val,
-            p95,
-            p99,
-            sd,
-            100.0 * sd / media,
-            n_muestras,
-            allocs as f64 / total_ops,
-            total_c.os_calls as f64 / total_ops,
-            total_c.header_bytes as f64 / total_ops,
-            total_c.commits as f64 / total_ops,
-            total_c.returns as f64 / total_ops,
-            total_c.hole_reuses as f64 / total_ops,
+            batch_stats.mean,
+            batch_stats.median,
+            batch_stats.min,
+            batch_stats.max,
+            batch_stats.p95,
+            batch_stats.p99,
+            batch_stats.std_dev_sample,
+            run_stats.std_dev_sample,
+            batch_stats.count,
+            allocs_per_op,
+            os_calls_per_op,
+            header_bytes_per_op,
+            commits_per_op,
+            returns_per_op,
+            hole_reuses_per_op,
         );
+
+        results.push(EscenarioResult {
+            nombre: e.nombre,
+            batch_stats,
+            run_stats,
+            run_means: medias,
+            batch_samples: todas.lotes,
+            total_ops,
+            allocs_per_op,
+            os_calls_per_op,
+            header_bytes_per_op,
+            commits_per_op,
+            returns_per_op,
+            hole_reuses_per_op,
+        });
     }
+
     println!(
         "(alloc/op incluye la preparación de cada escenario —vectores de handles, pools— repartida entre sus ops)"
     );
     memoria();
+
+    if json_flag || json_out_path.is_some() {
+        let json_content = serialize_json_results(&results, WARMUP, ITERATIONS);
+        if json_flag {
+            println!("\n== json output ==");
+            println!("{json_content}");
+        }
+        if let Some(path) = json_out_path {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(path, &json_content) {
+                Ok(_) => println!("JSON escrito exitosamente en: {path}"),
+                Err(e) => eprintln!("Error al escribir JSON en {path}: {e}"),
+            }
+        }
+    }
 }
 
 type Base = (u64, u64, u64, u64, u64);
