@@ -1,5 +1,40 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Finalización y Endurecimiento Definitivo — fix/nexo-v04-security-finalization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown completada y publicada (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: **Rama activa de entrega final**, creada a partir de `07138c6`.
+
+### 1. Defectos P0 y Endurecimiento Adicional Cerrados en esta Fase
+1. **P0-007 (Fallo cerrado en inspección de metadatos tras cierre de piscina)**:
+   - Se blindaron `PhysicalPool::generation()` y `PhysicalPool::page_state()` invocando `self.space()?;` antes de ubicar cualquier slot.
+   - Si el pool fue cerrado con `close()` o `try_close()`, toda inspección retorna inmediatamente `Err(PoolError::Closed)`.
+   - Se añadió `self.superpages.clear()` en `PhysicalPool::close()` para garantizar la erradicación total de metadatos residuales tras liberar la reserva virtual.
+   - Prueba de regresión agregada y validada en `crates/nexo/tests/close_contract.rs::closed_pool_rejects_generation_page_state_and_physical_access`.
+2. **P0-008 (Validación defensiva de límites en `ScopedArena::close_scope`)**:
+   - `close_scope` rechaza inmediatamente cualquier marcador con `offset > self.offset` o `drop_count > self.drops.len()` retornando `ArenaError::ScopeMismatch`.
+   - Impide formalmente corrupciones de punteros u omisiones de destructores ante marcadores adulterados.
+   - Prueba unitaria de regresión añadida y validada en `crates/nexo/src/next/arena.rs::tests::test_marker_defensive_bounds_validation`.
+3. **Auditoría Exhaustiva de Código `unsafe`**:
+   - Se auditaron y documentaron formalmente todos los bloques `unsafe` en `crates/nexo/src/next/arena.rs`, `address_space.rs`, `windows.rs` y `linux.rs`. Contratos de precondiciones y comportamiento ante pánicos y fallos documentados en `docs/NEXO_NEXT_SAFETY.md`.
+4. **Metodología y Mediciones Empíricas de Rendimiento**:
+   - Se ejecutó `nexo-physical-bench` en modo release (20.000 iteraciones) registrando métricas reales en `docs/NEXO_NEXT_BENCHMARKS.md` (372.15 ns/op hot alloc, 323.25 ns/op hole reuse).
+   - Fuzzer físico ejecutado en modo adversarial (`--fallos 1000 16`): 16.000 comandos de inyección del SO con 0 divergencias.
+5. **Especificación Normativa de Integración con ELE**:
+   - Se elaboró `docs/NEXO_ELE_COMPATIBILITY.md` documentando el mapeo de capacidades lineales, representación LIR, invariantes de verificación y pre-requisitos de ABI para futura integración cuando proceda, sin conectar el runtime prematuramente.
+
+### 2. Estado de CI Remoto
+- **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA** (`0 minutes remaining` en GitHub Actions).
+- No se han modificado flujos en `.github/` para evadir restricciones.
+- Toda validación está certificada localmente de forma reproducible y exhaustiva en modo Dual-OS (Windows MSVC + Linux WSL2).
+
+---
+
 ## Actualización 2026-11-16 (Operación Security Lockdown — fix/nexo-v0.4-authority-lockdown)
 
 Ramas y estado de Git:

@@ -164,3 +164,65 @@ Clasificación de estados:
 | **AUTH-HARDEN-18** | Mocks de prueba completamente inaccesibles en binarios de producción | `test_authority_lockdown::test_auth_harden_18_mock_pools_inaccessible_in_production` (E0433) | DEMOSTRADA / PROBADA |
 | **AUTH-HARDEN-19** | Lifetime de `CompactObjRef` atado a préstamo de pool impidiendo escape | `test_authority_lockdown::test_auth_harden_19_compact_objref_bounded_to_pool_borrow` (E0515) | DEMOSTRADA / PROBADA |
 | **AUTH-HARDEN-20** | Borrow checker impide mutación del pool físico mientras exista préstamo activo | `test_authority_lockdown::test_auth_harden_20_borrow_checker_prevents_mutation_during_objref` (E0502) | DEMOSTRADA / PROBADA |
+
+---
+
+## 3. Auditoría Exhaustiva de Bloques `unsafe` en `crates/nexo`
+
+Todos los bloques `unsafe` presentes en `crates/nexo` han sido categorizados, delimitados y verificados bajo contratos estrictos de precondiciones, invariantes y comportamiento ante fallos:
+
+### 3.1. Asignador por Ámbito (`crates/nexo/src/next/arena.rs`)
+1. **Asignación y Alineación de Búfer (`alloc`, `dealloc`)**:
+   - `alloc(layout)`: Invoca el asignador global con un layout validado cuya alineación es potencia de dos $\ge 128$ bytes. Si falla, retorna `ArenaError::OutOfMemory` sin alterar punteros.
+   - `dealloc(buffer, layout)`: En `BufferGuard::drop`, se ejecuta exclusivamente después de que todos los destructores registrados han sido invocados.
+2. **Aritmética de Punteros (`add`) y Escritura Tipada (`ptr::write`)**:
+   - Precondición: `offset + align_offset + size <= capacity`.
+   - Invariante: Puntero de destino alineado estrictamente a `align_of::<T>()`.
+   - Escritura: `std::ptr::write(target_ptr, value)` inicializa la memoria sin invocar destructores sobre bits no inicializados.
+3. **Invocación de Destructores (`ptr::drop_in_place`)**:
+   - Envoltorio tipado monomorfizado `drop_wrapper<U>(raw: *mut u8)` ejecuta `std::ptr::drop_in_place(typed_ptr)`.
+   - Se invoca únicamente sobre punteros válidos registrados en `drops`. Cada entrada se extrae de `drops` antes de invocar la función de drop, garantizando cero dobles destrucciones ante pánico.
+4. **Construcción de Referencia Mutable (`&mut *target_ptr`)**:
+   - Precondición: La posesión del objeto reside en el invocador de `alloc`. Como `ScopedArena` exige `&mut self` para asignar, no existen referencias solapadas activas en safe Rust.
+
+### 3.2. Espacio de Direcciones Virtuales (`crates/nexo/src/physical/address_space.rs`)
+1. **Aritmética de Punteros Base (`base.add`)**:
+   - Precondición: `offset + len <= reservation.len`.
+   - Comprobaciones checked previas en `check_range` garantizan ausencia de desbordamiento en $2^{64}-1$.
+2. **Copia y Puesta a Cero de Memoria (`copy_nonoverlapping`, `write_bytes`)**:
+   - Precondición: Destino y origen verificados contra el tamaño y rango de páginas comprometidas.
+3. **Conversión a Slices (`slice::from_raw_parts`, `from_raw_parts_mut`)**:
+   - Precondición: El puntero base no es nulo, está alineado y la longitud está totalmente contenida en páginas en estado `Accessible`.
+
+### 3.3. Capa de Plataforma del Sistema Operativo (`windows.rs` y `linux.rs`)
+1. **Llamadas FFI Directas (`VirtualAlloc`, `VirtualProtect`, `VirtualFree`, `mmap`, `mprotect`, `madvise`, `munmap`)**:
+   - Invariante de No Solapamiento: En Linux, nunca se emplea `MAP_FIXED` para reservas arbitrarias. Se sobre-reserva memoria, se calcula el desplazamiento a la frontera de superpágina de 64 KiB, y los prefijos y sufijos no alineados se devuelven al kernel con `munmap`.
+   - Manejo Fail-Closed: Todo retorno de error del sistema operativo (`GetLastError` en Windows, `errno` en Linux) se traduce inmediatamente a `PhysicalError::Platform` o `PhysicalError::Quarantined`, preservando las reservas y evitando lecturas de páginas sin confirmar.
+
+---
+
+## 4. Endurecimiento de Invariantes de Cierre y Resiliencia ante Pánicos
+
+### 4.1. Fallo Cerrado en Piscinas Cerradas (`PhysicalPool::close`)
+- Al cerrarse un pool mediante `close()` o `try_close()`:
+  - La reserva virtual de páginas se libera con el SO (`AddressSpace::release`).
+  - Los vectores `superpages`, `pending` y `deferred` se vacían terminantemente (`clear()`).
+  - Las funciones de consulta e inspección (`generation`, `page_state`, `physical_access`, `revalidate`) verifican `self.space()?`, retornando inmediatamente `Err(PoolError::Closed)` en lugar de devolver datos obsoletos o causar fallos de lectura sobre páginas liberadas.
+
+### 4.2. Validación Defensiva de Marcadores de Ámbito (`ScopedArena::close_scope`)
+- `close_scope(marker)` valida defensivamente:
+  - `marker.arena_id == self.id`
+  - `marker.scope_id == self.active_scopes`
+  - `marker.offset <= self.offset`
+  - `marker.drop_count <= self.drops.len()`
+- Si cualquier condición de límite se viola (incluso ante corrupción deliberada del marcador), la operación aborta con `CloseScopeError { error: ArenaError::ScopeMismatch, marker }`, impidiendo avances espurios de offset o desajustes de destructores.
+
+### 4.3. Semántica de Pánicos: `panic=unwind` frente a `panic=abort`
+- **Bajo `panic=unwind` (Modo por defecto de desarrollo y pruebas)**:
+  - Los destructores se ejecutan encapsulados en `catch_unwind`.
+  - La arena se envenena (`ArenaState::Poisoned`), bloqueando asignaciones futuras pero permitiendo la ejecución ordenada LIFO del resto de destructores de objetos vivos.
+  - La memoria virtual solo se devuelve tras finalizar los drops pendientes.
+  - El primer pánico es relanzado transparentemente si el hilo no se encontraba previamente desenrollándose, evitando abortos por doble pánico (*double panic abort*).
+- **Bajo `panic=abort` (Modo endurecido de producción)**:
+  - Ante cualquier pánico, la ejecución del proceso se aborta de inmediato.
+  - El sistema operativo anfitrión reclama la totalidad del espacio virtual reservado y las páginas físicas comprometidas, garantizando matemáticamente cero fugas y cero lecturas fuera de límites tras el fallo.
