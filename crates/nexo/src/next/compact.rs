@@ -26,6 +26,10 @@ pub enum CompactPoolError {
     InvalidPoolId,
     /// El token de autoridad no corresponde al pool físico proporcionado.
     PoolMismatch,
+    /// El pool físico ya fue registrado previamente en este registro.
+    AlreadyRegistered {
+        physical_pool_id: u64,
+    },
 }
 
 impl fmt::Display for CompactPoolError {
@@ -36,31 +40,40 @@ impl fmt::Display for CompactPoolError {
             Self::PoolMismatch => {
                 write!(f, "compact pool token does not belong to the target pool")
             }
+            Self::AlreadyRegistered { physical_pool_id } => {
+                write!(f, "physical pool {physical_pool_id} is already registered")
+            }
         }
     }
 }
 
 impl std::error::Error for CompactPoolError {}
 
-/// Instancia de registro acotado de identificadores de pools compactos de 8 bits (1..=255).
-pub(crate) struct CompactPoolRegistryInstance {
+/// Asignador monotónico acotado de identificadores numéricos de 8 bits (1..=255).
+///
+/// Componente puramente algorítmico sin autoridad de memoria.
+/// Emite números únicos en el rango `1..=255`. Al alcanzar el límite,
+/// retorna permanentemente [`CompactPoolError::PoolIdExhausted`] sin wraparound ni reciclaje.
+#[derive(Debug)]
+pub struct CompactIdAllocator8 {
     allocated: AtomicU8,
 }
 
-impl Default for CompactPoolRegistryInstance {
+impl Default for CompactIdAllocator8 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl CompactPoolRegistryInstance {
+impl CompactIdAllocator8 {
     pub const fn new() -> Self {
         Self {
             allocated: AtomicU8::new(0),
         }
     }
 
-    pub fn acquire_id(&self) -> Result<u8, CompactPoolError> {
+    /// Asigna el siguiente identificador numérico único (1..=255).
+    pub fn allocate_id(&self) -> Result<u8, CompactPoolError> {
         let mut current = self.allocated.load(Ordering::Relaxed);
         loop {
             if current == MAX_COMPACT_POOLS {
@@ -79,12 +92,68 @@ impl CompactPoolRegistryInstance {
         }
     }
 
+    /// Comprueba si un identificador se encuentra en el rango asignado legítimamente.
     pub fn is_valid_id(&self, id: u8) -> bool {
         id != INVALID_COMPACT_POOL_ID && id <= self.allocated.load(Ordering::SeqCst)
     }
 
+    /// Retorna la cantidad de identificadores efectivamente emitidos.
     pub fn allocated_count(&self) -> u8 {
         self.allocated.load(Ordering::SeqCst)
+    }
+}
+
+/// Instancia de registro acotado de identificadores de pools compactos de 8 bits (1..=255).
+pub(crate) struct CompactPoolRegistryInstance {
+    allocator: CompactIdAllocator8,
+    registered_pools: std::sync::Mutex<Vec<u64>>,
+}
+
+impl Default for CompactPoolRegistryInstance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompactPoolRegistryInstance {
+    pub const fn new() -> Self {
+        Self {
+            allocator: CompactIdAllocator8::new(),
+            registered_pools: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Registra un pool físico de manera atómica e infalsificable.
+    ///
+    /// # Errores
+    /// - Retorna [`CompactPoolError::AlreadyRegistered`] si el pool ya fue registrado previamente.
+    /// - Retorna [`CompactPoolError::PoolIdExhausted`] si se han agotado los 255 identificadores.
+    pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken, CompactPoolError> {
+        let mut pools = self.registered_pools.lock().unwrap();
+        match pools.binary_search(&physical_pool_id) {
+            Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
+            Err(insert_idx) => {
+                let compact_id = self.allocator.allocate_id()?;
+                pools.insert(insert_idx, physical_pool_id);
+                Ok(CompactPoolToken {
+                    compact_id,
+                    physical_pool_id,
+                })
+            }
+        }
+    }
+
+    pub fn is_valid_id(&self, id: u8) -> bool {
+        self.allocator.is_valid_id(id)
+    }
+
+    pub fn allocated_count(&self) -> u8 {
+        self.allocator.allocated_count()
+    }
+
+    pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
+        let pools = self.registered_pools.lock().unwrap();
+        pools.binary_search(&physical_pool_id).is_ok()
     }
 }
 
@@ -123,44 +192,17 @@ impl CompactPoolToken {
 pub struct CompactPoolRegistry;
 
 impl CompactPoolRegistry {
-    /// Reserva un nuevo identificador único de pool compacto (1..=255).
-    ///
-    /// Garantiza ausencia de reciclaje: una vez asignados los 255 identificadores,
-    /// cualquier intento posterior retorna [`CompactPoolError::PoolIdExhausted`],
-    /// impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
-    pub fn acquire_id() -> Result<u8, CompactPoolError> {
-        GLOBAL_COMPACT_REGISTRY.acquire_id()
-    }
-
     /// Registra un `PhysicalPool` real y emite un token de autoridad infalsificable
     /// vinculado unívocamente a su identificador de memoria física.
+    ///
+    /// # Errores
+    /// - [`CompactPoolError::AlreadyRegistered`]: Si el pool ya fue registrado previamente.
+    /// - [`CompactPoolError::PoolIdExhausted`]: Si se agotaron los 255 IDs de pool compacto.
     pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken, CompactPoolError> {
-        let compact_id = Self::acquire_id()?;
-        Ok(CompactPoolToken {
-            compact_id,
-            physical_pool_id: pool.id(),
-        })
-    }
-
-    /// Emite un token acoplado a un identificador de pool físico explícito.
-    pub fn acquire_token_for(physical_pool_id: u64) -> Result<CompactPoolToken, CompactPoolError> {
-        let compact_id = Self::acquire_id()?;
-        Ok(CompactPoolToken {
-            compact_id,
-            physical_pool_id,
-        })
-    }
-
-    /// Emite un token desvinculado (`physical_pool_id = 0`) para entornos aislados o de prueba.
-    pub fn acquire_token() -> Result<CompactPoolToken, CompactPoolError> {
-        Self::acquire_token_for(0)
+        GLOBAL_COMPACT_REGISTRY.register(pool.id())
     }
 
     /// Comprueba si un identificador se encuentra dentro del rango asignado legítimamente.
-    ///
-    /// Un identificador es válido si y solo si:
-    /// 1. No es `INVALID_COMPACT_POOL_ID` (0).
-    /// 2. Es menor o igual al número total de identificadores efectivamente emitidos.
     pub fn is_valid_id(id: u8) -> bool {
         GLOBAL_COMPACT_REGISTRY.is_valid_id(id)
     }
@@ -169,27 +211,38 @@ impl CompactPoolRegistry {
     pub fn allocated_count() -> u8 {
         GLOBAL_COMPACT_REGISTRY.allocated_count()
     }
+
+    /// Comprueba si un pool físico específico ya se encuentra registrado.
+    pub fn is_pool_registered(pool: &PhysicalPool) -> bool {
+        GLOBAL_COMPACT_REGISTRY.is_pool_registered(pool.id())
+    }
 }
 
-/// Instancia de registro acotado de identificadores de pools compactos de 16 bits (1..=65.535).
-pub(crate) struct CompactPoolRegistryInstance16 {
+/// Asignador monotónico acotado de identificadores numéricos de 16 bits (1..=65.535).
+///
+/// Componente puramente algorítmico sin autoridad de memoria.
+/// Emite números únicos en el rango `1..=65.535`. Al alcanzar el límite,
+/// retorna permanentemente [`CompactPoolError::PoolIdExhausted`] sin wraparound ni reciclaje.
+#[derive(Debug)]
+pub struct CompactIdAllocator16 {
     allocated: AtomicU16,
 }
 
-impl Default for CompactPoolRegistryInstance16 {
+impl Default for CompactIdAllocator16 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl CompactPoolRegistryInstance16 {
+impl CompactIdAllocator16 {
     pub const fn new() -> Self {
         Self {
             allocated: AtomicU16::new(0),
         }
     }
 
-    pub fn acquire_id(&self) -> Result<u16, CompactPoolError> {
+    /// Asigna el siguiente identificador numérico único (1..=65.535).
+    pub fn allocate_id(&self) -> Result<u16, CompactPoolError> {
         let mut current = self.allocated.load(Ordering::Relaxed);
         loop {
             if current == MAX_COMPACT_POOLS_16 {
@@ -208,12 +261,64 @@ impl CompactPoolRegistryInstance16 {
         }
     }
 
+    /// Comprueba si un identificador se encuentra en el rango asignado legítimamente.
     pub fn is_valid_id(&self, id: u16) -> bool {
         id != INVALID_COMPACT_POOL_ID_16 && id <= self.allocated.load(Ordering::SeqCst)
     }
 
+    /// Retorna la cantidad de identificadores efectivamente emitidos.
     pub fn allocated_count(&self) -> u16 {
         self.allocated.load(Ordering::SeqCst)
+    }
+}
+
+/// Instancia de registro acotado de identificadores de pools compactos de 16 bits (1..=65.535).
+pub(crate) struct CompactPoolRegistryInstance16 {
+    allocator: CompactIdAllocator16,
+    registered_pools: std::sync::Mutex<Vec<u64>>,
+}
+
+impl Default for CompactPoolRegistryInstance16 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompactPoolRegistryInstance16 {
+    pub const fn new() -> Self {
+        Self {
+            allocator: CompactIdAllocator16::new(),
+            registered_pools: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Registra un pool físico de manera atómica e infalsificable en 16 bits.
+    pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken16, CompactPoolError> {
+        let mut pools = self.registered_pools.lock().unwrap();
+        match pools.binary_search(&physical_pool_id) {
+            Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
+            Err(insert_idx) => {
+                let compact_id = self.allocator.allocate_id()?;
+                pools.insert(insert_idx, physical_pool_id);
+                Ok(CompactPoolToken16 {
+                    compact_id,
+                    physical_pool_id,
+                })
+            }
+        }
+    }
+
+    pub fn is_valid_id(&self, id: u16) -> bool {
+        self.allocator.is_valid_id(id)
+    }
+
+    pub fn allocated_count(&self) -> u16 {
+        self.allocator.allocated_count()
+    }
+
+    pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
+        let pools = self.registered_pools.lock().unwrap();
+        pools.binary_search(&physical_pool_id).is_ok()
     }
 }
 
@@ -245,33 +350,14 @@ impl CompactPoolToken16 {
 pub struct CompactPoolRegistry16;
 
 impl CompactPoolRegistry16 {
-    pub fn acquire_id() -> Result<u16, CompactPoolError> {
-        GLOBAL_COMPACT_REGISTRY_16.acquire_id()
-    }
-
     /// Registra un `PhysicalPool` real y emite un token de autoridad infalsificable
     /// vinculado unívocamente a su identificador de memoria física.
+    ///
+    /// # Errores
+    /// - [`CompactPoolError::AlreadyRegistered`]: Si el pool ya fue registrado previamente.
+    /// - [`CompactPoolError::PoolIdExhausted`]: Si se agotaron los 65.535 IDs de pool compacto.
     pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken16, CompactPoolError> {
-        let compact_id = Self::acquire_id()?;
-        Ok(CompactPoolToken16 {
-            compact_id,
-            physical_pool_id: pool.id(),
-        })
-    }
-
-    pub fn acquire_token_for(
-        physical_pool_id: u64,
-    ) -> Result<CompactPoolToken16, CompactPoolError> {
-        let compact_id = Self::acquire_id()?;
-        Ok(CompactPoolToken16 {
-            compact_id,
-            physical_pool_id,
-        })
-    }
-
-    /// Emite un token lineal único e infalsificable de autoridad para un pool compacto de 16 bits.
-    pub fn acquire_token() -> Result<CompactPoolToken16, CompactPoolError> {
-        Self::acquire_token_for(0)
+        GLOBAL_COMPACT_REGISTRY_16.register(pool.id())
     }
 
     pub fn is_valid_id(id: u16) -> bool {
@@ -280,6 +366,10 @@ impl CompactPoolRegistry16 {
 
     pub fn allocated_count() -> u16 {
         GLOBAL_COMPACT_REGISTRY_16.allocated_count()
+    }
+
+    pub fn is_pool_registered(pool: &PhysicalPool) -> bool {
+        GLOBAL_COMPACT_REGISTRY_16.is_pool_registered(pool.id())
     }
 }
 
@@ -544,6 +634,8 @@ pub enum CompactRevalidateError {
     StaleGeneration,
     /// La generación del slot ha sido retirada permanentemente por agotamiento de ciclos.
     GenerationRetired,
+    /// La subpágina que contiene el slot se encuentra en cuarentena por fallo o aislamiento de seguridad.
+    SubpageQuarantined,
 }
 
 impl fmt::Display for CompactRevalidateError {
@@ -555,6 +647,12 @@ impl fmt::Display for CompactRevalidateError {
             Self::StaleGeneration => write!(f, "compact link generation is stale"),
             Self::GenerationRetired => {
                 write!(f, "compact link slot generation is permanently retired")
+            }
+            Self::SubpageQuarantined => {
+                write!(
+                    f,
+                    "compact link subpage is quarantined due to safety fault or isolation"
+                )
             }
         }
     }
@@ -745,25 +843,14 @@ pub trait CompactPoolAuthority64: private::Sealed {
     }
 }
 
-#[cfg(any(test, feature = "test-mocks"))]
-pub mod testing {
+#[cfg(test)]
+mod tests {
     use super::*;
 
-    /// Entorno de pruebas: Pool simulado sellado para validar revalidación de 4 bytes.
-    pub struct MockCompactPool {
+    struct MockCompactPool {
         pub id: u8,
         pub capacity: u32,
         pub generations: Vec<u8>,
-    }
-
-    impl MockCompactPool {
-        pub fn new(id: u8, capacity: u32, generations: Vec<u8>) -> Self {
-            Self {
-                id,
-                capacity,
-                generations,
-            }
-        }
     }
 
     impl private::Sealed for MockCompactPool {}
@@ -787,21 +874,10 @@ pub mod testing {
         }
     }
 
-    /// Entorno de pruebas: Pool simulado sellado para validar revalidación de 8 bytes.
-    pub struct MockCompactPool64 {
+    struct MockCompactPool64 {
         pub id: u16,
         pub capacity: u32,
         pub generations: Vec<u16>,
-    }
-
-    impl MockCompactPool64 {
-        pub fn new(id: u16, capacity: u32, generations: Vec<u16>) -> Self {
-            Self {
-                id,
-                capacity,
-                generations,
-            }
-        }
     }
 
     impl private::Sealed for MockCompactPool64 {}
@@ -824,15 +900,10 @@ pub mod testing {
             Ok(self.generations[slot as usize])
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn test_compact_pool_authority_revalidation() {
-        let pool = testing::MockCompactPool {
+        let pool = MockCompactPool {
             id: 10,
             capacity: 100,
             generations: vec![1, 2, 3, 254], // slot 0: gen 1 (vivo), slot 1: gen 2 (destruido), slot 2: gen 3 (vivo), slot 3: retirado
@@ -875,6 +946,27 @@ mod tests {
     }
 
     #[test]
+    fn test_compact_pool_authority_64_revalidation() {
+        let pool = MockCompactPool64 {
+            id: 200,
+            capacity: 50,
+            generations: vec![1, 2, GEN_RETIRADO_16],
+        };
+
+        let valid = CompactLink64::new(200, 0, 1).unwrap();
+        let obj = pool.revalidate_compact_64(valid).unwrap();
+        assert_eq!(obj.pool_id(), 200);
+        assert_eq!(obj.slot(), 0);
+        assert_eq!(obj.generation(), 1);
+
+        let retired = CompactLink64::new(200, 2, 1).unwrap();
+        assert_eq!(
+            pool.revalidate_compact_64(retired).unwrap_err(),
+            CompactRevalidateError::GenerationRetired
+        );
+    }
+
+    #[test]
     fn test_compact_gen_16bit_boundary_correctness() {
         assert!(CompactGen::is_retired(GEN_RETIRADO_16));
         assert!(CompactGen::is_retired(0xffff));
@@ -900,17 +992,30 @@ mod tests {
         assert!(!registry.is_valid_id(0));
         assert!(!registry.is_valid_id(1));
 
-        let id1 = registry.acquire_id().unwrap();
-        assert_eq!(id1, 1);
+        let token1 = registry.register(1001).unwrap();
+        assert_eq!(token1.compact_id(), 1);
+        assert_eq!(token1.physical_pool_id(), 1001);
         assert!(registry.is_valid_id(1));
         assert!(!registry.is_valid_id(2));
         assert_eq!(registry.allocated_count(), 1);
+        assert!(registry.is_pool_registered(1001));
+        assert!(!registry.is_pool_registered(1002));
 
-        // Asignar IDs hasta alcanzar el límite exacto de 255
-        let mut allocated = vec![id1];
-        while let Ok(id) = registry.acquire_id() {
-            assert_ne!(id, INVALID_COMPACT_POOL_ID);
-            allocated.push(id);
+        // Intento de registro duplicado del mismo pool físico debe ser rechazado
+        assert_eq!(
+            registry.register(1001).unwrap_err(),
+            CompactPoolError::AlreadyRegistered {
+                physical_pool_id: 1001
+            }
+        );
+        assert_eq!(registry.allocated_count(), 1);
+
+        // Asignar pools únicos hasta alcanzar el límite exacto de 255
+        let mut allocated = vec![token1.compact_id()];
+        for pool_id in 1002..=(1000 + MAX_COMPACT_POOLS as u64) {
+            let tok = registry.register(pool_id).unwrap();
+            assert_ne!(tok.compact_id(), INVALID_COMPACT_POOL_ID);
+            allocated.push(tok.compact_id());
         }
 
         assert_eq!(allocated.len(), MAX_COMPACT_POOLS as usize);
@@ -919,7 +1024,7 @@ mod tests {
 
         // Agotado: PoolIdExhausted sin wraparound
         assert_eq!(
-            registry.acquire_id().unwrap_err(),
+            registry.register(9999).unwrap_err(),
             CompactPoolError::PoolIdExhausted
         );
         assert!(registry.is_valid_id(1));
@@ -929,16 +1034,16 @@ mod tests {
     }
 
     #[test]
-    fn test_isolated_compact_pool_registry_instance_concurrency() {
+    fn test_isolated_compact_id_allocator_concurrency() {
         use std::sync::Arc;
-        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let allocator = Arc::new(CompactIdAllocator8::new());
         let mut handles = Vec::new();
 
         for _ in 0..8 {
-            let reg = registry.clone();
+            let alloc = allocator.clone();
             handles.push(std::thread::spawn(move || {
                 let mut issued = Vec::new();
-                while let Ok(id) = reg.acquire_id() {
+                while let Ok(id) = alloc.allocate_id() {
                     issued.push(id);
                 }
                 issued
@@ -963,10 +1068,18 @@ mod tests {
         assert!(!registry16.is_valid_id(0));
         assert!(!registry16.is_valid_id(1));
 
-        let id1 = registry16.acquire_id().unwrap();
-        assert_eq!(id1, 1);
+        let token1 = registry16.register(5001).unwrap();
+        assert_eq!(token1.compact_id(), 1);
+        assert_eq!(token1.physical_pool_id(), 5001);
         assert!(registry16.is_valid_id(1));
         assert!(!registry16.is_valid_id(2));
         assert_eq!(registry16.allocated_count(), 1);
+
+        assert_eq!(
+            registry16.register(5001).unwrap_err(),
+            CompactPoolError::AlreadyRegistered {
+                physical_pool_id: 5001
+            }
+        );
     }
 }
