@@ -5,8 +5,10 @@
 Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
 
 ### 1. Resolución de exposición de helpers adversariales
-- Se eliminó la exposición incondicional de los métodos de prueba (`__test_craft_handle`, `__test_craft_hole_token`, `__test_corrupt_live`, `__test_corrupt_holes`, `__test_corrupt_generation`, `__test_corrupt_occupied`, `__test_corrupt_free_bit`, `__test_corrupt_hole_bit`) mediante la feature interna `test-internals`. En compilación de producción (`cargo build` / `cargo build --release`), estos métodos son inexistentes.
-- Se implementaron pruebas negativas de compilación externa (`crates/nexo/tests/api_security.rs` y fixture `crates/nexo/tests/fixtures/external_consumer/`) que verifican que un consumidor normal no puede invocar dichos métodos (`error[E0599]`) ni construir instancias directas de `Handle` o `HoleToken` (`error[E0451]`).
+- Se eliminó completamente la feature `test-internals` y los métodos `__test_*` de la API del crate.
+- Los métodos de instrumentación adversarial (`craft_handle_for_test`, `craft_hole_token_for_test`, `corrupt_live_for_test`, `corrupt_holes_for_test`, `corrupt_generation_for_test`, `corrupt_occupied_for_test`, `corrupt_free_bit_for_test`, `corrupt_hole_bit_for_test`) quedaron restringidos estrictamente a `#[cfg(test)]` con visibilidad `pub(crate)` dentro de `crates/nexo/src/physical/pool.rs`.
+- La suite adversarial A01–A12 se migró a un módulo interno de pruebas unitarias (`crates/nexo/src/physical/adversarial_tests.rs`).
+- Se implementaron pruebas negativas de compilación externa (`crates/nexo/tests/api_security.rs` y fixture `crates/nexo/tests/fixtures/external_consumer/`) que verifican que un consumidor normal o con `--all-features` no puede invocar dichos métodos (`error[E0599]`) ni construir instancias directas de `Handle` o `HoleToken` (`error[E0451]`).
 - Se añadieron doctests `compile_fail` demostrando la no clonabilidad de `Handle` y `HoleToken` (`error[E0599]`).
 - Validación: 216 pruebas aprobadas en Windows MSVC, 214 pruebas aprobadas en Linux WSL2 glibc.
 

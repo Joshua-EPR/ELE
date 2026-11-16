@@ -4,6 +4,8 @@
 //! modelo abstracto, ELE-LIR, el ABI ni las reglas de ownership de ELE.
 
 mod address_space;
+#[cfg(test)]
+mod adversarial_tests;
 mod generation;
 mod oracle_adapter;
 mod platform;
