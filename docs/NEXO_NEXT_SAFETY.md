@@ -51,19 +51,22 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
   10. La arena garantiza alineación base de 128 bytes (o configurable como potencia de dos) y soporta alineaciones arbitrarias de tipos (probado hasta 4096 bytes) sin desbordamiento aritmético gracias a `align_offset` y comprobaciones `checked_add`. Tipos de tamaño cero (ZST) no consumen capacidad de memoria y ejecutan sus destructores deterministamente.
   11. `begin_scope()` retorna `Result<ScopeMarker, ArenaError>` y previene desbordamiento del contador de ámbitos con `checked_add(1)` retornando `ArenaError::ScopeDepthExhausted`.
 
-### T5: Frontera de Autoridad y Revalidación de Enlaces Compactos
-- **Separación de conceptos**:
+### T5: Frontera de Autoridad, Traits Sellados Auténticos y Vinculación Infalsificable de Pool
+- **Separación de conceptos y teoremas**:
   1. **Enlace como dato (`CompactLink`, `CompactLink64`)**: Identificador plano de 32 o 64 bits copiable (`Copy`, `Clone`). Carece por completo de autoridad propietaria o capacidad de desreferenciación directa. Sus métodos `matches()` son predicados puramente representacionales.
-  2. **Token lineal de autoridad única (`CompactPoolToken`, `CompactPoolToken16`)**: Token no clonable (`!Clone`, `!Copy`) emitible exclusivamente por el registro global de producción (`CompactPoolRegistry::acquire_token`). Garantiza unicidad global absoluta dentro del espacio de direcciones y ausencia de colisiones por instancias independientes.
-  3. **Trait sellado (`CompactPoolAuthority: private::Sealed`, `CompactPoolAuthority64: private::Sealed`)**: Solo implementaciones verificadas y auditadas del runtime (`CompactPhysicalPool`, `CompactPhysicalPool64`) pueden implementar el contrato de autoridad. Se rechaza estáticamente cualquier intento de consumidores externos de fabricar autoridades ficticias.
-  4. **Revalidación autorizada y acotada por préstamo (`CompactObjRef<'a>`, `CompactObjRef64<'a>`)**: Operación ejecutada exclusivamente por el pool físico bajo verificación estricta de:
+  2. **Token lineal de autoridad y vinculación de identidad (`CompactPoolToken`, `CompactPoolToken16`)**: Token no clonable (`!Clone`, `!Copy`) emitible exclusivamente por el registro global de producción (`CompactPoolRegistry::register_pool` o `acquire_token_for`). Almacena de forma inmutable tanto el `compact_id` asignado como el `physical_pool_id: u64` correspondiente al `PhysicalPool` registrado.
+  3. **Trait sellado auténtico (*Authentic Sealed Trait*)**: Los traits `CompactPoolAuthority` y `CompactPoolAuthority64` exigen el supertrait `private::Sealed` (donde `private` es `pub(crate)`) y el método privado sellado `fn __seal_authority(&self, _: private::InternalSeal)`. Crates externas no pueden nombrar el tipo `InternalSeal` ni implementar `Sealed`, garantizando que únicamente adaptadores del núcleo (`CompactPhysicalPool`, `CompactPhysicalPool64`) puedan implementar la interfaz de autoridad (demostrado formalmente mediante doctests de compilación fallida `compile_fail`).
+  4. **Invariante de no emparejamiento cruzado (*No Cross-Pool Token Pairing*)**: La instanciación de un adaptador autorizado `CompactPhysicalPool::new(&pool, &token)` o `CompactPhysicalPool64::new(&pool, &token)` valida `token.physical_pool_id() == pool.id()`, abortando con `CompactPoolError::PoolMismatch` ante cualquier discrepancia. Un token adquirido para el pool $A$ jamás otorga autoridad de revalidación sobre el pool $B$.
+  5. **Invariante de capacidad de slot (*Slot Capacity Clamping*)**: Para enlaces de 32 bits (`CompactLink`), los índices de slot se limitan a 16 bits ($0..65.535$). El adaptador acota estrictamente la capacidad reportada mediante `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32`, asegurando que no se expongan slots que desborden la codificación del enlace.
+  6. **Revalidación autorizada y acotada por préstamo (`CompactObjRef<'a>`, `CompactObjRef64<'a>`)**: Operación ejecutada exclusivamente por el pool físico bajo verificación estricta de:
      - Afinidad de `pool_id` mediante posesión de `CompactPoolToken`.
      - Límites de capacidad (`slot < slot_capacity`).
      - Estado de confirmación de subpágina en memoria virtual (rechaza `Quarantined`, `Reserved`, `ReclaimPending`, `Returned`).
      - Estado de asignación del slot (no libre, no en hueco, impar).
      - Estado no retirado ($\text{gen} < \text{GEN\_RETIRADO}$).
      - Coincidencia exacta de generación viva.
-  5. **Token de acceso no propietario acotado (`CompactObjRef<'a>`)**: Representación opaca con campos privados y sin constructor público, ligada formalmente al préstamo `'a` del pool. Mientras exista un token revalidado, el pool no puede ser mutado exclusivamente ni destruido. Jamás es convertible a `Handle` (conservación estricta de las reglas de posesión R2, R3, R6, R7, R8 y R9 de ELE).
+  7. **Token de acceso no propietario acotado (`CompactObjRef<'a>`)**: Representación opaca con campos privados y sin constructor público, ligada formalmente al préstamo `'a` del pool. Mientras exista un token revalidado, el pool no puede ser mutado exclusivamente ni destruido. Jamás es convertible a `Handle` (conservación estricta de las reglas de posesión R2, R3, R6, R7, R8 y R9 de ELE).
+  8. **Aislamiento de mocks de prueba**: `MockCompactPool` y `MockCompactPool64` se aíslan condicionalmente bajo `#[cfg(any(test, feature = "test-mocks"))]`. No existen en binarios de producción.
 
 ### T6: Resiliencia Exhaustiva de Destrucción y Ausencia de Corrupción ante Pánicos en `ScopedArena`
 - **Garantías de DROP-01 a DROP-16**:
@@ -120,3 +123,23 @@ Clasificación de estados:
 | **Alineación 4096** | Padding seguro y potencia de dos | `test_scoped_arena::test_p0_arena_08_extreme_alignment_up_to_4096` | IMPLEMENTADA / PROBADA |
 | **PFS Reconcile** | Cuarentena y reparación | PFS01–PFS12, `nexo-physical-fuzz` | IMPLEMENTADA / PROBADA |
 | **Child Isolation** | Protección de página de SO en proceso hijo | `child_isolation::p03_*` (SIGSEGV verificado) | IMPLEMENTADA / PROBADA |
+| **AUTH-01 (Sealed 32)** | Imposibilidad de implementar trait sellado externo | `test_authority_soundness::test_auth_01` + doctest `compile_fail` | DEMOSTRADA / PROBADA |
+| **AUTH-02 (Sealed 64)** | Imposibilidad de implementar trait sellado 64 externo | `test_authority_soundness::test_auth_02` + doctest `compile_fail` | DEMOSTRADA / PROBADA |
+| **AUTH-03 (Encapsulation)** | `CompactObjRef` carece de constructor público | `test_authority_soundness::test_auth_03` + doctests `compile_fail` | DEMOSTRADA / PROBADA |
+| **AUTH-04 (Mock Confinement)** | Mocks aislados de compilaciones de producción | `test_authority_soundness::test_auth_04` (`feature = "test-mocks"`) | DEMOSTRADA / PROBADA |
+| **AUTH-05 (Token Binding 32)** | Token de pool foráneo rechazado en adaptador 32 | `test_authority_soundness::test_auth_05_cross_pool_token_pairing_fails_32bit` | DEMOSTRADA / PROBADA |
+| **AUTH-06 (Token Binding 64)** | Token de pool foráneo rechazado en adaptador 64 | `test_authority_soundness::test_auth_06_cross_pool_token_pairing_fails_64bit` | DEMOSTRADA / PROBADA |
+| **AUTH-07 (Pool ID Embed)** | `CompactPoolToken` almacena `physical_pool_id` | `test_authority_soundness::test_auth_07_token_embeds_exact_physical_pool_id` | IMPLEMENTADA / PROBADA |
+| **AUTH-08 (Mismatch Reject)** | Mismo `compact_id` con distinto `physical_pool_id` | `test_authority_soundness::test_auth_08_identical_compact_id_with_different_physical_pool_id_rejected` | IMPLEMENTADA / PROBADA |
+| **AUTH-09 (Foreign Pool)** | Revalidación rechazada con pool físico foráneo | `test_authority_soundness::test_auth_09_cross_pool_revalidation_fails_with_foreign_pool` | IMPLEMENTADA / PROBADA |
+| **AUTH-10 (Even Generation)** | Generación par rechazada como `SlotNotAllocated` | `test_authority_soundness::test_auth_10_even_generation_rejected_as_slot_not_allocated` | IMPLEMENTADA / PROBADA |
+| **AUTH-11 (Stale Generation)** | Generación antigua rechazada tras reasignación | `test_authority_soundness::test_auth_11_stale_generation_rejected_after_slot_reuse` | IMPLEMENTADA / PROBADA |
+| **AUTH-12 (Retired Gen 8)** | Generación $\ge 254$ rechazada permanentemente | `test_authority_soundness::test_auth_12_retired_generation_8bit_rejected` | IMPLEMENTADA / PROBADA |
+| **AUTH-13 (Retired Gen 16)** | Generación $\ge 65534$ rechazada permanentemente | `test_authority_soundness::test_auth_13_retired_generation_16bit_rejected` | IMPLEMENTADA / PROBADA |
+| **AUTH-14 (Quarantine)** | Slot en subpágina en cuarentena rechazado | `test_authority_soundness::test_auth_14_slot_in_quarantined_subpage_rejected` | IMPLEMENTADA / PROBADA |
+| **AUTH-15 (Uncommitted)** | Slot en subpágina no committed rechazado | `test_authority_soundness::test_auth_15_slot_in_returned_or_uncommitted_subpage_rejected` | IMPLEMENTADA / PROBADA |
+| **AUTH-16 (Slot Clamping)** | Slot fuera de límites y acotado por 65.536 | `test_authority_soundness::test_auth_16_slot_out_of_bounds_and_capacity_clamped` | IMPLEMENTADA / PROBADA |
+| **AUTH-17 (Non-Promotable)** | `CompactObjRef` es de solo lectura y no convertible | `test_authority_soundness::test_auth_17_compact_obj_ref_is_read_only_and_non_promotable` | DEMOSTRADA / PROBADA |
+| **AUTH-18 (Lifetime Bound)** | `CompactObjRef<'a>` ligado al préstamo del pool | `test_authority_soundness::test_auth_18_compact_obj_ref_lifetime_bound_to_pool_borrow` | DEMOSTRADA / PROBADA |
+| **AUTH-19 (Bounded Issuance)** | Registro acotado sin reciclaje | `test_authority_soundness::test_auth_19_compact_pool_registry_bounded_issuance` | IMPLEMENTADA / PROBADA |
+| **AUTH-20 (Concurrency)** | Concurrencia atómica de 16 bits sin duplicados | `test_authority_soundness::test_auth_20_concurrent_issuance_in_registry16_no_duplicates` | IMPLEMENTADA / PROBADA |

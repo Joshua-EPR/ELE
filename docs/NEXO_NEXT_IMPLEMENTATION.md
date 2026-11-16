@@ -68,3 +68,26 @@ crates/nexo/src/
   - Accede una sola vez a la cabecera / metadatos de superpágina para validar un conjunto de enlaces contiguos.
 - `InvariantRevalidation`:
   - Helper que modela la validez persistente de una revalidación cuando el análisis de efectos demuestra ausencia de mutaciones en el pool.
+
+### 2.4 Adaptadores Físicos Autorizados (`next/adapter.rs`)
+- `CompactPhysicalPool` y `CompactPhysicalPool64`:
+  - Enlazan una referencia prestada `&'a PhysicalPool` con un `&'a CompactPoolToken` verificado.
+  - El constructor valida estrictamente `token.physical_pool_id() == pool.id()`, impidiendo falsificación de autoridad.
+  - Implementan el trait sellado `CompactPoolAuthority` y `CompactPoolAuthority64` validando el estado real de la memoria física:
+    - Estado de subpágina `PageState::Committed` (rechazo estricto de `Quarantined`, `Reserved`, `Returned`, `ReclaimPending`).
+    - Límite de slot verificado contra la capacidad física y acotado por `(MAX_SLOT_COMPACT_32 as u64) + 1`.
+    - Generación viva impar verificada contra los metadatos de superpágina y el espejo físico.
+  - Devuelven `CompactObjRef<'a>` o `CompactObjRef64<'a>`, tokens opacos de lectura enlazados al tiempo de vida `'a` del pool prestado.
+
+---
+
+## 3. Estado de resolución de defectos de seguridad (P0 / P1)
+
+| Defecto | Clasificación | Solución implementada | Validación |
+|---|---|---|---|
+| **P0-001** | Pseudo-sellado de `CompactPoolAuthority` (`pub mod private`) | Módulo `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }` con método sellado `__seal_authority` y doctests `compile_fail`. | `AUTH-01`, `AUTH-02`, 9 doctests |
+| **P0-002** | Emparejamiento no verificado de Pool ↔ Token | `CompactPoolToken` y `CompactPoolToken16` almacenan `physical_pool_id: u64`; constructores de adaptadores validan coincidencia exacta con `pool.id()`. | `AUTH-05`, `AUTH-06`, `AUTH-07`, `AUTH-08`, `AUTH-09` |
+| **P0-003** | Fuga de `MockCompactPool` a producción | Aislados detrás de `#[cfg(any(test, feature = "test-mocks"))]`. Crate de producción no exporta mocks. | `AUTH-04`, compilación de producción |
+| **P1-004** | Exposición pública de registros independientes | `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` son `pub(crate)` y excluidos de la API pública. | `AUTH-19`, `AUTH-20`, pruebas unitarias |
+| **P1-005** | Mutación de contador global en pruebas de agotamiento | `next_arena_id` refactorizado para delegar en `allocate_arena_id(&AtomicU64)`. Pruebas usan contadores atómicos locales. | Pruebas concurrentes en `arena.rs` |
+| **P1-006** | Capacidad de slot desbordaba representación de 16 bits | `slot_capacity()` en `CompactPhysicalPool` acotado a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32`. | `AUTH-16` |

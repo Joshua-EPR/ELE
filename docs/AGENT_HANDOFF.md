@@ -1,5 +1,73 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Auditoría Definitiva de Autoridad e Identidad — fix/nexo-v0.4-authority-soundness)
+
+Ramas auditadas:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (intacta, inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama de trabajo con correcciones definitivas P0-001..P0-003 y P1-004..P1-006.
+
+### 1. Correcciones P0 y P1 Implementadas
+
+1. **P0-001 (Sellado Auténtico de Traits de Autoridad)**:
+   - Se erradicó el pseudo-sellado `pub mod private` que permitía a crates foráneas implementar `Sealed`.
+   - Se estableció el sellado canónico: `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }`.
+   - Se incorporó el método privado sellado `fn __seal_authority(&self, _: private::InternalSeal)` en `CompactPoolAuthority` y `CompactPoolAuthority64`.
+   - Pruebas doctest negativas con `compile_fail` agregadas y verificadas (9 doctests pasados).
+
+2. **P0-002 (Vinculación Infalsificable Pool ↔ Token)**:
+   - `CompactPoolToken` y `CompactPoolToken16` almacenan de forma inmutable el `physical_pool_id: u64` correspondiente al `PhysicalPool` registrado.
+   - `CompactPhysicalPool::new(&pool, &token)` y `CompactPhysicalPool64::new(&pool, &token)` devuelven `Result<Self, CompactPoolError>` y validan estrictamente `token.physical_pool_id() == pool.id()`, abortando con `CompactPoolError::PoolMismatch` ante cualquier discrepancia.
+
+3. **P0-003 (Confinamiento Absoluto de Mocks)**:
+   - `MockCompactPool` y `MockCompactPool64` están condicionados a `#[cfg(any(test, feature = "test-mocks"))]`.
+   - `crates/nexo/Cargo.toml` define la feature `test-mocks` y la inyecta solo en `dev-dependencies`, eliminándolos completamente de las compilaciones de producción.
+
+4. **P1-004 (Confinamiento de Registros Independientes)**:
+   - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` son `pub(crate)` y fueron retirados de la re-exportación pública en `nexo::next`.
+
+5. **P1-005 (Aislamiento de Contador Global en Pruebas de Agotamiento)**:
+   - `allocate_arena_id(counter: &AtomicU64) -> Result<u64, ArenaError>` extraído para permitir que las pruebas de agotamiento utilicen contadores locales aislados sin mutar el singleton `NEXT_ARENA_ID`.
+
+6. **P1-006 (Acotamiento de Capacidad de Slots en Adaptador)**:
+   - `CompactPhysicalPool::slot_capacity()` acotado a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32` (máximo 65.536), garantizando que los índices encajen en la representación de 16 bits de `CompactLink`.
+
+### 2. Suite de Validación Adversarial AUTH-01 a AUTH-20 (`crates/nexo/tests/test_authority_soundness.rs`)
+- `AUTH-01`: Intento externo de implementar `CompactPoolAuthority` falla estáticamente (doctest `compile_fail`).
+- `AUTH-02`: Intento externo de implementar `CompactPoolAuthority64` falla estáticamente (doctest `compile_fail`).
+- `AUTH-03`: Intento de construir `CompactObjRef` directamente falla estáticamente (doctest `compile_fail`).
+- `AUTH-04`: Mocks no disponibles en producción sin `feature = "test-mocks"`.
+- `AUTH-05`: Emparejamiento de token foráneo falla en adaptador de 32 bits (`PoolMismatch`).
+- `AUTH-06`: Emparejamiento de token foráneo falla en adaptador de 64 bits (`PoolMismatch`).
+- `AUTH-07`: `CompactPoolToken` almacena el `physical_pool_id` exacto.
+- `AUTH-08`: `compact_id` idéntico pero diferente `physical_pool_id` es rechazado.
+- `AUTH-09`: Revalidación cruzada rechazada con pool físico foráneo.
+- `AUTH-10`: Generación par rechazada como `SlotNotAllocated`.
+- `AUTH-11`: Generación obsoleta rechazada tras reasignación (`StaleGeneration`).
+- `AUTH-12`: Generación $\ge 254$ en 8 bits rechazada permanentemente (`GenerationRetired`).
+- `AUTH-13`: Generación $\ge 65534$ en 16 bits rechazada permanentemente (`GenerationRetired`).
+- `AUTH-14`: Slot en subpágina en cuarentena rechazado (`SubpageQuarantined`).
+- `AUTH-15`: Slot en subpágina no confirmada rechazado (`SlotNotAllocated`).
+- `AUTH-16`: Slot fuera de límites rechazado (`SlotOutOfBounds`) y capacidad acotada a 65.536.
+- `AUTH-17`: `CompactObjRef` es de solo lectura y no convertible a `Handle`.
+- `AUTH-18`: `CompactObjRef<'a>` tiene tiempo de vida acotado al préstamo del pool.
+- `AUTH-19`: `CompactPoolRegistry` emisión acotada a 255 IDs sin reciclaje.
+- `AUTH-20`: Concurrencia atómica de 16 bits sin duplicados en emisión.
+
+### 3. Matriz de Validación Dual-OS
+
+| Plataforma | Suite `ele-nexo` | Suite `test_authority_soundness` | Suite `test_compact_nexo` | Child Isolation | Fuzzers |
+|---|---|---|---|---|---|
+| **Windows MSVC** | 35 lib + 9 doc + 11 api = 55 tests OK | 20/20 OK | 12/12 OK | N/A (Windows) | 4.096 comandos (4 seeds) OK; 64 campañas $\times$ 5.000 pasos PFS OK; `nexo-fuzz` 1.000 casos OK |
+| **Linux WSL2** | 36 lib + 9 doc + 11 api = 56 tests OK | 20/20 OK | 12/12 OK | 5/5 OK (SIGSEGV verificado) | 100% concordancia con Windows |
+
+### 4. Estado de CI Remoto
+- **CI EXTERNO: BLOQUEADO POR CUOTA DE GITHUB ACTIONS** (`0 minutes remaining`).
+- Toda validación se ejecuta y certifica localmente.
+
+---
+
 ## Actualización 2026-11-16 (Zero-Trust Hardening) — Resolución de Identidad de Registros, Traits Sellados, Tokens Infalsificables, Adaptador Físico y Suite DROP-08..16
 
 Ramas auditadas:

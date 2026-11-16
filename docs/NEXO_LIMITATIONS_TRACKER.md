@@ -209,3 +209,24 @@ pasa a **Demostrada** bajo la definición de `NEXO_v0.3_FORMAL.md`; una campaña
 de fuzz, por grande que sea, no cambia esa palabra. Si cambia el layout, la
 autoridad de metadatos, el modelo de concurrencia o el contrato LIR, deben
 reevaluarse todas las filas dependientes y no limitarse a actualizar su texto.
+
+---
+
+## Registro de auditoría y cierre de soundness P0/P1 en NEXO v0.4
+
+Durante la auditoría profunda de autoridad e identidad de NEXO v0.4 se detectaron y cerraron los siguientes defectos críticos de seguridad:
+
+1. **P0-001 (Sellado auténtico de trait de autoridad)**: Se eliminó el pseudo-sellado `pub mod private` reemplazándolo por `pub(crate) mod private` con método privado sellado `fn __seal_authority(&self, _: private::InternalSeal)` y pruebas doctest negativas con `compile_fail`.
+2. **P0-002 (Vinculación infalsificable Pool ↔ Token)**: Se eliminó el emparejamiento no verificado de tokens arbitrarios. `CompactPoolToken` y `CompactPoolToken16` almacenan el `physical_pool_id: u64` y el adaptador aborta con `CompactPoolError::PoolMismatch` ante discrepancias de pool.
+3. **P0-003 (Confinamiento de mocks de prueba)**: Se aislaron `MockCompactPool` y `MockCompactPool64` detrás de `#[cfg(any(test, feature = "test-mocks"))]`, impidiendo su inclusión en artefactos de producción.
+4. **P1-004 (Confinamiento de registros independientes)**: `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` fueron restringidos a `pub(crate)` y retirados de la re-exportación pública.
+5. **P1-005 (Aislamiento de contador global en pruebas de agotamiento)**: Se refactorizó la asignación de ID de arena a `allocate_arena_id(&AtomicU64)`, eliminando la mutación del contador global en pruebas multi-hilo.
+6. **P1-006 (Acotamiento de capacidad de slots en adaptador 32 bits)**: `CompactPhysicalPool::slot_capacity()` fue acotado a 65.536 slots, impidiendo desbordamientos en la representación de 16 bits de `CompactLink`.
+
+### Estado de Infraestructura de Integración Continua Externa
+
+> [!IMPORTANT]
+> **CI EXTERNO: BLOQUEADO POR CUOTA DE GITHUB ACTIONS**
+> La infraestructura remota de GitHub Actions se encuentra actualmente bloqueada debido al agotamiento total de la cuota mensual asignada de la cuenta (`0 minutes remaining`). Conforme a las directrices de seguridad y gobernanza del proyecto:
+> - NO se modifican los flujos de trabajo en `.github/workflows/` para eludir la restricción.
+> - La validación exhaustiva se ejecuta y certifica localmente en modo Dual-OS (Windows MSVC nativo + Linux WSL2 / glibc) sobre los worktrees autorizados.

@@ -98,6 +98,22 @@ NEXO v0.4 es la evolución incremental del modelo de memoria de ELE diseñado pa
 - **Hoisting fuera de bucles**: Si un bucle ejecuta lecturas repetidas mediante un `Link` sobre un pool $P$, y el análisis de efectos del cuerpo del bucle demuestra que ningún efecto de mutación (`Destroy`, `Reorder`, `Invalidate`) afecta a $P$, la comprobación `revalidate` se eleva fuera del bucle (*loop-invariant code motion*).
 - **Revalidación en lote (*Batch Revalidation*)**: Validación vectorizada de múltiples enlaces pertenecientes al mismo pool amortizando el acceso a la superpágina.
 
+### 3.8 Frontera de autoridad auténtica, sellado e identidad infalsificable (P0/P1 Soundness)
+- **Sellado auténtico (*Authentic Sealed Trait*)**:
+  - Los traits `CompactPoolAuthority` y `CompactPoolAuthority64` utilizan el patrón canónico de sellado de Rust:
+    - Supertrait `private::Sealed` definido en un submódulo `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }`.
+    - Método sellado obligatorio `fn __seal_authority(&self, _: private::InternalSeal)` que imposibilita la implementación por crates externas incluso si el supertrait fuera accesible.
+    - Se verifica mediante doctests negativos con directiva `compile_fail`.
+- **Vinculación infalsificable de pool físico y token (`CompactPoolToken`)**:
+  - Los tokens de autoridad `CompactPoolToken` y `CompactPoolToken16` incorporan no solo el `compact_id` sino también el `physical_pool_id: u64` correspondiente al `PhysicalPool` registrado.
+  - La construcción de adaptadores autorizados (`CompactPhysicalPool::new(&pool, &token)` y `CompactPhysicalPool64::new(&pool, &token)`) devuelve `Result<Self, CompactPoolError>` y valida estrictamente `token.physical_pool_id() == pool.id()`, fallando con `CompactPoolError::PoolMismatch` ante cualquier intento de emparejamiento cruzado de tokens foráneos.
+- **Agotamiento acotado de capacidad en adaptadores**:
+  - `CompactPhysicalPool::slot_capacity()` acota la capacidad reportada a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32` (máximo 65.536 slots), garantizando que un pool físico de tamaño mayor nunca exponga un slot inalcanzable o truncable por la representación de 16 bits de `CompactLink`.
+- **Aislamiento absoluto de mocks de prueba**:
+  - `MockCompactPool` y `MockCompactPool64` están condicionados a `#[cfg(any(test, feature = "test-mocks"))]`, imposibilitando su existencia o compilación en binarios de producción sin la bandera explícita.
+- **Confinamiento de registros independientes**:
+  - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` quedan confinados a visibilidad `pub(crate)` y excluidos de las re-exportaciones públicas de `nexo::next`, garantizando que la emisión pública de tokens solo proceda de los registros monotónicos globales.
+
 ---
 
 ## 4. Mapa de correspondencias y preservación de reglas formales
