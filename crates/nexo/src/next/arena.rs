@@ -22,6 +22,7 @@ pub enum ArenaError {
     ScopeMismatch,
     Poisoned,
     ScopeDepthExhausted,
+    ArenaIdExhausted,
 }
 
 impl fmt::Display for ArenaError {
@@ -32,6 +33,7 @@ impl fmt::Display for ArenaError {
             Self::ScopeMismatch => write!(f, "scope marker mismatch or out-of-order scope access"),
             Self::Poisoned => write!(f, "arena is poisoned due to a destructor panic"),
             Self::ScopeDepthExhausted => write!(f, "maximum active scope depth exhausted"),
+            Self::ArenaIdExhausted => write!(f, "arena monotonic identifier space exhausted"),
         }
     }
 }
@@ -142,7 +144,7 @@ fn next_arena_id() -> Result<u64, ArenaError> {
     let mut current = NEXT_ARENA_ID.load(Ordering::Relaxed);
     loop {
         if current == u64::MAX {
-            return Err(ArenaError::OutOfMemory);
+            return Err(ArenaError::ArenaIdExhausted);
         }
         let next = current + 1;
         match NEXT_ARENA_ID.compare_exchange_weak(
@@ -463,5 +465,18 @@ mod tests {
             format!("{}", ArenaError::Poisoned),
             "arena is poisoned due to a destructor panic"
         );
+        assert_eq!(
+            format!("{}", ArenaError::ArenaIdExhausted),
+            "arena monotonic identifier space exhausted"
+        );
+    }
+
+    #[test]
+    fn test_arena_id_exhausted_boundary() {
+        let prev = NEXT_ARENA_ID.load(Ordering::SeqCst);
+        NEXT_ARENA_ID.store(u64::MAX, Ordering::SeqCst);
+        let res = next_arena_id();
+        assert_eq!(res.unwrap_err(), ArenaError::ArenaIdExhausted);
+        NEXT_ARENA_ID.store(prev, Ordering::SeqCst);
     }
 }
