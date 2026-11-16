@@ -25,12 +25,28 @@ fn convert_pool_error(err: PoolError) -> CompactRevalidateError {
         PoolError::OutOfBounds => CompactRevalidateError::OutOfBounds,
         PoolError::StaleGeneration => CompactRevalidateError::StaleGeneration,
         PoolError::Retired => CompactRevalidateError::GenerationRetired,
+        PoolError::ForeignHandle => CompactRevalidateError::ForeignPool,
+        PoolError::InventedHole => CompactRevalidateError::SlotNotAllocated,
         PoolError::Physical(PhysicalError::Quarantined) => {
             CompactRevalidateError::SubpageQuarantined
         }
+        PoolError::Physical(PhysicalError::ReleaseUncertain) => {
+            CompactRevalidateError::ReleaseUncertain
+        }
+        PoolError::Physical(PhysicalError::Released) => CompactRevalidateError::PoolClosed,
         PoolError::Physical(p) => CompactRevalidateError::Physical(p),
         PoolError::Invariant(s) => CompactRevalidateError::Invariant(s),
-        _ => CompactRevalidateError::OutOfBounds,
+        PoolError::OutOfSpace => CompactRevalidateError::Invariant("pool out of space".into()),
+        PoolError::InvalidField => CompactRevalidateError::Invariant("invalid field index".into()),
+        PoolError::InvalidConfig(s) => {
+            CompactRevalidateError::Invariant(format!("invalid pool config: {s}"))
+        }
+        PoolError::Leak { live, holes } => {
+            CompactRevalidateError::Invariant(format!("pool leak: live={live}, holes={holes}"))
+        }
+        PoolError::InjectedFailure(s) => {
+            CompactRevalidateError::Invariant(format!("injected failure: {s}"))
+        }
     }
 }
 
@@ -54,6 +70,7 @@ impl<'a> CompactPhysicalPool<'a> {
     ///
     /// # Errores
     /// - Retorna [`CompactPoolError::PoolClosed`] si el `pool` físico se encuentra cerrado.
+    /// - Retorna [`CompactPoolError::ReleaseUncertain`] si el `pool` físico se encuentra en estado ambiguo.
     /// - Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
     ///   específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
     pub fn new(
@@ -63,6 +80,11 @@ impl<'a> CompactPhysicalPool<'a> {
         if pool.is_closed() {
             return Err(CompactPoolError::PoolClosed);
         }
+        if pool.is_release_uncertain() {
+            return Err(CompactPoolError::ReleaseUncertain);
+        }
+        pool.ensure_operational()
+            .map_err(|_| CompactPoolError::ReleaseUncertain)?;
         if token.physical_pool_id() != pool.id() {
             return Err(CompactPoolError::PoolMismatch);
         }
@@ -148,6 +170,7 @@ impl<'a> CompactPhysicalPool64<'a> {
     ///
     /// # Errores
     /// - Retorna [`CompactPoolError::PoolClosed`] si el `pool` físico se encuentra cerrado.
+    /// - Retorna [`CompactPoolError::ReleaseUncertain`] si el `pool` físico se encuentra en estado ambiguo.
     /// - Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
     ///   específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
     pub fn new(
@@ -157,6 +180,11 @@ impl<'a> CompactPhysicalPool64<'a> {
         if pool.is_closed() {
             return Err(CompactPoolError::PoolClosed);
         }
+        if pool.is_release_uncertain() {
+            return Err(CompactPoolError::ReleaseUncertain);
+        }
+        pool.ensure_operational()
+            .map_err(|_| CompactPoolError::ReleaseUncertain)?;
         if token.physical_pool_id() != pool.id() {
             return Err(CompactPoolError::PoolMismatch);
         }
@@ -214,5 +242,78 @@ impl<'a> CompactPoolAuthority64 for CompactPhysicalPool64<'a> {
         }
 
         Ok(generation_val as u16)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_pool_error_exhaustive_coverage() {
+        assert_eq!(
+            convert_pool_error(PoolError::Closed),
+            CompactRevalidateError::PoolClosed
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::OutOfBounds),
+            CompactRevalidateError::OutOfBounds
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::StaleGeneration),
+            CompactRevalidateError::StaleGeneration
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Retired),
+            CompactRevalidateError::GenerationRetired
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::ForeignHandle),
+            CompactRevalidateError::ForeignPool
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::InventedHole),
+            CompactRevalidateError::SlotNotAllocated
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Physical(PhysicalError::Quarantined)),
+            CompactRevalidateError::SubpageQuarantined
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Physical(PhysicalError::ReleaseUncertain)),
+            CompactRevalidateError::ReleaseUncertain
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Physical(PhysicalError::Released)),
+            CompactRevalidateError::PoolClosed
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Physical(PhysicalError::Inaccessible)),
+            CompactRevalidateError::Physical(PhysicalError::Inaccessible)
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Invariant("error de prueba".into())),
+            CompactRevalidateError::Invariant("error de prueba".into())
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::OutOfSpace),
+            CompactRevalidateError::Invariant("pool out of space".into())
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::InvalidField),
+            CompactRevalidateError::Invariant("invalid field index".into())
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::InvalidConfig("bad config")),
+            CompactRevalidateError::Invariant("invalid pool config: bad config".into())
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::Leak { live: 5, holes: 2 }),
+            CompactRevalidateError::Invariant("pool leak: live=5, holes=2".into())
+        );
+        assert_eq!(
+            convert_pool_error(PoolError::InjectedFailure("fail")),
+            CompactRevalidateError::Invariant("injected failure: fail".into())
+        );
     }
 }
