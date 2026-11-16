@@ -10,9 +10,7 @@ name = "nexo"
 
 [features]
 default = []
-test-mocks = []
 
 [dependencies]
 
 [dev-dependencies]
-ele-nexo = { path = ".", features = ["test-mocks"] }
