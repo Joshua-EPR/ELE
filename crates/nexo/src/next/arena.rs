@@ -140,23 +140,22 @@ pub struct ScopedArena {
     drops: Vec<DropEntry>,
 }
 
-fn next_arena_id() -> Result<u64, ArenaError> {
-    let mut current = NEXT_ARENA_ID.load(Ordering::Relaxed);
+pub(crate) fn allocate_arena_id(counter: &AtomicU64) -> Result<u64, ArenaError> {
+    let mut current = counter.load(Ordering::Relaxed);
     loop {
         if current == u64::MAX {
             return Err(ArenaError::ArenaIdExhausted);
         }
         let next = current + 1;
-        match NEXT_ARENA_ID.compare_exchange_weak(
-            current,
-            next,
-            Ordering::SeqCst,
-            Ordering::Relaxed,
-        ) {
+        match counter.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::Relaxed) {
             Ok(val) => return Ok(val),
             Err(actual) => current = actual,
         }
     }
+}
+
+fn next_arena_id() -> Result<u64, ArenaError> {
+    allocate_arena_id(&NEXT_ARENA_ID)
 }
 
 impl ScopedArena {
@@ -473,10 +472,8 @@ mod tests {
 
     #[test]
     fn test_arena_id_exhausted_boundary() {
-        let prev = NEXT_ARENA_ID.load(Ordering::SeqCst);
-        NEXT_ARENA_ID.store(u64::MAX, Ordering::SeqCst);
-        let res = next_arena_id();
+        let isolated = AtomicU64::new(u64::MAX);
+        let res = allocate_arena_id(&isolated);
         assert_eq!(res.unwrap_err(), ArenaError::ArenaIdExhausted);
-        NEXT_ARENA_ID.store(prev, Ordering::SeqCst);
     }
 }

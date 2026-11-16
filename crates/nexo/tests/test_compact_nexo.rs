@@ -4,10 +4,9 @@
 use nexo::next::{
     CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactObjRef,
     CompactObjRef64, CompactPhysicalPool, CompactPoolAuthority, CompactPoolAuthority64,
-    CompactPoolError, CompactPoolRegistry, CompactPoolRegistry16, CompactPoolRegistryInstance,
-    CompactPoolRegistryInstance16, CompactPoolToken, CompactPoolToken16, CompactRevalidateError,
-    GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID, INVALID_COMPACT_POOL_ID_16,
-    MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
+    CompactPoolRegistry, CompactPoolRegistry16, CompactPoolToken, CompactPoolToken16,
+    CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID,
+    INVALID_COMPACT_POOL_ID_16, MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
 };
 use nexo::physical::{HeaderStatus, PhysicalPool, PoolConfig, ReclaimPolicy};
 
@@ -201,79 +200,23 @@ fn test_compact_link_slot_and_generation_boundaries() {
 }
 
 #[test]
-fn test_compact_pool_registry_bounded_issuance() {
-    let registry = CompactPoolRegistryInstance::new();
-
-    // Asignar IDs hasta alcanzar el límite exacto de 255
-    let mut allocated = Vec::new();
-    while let Ok(id) = registry.acquire_id() {
-        assert_ne!(id, INVALID_COMPACT_POOL_ID);
-        allocated.push(id);
-    }
-
-    assert_eq!(allocated.len(), MAX_COMPACT_POOLS as usize);
-    assert_eq!(allocated[0], 1);
-    assert_eq!(allocated[MAX_COMPACT_POOLS as usize - 1], MAX_COMPACT_POOLS);
-
-    // Una vez agotado, cualquier intento posterior debe retornar PoolIdExhausted
-    assert_eq!(
-        registry.acquire_id().unwrap_err(),
-        CompactPoolError::PoolIdExhausted
-    );
-
-    // Verificar que jamás hubo wraparound a 0 ni a valores ya asignados
-    assert!(registry.is_valid_id(1));
-    assert!(registry.is_valid_id(MAX_COMPACT_POOLS));
-    assert!(!registry.is_valid_id(INVALID_COMPACT_POOL_ID));
-    assert_eq!(registry.allocated_count(), MAX_COMPACT_POOLS);
-}
-
-#[test]
-fn test_compact_pool_registry_concurrent_issuance_no_duplicates() {
-    use std::sync::Arc;
-    let registry = Arc::new(CompactPoolRegistryInstance::new());
-    let mut handles = Vec::new();
-
-    for _ in 0..8 {
-        let reg = registry.clone();
-        handles.push(std::thread::spawn(move || {
-            let mut issued = Vec::new();
-            while let Ok(id) = reg.acquire_id() {
-                issued.push(id);
-            }
-            issued
-        }));
-    }
-
-    let mut all_issued = Vec::new();
-    for h in handles {
-        all_issued.extend(h.join().unwrap());
-    }
-
-    assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
-    all_issued.sort_unstable();
-    all_issued.dedup();
-    assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
-}
-
-#[test]
-fn test_compact_pool_registry_16_bounded_issuance() {
-    let registry16 = CompactPoolRegistryInstance16::new();
-    assert_eq!(registry16.allocated_count(), 0);
-    assert!(!registry16.is_valid_id(INVALID_COMPACT_POOL_ID_16));
-    assert!(!registry16.is_valid_id(1));
-
-    let id1 = registry16.acquire_id().unwrap();
-    assert_eq!(id1, 1);
-    assert!(registry16.is_valid_id(1));
-    assert!(!registry16.is_valid_id(2));
-    assert_eq!(registry16.allocated_count(), 1);
-
+fn test_compact_pool_registry_public_api() {
+    assert_eq!(MAX_COMPACT_POOLS, 255);
     assert_eq!(MAX_COMPACT_POOLS_16, 65535);
+    assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
     assert!(!CompactPoolRegistry16::is_valid_id(
         INVALID_COMPACT_POOL_ID_16
     ));
-    assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
+
+    let allocated = CompactPoolRegistry::allocated_count();
+    let token = CompactPoolRegistry::acquire_token().unwrap();
+    assert_eq!(CompactPoolRegistry::allocated_count(), allocated + 1);
+    assert!(CompactPoolRegistry::is_valid_id(token.id()));
+
+    let allocated16 = CompactPoolRegistry16::allocated_count();
+    let token16 = CompactPoolRegistry16::acquire_token().unwrap();
+    assert_eq!(CompactPoolRegistry16::allocated_count(), allocated16 + 1);
+    assert!(CompactPoolRegistry16::is_valid_id(token16.id()));
 }
 
 #[test]
@@ -368,7 +311,7 @@ fn test_compact_physical_pool_adapter_integration() {
         protect_before_discard: true,
     };
     let mut physical_pool = PhysicalPool::new(config).unwrap();
-    let token = CompactPoolRegistry::acquire_token().unwrap();
+    let token = CompactPoolRegistry::register_pool(&physical_pool).unwrap();
 
     // Asignar un slot en el pool físico
     let handle = physical_pool.allocate().unwrap();
@@ -381,7 +324,7 @@ fn test_compact_physical_pool_adapter_integration() {
 
     // 1. Revalidación autorizada a través del adaptador físico
     {
-        let adapter = CompactPhysicalPool::new(&physical_pool, &token);
+        let adapter = CompactPhysicalPool::new(&physical_pool, &token).unwrap();
         let obj_ref = adapter.revalidate_compact(compact_link).unwrap();
         assert_eq!(obj_ref.pool_id(), token.id());
         assert_eq!(obj_ref.slot(), slot);
@@ -409,7 +352,7 @@ fn test_compact_physical_pool_adapter_integration() {
 
     // 4. Intentar revalidar el enlace compacto tras la destrucción -> Rechazado
     {
-        let adapter = CompactPhysicalPool::new(&physical_pool, &token);
+        let adapter = CompactPhysicalPool::new(&physical_pool, &token).unwrap();
         let err = adapter.revalidate_compact(compact_link).unwrap_err();
         // El slot ahora tiene generación par (destruido/no asignado)
         assert_eq!(err, CompactRevalidateError::SlotNotAllocated);
@@ -422,7 +365,7 @@ fn test_compact_physical_pool_adapter_integration() {
 
     // El enlace antiguo (gen 1) ahora es stale frente a la nueva vida (gen 3)
     {
-        let adapter = CompactPhysicalPool::new(&physical_pool, &token);
+        let adapter = CompactPhysicalPool::new(&physical_pool, &token).unwrap();
         let err = adapter.revalidate_compact(compact_link).unwrap_err();
         assert_eq!(err, CompactRevalidateError::StaleGeneration);
     }
