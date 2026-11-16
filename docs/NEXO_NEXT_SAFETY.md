@@ -217,12 +217,22 @@ Todos los bloques `unsafe` presentes en `crates/nexo` han sido categorizados, de
   - `marker.drop_count <= self.drops.len()`
 - Si cualquier condición de límite se viola (incluso ante corrupción deliberada del marcador), la operación aborta con `CloseScopeError { error: ArenaError::ScopeMismatch, marker }`, impidiendo avances espurios de offset o desajustes de destructores.
 
-### 4.3. Semántica de Pánicos: `panic=unwind` frente a `panic=abort`
-- **Bajo `panic=unwind` (Modo por defecto de desarrollo y pruebas)**:
-  - Los destructores se ejecutan encapsulados en `catch_unwind`.
-  - La arena se envenena (`ArenaState::Poisoned`), bloqueando asignaciones futuras pero permitiendo la ejecución ordenada LIFO del resto de destructores de objetos vivos.
-  - La memoria virtual solo se devuelve tras finalizar los drops pendientes.
-  - El primer pánico es relanzado transparentemente si el hilo no se encontraba previamente desenrollándose, evitando abortos por doble pánico (*double panic abort*).
-- **Bajo `panic=abort` (Modo endurecido de producción)**:
-  - Ante cualquier pánico, la ejecución del proceso se aborta de inmediato.
-  - El sistema operativo anfitrión reclama la totalidad del espacio virtual reservado y las páginas físicas comprometidas, garantizando matemáticamente cero fugas y cero lecturas fuera de límites tras el fallo.
+### 4.3. Semántica de Pánicos y Ciclo de Vida de Recursos
+
+Es esencial distinguir con precisión los distintos mecanismos de recuperación y sus límites:
+
+1. **Recuperación normal de recursos en ejecución secuencial (`Drop`)**:
+   - En ejecución normal, los objetos asignados en `ScopedArena` y las superpáginas en `PhysicalPool` ejecutan sus destructores tipados (`Drop`) de forma determinista y ordenada (LIFO en arena).
+   - `PhysicalPool::close()` libera explícitamente el espacio de direcciones virtuales con el SO (`VirtualFree` / `munmap`), vacía metadatos y comprueba la ausencia de fugas de handles o tokens vivos.
+
+2. **Recuperación parcial bajo `panic=unwind` (desenrollado de pila)**:
+   - Cuando un destructor entra en pánico durante el desenrollado, `ScopedArena` captura el pánico vía `catch_unwind`, envenena la arena (`ArenaState::Poisoned`), y continúa drenando los destructores pendientes de los objetos restantes para evitar fugas de memoria heap y descriptores.
+   - Si bien los destructores restantes se ejecutan y el búfer virtual se libera al terminar `drop(arena)` mediante `BufferGuard`, el estado de la aplicación puede haber quedado parcialmente mutado si destructores previos fallaron antes de completar su limpieza.
+
+3. **Terminación inmediata bajo `panic=abort`**:
+   - En este modo de compilación, ante cualquier pánico el proceso termina de inmediato sin desenrollar la pila ni ejecutar destructores de Rust (`Drop`).
+   - El sistema operativo anfitrión reclama la memoria del proceso (incluyendo el espacio de direcciones virtuales reservado y las páginas confirmadas por `VirtualAlloc` o `mmap`).
+   - **Límites de la terminación inmediata**: Si bien el SO recupera la memoria virtual del proceso, los recursos externos persistentes que no dependan del espacio de direcciones del proceso (como archivos temporales en disco, bloqueos inter-proceso en el sistema de archivos, descriptores de IPC no heredables o sockets remotos que esperan cierre ordenado) pueden requerir mecanismos de reconciliación externa o recuperación ante caídas (*crash recovery*).
+
+4. **Límites de verificación**:
+   - La recuperación de memoria por el kernel ante la terminación del proceso es una propiedad de aislamiento provista por los sistemas operativos modernos (Windows NT, Linux), no una prueba formal o matemática intrínseca del lenguaje de tipos. Las garantías formales de NEXO se limitan a las demostraciones de ownership, tipos lineales y preservación de estados en el espacio de usuario mientras el runtime se encuentre en ejecución.

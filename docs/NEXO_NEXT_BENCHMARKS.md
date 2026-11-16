@@ -78,3 +78,49 @@ memory reserved=524288 committed=8192 useful=64 external_metadata_lower_bound=58
    El ciclo de `commit + reclaim` (3.346.20 ns/op) está dominado por las transiciones de modo núcleo del sistema operativo. Por este motivo, el diseño de NEXO utiliza amortización por superpáginas de 64 KiB y política de descommit diferido (`ReclaimPolicy::Deferred`), evitando llamadas al kernel en el camino caliente de ejecución.
 3. **Validación de fuzzer físico bajo inyección de fallos**:
    La campaña `nexo-physical-fuzz --fallos 1000 16` ejecutó 16.000 comandos de asignación, reparación e inyecciones del SO en 16 campañas independientes con **0 divergencias** observadas entre el modelo de referencia y el allocator físico real.
+
+---
+
+## 4. Resultados ampliados multicorrida (`--completo`) y análisis de memoria
+
+Para evaluar la estabilidad estadística y la repetibilidad de las mediciones, se ejecutó el arnés en modo ampliado con 7 corridas independientes sobre lotes de 200 operaciones por escenario (`nexo-physical-bench --completo`), reportando media, mediana, percentiles p95/p99 y coeficiente de variación (CV%):
+
+### 4.1 Métricas de latencia y llamadas al sistema (7 corridas × 200 ops)
+
+| Escenario | Media (ns/op) | Mediana (ns/op) | p95 (ns/op) | p99 (ns/op) | CV% | Alloc/op | SO/op | Cab B/op | Huecos/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Revalidar enlace + leer** | **51.4** | 49.5 | 61.0 | 91.0 | 3.8% | 0.004 | 0.000 | 0.0 | 0.000 |
+| **Ráfaga 960 alloc + 960 free (por op)** | **178.5** | 181.5 | 213.0 | 251.0 | 0.5% | 0.008 | 0.016 | 21.4 | 0.000 |
+| **Hole destroy + reuse** | **277.6** | 276.5 | 283.5 | 291.5 | 0.4% | 0.004 | 0.000 | 42.0 | 1.000 |
+| **Pool pequeño (1 superpágina)** | **306.5** | 305.0 | 309.0 | 337.0 | 0.7% | 0.004 | 0.000 | 42.0 | 0.000 |
+| **Larga duración: 900 vivos + churn** | **308.7** | 307.0 | 323.0 | 328.0 | 0.6% | 0.004 | 0.000 | 42.0 | 0.000 |
+| **Hot allocate + free (con ancla)** | **309.5** | 308.0 | 315.0 | 364.5 | 0.9% | 0.004 | 0.000 | 42.0 | 0.000 |
+| **Commit + reclaim diferido (`keep=1`)** | **314.9** | 310.0 | 327.5 | 429.0 | 1.7% | 0.004 | 0.000 | 42.2 | 0.000 |
+| **Fragmentado: 450 subpáginas a medias** | **317.7** | 308.0 | 429.5 | 460.5 | 6.7% | 0.005 | 0.000 | 42.0 | 0.000 |
+| **Pool grande (64 superpáginas, 50k vivos)**| **354.0** | 329.5 | 515.5 | 566.5 | 11.9% | 0.006 | 0.000 | 42.0 | 0.000 |
+| **Commit + reclaim agresivo** | **3.045.7** | 3.037.5 | 3.236.5 | 3.587.0 | 1.0% | 0.004 | 2.000 | 42.2 | 0.000 |
+| **Commit + reclaim agresivo (con mprotect)** | **3.674.4** | 3.475.0 | 5.149.5 | 5.839.0 | 3.9% | 0.004 | 3.000 | 42.2 | 0.000 |
+| *Línea base: Box<[u8;64]> alloc + free* | 119.7 | 102.5 | 157.5 | 166.5 | 17.0% | 1.000 | 0.000 | 0.0 | 0.000 |
+| *Línea base: Box ráfaga 960+960 (por op)* | 102.9 | 87.0 | 194.0 | 227.5 | 3.2% | 0.501 | 0.000 | 0.0 | 0.000 |
+
+### 4.2 Métricas de consumo de memoria y Working Set (Pool 64 superpáginas / 4.0 MiB reservados)
+
+Con 50.000 objetos vivos de 64 B (3.05 MiB de carga útil neta), se midió la memoria comprometida real y el impacto en Working Set (WS) / Resident Set Size (RSS):
+
+| Estado y Política de Reclamación | Comprometido | Accesible | Δ WS / RSS | Δ Memoria Privada |
+|---|---:|---:|---:|---:|
+| **Agresivo: 50.000 objetos vivos** | 3.26 MiB | 3.26 MiB | +4.15 MiB | +4.38 MiB |
+| **Agresivo: 25.000 vivos intercalados** | 3.26 MiB | 3.26 MiB | +4.55 MiB | +4.88 MiB |
+| **Agresivo: 0 vivos (vaciado ordinario)** | 0.21 MiB | 0.21 MiB | +1.49 MiB | +1.82 MiB |
+| **Agresivo: 0 vivos tras `reclaim_all`** | 0.21 MiB | 0.21 MiB | +1.49 MiB | +1.82 MiB |
+| **Diferido `keep=8`: 50.000 objetos vivos** | 3.26 MiB | 3.26 MiB | +4.17 MiB | +4.46 MiB |
+| **Diferido `keep=8`: 25.000 intercalados** | 3.26 MiB | 3.26 MiB | +4.55 MiB | +4.96 MiB |
+| **Diferido `keep=8`: 0 vivos ordinario** | 0.24 MiB | 0.24 MiB | +1.53 MiB | +1.94 MiB |
+| **Diferido `keep=8`: 0 tras `reclaim_all`** | 0.21 MiB | 0.21 MiB | +1.50 MiB | +1.91 MiB |
+
+### 4.3 Conclusiones empíricas
+
+1. **Repetibilidad**: 9 de los 11 escenarios medidos presentan un coeficiente de variación (CV%) inferior al 4.0%, garantizando reproducibilidad estadística en plataformas de integración continua y desarrollo.
+2. **Revalidación ultrarrápida**: La revalidación de enlaces compactos más lectura de metadatos se ejecuta en **51.4 ns/op** sin llamadas al SO, validando el diseño de optimizaciones en bucles calientes.
+3. **Eficacia de amortización de syscalls**: En la política `Deferred` (`keep=1`), la latencia es de **314.9 ns/op** con **0.000 llamadas al SO/op**, mientras que la política agresiva requiere **3.045.7 ns/op** debido a 2 llamadas al kernel por operación (`VirtualAlloc`/`VirtualFree`).
+4. **Devolución de memoria**: Al descender de 50.000 a 0 objetos vivos, la memoria comprometida desciende de **3.26 MiB a 0.21 MiB** (reducción del 93.5%), confirmando la descommitación física efectiva hacia el sistema operativo.

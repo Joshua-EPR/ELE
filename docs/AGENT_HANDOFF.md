@@ -10,7 +10,7 @@ Ramas y estado de Git:
 - `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown completada y publicada (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
 - `fix/nexo-v04-security-finalization`: **Rama activa de entrega final**, creada a partir de `07138c6`.
 
-### 1. Defectos P0 y Endurecimiento Adicional Cerrados en esta Fase
+### 1. Defectos P0/P1 y Endurecimiento Adicional Cerrados en esta Fase
 1. **P0-007 (Fallo cerrado en inspección de metadatos tras cierre de piscina)**:
    - Se blindaron `PhysicalPool::generation()` y `PhysicalPool::page_state()` invocando `self.space()?;` antes de ubicar cualquier slot.
    - Si el pool fue cerrado con `close()` o `try_close()`, toda inspección retorna inmediatamente `Err(PoolError::Closed)`.
@@ -20,13 +20,49 @@ Ramas y estado de Git:
    - `close_scope` rechaza inmediatamente cualquier marcador con `offset > self.offset` o `drop_count > self.drops.len()` retornando `ArenaError::ScopeMismatch`.
    - Impide formalmente corrupciones de punteros u omisiones de destructores ante marcadores adulterados.
    - Prueba unitaria de regresión añadida y validada en `crates/nexo/src/next/arena.rs::tests::test_marker_defensive_bounds_validation`.
-3. **Auditoría Exhaustiva de Código `unsafe`**:
+3. **P1-009 (Rechazo de piscinas cerradas en adaptadores compactos y registros)**:
+   - `CompactPhysicalPool::new` y `CompactPhysicalPool64::new` fallan cerrado inmediatamente con `Err(CompactPoolError::PoolClosed)` si el pool ya fue cerrado antes de crear el adaptador.
+   - `CompactPoolRegistry::register_pool` y `CompactPoolRegistry16::register_pool` impiden registrar una piscina cerrada, retornando `Err(CompactPoolError::PoolClosed)`.
+   - Prueba de regresión en `crates/nexo/tests/test_authority_lockdown.rs::test_auth_harden_06_closed_pool_fails_closed`.
+4. **P1-010 (Preservación de errores tipados en revalidación compacta)**:
+   - `CompactPhysicalPool::current_compact_generation` sustituye el mapeo genérico a `OutOfBounds` por `convert_pool_error`, preservando `PoolClosed`, `Physical(p)`, `Invariant(s)`, `GenerationRetired`, `SubpageQuarantined`, y `StaleGeneration`.
+   - Permite discriminar fallos del kernel o cierre de piscina de verdaderos accesos fuera de rango.
+5. **P1-011 (Recuperación resiliente ante envenenamiento de mutex en el registro global)**:
+   - `CompactPoolRegistryInstance::register` y `CompactPoolRegistryInstance16::register` implementan recuperación explícita con `.unwrap_or_else(|poisoned| ...)` ordenando y deduplicando el vector de IDs para evitar que un pánico en un hilo inhabilite permanentemente el registro global.
+   - Prueba unitaria de regresión validada en `crates/nexo/src/next/compact.rs::tests::test_registry_mutex_poisoning_recovery`.
+6. **P1-012 (Auditoría de ScopedArena y verificación de límites de ciclo de vida con DROP-17..20)**:
+   - Casos agregados en `crates/nexo/tests/test_scoped_arena.rs`:
+     - `DROP-17`: rechazo de cierre de marcadores desordenados con recuperación de marcador.
+     - `DROP-18`: rechazo de marcadores de arenas foráneas.
+     - `DROP-19`: manejo seguro de marcadores tras pánicos y envenenamiento en destructores.
+     - `DROP-20`: asignaciones ZST con alineación extrema en la frontera exacta de capacidad.
+7. **Auditoría Exhaustiva de Código `unsafe`**:
    - Se auditaron y documentaron formalmente todos los bloques `unsafe` en `crates/nexo/src/next/arena.rs`, `address_space.rs`, `windows.rs` y `linux.rs`. Contratos de precondiciones y comportamiento ante pánicos y fallos documentados en `docs/NEXO_NEXT_SAFETY.md`.
-4. **Metodología y Mediciones Empíricas de Rendimiento**:
-   - Se ejecutó `nexo-physical-bench` en modo release (20.000 iteraciones) registrando métricas reales en `docs/NEXO_NEXT_BENCHMARKS.md` (372.15 ns/op hot alloc, 323.25 ns/op hole reuse).
+8. **Metodología y Mediciones Empíricas de Rendimiento**:
+   - Se ejecutó `nexo-physical-bench --completo` en modo release (7 corridas × 200 ops por escenario) registrando métricas de media, mediana, p95/p99, CV%, syscalls/op y consumo de memoria/Working Set en `docs/NEXO_NEXT_BENCHMARKS.md`.
+   - Revalidación compacta validada a 51.4 ns/op (CV 3.8%); ráfaga 960+960 a 178.5 ns/op (CV 0.5%); reciclaje de huecos a 277.6 ns/op (CV 0.4%).
    - Fuzzer físico ejecutado en modo adversarial (`--fallos 1000 16`): 16.000 comandos de inyección del SO con 0 divergencias.
-5. **Especificación Normativa de Integración con ELE**:
+9. **Especificación Normativa de Integración con ELE**:
    - Se elaboró `docs/NEXO_ELE_COMPATIBILITY.md` documentando el mapeo de capacidades lineales, representación LIR, invariantes de verificación y pre-requisitos de ABI para futura integración cuando proceda, sin conectar el runtime prematuramente.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 13 | **13/13 APROBADAS** | **13/13 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 8 | **8/8 APROBADAS** | **8/8 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests lib.rs** | `crates/nexo/src/lib.rs` | 37/38 | **37/37 APROBADAS** | **38/38 APROBADAS** |
+| **Physical Fuzz tests** | `crates/nexo/src/bin/nexo-physical-fuzz.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Revalidation Opt** | `crates/nexo/tests/test_revalidation_opt.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
 
 ### 2. Estado de CI Remoto
 - **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA** (`0 minutes remaining` en GitHub Actions).
@@ -174,7 +210,7 @@ Ramas auditadas:
 - **Corrección aplicada**:
   - Se introdujo `CompactPoolToken` y `CompactPoolToken16`: tokens lineales con campos privados y sin constructor público, no clonables (`!Clone`, `!Copy`), emitibles exclusivamente a través de los registros globales de producción (`CompactPoolRegistry::acquire_token` y `CompactPoolRegistry16::acquire_token`).
   - Las instancias desacopladas (`CompactPoolRegistryInstance`) se confinaron al módulo interno `testing`, eliminando la ambigüedad en el contrato público de producción.
-  - La unicidad de `pool_id` queda matemáticamente garantizada a nivel de proceso mediante asignación atómica sin reciclaje ni wraparound.
+  - La unicidad de `pool_id` queda formalmente garantizada a nivel de proceso mediante asignación atómica sin reciclaje ni wraparound.
 
 ### 2. Frontera de Autoridad y Traits Sellados (P0)
 - **Defecto auditado**: El trait público `CompactPoolAuthority` podía ser implementado por consumidores externos con datos arbitrarios para obtener `CompactObjRef`.
