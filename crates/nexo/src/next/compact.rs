@@ -83,6 +83,23 @@ impl CompactPoolRegistryInstance {
 
 static GLOBAL_COMPACT_REGISTRY: CompactPoolRegistryInstance = CompactPoolRegistryInstance::new();
 
+/// Token lineal de autoridad única emitido para un pool compacto de 8 bits (1..=255).
+///
+/// Invariantes de seguridad (R1-R9):
+/// 1. Campos estrictamente privados: ningún consumidor externo puede falsificarlo.
+/// 2. No implementa `Clone` ni `Copy`: no puede duplicarse ni compartirse espuriamente.
+/// 3. Emitible exclusivamente a través de [`CompactPoolRegistry::acquire_token`].
+#[derive(Debug)]
+pub struct CompactPoolToken {
+    id: u8,
+}
+
+impl CompactPoolToken {
+    pub fn id(&self) -> u8 {
+        self.id
+    }
+}
+
 /// Registro global seguro de identificadores de pools compactos de 8 bits.
 pub struct CompactPoolRegistry;
 
@@ -94,6 +111,12 @@ impl CompactPoolRegistry {
     /// impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
     pub fn acquire_id() -> Result<u8, CompactPoolError> {
         GLOBAL_COMPACT_REGISTRY.acquire_id()
+    }
+
+    /// Emite un token lineal único e infalsificable de autoridad para un pool compacto de 8 bits.
+    pub fn acquire_token() -> Result<CompactPoolToken, CompactPoolError> {
+        let id = Self::acquire_id()?;
+        Ok(CompactPoolToken { id })
     }
 
     /// Comprueba si un identificador se encuentra dentro del rango asignado legítimamente.
@@ -160,12 +183,30 @@ impl CompactPoolRegistryInstance16 {
 static GLOBAL_COMPACT_REGISTRY_16: CompactPoolRegistryInstance16 =
     CompactPoolRegistryInstance16::new();
 
+/// Token lineal de autoridad única emitido para un pool compacto de 16 bits (1..=65.535).
+#[derive(Debug)]
+pub struct CompactPoolToken16 {
+    id: u16,
+}
+
+impl CompactPoolToken16 {
+    pub fn id(&self) -> u16 {
+        self.id
+    }
+}
+
 /// Registro global seguro de identificadores de pools compactos de 16 bits.
 pub struct CompactPoolRegistry16;
 
 impl CompactPoolRegistry16 {
     pub fn acquire_id() -> Result<u16, CompactPoolError> {
         GLOBAL_COMPACT_REGISTRY_16.acquire_id()
+    }
+
+    /// Emite un token lineal único e infalsificable de autoridad para un pool compacto de 16 bits.
+    pub fn acquire_token() -> Result<CompactPoolToken16, CompactPoolError> {
+        let id = Self::acquire_id()?;
+        Ok(CompactPoolToken16 { id })
     }
 
     pub fn is_valid_id(id: u16) -> bool {
@@ -456,6 +497,16 @@ impl fmt::Display for CompactRevalidateError {
 
 impl std::error::Error for CompactRevalidateError {}
 
+/// Módulo privado para sellar traits de autoridad de memoria compacta.
+///
+/// Impide terminantemente que crates o consumidores externos implementen
+/// [`CompactPoolAuthority`] o [`CompactPoolAuthority64`], evitando que entidades
+/// no verificadas puedan fabricar tokens de acceso o eludir las comprobaciones
+/// de seguridad física.
+pub mod private {
+    pub trait Sealed {}
+}
+
 /// Token de acceso no propietario obtenido exclusivamente tras una revalidación autorizada
 /// de un enlace compacto de 4 bytes ([`CompactLink`]).
 ///
@@ -463,15 +514,18 @@ impl std::error::Error for CompactRevalidateError {}
 /// 1. Campos estrictamente privados: ningún consumidor externo puede fabricar un `CompactObjRef`.
 /// 2. Sin constructor público: emitible únicamente por una implementación autorizada de pool.
 /// 3. No implementa `Clone` ni `Copy`: preserva la disciplina de préstamos sin duplicación espuria.
-/// 4. No puede convertirse a `Handle`: un enlace jamás confiere capacidad de posesión o destrucción.
+/// 4. Vinculado a la vida útil del préstamo del pool (`'a`): expira al finalizar el ámbito del préstamo,
+///    impidiendo el acceso tras la destrucción, reutilización o cierre del pool.
+/// 5. No puede convertirse a `Handle`: un enlace jamás confiere capacidad de posesión o destrucción.
 #[derive(Debug)]
-pub struct CompactObjRef {
+pub struct CompactObjRef<'a> {
     pool_id: u8,
     slot: u32,
     generation: u8,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl CompactObjRef {
+impl<'a> CompactObjRef<'a> {
     pub fn pool_id(&self) -> u8 {
         self.pool_id
     }
@@ -487,13 +541,14 @@ impl CompactObjRef {
 
 /// Token de acceso no propietario obtenido tras revalidación de un enlace compacto de 8 bytes ([`CompactLink64`]).
 #[derive(Debug)]
-pub struct CompactObjRef64 {
+pub struct CompactObjRef64<'a> {
     pool_id: u16,
     slot: u32,
     generation: u16,
+    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl CompactObjRef64 {
+impl<'a> CompactObjRef64<'a> {
     pub fn pool_id(&self) -> u16 {
         self.pool_id
     }
@@ -508,16 +563,19 @@ impl CompactObjRef64 {
 }
 
 /// Autoridad de revalidación para pools con soporte de enlaces compactos de 4 bytes.
-pub trait CompactPoolAuthority {
+///
+/// Este trait está sellado mediante [`private::Sealed`]: solo implementaciones
+/// auditadas dentro del runtime de NEXO pueden actuar como autoridad de revalidación.
+pub trait CompactPoolAuthority: private::Sealed {
     fn compact_id(&self) -> u8;
     fn slot_capacity(&self) -> u32;
     fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError>;
 
     /// Revalida un enlace compacto contra la autoridad real del pool.
-    fn revalidate_compact(
-        &self,
+    fn revalidate_compact<'a>(
+        &'a self,
         link: CompactLink,
-    ) -> Result<CompactObjRef, CompactRevalidateError> {
+    ) -> Result<CompactObjRef<'a>, CompactRevalidateError> {
         if link.pool_id() != self.compact_id() {
             return Err(CompactRevalidateError::ForeignPool);
         }
@@ -538,21 +596,22 @@ pub trait CompactPoolAuthority {
             pool_id: link.pool_id(),
             slot: link.slot(),
             generation: link.generation(),
+            _marker: std::marker::PhantomData,
         })
     }
 }
 
 /// Autoridad de revalidación para pools con soporte de enlaces compactos de 8 bytes.
-pub trait CompactPoolAuthority64 {
+pub trait CompactPoolAuthority64: private::Sealed {
     fn compact_id(&self) -> u16;
     fn slot_capacity(&self) -> u32;
     fn current_compact_generation(&self, slot: u32) -> Result<u16, CompactRevalidateError>;
 
     /// Revalida un enlace compacto de 64 bits contra la autoridad real del pool.
-    fn revalidate_compact_64(
-        &self,
+    fn revalidate_compact_64<'a>(
+        &'a self,
         link: CompactLink64,
-    ) -> Result<CompactObjRef64, CompactRevalidateError> {
+    ) -> Result<CompactObjRef64<'a>, CompactRevalidateError> {
         if link.pool_id() != self.compact_id() {
             return Err(CompactRevalidateError::ForeignPool);
         }
@@ -573,7 +632,84 @@ pub trait CompactPoolAuthority64 {
             pool_id: link.pool_id(),
             slot: link.slot(),
             generation: link.generation(),
+            _marker: std::marker::PhantomData,
         })
+    }
+}
+
+pub mod testing {
+    use super::*;
+
+    /// Entorno de pruebas: Pool simulado sellado para validar revalidación de 4 bytes.
+    pub struct MockCompactPool {
+        pub id: u8,
+        pub capacity: u32,
+        pub generations: Vec<u8>,
+    }
+
+    impl MockCompactPool {
+        pub fn new(id: u8, capacity: u32, generations: Vec<u8>) -> Self {
+            Self {
+                id,
+                capacity,
+                generations,
+            }
+        }
+    }
+
+    impl private::Sealed for MockCompactPool {}
+
+    impl CompactPoolAuthority for MockCompactPool {
+        fn compact_id(&self) -> u8 {
+            self.id
+        }
+
+        fn slot_capacity(&self) -> u32 {
+            self.capacity
+        }
+
+        fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError> {
+            if slot >= self.capacity || slot as usize >= self.generations.len() {
+                return Err(CompactRevalidateError::OutOfBounds);
+            }
+            Ok(self.generations[slot as usize])
+        }
+    }
+
+    /// Entorno de pruebas: Pool simulado sellado para validar revalidación de 8 bytes.
+    pub struct MockCompactPool64 {
+        pub id: u16,
+        pub capacity: u32,
+        pub generations: Vec<u16>,
+    }
+
+    impl MockCompactPool64 {
+        pub fn new(id: u16, capacity: u32, generations: Vec<u16>) -> Self {
+            Self {
+                id,
+                capacity,
+                generations,
+            }
+        }
+    }
+
+    impl private::Sealed for MockCompactPool64 {}
+
+    impl CompactPoolAuthority64 for MockCompactPool64 {
+        fn compact_id(&self) -> u16 {
+            self.id
+        }
+
+        fn slot_capacity(&self) -> u32 {
+            self.capacity
+        }
+
+        fn current_compact_generation(&self, slot: u32) -> Result<u16, CompactRevalidateError> {
+            if slot >= self.capacity || slot as usize >= self.generations.len() {
+                return Err(CompactRevalidateError::OutOfBounds);
+            }
+            Ok(self.generations[slot as usize])
+        }
     }
 }
 
@@ -581,30 +717,9 @@ pub trait CompactPoolAuthority64 {
 mod tests {
     use super::*;
 
-    struct MockCompactPool {
-        id: u8,
-        capacity: u32,
-        generations: Vec<u8>,
-    }
-
-    impl CompactPoolAuthority for MockCompactPool {
-        fn compact_id(&self) -> u8 {
-            self.id
-        }
-        fn slot_capacity(&self) -> u32 {
-            self.capacity
-        }
-        fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError> {
-            if slot as usize >= self.generations.len() {
-                return Err(CompactRevalidateError::OutOfBounds);
-            }
-            Ok(self.generations[slot as usize])
-        }
-    }
-
     #[test]
     fn test_compact_pool_authority_revalidation() {
-        let pool = MockCompactPool {
+        let pool = testing::MockCompactPool {
             id: 10,
             capacity: 100,
             generations: vec![1, 2, 3, 254], // slot 0: gen 1 (vivo), slot 1: gen 2 (destruido), slot 2: gen 3 (vivo), slot 3: retirado
