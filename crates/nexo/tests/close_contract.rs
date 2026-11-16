@@ -140,3 +140,119 @@ fn closed_pool_rejects_generation_page_state_and_physical_access() {
     assert_eq!(pool.revalidate(link), Err(PoolError::Closed));
     assert_eq!(pool.validate_superpage(0), Err(PoolError::OutOfBounds));
 }
+
+#[test]
+fn release_uncertain_blocks_all_authority_and_revalidations() {
+    use nexo::next::adapter::{CompactPhysicalPool, CompactPhysicalPool64};
+    use nexo::next::compact::{
+        CompactLink, CompactLink64, CompactPoolError, CompactPoolRegistry, CompactPoolRegistry16,
+    };
+
+    // 1. Pool operativo antes del fallo
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    assert!(pool.is_operational());
+    assert!(!pool.is_closed());
+    assert!(!pool.is_release_uncertain());
+    assert!(pool.ensure_operational().is_ok());
+
+    let token8 = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let token16 = CompactPoolRegistry16::register_pool(&pool).unwrap();
+    let handle = pool.allocate().unwrap();
+    let slot = handle.slot();
+    let link = handle.link();
+    let _link32 = CompactLink::new(token8.id(), slot, handle.generation() as u16).unwrap();
+    let _link64 = CompactLink64::new(token16.id(), slot, handle.generation() as u16).unwrap();
+
+    // Destruimos handle para permitir close sin leak
+    pool.destroy(handle, false).unwrap();
+
+    // 2. Inyectar fallo ambiguo en release y ejecutar try_close
+    pool.set_faults(FaultPlan::new().unknown_nth(FaultOp::Release, 1))
+        .unwrap();
+    let failure = match pool.try_close() {
+        Ok(()) => panic!("release debía quedar ambiguo"),
+        Err(failure) => failure,
+    };
+    assert_eq!(
+        failure.error(),
+        &PoolError::Physical(PhysicalError::UnknownState(FaultOp::Release))
+    );
+    let (mut pool, _) = (*failure).into_parts();
+
+    // El pool NO está cerrado (space es Some), pero está en ReleaseUncertain y NO es operativo
+    assert!(!pool.is_closed());
+    assert!(pool.is_open());
+    assert!(pool.is_release_uncertain());
+    assert!(!pool.is_operational());
+    assert_eq!(
+        pool.ensure_operational(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 3. Bloqueo de registro compacto de 8 bits
+    assert_eq!(
+        CompactPoolRegistry::register_pool(&pool).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+
+    // 4. Bloqueo de registro compacto de 16 bits
+    assert_eq!(
+        CompactPoolRegistry16::register_pool(&pool).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+
+    // 5. Rechazo de construcción de adaptadores de 32 y 64 bits
+    assert_eq!(
+        CompactPhysicalPool::new(&pool, &token8).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+    assert_eq!(
+        CompactPhysicalPool64::new(&pool, &token16).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+
+    // 6. Rechazo de consultas de generación
+    assert_eq!(
+        pool.generation(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 7. Rechazo de consultas de estado de página
+    assert_eq!(
+        pool.page_state(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 8. Rechazo de acceso físico y dirección base
+    assert_eq!(
+        pool.physical_access(slot),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.base_addr(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 9. Rechazo de revalidación ordinaria
+    assert_eq!(
+        pool.revalidate(link),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 10. Rechazo de nuevas asignaciones o capacidades
+    assert_eq!(
+        pool.allocate(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+
+    // 11. Preservación de la capacidad de reintentar el cierre y cierre exitoso tras retirar fallo
+    pool.set_faults(FaultPlan::new()).unwrap();
+    assert!(pool.close().is_ok());
+
+    // 12. Pool ahora está cerrado completamente
+    assert!(pool.is_closed());
+    assert!(!pool.is_open());
+    assert!(!pool.is_release_uncertain());
+    assert!(!pool.is_operational());
+    assert_eq!(pool.ensure_operational(), Err(PoolError::Closed));
+}

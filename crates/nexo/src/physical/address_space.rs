@@ -325,6 +325,16 @@ impl AddressSpace {
         self.len() == 0
     }
 
+    /// Comprueba si la reserva ha sido liberada exitosamente.
+    pub fn is_released(&self) -> bool {
+        self.released
+    }
+
+    /// Comprueba si la reserva se encuentra en estado ambiguo de liberación.
+    pub fn is_release_uncertain(&self) -> bool {
+        self.release_uncertain
+    }
+
     pub fn page_size(&self) -> usize {
         self.page_size
     }
