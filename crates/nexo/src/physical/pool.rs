@@ -1167,6 +1167,7 @@ impl PhysicalPool {
     }
 
     pub fn check_invariants(&self) -> Result<(), PoolError> {
+        self.ensure_operational()?;
         let inv = |m: String| Err(PoolError::Invariant(m));
         let space = self.space()?;
         let mask = self.full_mask();
@@ -1306,7 +1307,15 @@ impl PhysicalPool {
     }
 
     /// Valida que el ordinal `sp` corresponde a una superpágina inicializada en este pool.
+    ///
+    /// # Errores
+    /// - [`PoolError::Closed`]: Si el pool físico está cerrado.
+    /// - [`PoolError::Physical(PhysicalError::ReleaseUncertain)`]: Si el pool está en estado
+    ///   físico ambiguo de liberación.
+    /// - [`PoolError::OutOfBounds`]: Si `sp` está fuera del rango de superpáginas de la reserva.
+    /// - [`PoolError::Invariant`]: Si la superpágina dentro del rango aún no ha sido inicializada.
     pub fn validate_superpage(&self, sp: usize) -> Result<SuperpageIndex, PoolError> {
+        self.ensure_operational()?;
         if sp >= self.superpages.len() {
             return Err(PoolError::OutOfBounds);
         }
