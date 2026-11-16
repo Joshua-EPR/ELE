@@ -1,5 +1,58 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Integridad Estadística de Benchmarks y Fallos OOM en Registros — fix/nexo-v04-benchmark-integrity-and-oom)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-final-invariant-hardening`: Rama base directa (`7bd85f0afb7d7a77bd91a34c3b2e8811a37b9130`).
+- `fix/nexo-v04-benchmark-integrity-and-oom`: **Rama activa de corrección**, creada a partir de `7bd85f0a`.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+1. **P1-022 (Desagregación estadística estricta, algoritmo de Welford e integridad de Samuelson)**:
+   - Erradicación absoluta de la mezcla de desviaciones estándar en microbenchmarks (`crates/nexo/src/bin/nexo-physical-bench.rs` y `docs/NEXO_NEXT_BENCHMARKS.md`).
+   - Desagregación rigurosa en tres niveles muestrales independientes: Lotes ($N=700$, $s_{\text{batch}}$), Corridas ($N=7$, $s_{\text{run}}$) y Procesos de SO independientes ($N=5$, $s_{\text{proc}}$).
+   - Demostración y resolución matemática formal de la aparente contradicción de Samuelson ($s \ge |x_{\max} - \bar{x}|/\sqrt{N-1}$): se demostró que el valor reportado previamente de 18.8 ns era la dispersión entre las 7 corridas ($N=7$), no de los 700 lotes individuales ($N=700$), donde la dispersión real $s_{\text{batch}} \ge 108.6$ ns cumple estrictamente la cota.
+   - Creación del módulo `crates/nexo/src/stats.rs` con acumulador de Welford (1962), cálculo de varianza insesgada ($N-1$), percentiles e interpolación, y verificación algorítmica obligatoria de cotas de Samuelson en tiempo de ejecución.
+   - Soporte en `nexo-physical-bench` para emisión de JSON estructurado mediante `--json` y `--json-out <path>` sin dependencias externas.
+   - Implementación del runner automatizado `scripts/run_benchmarks.py`, ejecutando 5 procesos de SO independientes y generando `docs/benchmarks/summary.json` y `docs/benchmarks/raw/process_{1..5}.json`.
+2. **P0-023 (Verificación adversarial de atomicidad e inyección determinista de fallo de memoria REG-OOM-01..10)**:
+   - Implementación de inyección determinista de fallo de reserva de memoria (`try_reserve` OOM) exclusiva para pruebas (`#[cfg(test)]`) en `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`.
+   - Verificación estricta de la invariante obligatoria: `estado_autoridad_despues == estado_autoridad_antes`.
+   - Suite completa de 10 pruebas unitarias adversariales (`REG-OOM-01` a `REG-OOM-10`) en `crates/nexo/src/next/compact.rs`:
+     - `REG-OOM-01`: fallo con registro vacío.
+     - `REG-OOM-02`: fallo con identidades existentes registradas.
+     - `REG-OOM-03`: verificación de que el contador numérico de IDs permanece estrictamente inmutable tras el error.
+     - `REG-OOM-04`: ausencia total de registro para el pool físico fallido.
+     - `REG-OOM-05`: demostración de que jamás se emite un token de autoridad.
+     - `REG-OOM-06`: retirada de inyección y verificación de que la siguiente asignación tiene éxito y emite el ID contiguo exacto.
+     - `REG-OOM-07`: verificación idéntica sobre el registro y asignador de 16 bits.
+     - `REG-OOM-08`: contención multihilo concurrente entre registros legítimos e inyecciones de OOM.
+     - `REG-OOM-09`: agotamiento concurrente de IDs con fallos intercalados sin pérdida de identificadores.
+     - `REG-OOM-10`: verificación de invariantes internas, ordenación binaria estricta y ausencia total de corrupción tras fallos.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Stats & Samuelson Bounds** | `crates/nexo/src/stats.rs` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **REG-OOM Registry Tests** | `crates/nexo/src/next/compact.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 59/59 | **59/59 APROBADAS** | **59/59 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Microbenchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
 ## Actualización 2026-11-16 (Operación Cierre de Invariantes, Agotamiento de Identidades y Validación Estadística — fix/nexo-v04-final-invariant-hardening)
 
 Ramas y estado de Git:
