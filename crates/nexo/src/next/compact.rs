@@ -30,6 +30,8 @@ pub enum CompactPoolError {
     AlreadyRegistered {
         physical_pool_id: u64,
     },
+    /// El pool físico se encuentra cerrado y no puede registrarse ni adaptarse.
+    PoolClosed,
 }
 
 impl fmt::Display for CompactPoolError {
@@ -42,6 +44,12 @@ impl fmt::Display for CompactPoolError {
             }
             Self::AlreadyRegistered { physical_pool_id } => {
                 write!(f, "physical pool {physical_pool_id} is already registered")
+            }
+            Self::PoolClosed => {
+                write!(
+                    f,
+                    "physical pool is closed and cannot be registered or adapted"
+                )
             }
         }
     }
@@ -129,7 +137,15 @@ impl CompactPoolRegistryInstance {
     /// - Retorna [`CompactPoolError::AlreadyRegistered`] si el pool ya fue registrado previamente.
     /// - Retorna [`CompactPoolError::PoolIdExhausted`] si se han agotado los 255 identificadores.
     pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken, CompactPoolError> {
-        let mut pools = self.registered_pools.lock().unwrap();
+        let mut pools = match self.registered_pools.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.sort_unstable();
+                guard.dedup();
+                guard
+            }
+        };
         match pools.binary_search(&physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
@@ -152,7 +168,10 @@ impl CompactPoolRegistryInstance {
     }
 
     pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
-        let pools = self.registered_pools.lock().unwrap();
+        let pools = match self.registered_pools.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         pools.binary_search(&physical_pool_id).is_ok()
     }
 }
@@ -199,6 +218,9 @@ impl CompactPoolRegistry {
     /// - [`CompactPoolError::AlreadyRegistered`]: Si el pool ya fue registrado previamente.
     /// - [`CompactPoolError::PoolIdExhausted`]: Si se agotaron los 255 IDs de pool compacto.
     pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken, CompactPoolError> {
+        if pool.is_closed() {
+            return Err(CompactPoolError::PoolClosed);
+        }
         GLOBAL_COMPACT_REGISTRY.register(pool.id())
     }
 
@@ -294,7 +316,15 @@ impl CompactPoolRegistryInstance16 {
 
     /// Registra un pool físico de manera atómica e infalsificable en 16 bits.
     pub fn register(&self, physical_pool_id: u64) -> Result<CompactPoolToken16, CompactPoolError> {
-        let mut pools = self.registered_pools.lock().unwrap();
+        let mut pools = match self.registered_pools.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.sort_unstable();
+                guard.dedup();
+                guard
+            }
+        };
         match pools.binary_search(&physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
@@ -317,7 +347,10 @@ impl CompactPoolRegistryInstance16 {
     }
 
     pub fn is_pool_registered(&self, physical_pool_id: u64) -> bool {
-        let pools = self.registered_pools.lock().unwrap();
+        let pools = match self.registered_pools.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         pools.binary_search(&physical_pool_id).is_ok()
     }
 }
@@ -357,6 +390,9 @@ impl CompactPoolRegistry16 {
     /// - [`CompactPoolError::AlreadyRegistered`]: Si el pool ya fue registrado previamente.
     /// - [`CompactPoolError::PoolIdExhausted`]: Si se agotaron los 65.535 IDs de pool compacto.
     pub fn register_pool(pool: &PhysicalPool) -> Result<CompactPoolToken16, CompactPoolError> {
+        if pool.is_closed() {
+            return Err(CompactPoolError::PoolClosed);
+        }
         GLOBAL_COMPACT_REGISTRY_16.register(pool.id())
     }
 
@@ -622,7 +658,7 @@ impl CompactLink64 {
 }
 
 /// Error al revalidar un enlace compacto contra una autoridad física de pool.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CompactRevalidateError {
     /// El enlace no pertenece al pool indicado (`pool_id` no coincide).
     ForeignPool,
@@ -636,6 +672,12 @@ pub enum CompactRevalidateError {
     GenerationRetired,
     /// La subpágina que contiene el slot se encuentra en cuarentena por fallo o aislamiento de seguridad.
     SubpageQuarantined,
+    /// El pool físico de respaldo ha sido cerrado.
+    PoolClosed,
+    /// Fallo físico u operativo de bajo nivel en el subsistema de memoria virtual.
+    Physical(crate::physical::PhysicalError),
+    /// Violación de invariante interna del pool físico.
+    Invariant(String),
 }
 
 impl fmt::Display for CompactRevalidateError {
@@ -654,6 +696,9 @@ impl fmt::Display for CompactRevalidateError {
                     "compact link subpage is quarantined due to safety fault or isolation"
                 )
             }
+            Self::PoolClosed => write!(f, "compact link target pool is closed"),
+            Self::Physical(err) => write!(f, "physical memory error during revalidation: {err}"),
+            Self::Invariant(msg) => write!(f, "pool invariant error during revalidation: {msg}"),
         }
     }
 }
@@ -1081,5 +1126,44 @@ mod tests {
                 physical_pool_id: 5001
             }
         );
+    }
+
+    #[test]
+    fn test_registry_mutex_poisoning_recovery() {
+        use std::sync::Arc;
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+
+        // Hilo que bloquea el mutex y entra en pánico intencionalmente
+        let reg_clone = registry.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = reg_clone.registered_pools.lock().unwrap();
+            panic!("pánico forzado para envenenar el mutex del registro");
+        });
+        assert!(
+            handle.join().is_err(),
+            "El hilo secundario debió entrar en pánico"
+        );
+
+        // El mutex está envenenado; la siguiente operación register no debe entrar en pánico,
+        // sino recuperar el mutex, restaurar invariantes y registrar con éxito.
+        let token = registry
+            .register(9999)
+            .expect("El registro debe recuperarse de mutex envenenado");
+        assert_eq!(token.physical_pool_id(), 9999);
+        assert!(registry.is_pool_registered(9999));
+
+        // Registro de 16 bits también se recupera
+        let registry16 = Arc::new(CompactPoolRegistryInstance16::new());
+        let reg16_clone = registry16.clone();
+        let handle16 = std::thread::spawn(move || {
+            let _guard = reg16_clone.registered_pools.lock().unwrap();
+            panic!("pánico forzado en registro16");
+        });
+        assert!(handle16.join().is_err());
+        let token16 = registry16
+            .register(8888)
+            .expect("El registro16 debe recuperarse de mutex envenenado");
+        assert_eq!(token16.physical_pool_id(), 8888);
+        assert!(registry16.is_pool_registered(8888));
     }
 }

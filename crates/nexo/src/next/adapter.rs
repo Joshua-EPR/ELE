@@ -17,7 +17,22 @@ use super::compact::{
     CompactPoolToken16, CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16,
     MAX_SLOT_COMPACT_32, private,
 };
-use crate::physical::{PageState, PhysicalPool};
+use crate::physical::{PageState, PhysicalError, PhysicalPool, PoolError};
+
+fn convert_pool_error(err: PoolError) -> CompactRevalidateError {
+    match err {
+        PoolError::Closed => CompactRevalidateError::PoolClosed,
+        PoolError::OutOfBounds => CompactRevalidateError::OutOfBounds,
+        PoolError::StaleGeneration => CompactRevalidateError::StaleGeneration,
+        PoolError::Retired => CompactRevalidateError::GenerationRetired,
+        PoolError::Physical(PhysicalError::Quarantined) => {
+            CompactRevalidateError::SubpageQuarantined
+        }
+        PoolError::Physical(p) => CompactRevalidateError::Physical(p),
+        PoolError::Invariant(s) => CompactRevalidateError::Invariant(s),
+        _ => CompactRevalidateError::OutOfBounds,
+    }
+}
 
 /// Adaptador de revalidación para enlaces compactos de 4 bytes sobre `PhysicalPool`.
 pub struct CompactPhysicalPool<'a> {
@@ -38,12 +53,16 @@ impl<'a> CompactPhysicalPool<'a> {
     /// Construye un nuevo adaptador vinculando el pool físico con su token de autoridad legítimo.
     ///
     /// # Errores
-    /// Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
-    /// específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
+    /// - Retorna [`CompactPoolError::PoolClosed`] si el `pool` físico se encuentra cerrado.
+    /// - Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
+    ///   específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
     pub fn new(
         pool: &'a PhysicalPool,
         token: &'a CompactPoolToken,
     ) -> Result<Self, CompactPoolError> {
+        if pool.is_closed() {
+            return Err(CompactPoolError::PoolClosed);
+        }
         if token.physical_pool_id() != pool.id() {
             return Err(CompactPoolError::PoolMismatch);
         }
@@ -80,11 +99,8 @@ impl<'a> CompactPoolAuthority for CompactPhysicalPool<'a> {
             return Err(CompactRevalidateError::OutOfBounds);
         }
 
-        // Verificar el estado de la subpágina en memoria física
-        let page_state = self
-            .pool
-            .page_state(slot)
-            .map_err(|_| CompactRevalidateError::OutOfBounds)?;
+        // Verificar el estado de la subpágina en memoria física preservando causas exactas
+        let page_state = self.pool.page_state(slot).map_err(convert_pool_error)?;
 
         // Rechazar páginas en cuarentena, no confirmadas o devueltas al SO
         match page_state {
@@ -97,11 +113,8 @@ impl<'a> CompactPoolAuthority for CompactPhysicalPool<'a> {
             }
         }
 
-        // Consultar la generación lógica de la tabla
-        let generation_val = self
-            .pool
-            .generation(slot)
-            .map_err(|_| CompactRevalidateError::OutOfBounds)?;
+        // Consultar la generación lógica de la tabla preservando errores físicos/invariantes
+        let generation_val = self.pool.generation(slot).map_err(convert_pool_error)?;
 
         if generation_val >= GEN_RETIRADO_8 as u32 {
             return Err(CompactRevalidateError::GenerationRetired);
@@ -134,12 +147,16 @@ impl<'a> CompactPhysicalPool64<'a> {
     /// Construye un nuevo adaptador vinculando el pool físico con su token de autoridad de 16 bits.
     ///
     /// # Errores
-    /// Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
-    /// específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
+    /// - Retorna [`CompactPoolError::PoolClosed`] si el `pool` físico se encuentra cerrado.
+    /// - Retorna [`CompactPoolError::PoolMismatch`] si el token proporcionado no fue emitido
+    ///   específicamente para este `pool` (i.e. `token.physical_pool_id() != pool.id()`).
     pub fn new(
         pool: &'a PhysicalPool,
         token: &'a CompactPoolToken16,
     ) -> Result<Self, CompactPoolError> {
+        if pool.is_closed() {
+            return Err(CompactPoolError::PoolClosed);
+        }
         if token.physical_pool_id() != pool.id() {
             return Err(CompactPoolError::PoolMismatch);
         }
@@ -174,10 +191,7 @@ impl<'a> CompactPoolAuthority64 for CompactPhysicalPool64<'a> {
             return Err(CompactRevalidateError::OutOfBounds);
         }
 
-        let page_state = self
-            .pool
-            .page_state(slot)
-            .map_err(|_| CompactRevalidateError::OutOfBounds)?;
+        let page_state = self.pool.page_state(slot).map_err(convert_pool_error)?;
 
         match page_state {
             PageState::Committed => {}
@@ -189,10 +203,7 @@ impl<'a> CompactPoolAuthority64 for CompactPhysicalPool64<'a> {
             }
         }
 
-        let generation_val = self
-            .pool
-            .generation(slot)
-            .map_err(|_| CompactRevalidateError::OutOfBounds)?;
+        let generation_val = self.pool.generation(slot).map_err(convert_pool_error)?;
 
         if generation_val >= GEN_RETIRADO_16 as u32 {
             return Err(CompactRevalidateError::GenerationRetired);

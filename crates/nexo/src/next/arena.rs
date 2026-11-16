@@ -332,7 +332,8 @@ impl ScopedArena {
                 error: ArenaError::Poisoned,
             });
         }
-        if marker.arena_id != self.id
+        if self.active_scopes == 0
+            || marker.arena_id != self.id
             || marker.scope_id != self.active_scopes
             || marker.offset > self.offset
             || marker.drop_count > self.drops.len()

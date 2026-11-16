@@ -552,6 +552,16 @@ impl PhysicalPool {
         self.id
     }
 
+    /// Comprueba si el pool físico ha sido cerrado y su reserva de páginas liberada.
+    pub fn is_closed(&self) -> bool {
+        self.space.is_none()
+    }
+
+    /// Comprueba si el pool físico se encuentra abierto y con reserva virtual operativa.
+    pub fn is_open(&self) -> bool {
+        self.space.is_some()
+    }
+
     pub fn base_addr(&self) -> Result<usize, PoolError> {
         Ok(self.space()?.base_addr())
     }
