@@ -1,5 +1,47 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 — Endurecimiento final de seguridad y cierre sin regresiones (DROP-01..07, CompactPoolAuthority, Registry16)
+
+Ramas auditadas:
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de endurecimiento final).
+
+### 1. Protocolo de Destrucción Final Resiliente en `Drop for ScopedArena` (P0)
+- **Defecto P0 resuelto**: Si un destructor fallaba con pánico durante `drop(arena)`, el bucle de liberación se interrumpía; aunque el búfer se liberaba por RAII, los destructores pendientes restantes eran omitidos, provocando fugas de recursos y riesgo de aborto por doble pánico (*double panic abort*) si el hilo ya se encontraba en unwinding.
+- **Protocolo implementado**:
+  - `drop(&mut self)` encapsula cada llamada a `(entry.drop_fn)(entry.ptr)` con `std::panic::catch_unwind(AssertUnwindSafe(..))`.
+  - El primer pánico se almacena en `first_panic: Option<Box<dyn Any + Send>>`.
+  - Todos los destructores pendientes continúan drenándose y ejecutándose en estricto orden LIFO hasta que `self.drops` queda completamente vacío.
+  - El `BufferGuard` desasigna el búfer de memoria virtual de forma infalible una vez que todos los destructores han concluido.
+  - Si hubo pánicos y `!std::thread::panicking()`, se reanuda el primer pánico mediante `std::panic::resume_unwind(panic_payload)`.
+  - Si el hilo ya se encontraba en unwinding (`std::thread::panicking()`), no se invoca `resume_unwind`, evitando el aborto del proceso y permitiendo que el pánico original continúe de forma segura.
+- **Suite DROP-01 a DROP-07 (`test_scoped_arena.rs`)**:
+  - `DROP-01`: Pánico en un destructor con 3 pendientes; los 4 destructores se ejecutan en orden LIFO exacto una vez cada uno.
+  - `DROP-02`: Múltiples destructores paniquean; todos se ejecutan sin doble destrucción ni UB.
+  - `DROP-03`: Destrucción final de arena previamente envenenada (`ArenaState::Poisoned`).
+  - `DROP-04`: Propagación fiel del payload del primer pánico.
+  - `DROP-05`: Ausencia de doble pánico / aborto durante unwinding activo en hilo aislado.
+  - `DROP-06`: Liberación limpia de recursos complejos (`Box`, `Vec`, `String`) ante pánico.
+  - `DROP-07`: Cascada de ámbitos anidados con múltiples pánicos en orden LIFO estricto.
+
+### 2. Revalidación Autorizada de Enlaces Compactos (`CompactPoolAuthority`)
+- Se implementó la frontera formal entre:
+  - **Enlace como dato (`CompactLink`, `CompactLink64`)**: Identificador plano de 32 o 64 bits copiable (`Copy`), sin autoridad de acceso directo a memoria.
+  - **Revalidación autorizada (`CompactPoolAuthority`, `CompactPoolAuthority64`)**: Trait de pool físico que valida `compact_id`, límites de slot, estado asignado (no par/libre), ausencia de retiro y coincidencia exacta de generación, retornando `Result<CompactObjRef, CompactRevalidateError>`.
+  - **Token no propietario (`CompactObjRef`, `CompactObjRef64`)**: Campos estrictamente privados, sin constructor público, jamás convertible a `Handle`.
+
+### 3. Registro Aislado y Registro de 16 Bits (`CompactPoolRegistry16`)
+- `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`: Estructuras instanciables para evitar contaminación cruzada entre pruebas unitarias que agotan identidades y el singleton global.
+- `CompactPoolRegistry16`: Registro de 16 bits (1..=65.535) para respaldar formalmente la identidad de `CompactLink64` sin reciclaje ni colisiones ABA.
+- Corrección del dominio de 16 bits en `CompactGen`: `is_live` valida estrictamente `g < GEN_RETIRADO_16`, corrigiendo el valor 65535 (`0xffff`) que era erróneamente clasificado como vivo.
+
+### 4. Estado de Validación Dual
+- **Windows MSVC**: 249 pruebas aprobadas en `ele-nexo`, 780+ pruebas en workspace completo (`cargo test --workspace`), clippy con 0 advertencias, fmt limpio, release build limpio, 5/5 child isolation, 65.536 comandos de fuzzer físico sin divergencias, 10.000 casos de fuzzer lingüístico (0 fallos P1).
+- **Linux WSL2**: 250 pruebas aprobadas en `ele-nexo` (incluye prueba de `madvise` específica de Linux), paridad completa.
+- **Miri**: Documentada como limitación pendiente de herramienta externa.
+
+---
+
 ## Actualización 2026-11-15 (Pase 3) — Cierre definitivo P0 de resiliencia ante pánicos en `ScopedArena`, consistencia de `CompactPoolRegistry` y Suite P0-ARENA-01..08
 
 Ramas auditadas:

@@ -696,3 +696,477 @@ fn test_p0_arena_08_extreme_alignment_up_to_4096() {
     arena.close_scope(marker).unwrap();
     assert_eq!(arena.used_bytes(), 0);
 }
+
+// =========================================================================
+// SUITE MANDATORIA DROP-01 a DROP-07 (Destrucción Final Resiliente y Pánicos)
+// =========================================================================
+
+/// DROP-01: Un destructor provoca un pánico y existen otros tres destructores pendientes.
+/// Se comprueba que TODOS los destructores pendientes se ejecutan, en estricto orden LIFO,
+/// exactamente una vez cada uno.
+#[test]
+fn test_drop_01_single_panic_with_three_pending_destructors() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+
+    let d1_dropped = Arc::new(AtomicBool::new(false));
+    let d1_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let d2_dropped = Arc::new(AtomicBool::new(false));
+    let d2_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let d3_dropped = Arc::new(AtomicBool::new(false));
+    let d3_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let d4_dropped = Arc::new(AtomicBool::new(false));
+    let d4_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    struct TrackedPanic {
+        dropped: Arc<AtomicBool>,
+        order: Arc<AtomicUsize>,
+        global: Arc<AtomicUsize>,
+    }
+    impl Drop for TrackedPanic {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+            let ord = self.global.fetch_add(1, Ordering::SeqCst);
+            self.order.store(ord, Ordering::SeqCst);
+            panic!("pánico intencional en destructor DROP-01");
+        }
+    }
+
+    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut arena = ScopedArena::new(4096).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        // Asignar en orden: 1, 2, 3, y 4 (que causará pánico al dropearse)
+        arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 1,
+                    dropped: d1_dropped.clone(),
+                    drop_order: d1_order.clone(),
+                    global_order: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 2,
+                    dropped: d2_dropped.clone(),
+                    drop_order: d2_order.clone(),
+                    global_order: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 3,
+                    dropped: d3_dropped.clone(),
+                    drop_order: d3_order.clone(),
+                    global_order: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        arena
+            .alloc(
+                &marker,
+                TrackedPanic {
+                    dropped: d4_dropped.clone(),
+                    order: d4_order.clone(),
+                    global: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        // Al salir de este bloque, `arena` se dropea.
+        // El drop de `arena` extrae en LIFO: d4 (paniquea), d3, d2, d1.
+    }));
+
+    assert!(
+        panic_result.is_err(),
+        "drop(arena) debió reanudar el pánico"
+    );
+
+    // Todos los 4 objetos debieron ser destruidos
+    assert!(d4_dropped.load(Ordering::SeqCst), "d4 debió ejecutarse");
+    assert!(d3_dropped.load(Ordering::SeqCst), "d3 debió ejecutarse");
+    assert!(d2_dropped.load(Ordering::SeqCst), "d2 debió ejecutarse");
+    assert!(d1_dropped.load(Ordering::SeqCst), "d1 debió ejecutarse");
+
+    // Orden LIFO estricto: 4 -> 3 -> 2 -> 1
+    assert_eq!(d4_order.load(Ordering::SeqCst), 0, "d4 primero");
+    assert_eq!(d3_order.load(Ordering::SeqCst), 1, "d3 segundo");
+    assert_eq!(d2_order.load(Ordering::SeqCst), 2, "d2 tercero");
+    assert_eq!(d1_order.load(Ordering::SeqCst), 3, "d1 cuarto");
+}
+
+/// DROP-02: Dos destructores diferentes provocan pánicos en el mismo drop de arena.
+/// Se comprueba que ambos se ejecutan, los objetos normales intermedios también se ejecutan,
+/// y no existe doble destrucción ni comportamiento indefinido.
+#[test]
+fn test_drop_02_multiple_panics_during_arena_drop() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+
+    let d1_dropped = Arc::new(AtomicBool::new(false));
+    let d2_dropped = Arc::new(AtomicBool::new(false));
+    let d3_dropped = Arc::new(AtomicBool::new(false));
+    let d4_dropped = Arc::new(AtomicBool::new(false));
+
+    struct MultiPanic {
+        msg: &'static str,
+        dropped: Arc<AtomicBool>,
+        global: Arc<AtomicUsize>,
+    }
+    impl Drop for MultiPanic {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+            self.global.fetch_add(1, Ordering::SeqCst);
+            panic!("{}", self.msg);
+        }
+    }
+
+    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut arena = ScopedArena::new(4096).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        // 1: normal
+        arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 1,
+                    dropped: d1_dropped.clone(),
+                    drop_order: Arc::new(AtomicUsize::new(0)),
+                    global_order: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        // 2: paniquea
+        arena
+            .alloc(
+                &marker,
+                MultiPanic {
+                    msg: "pánico en d2",
+                    dropped: d2_dropped.clone(),
+                    global: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        // 3: normal
+        arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 3,
+                    dropped: d3_dropped.clone(),
+                    drop_order: Arc::new(AtomicUsize::new(0)),
+                    global_order: global_order.clone(),
+                },
+            )
+            .unwrap();
+
+        // 4: paniquea
+        arena
+            .alloc(
+                &marker,
+                MultiPanic {
+                    msg: "pánico en d4",
+                    dropped: d4_dropped.clone(),
+                    global: global_order.clone(),
+                },
+            )
+            .unwrap();
+    }));
+
+    assert!(panic_result.is_err());
+
+    // Se verifica que todos los 4 destructores tuvieron su oportunidad de correr
+    assert!(d4_dropped.load(Ordering::SeqCst), "d4 ejecutado");
+    assert!(d3_dropped.load(Ordering::SeqCst), "d3 ejecutado");
+    assert!(d2_dropped.load(Ordering::SeqCst), "d2 ejecutado");
+    assert!(d1_dropped.load(Ordering::SeqCst), "d1 ejecutado");
+    assert_eq!(global_order.load(Ordering::SeqCst), 4);
+}
+
+/// DROP-03: Destrucción de una arena ya envenenada (`ArenaState::Poisoned`).
+/// Los objetos pendientes que quedaron en la arena tras el envenenamiento
+/// deben ser ejecutados limpiamente al invocar `drop(arena)`.
+#[test]
+fn test_drop_03_poisoned_arena_final_drop() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+    let outer_dropped = Arc::new(AtomicBool::new(false));
+    let inner_ok_dropped = Arc::new(AtomicBool::new(false));
+    let inner_panic_dropped = Arc::new(AtomicBool::new(false));
+
+    let mut arena = ScopedArena::new(4096).unwrap();
+    let outer = arena.begin_scope().unwrap();
+
+    arena
+        .alloc(
+            &outer,
+            TrackedObject {
+                id: 100,
+                dropped: outer_dropped.clone(),
+                drop_order: Arc::new(AtomicUsize::new(0)),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    let inner = arena.begin_scope().unwrap();
+    arena
+        .alloc(
+            &inner,
+            TrackedObject {
+                id: 200,
+                dropped: inner_ok_dropped.clone(),
+                drop_order: Arc::new(AtomicUsize::new(0)),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    arena
+        .alloc(
+            &inner,
+            PanicDropper {
+                should_panic: true,
+                dropped: inner_panic_dropped.clone(),
+            },
+        )
+        .unwrap();
+
+    // Provocar envenenamiento cerrando `inner` con pánico
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(inner);
+    }));
+
+    assert!(arena.is_poisoned());
+    assert!(inner_panic_dropped.load(Ordering::SeqCst));
+    assert!(!inner_ok_dropped.load(Ordering::SeqCst));
+    assert!(!outer_dropped.load(Ordering::SeqCst));
+
+    // Liberar la arena envenenada: debe destruir inner_ok y outer
+    drop(arena);
+
+    assert!(inner_ok_dropped.load(Ordering::SeqCst));
+    assert!(outer_dropped.load(Ordering::SeqCst));
+}
+
+/// DROP-04: Verificación de la propagación transparente del primer pánico en `drop(arena)`.
+#[test]
+fn test_drop_04_panic_propagation_payload() {
+    let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut arena = ScopedArena::new(1024).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        struct CustomPanic;
+        impl Drop for CustomPanic {
+            fn drop(&mut self) {
+                panic!("DROP-04-PAYLOAD-MATCH");
+            }
+        }
+
+        let _ = arena.alloc(&marker, CustomPanic).unwrap();
+        // drop(arena) ocurre al salir del closure
+    }));
+
+    assert!(panic_res.is_err());
+    let err = panic_res.unwrap_err();
+    if let Some(msg) = err.downcast_ref::<&str>() {
+        assert_eq!(*msg, "DROP-04-PAYLOAD-MATCH");
+    } else if let Some(msg) = err.downcast_ref::<String>() {
+        assert_eq!(msg.as_str(), "DROP-04-PAYLOAD-MATCH");
+    } else {
+        panic!("El payload de pánico no coincidió con el esperado");
+    }
+}
+
+/// DROP-05: Pánico durante unwinding previo.
+/// Comprueba que si el hilo ya se encuentra en proceso de desenrollado (`std::thread::panicking()`),
+/// `drop(arena)` no llama a `resume_unwind` (lo cual causaría un aborto fatal del proceso por doble pánico),
+/// sino que limpia todos los objetos restantes y permite que el pánico original continúe de forma segura.
+#[test]
+fn test_drop_05_no_double_panic_abort_during_unwinding() {
+    let remaining_dropped = Arc::new(AtomicBool::new(false));
+    let remaining_clone = remaining_dropped.clone();
+
+    // Ejecutar en un hilo separado para aislar el unwinding
+    let handle = std::thread::spawn(move || {
+        struct PanickingDrop;
+        impl Drop for PanickingDrop {
+            fn drop(&mut self) {
+                panic!("segundo pánico durante unwinding");
+            }
+        }
+
+        let mut arena = ScopedArena::new(2048).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        let _ = arena
+            .alloc(
+                &marker,
+                TrackedObject {
+                    id: 999,
+                    dropped: remaining_clone,
+                    drop_order: Arc::new(AtomicUsize::new(0)),
+                    global_order: Arc::new(AtomicUsize::new(0)),
+                },
+            )
+            .unwrap();
+
+        let _ = arena.alloc(&marker, PanickingDrop).unwrap();
+
+        // Lanzar un pánico inicial en el hilo:
+        // Durante el desenrollado de este pánico, `arena` será dropeada.
+        // Dentro de `drop(arena)`, `PanickingDrop` paniqueará.
+        // La guarda `!std::thread::panicking()` debe interceptar este segundo pánico
+        // e impedir el aborto del proceso, ejecutando a su vez `TrackedObject`.
+        panic!("pánico inicial del hilo");
+    });
+
+    let join_res = handle.join();
+    assert!(join_res.is_err(), "El hilo debió terminar en pánico");
+    assert!(
+        remaining_dropped.load(Ordering::SeqCst),
+        "El objeto remanente debió ser destruido limpiamente a pesar del pánico secundario"
+    );
+}
+
+/// DROP-06: Destructores con liberación compleja de heap (`Box`, `Vec`, `String`) y recursos simulados.
+/// Garantiza ausencia de fugas de recursos al salir por pánico.
+#[test]
+fn test_drop_06_complex_heap_resources_cleaned_on_panic() {
+    static RESOURCE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    struct ExternalResource {
+        _buffer: Vec<u8>,
+        _boxed: Box<[String]>,
+    }
+
+    impl ExternalResource {
+        fn new() -> Self {
+            RESOURCE_COUNT.fetch_add(1, Ordering::SeqCst);
+            Self {
+                _buffer: vec![0xcc; 512],
+                _boxed: vec![String::from("hello"), String::from("nexo")].into_boxed_slice(),
+            }
+        }
+    }
+
+    impl Drop for ExternalResource {
+        fn drop(&mut self) {
+            RESOURCE_COUNT.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    RESOURCE_COUNT.store(0, Ordering::SeqCst);
+
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut arena = ScopedArena::new(4096).unwrap();
+        let marker = arena.begin_scope().unwrap();
+
+        let _ = arena.alloc(&marker, ExternalResource::new()).unwrap();
+        let _ = arena.alloc(&marker, ExternalResource::new()).unwrap();
+        let _ = arena
+            .alloc(
+                &marker,
+                PanicDropper {
+                    should_panic: true,
+                    dropped: Arc::new(AtomicBool::new(false)),
+                },
+            )
+            .unwrap();
+    }));
+
+    // Ambos recursos externos debieron ser desasignados
+    assert_eq!(
+        RESOURCE_COUNT.load(Ordering::SeqCst),
+        0,
+        "Todos los recursos de heap externos debieron liberarse"
+    );
+}
+
+/// DROP-07: Ámbitos anidados con destructores pendientes y pánicos concurrentes en cascada.
+#[test]
+fn test_drop_07_nested_scopes_cascade_cleanup() {
+    let order_log = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    struct LoggedDrop {
+        id: usize,
+        log: Arc<std::sync::Mutex<Vec<usize>>>,
+        panics: bool,
+    }
+
+    impl Drop for LoggedDrop {
+        fn drop(&mut self) {
+            self.log.lock().unwrap().push(self.id);
+            if self.panics {
+                panic!("pánico en {}", self.id);
+            }
+        }
+    }
+
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut arena = ScopedArena::new(8192).unwrap();
+        let outer = arena.begin_scope().unwrap();
+        let _ = arena
+            .alloc(
+                &outer,
+                LoggedDrop {
+                    id: 1,
+                    log: order_log.clone(),
+                    panics: false,
+                },
+            )
+            .unwrap();
+
+        let mid = arena.begin_scope().unwrap();
+        let _ = arena
+            .alloc(
+                &mid,
+                LoggedDrop {
+                    id: 2,
+                    log: order_log.clone(),
+                    panics: true,
+                },
+            )
+            .unwrap();
+
+        let inner = arena.begin_scope().unwrap();
+        let _ = arena
+            .alloc(
+                &inner,
+                LoggedDrop {
+                    id: 3,
+                    log: order_log.clone(),
+                    panics: false,
+                },
+            )
+            .unwrap();
+        let _ = arena
+            .alloc(
+                &inner,
+                LoggedDrop {
+                    id: 4,
+                    log: order_log.clone(),
+                    panics: true,
+                },
+            )
+            .unwrap();
+    }));
+
+    let recorded = order_log.lock().unwrap().clone();
+    // Debe haber ejecutado los 4 destructores en LIFO: 4, 3, 2, 1
+    assert_eq!(recorded, vec![4, 3, 2, 1]);
+}

@@ -44,12 +44,23 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
   3. `alloc()` y `close_scope()` validan estrictamente la coincidencia de `arena_id` y `scope_id`. Cualquier marcador foráneo o de orden incorrecto es rechazado inmediatamente con `CloseScopeError`, devolviendo el `ScopeMarker` intacto al llamador para permitir recuperación y cierre ordenado sin clonación.
   4. Pre-reserva estricta: `alloc()` ejecuta `drops.try_reserve(1)` antes de escribir el valor, previniendo objetos vivos no registrados en caso de OOM.
   5. Resiliencia ante pánicos y envenenamiento (`ArenaState::Poisoned`): Si un destructor entra en pánico durante `close_scope`, `ScopeCloseGuard` marca la arena como `Poisoned`. El `offset` NO se retrocede al inicio del ámbito, blindando la memoria de los objetos no destruidos contra sobreescrituras en caso de captura de pánico (`catch_unwind`). La entrada que causó pánico fue retirada previamente de `drops`, garantizando cero dobles destrucciones. Toda operación subsiguiente (`alloc`, `begin_scope`, `close_scope`) sobre la arena envenenada es rechazada con `ArenaError::Poisoned`.
-  6. Al ejecutarse `drop(arena)`, se procesan limpiamente en orden LIFO todos los destructores pendientes de ámbitos externos o del ámbito interrumpido, y `BufferGuard` asegura la liberación de la memoria virtual aunque un destructor falle en el drop final.
+  6. Protocolo de Destrucción Final Resiliente (`Drop for ScopedArena`): Al ejecutarse `drop(arena)`, se drenan y ejecutan todos los destructores pendientes en orden LIFO estricto. Cada destructor se ejecuta encapsulado en `std::panic::catch_unwind`. Si uno o varios destructores fallan con pánico, los restantes continúan ejecutándose hasta vaciar completamente `drops`, asegurando que ningún objeto sufra omisión de su destructor ni retención indebida de recursos externos (ficheros, memoria heap, sockets). Una vez drenados todos los objetos, `BufferGuard` desasigna la memoria virtual. Si ocurrieron pánicos y el hilo no se encontraba previamente en unwinding (`!std::thread::panicking()`), se reanuda el primer pánico registrado mediante `std::panic::resume_unwind`, cumpliendo con la propagación transparente del error y evitando simultáneamente abortos fatales por doble pánico (*double panic abort*).
   7. `close_scope` consume el `ScopeMarker` por valor.
   8. Si existiese cualquier préstamo activo de la arena, el borrow checker rechaza la llamada a `close_scope` por solapamiento de préstamos vivos.
   9. `ScopedArena` no implementa `Send` ni `Sync` (retiene punteros crudos `NonNull<u8>`), impidiendo formalmente que tipos no aptos para concurrencia (como `Rc`) sean transferidos entre hilos a través de la arena.
   10. La arena garantiza alineación base de 128 bytes (o configurable como potencia de dos) y soporta alineaciones arbitrarias de tipos (probado hasta 4096 bytes) sin desbordamiento aritmético gracias a `align_offset` y comprobaciones `checked_add`. Tipos de tamaño cero (ZST) no consumen capacidad de memoria y ejecutan sus destructores deterministamente.
   11. `begin_scope()` retorna `Result<ScopeMarker, ArenaError>` y previene desbordamiento del contador de ámbitos con `checked_add(1)` retornando `ArenaError::ScopeDepthExhausted`.
+
+### T5: Frontera de Autoridad y Revalidación de Enlaces Compactos
+- **Separación de conceptos**:
+  1. **Enlace como dato (`CompactLink`, `CompactLink64`)**: Identificador plano de 32 o 64 bits copiable (`Copy`, `Clone`). Carece por completo de autoridad propietaria o capacidad de desreferenciación directa. Sus métodos `matches()` son predicados puramente representacionales.
+  2. **Revalidación autorizada (`CompactPoolAuthority`, `CompactPoolAuthority64`)**: Operación ejecutada exclusivamente por el pool físico bajo verificación estricta de:
+     - Afinidad de `pool_id`.
+     - Límites de capacidad (`slot < slot_capacity`).
+     - Estado de asignación del slot (no libre, no en hueco, impar).
+     - Estado no retirado ($\text{gen} < \text{GEN\_RETIRADO}$).
+     - Coincidencia exacta de generación viva.
+  3. **Token de acceso no propietario (`CompactObjRef`, `CompactObjRef64`)**: Representación opaca con campos privados y sin constructor público, emitible únicamente tras el éxito de la revalidación autorizada. Jamás es convertible a `Handle` (conservación estricta de las reglas de posesión R2, R3, R6, R7, R8 y R9 de ELE).
 
 ---
 
@@ -60,16 +71,22 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
 | **No-UAF** | Generación impar/par y descarte físico | `adversarial_atomicity::a08`, `physical::f07` | Verificada |
 | **No-Double-Free** | Linearidad de `Handle` | `pool.rs` compile_fail doctests, `api_security.rs` | Verificada |
 | **No-ABA (32-bit)** | Retirada en $2^{32}-2$ | `bislab::agotamiento_de_generacion_sin_wraparound` | Verificada |
-| **No-ABA (16-bit)** | Retirada en $2^{16}-2$ | `test_compact_nexo::test_compact_gen_exhaustion_and_no_aba` | Verificada |
+| **No-ABA (16-bit)** | Retirada en $2^{16}-2$ | `test_compact_nexo::test_compact_gen_exhaustion_and_no_aba`, `test_compact_gen_16bit_boundary_correctness` | Verificada |
 | **No-ABA (8-bit)** | Retirada en 254 (`GEN_RETIRADO_8`) | `test_compact_nexo::test_exhaustive_8bit_domain_and_invariants` | Verificada |
-| **Compact Registry** | Límite estricto 255 IDs sin reciclaje | `test_compact_nexo::test_compact_pool_registry_bounded_issuance` | Verificada |
+| **Compact Registry 8-bit** | Límite estricto 255 IDs sin reciclaje ni colisiones concurrentes | `test_compact_nexo::test_compact_pool_registry_bounded_issuance`, `test_compact_pool_registry_concurrent_issuance_no_duplicates` | Verificada |
+| **Compact Registry 16-bit** | Límite estricto 65.535 IDs sin reciclaje | `test_compact_nexo::test_compact_pool_registry_16_bounded_issuance` | Verificada |
+| **Compact Authority** | Revalidación autorizada y rechazo de slots foráneos/stale/pares | `test_compact_nexo::test_compact_link_authorized_revalidation_boundary` | Verificada |
 | **Aislamiento Scope** | Marcador lineal de ámbito | `test_scoped_arena::test_nested_scopes_and_lifo_destruction` | Verificada |
 | **Panic Resilience** | Envenenamiento y guard LIFO | `test_scoped_arena::test_p0_arena_01_three_objects_middle_panics_in_drop` | Verificada |
 | **No Memory Overwrite** | Bloqueo de asignación envenenada | `test_scoped_arena::test_p0_arena_02_allocation_after_panic_is_rejected_no_overwrite` | Verificada |
-| **No Double Free Drop** | Cierre limpio de drops restantes | `test_scoped_arena::test_p0_arena_03_arena_drop_destroys_remaining_objects_exactly_once` | Verificada |
-| **Anidamiento y Pánico** | Propagación de envenenamiento | `test_scoped_arena::test_p0_arena_04_nested_scopes_with_inner_panic` | Verificada |
+| **Final Drop Resilient** | Drenado total LIFO ante pánico individual | `test_scoped_arena::test_drop_01_single_panic_with_three_pending_destructors` | Verificada |
+| **Multi-Panic Resilience**| Drenado total LIFO ante múltiples pánicos | `test_scoped_arena::test_drop_02_multiple_panics_during_arena_drop` | Verificada |
+| **Poisoned Final Drop** | Liberación de arena envenenada | `test_scoped_arena::test_drop_03_poisoned_arena_final_drop` | Verificada |
+| **Panic Propagation** | Reanudación fiel de carga útil de pánico | `test_scoped_arena::test_drop_04_panic_propagation_payload` | Verificada |
+| **No Double-Panic Abort**| Intercepción segura durante unwinding activo | `test_scoped_arena::test_drop_05_no_double_panic_abort_during_unwinding` | Verificada |
+| **Complex Heap Drops** | Liberación de buffers complejos de heap | `test_scoped_arena::test_drop_06_complex_heap_resources_cleaned_on_panic`, `test_p0_arena_06_complex_heap_owners_freed_cleanly` | Verificada |
+| **Nested Cascade Cleanup**| Limpieza en cascada en ámbitos anidados | `test_scoped_arena::test_drop_07_nested_scopes_cascade_cleanup`, `test_p0_arena_04_nested_scopes_with_inner_panic` | Verificada |
 | **ZST Drop Safety** | Destrucción LIFO sin avance de offset | `test_scoped_arena::test_p0_arena_05_zst_drop_interleaved_and_panic` | Verificada |
-| **Heap Owners** | Liberación de buffers complejos | `test_scoped_arena::test_p0_arena_06_complex_heap_owners_freed_cleanly` | Verificada |
 | **Scope Overflow** | `checked_add` y `ScopeDepthExhausted` | `test_scoped_arena::test_p0_arena_07_deep_scope_nesting_and_depth_invariants` | Verificada |
 | **Alineación 4096** | Padding seguro y potencia de dos | `test_scoped_arena::test_p0_arena_08_extreme_alignment_up_to_4096` | Verificada |
 | **PFS Reconcile** | Cuarentena y reparación | PFS01–PFS12, `nexo-physical-fuzz` | Verificada |

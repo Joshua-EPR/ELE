@@ -4,44 +4,63 @@
 //! e implementar ciclos de vida compactos en pools de tamaño limitado preservando
 //! estrictamente la inmunidad ante problemas ABA y colisiones de identidad.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::fmt;
+use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 
 pub const INVALID_COMPACT_POOL_ID: u8 = 0;
 pub const MAX_COMPACT_POOLS: u8 = 255;
+pub const INVALID_COMPACT_POOL_ID_16: u16 = 0;
+pub const MAX_COMPACT_POOLS_16: u16 = 65535;
 pub const GEN_RETIRADO_16: u16 = 0xfffe;
 pub const GEN_RETIRADO_8: u8 = 0xfe;
 pub const MAX_SLOT_COMPACT_32: u32 = 0xffff; // 16 bits = 65.535 slots por pool compacto de 4 bytes
 
-/// Contador monotónico atómico de pools compactos asignados (0..=255).
-/// 0 indica que ningún pool ha sido registrado aún.
-static ALLOCATED_COMPACT_POOLS: AtomicU8 = AtomicU8::new(0);
-
 /// Errores de asignación y registro de pools compactos.
 #[derive(Debug, Eq, PartialEq)]
 pub enum CompactPoolError {
-    /// Se ha agotado el espacio de 255 identificadores únicos de pool compacto.
+    /// Se ha agotado el espacio de identificadores únicos de pool compacto.
     /// Queda terminantemente prohibido el reciclaje o wraparound silencioso.
     PoolIdExhausted,
     InvalidPoolId,
 }
 
-/// Registro global seguro de identificadores de pools compactos de 8 bits.
-pub struct CompactPoolRegistry;
+impl fmt::Display for CompactPoolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PoolIdExhausted => write!(f, "compact pool identifier space exhausted"),
+            Self::InvalidPoolId => write!(f, "invalid compact pool identifier"),
+        }
+    }
+}
 
-impl CompactPoolRegistry {
-    /// Reserva un nuevo identificador único de pool compacto (1..=255).
-    ///
-    /// Garantiza ausencia de reciclaje: una vez asignados los 255 identificadores,
-    /// cualquier intento posterior retorna [`CompactPoolError::PoolIdExhausted`],
-    /// impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
-    pub fn acquire_id() -> Result<u8, CompactPoolError> {
-        let mut current = ALLOCATED_COMPACT_POOLS.load(Ordering::Relaxed);
+impl std::error::Error for CompactPoolError {}
+
+/// Instancia de registro acotado de identificadores de pools compactos de 8 bits (1..=255).
+pub struct CompactPoolRegistryInstance {
+    allocated: AtomicU8,
+}
+
+impl Default for CompactPoolRegistryInstance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompactPoolRegistryInstance {
+    pub const fn new() -> Self {
+        Self {
+            allocated: AtomicU8::new(0),
+        }
+    }
+
+    pub fn acquire_id(&self) -> Result<u8, CompactPoolError> {
+        let mut current = self.allocated.load(Ordering::Relaxed);
         loop {
             if current == MAX_COMPACT_POOLS {
                 return Err(CompactPoolError::PoolIdExhausted);
             }
             let next = current + 1;
-            match ALLOCATED_COMPACT_POOLS.compare_exchange_weak(
+            match self.allocated.compare_exchange_weak(
                 current,
                 next,
                 Ordering::SeqCst,
@@ -53,18 +72,108 @@ impl CompactPoolRegistry {
         }
     }
 
+    pub fn is_valid_id(&self, id: u8) -> bool {
+        id != INVALID_COMPACT_POOL_ID && id <= self.allocated.load(Ordering::SeqCst)
+    }
+
+    pub fn allocated_count(&self) -> u8 {
+        self.allocated.load(Ordering::SeqCst)
+    }
+}
+
+static GLOBAL_COMPACT_REGISTRY: CompactPoolRegistryInstance = CompactPoolRegistryInstance::new();
+
+/// Registro global seguro de identificadores de pools compactos de 8 bits.
+pub struct CompactPoolRegistry;
+
+impl CompactPoolRegistry {
+    /// Reserva un nuevo identificador único de pool compacto (1..=255).
+    ///
+    /// Garantiza ausencia de reciclaje: una vez asignados los 255 identificadores,
+    /// cualquier intento posterior retorna [`CompactPoolError::PoolIdExhausted`],
+    /// impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
+    pub fn acquire_id() -> Result<u8, CompactPoolError> {
+        GLOBAL_COMPACT_REGISTRY.acquire_id()
+    }
+
     /// Comprueba si un identificador se encuentra dentro del rango asignado legítimamente.
     ///
     /// Un identificador es válido si y solo si:
     /// 1. No es `INVALID_COMPACT_POOL_ID` (0).
     /// 2. Es menor o igual al número total de identificadores efectivamente emitidos.
     pub fn is_valid_id(id: u8) -> bool {
-        id != INVALID_COMPACT_POOL_ID && id <= ALLOCATED_COMPACT_POOLS.load(Ordering::SeqCst)
+        GLOBAL_COMPACT_REGISTRY.is_valid_id(id)
     }
 
     /// Retorna la cantidad de identificadores de pool efectivamente emitidos hasta el momento.
     pub fn allocated_count() -> u8 {
-        ALLOCATED_COMPACT_POOLS.load(Ordering::SeqCst)
+        GLOBAL_COMPACT_REGISTRY.allocated_count()
+    }
+}
+
+/// Instancia de registro acotado de identificadores de pools compactos de 16 bits (1..=65.535).
+pub struct CompactPoolRegistryInstance16 {
+    allocated: AtomicU16,
+}
+
+impl Default for CompactPoolRegistryInstance16 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompactPoolRegistryInstance16 {
+    pub const fn new() -> Self {
+        Self {
+            allocated: AtomicU16::new(0),
+        }
+    }
+
+    pub fn acquire_id(&self) -> Result<u16, CompactPoolError> {
+        let mut current = self.allocated.load(Ordering::Relaxed);
+        loop {
+            if current == MAX_COMPACT_POOLS_16 {
+                return Err(CompactPoolError::PoolIdExhausted);
+            }
+            let next = current + 1;
+            match self.allocated.compare_exchange_weak(
+                current,
+                next,
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(next),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    pub fn is_valid_id(&self, id: u16) -> bool {
+        id != INVALID_COMPACT_POOL_ID_16 && id <= self.allocated.load(Ordering::SeqCst)
+    }
+
+    pub fn allocated_count(&self) -> u16 {
+        self.allocated.load(Ordering::SeqCst)
+    }
+}
+
+static GLOBAL_COMPACT_REGISTRY_16: CompactPoolRegistryInstance16 =
+    CompactPoolRegistryInstance16::new();
+
+/// Registro global seguro de identificadores de pools compactos de 16 bits.
+pub struct CompactPoolRegistry16;
+
+impl CompactPoolRegistry16 {
+    pub fn acquire_id() -> Result<u16, CompactPoolError> {
+        GLOBAL_COMPACT_REGISTRY_16.acquire_id()
+    }
+
+    pub fn is_valid_id(id: u16) -> bool {
+        GLOBAL_COMPACT_REGISTRY_16.is_valid_id(id)
+    }
+
+    pub fn allocated_count() -> u16 {
+        GLOBAL_COMPACT_REGISTRY_16.allocated_count()
     }
 }
 
@@ -82,7 +191,7 @@ pub struct CompactGen;
 impl CompactGen {
     /// Transiciona un slot a la siguiente generación viva (impar) en 16 bits.
     pub fn allocate(current: u16) -> Result<u16, CompactGenError> {
-        if current == GEN_RETIRADO_16 {
+        if current >= GEN_RETIRADO_16 {
             return Err(CompactGenError::Retired);
         }
         // El slot debe estar en estado par (libre o recién destruido)
@@ -98,7 +207,7 @@ impl CompactGen {
 
     /// Transiciona un slot a la siguiente generación destruida (par) o retirado en 16 bits.
     pub fn destroy(current: u16) -> Result<u16, CompactGenError> {
-        if current == GEN_RETIRADO_16 {
+        if current >= GEN_RETIRADO_16 {
             return Err(CompactGenError::Retired);
         }
         // El slot debe estar vivo (impar)
@@ -114,12 +223,12 @@ impl CompactGen {
 
     /// Comprueba si la generación de 16 bits corresponde a un slot vivo.
     pub fn is_live(g: u16) -> bool {
-        g != GEN_RETIRADO_16 && !g.is_multiple_of(2)
+        g < GEN_RETIRADO_16 && !g.is_multiple_of(2)
     }
 
     /// Comprueba si la generación de 16 bits está retirada permanentemente.
     pub fn is_retired(g: u16) -> bool {
-        g == GEN_RETIRADO_16
+        g >= GEN_RETIRADO_16
     }
 
     /// Transiciona un slot a la siguiente generación viva (impar) en 8 bits.
@@ -316,27 +425,271 @@ impl CompactLink64 {
     }
 }
 
+/// Error al revalidar un enlace compacto contra una autoridad física de pool.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompactRevalidateError {
+    /// El enlace no pertenece al pool indicado (`pool_id` no coincide).
+    ForeignPool,
+    /// El índice de slot supera la capacidad máxima del pool.
+    OutOfBounds,
+    /// El slot consultado no se encuentra asignado (está libre o en estado hueco).
+    SlotNotAllocated,
+    /// La generación del enlace es obsoleta respecto a la generación viva actual del slot.
+    StaleGeneration,
+    /// La generación del slot ha sido retirada permanentemente por agotamiento de ciclos.
+    GenerationRetired,
+}
+
+impl fmt::Display for CompactRevalidateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ForeignPool => write!(f, "compact link does not belong to this pool"),
+            Self::OutOfBounds => write!(f, "compact link slot index out of bounds"),
+            Self::SlotNotAllocated => write!(f, "compact link slot is not currently allocated"),
+            Self::StaleGeneration => write!(f, "compact link generation is stale"),
+            Self::GenerationRetired => {
+                write!(f, "compact link slot generation is permanently retired")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompactRevalidateError {}
+
+/// Token de acceso no propietario obtenido exclusivamente tras una revalidación autorizada
+/// de un enlace compacto de 4 bytes ([`CompactLink`]).
+///
+/// Invariantes de seguridad (R1-R9):
+/// 1. Campos estrictamente privados: ningún consumidor externo puede fabricar un `CompactObjRef`.
+/// 2. Sin constructor público: emitible únicamente por una implementación autorizada de pool.
+/// 3. No implementa `Clone` ni `Copy`: preserva la disciplina de préstamos sin duplicación espuria.
+/// 4. No puede convertirse a `Handle`: un enlace jamás confiere capacidad de posesión o destrucción.
+#[derive(Debug)]
+pub struct CompactObjRef {
+    pool_id: u8,
+    slot: u32,
+    generation: u8,
+}
+
+impl CompactObjRef {
+    pub fn pool_id(&self) -> u8 {
+        self.pool_id
+    }
+
+    pub fn slot(&self) -> u32 {
+        self.slot
+    }
+
+    pub fn generation(&self) -> u8 {
+        self.generation
+    }
+}
+
+/// Token de acceso no propietario obtenido tras revalidación de un enlace compacto de 8 bytes ([`CompactLink64`]).
+#[derive(Debug)]
+pub struct CompactObjRef64 {
+    pool_id: u16,
+    slot: u32,
+    generation: u16,
+}
+
+impl CompactObjRef64 {
+    pub fn pool_id(&self) -> u16 {
+        self.pool_id
+    }
+
+    pub fn slot(&self) -> u32 {
+        self.slot
+    }
+
+    pub fn generation(&self) -> u16 {
+        self.generation
+    }
+}
+
+/// Autoridad de revalidación para pools con soporte de enlaces compactos de 4 bytes.
+pub trait CompactPoolAuthority {
+    fn compact_id(&self) -> u8;
+    fn slot_capacity(&self) -> u32;
+    fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError>;
+
+    /// Revalida un enlace compacto contra la autoridad real del pool.
+    fn revalidate_compact(
+        &self,
+        link: CompactLink,
+    ) -> Result<CompactObjRef, CompactRevalidateError> {
+        if link.pool_id() != self.compact_id() {
+            return Err(CompactRevalidateError::ForeignPool);
+        }
+        if link.slot() >= self.slot_capacity() {
+            return Err(CompactRevalidateError::OutOfBounds);
+        }
+        let current_gen = self.current_compact_generation(link.slot())?;
+        if current_gen >= GEN_RETIRADO_8 {
+            return Err(CompactRevalidateError::GenerationRetired);
+        }
+        if current_gen.is_multiple_of(2) {
+            return Err(CompactRevalidateError::SlotNotAllocated);
+        }
+        if link.generation() != current_gen {
+            return Err(CompactRevalidateError::StaleGeneration);
+        }
+        Ok(CompactObjRef {
+            pool_id: link.pool_id(),
+            slot: link.slot(),
+            generation: link.generation(),
+        })
+    }
+}
+
+/// Autoridad de revalidación para pools con soporte de enlaces compactos de 8 bytes.
+pub trait CompactPoolAuthority64 {
+    fn compact_id(&self) -> u16;
+    fn slot_capacity(&self) -> u32;
+    fn current_compact_generation(&self, slot: u32) -> Result<u16, CompactRevalidateError>;
+
+    /// Revalida un enlace compacto de 64 bits contra la autoridad real del pool.
+    fn revalidate_compact_64(
+        &self,
+        link: CompactLink64,
+    ) -> Result<CompactObjRef64, CompactRevalidateError> {
+        if link.pool_id() != self.compact_id() {
+            return Err(CompactRevalidateError::ForeignPool);
+        }
+        if link.slot() >= self.slot_capacity() {
+            return Err(CompactRevalidateError::OutOfBounds);
+        }
+        let current_gen = self.current_compact_generation(link.slot())?;
+        if current_gen >= GEN_RETIRADO_16 {
+            return Err(CompactRevalidateError::GenerationRetired);
+        }
+        if current_gen.is_multiple_of(2) {
+            return Err(CompactRevalidateError::SlotNotAllocated);
+        }
+        if link.generation() != current_gen {
+            return Err(CompactRevalidateError::StaleGeneration);
+        }
+        Ok(CompactObjRef64 {
+            pool_id: link.pool_id(),
+            slot: link.slot(),
+            generation: link.generation(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_compact_pool_registry_invariants() {
-        assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
-        let count = CompactPoolRegistry::allocated_count();
-        if count == 0 {
-            assert!(!CompactPoolRegistry::is_valid_id(1));
-        } else {
-            assert!(CompactPoolRegistry::is_valid_id(count));
+    struct MockCompactPool {
+        id: u8,
+        capacity: u32,
+        generations: Vec<u8>,
+    }
+
+    impl CompactPoolAuthority for MockCompactPool {
+        fn compact_id(&self) -> u8 {
+            self.id
+        }
+        fn slot_capacity(&self) -> u32 {
+            self.capacity
+        }
+        fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError> {
+            if slot as usize >= self.generations.len() {
+                return Err(CompactRevalidateError::OutOfBounds);
+            }
+            Ok(self.generations[slot as usize])
         }
     }
 
     #[test]
-    fn test_matches_representation_predicate() {
-        let link = CompactLink::new(5, 100, 3).unwrap();
-        assert!(link.matches(5, 3));
-        assert!(!link.matches(6, 3));
-        assert!(!link.matches(5, 4));
-        assert!(!link.matches(5, 254));
+    fn test_compact_pool_authority_revalidation() {
+        let pool = MockCompactPool {
+            id: 10,
+            capacity: 100,
+            generations: vec![1, 2, 3, 254], // slot 0: gen 1 (vivo), slot 1: gen 2 (destruido), slot 2: gen 3 (vivo), slot 3: retirado
+        };
+
+        // Enlace válido
+        let valid_link = CompactLink::new(10, 0, 1).unwrap();
+        let obj_ref = pool.revalidate_compact(valid_link).unwrap();
+        assert_eq!(obj_ref.pool_id(), 10);
+        assert_eq!(obj_ref.slot(), 0);
+        assert_eq!(obj_ref.generation(), 1);
+
+        // Enlace foráneo (pool_id distinto)
+        let foreign_link = CompactLink::new(11, 0, 1).unwrap();
+        assert_eq!(
+            pool.revalidate_compact(foreign_link).unwrap_err(),
+            CompactRevalidateError::ForeignPool
+        );
+
+        // Slot no asignado (par)
+        let unallocated_link = CompactLink::new(10, 1, 1).unwrap();
+        assert_eq!(
+            pool.revalidate_compact(unallocated_link).unwrap_err(),
+            CompactRevalidateError::SlotNotAllocated
+        );
+
+        // Generación obsoleta (stale)
+        let stale_link = CompactLink::new(10, 2, 1).unwrap(); // el pool tiene gen 3
+        assert_eq!(
+            pool.revalidate_compact(stale_link).unwrap_err(),
+            CompactRevalidateError::StaleGeneration
+        );
+
+        // Slot fuera de límites
+        let oob_link = CompactLink::new(10, 200, 1).unwrap();
+        assert_eq!(
+            pool.revalidate_compact(oob_link).unwrap_err(),
+            CompactRevalidateError::OutOfBounds
+        );
+    }
+
+    #[test]
+    fn test_compact_gen_16bit_boundary_correctness() {
+        assert!(CompactGen::is_retired(GEN_RETIRADO_16));
+        assert!(CompactGen::is_retired(0xffff));
+        assert!(!CompactGen::is_live(0xffff));
+        assert!(!CompactGen::is_live(GEN_RETIRADO_16));
+        assert!(CompactGen::is_live(65533));
+        assert!(!CompactGen::is_live(65532));
+
+        assert_eq!(
+            CompactGen::allocate(0xffff).unwrap_err(),
+            CompactGenError::Retired
+        );
+        assert_eq!(
+            CompactGen::destroy(0xffff).unwrap_err(),
+            CompactGenError::Retired
+        );
+    }
+
+    #[test]
+    fn test_isolated_compact_pool_registry_instance() {
+        let registry = CompactPoolRegistryInstance::new();
+        assert_eq!(registry.allocated_count(), 0);
+        assert!(!registry.is_valid_id(0));
+        assert!(!registry.is_valid_id(1));
+
+        let id1 = registry.acquire_id().unwrap();
+        assert_eq!(id1, 1);
+        assert!(registry.is_valid_id(1));
+        assert!(!registry.is_valid_id(2));
+        assert_eq!(registry.allocated_count(), 1);
+    }
+
+    #[test]
+    fn test_isolated_compact_pool_registry_16_instance() {
+        let registry16 = CompactPoolRegistryInstance16::new();
+        assert_eq!(registry16.allocated_count(), 0);
+        assert!(!registry16.is_valid_id(0));
+        assert!(!registry16.is_valid_id(1));
+
+        let id1 = registry16.acquire_id().unwrap();
+        assert_eq!(id1, 1);
+        assert!(registry16.is_valid_id(1));
+        assert!(!registry16.is_valid_id(2));
+        assert_eq!(registry16.allocated_count(), 1);
     }
 }

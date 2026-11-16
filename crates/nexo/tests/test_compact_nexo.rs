@@ -2,9 +2,11 @@
 //! registro de identidades de pool y enlaces compactos (32 bits y 64 bits).
 
 use nexo::next::{
-    CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactPoolError,
-    CompactPoolRegistry, GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID,
-    MAX_COMPACT_POOLS, MAX_SLOT_COMPACT_32,
+    CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactObjRef,
+    CompactPoolAuthority, CompactPoolError, CompactPoolRegistry, CompactPoolRegistry16,
+    CompactPoolRegistryInstance, CompactPoolRegistryInstance16, CompactRevalidateError,
+    GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID, INVALID_COMPACT_POOL_ID_16,
+    MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
 };
 
 #[test]
@@ -198,24 +200,141 @@ fn test_compact_link_slot_and_generation_boundaries() {
 
 #[test]
 fn test_compact_pool_registry_bounded_issuance() {
-    // Asignar IDs hasta alcanzar el límite
+    let registry = CompactPoolRegistryInstance::new();
+
+    // Asignar IDs hasta alcanzar el límite exacto de 255
     let mut allocated = Vec::new();
-    while let Ok(id) = CompactPoolRegistry::acquire_id() {
+    while let Ok(id) = registry.acquire_id() {
         assert_ne!(id, INVALID_COMPACT_POOL_ID);
         allocated.push(id);
     }
 
+    assert_eq!(allocated.len(), MAX_COMPACT_POOLS as usize);
+    assert_eq!(allocated[0], 1);
+    assert_eq!(allocated[MAX_COMPACT_POOLS as usize - 1], MAX_COMPACT_POOLS);
+
     // Una vez agotado, cualquier intento posterior debe retornar PoolIdExhausted
     assert_eq!(
-        CompactPoolRegistry::acquire_id().unwrap_err(),
+        registry.acquire_id().unwrap_err(),
         CompactPoolError::PoolIdExhausted
     );
 
     // Verificar que jamás hubo wraparound a 0 ni a valores ya asignados
-    assert!(CompactPoolRegistry::is_valid_id(1));
-    assert!(CompactPoolRegistry::is_valid_id(MAX_COMPACT_POOLS));
+    assert!(registry.is_valid_id(1));
+    assert!(registry.is_valid_id(MAX_COMPACT_POOLS));
+    assert!(!registry.is_valid_id(INVALID_COMPACT_POOL_ID));
+    assert_eq!(registry.allocated_count(), MAX_COMPACT_POOLS);
+}
+
+#[test]
+fn test_compact_pool_registry_concurrent_issuance_no_duplicates() {
+    use std::sync::Arc;
+    let registry = Arc::new(CompactPoolRegistryInstance::new());
+    let mut handles = Vec::new();
+
+    for _ in 0..8 {
+        let reg = registry.clone();
+        handles.push(std::thread::spawn(move || {
+            let mut issued = Vec::new();
+            while let Ok(id) = reg.acquire_id() {
+                issued.push(id);
+            }
+            issued
+        }));
+    }
+
+    let mut all_issued = Vec::new();
+    for h in handles {
+        all_issued.extend(h.join().unwrap());
+    }
+
+    assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
+    all_issued.sort_unstable();
+    all_issued.dedup();
+    assert_eq!(all_issued.len(), MAX_COMPACT_POOLS as usize);
+}
+
+#[test]
+fn test_compact_pool_registry_16_bounded_issuance() {
+    let registry16 = CompactPoolRegistryInstance16::new();
+    assert_eq!(registry16.allocated_count(), 0);
+    assert!(!registry16.is_valid_id(INVALID_COMPACT_POOL_ID_16));
+    assert!(!registry16.is_valid_id(1));
+
+    let id1 = registry16.acquire_id().unwrap();
+    assert_eq!(id1, 1);
+    assert!(registry16.is_valid_id(1));
+    assert!(!registry16.is_valid_id(2));
+    assert_eq!(registry16.allocated_count(), 1);
+
+    assert_eq!(MAX_COMPACT_POOLS_16, 65535);
+    assert!(!CompactPoolRegistry16::is_valid_id(
+        INVALID_COMPACT_POOL_ID_16
+    ));
     assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
-    assert_eq!(CompactPoolRegistry::allocated_count(), MAX_COMPACT_POOLS);
+}
+
+struct TestPool {
+    id: u8,
+    slots: Vec<u8>,
+}
+
+impl CompactPoolAuthority for TestPool {
+    fn compact_id(&self) -> u8 {
+        self.id
+    }
+    fn slot_capacity(&self) -> u32 {
+        self.slots.len() as u32
+    }
+    fn current_compact_generation(&self, slot: u32) -> Result<u8, CompactRevalidateError> {
+        if slot as usize >= self.slots.len() {
+            return Err(CompactRevalidateError::OutOfBounds);
+        }
+        Ok(self.slots[slot as usize])
+    }
+}
+
+#[test]
+fn test_compact_link_authorized_revalidation_boundary() {
+    let pool = TestPool {
+        id: 42,
+        slots: vec![1, 2, 3, GEN_RETIRADO_8], // 0: vivo (1), 1: par (2), 2: vivo (3), 3: retirado (254)
+    };
+
+    // Revalidación autorizada exitosa
+    let link = CompactLink::new(42, 0, 1).unwrap();
+    let obj: CompactObjRef = pool.revalidate_compact(link).unwrap();
+    assert_eq!(obj.pool_id(), 42);
+    assert_eq!(obj.slot(), 0);
+    assert_eq!(obj.generation(), 1);
+
+    // Revalidación fallida por pool foráneo
+    let foreign = CompactLink::new(43, 0, 1).unwrap();
+    assert_eq!(
+        pool.revalidate_compact(foreign).unwrap_err(),
+        CompactRevalidateError::ForeignPool
+    );
+
+    // Revalidación fallida por slot par (no asignado)
+    let even = CompactLink::new(42, 1, 1).unwrap();
+    assert_eq!(
+        pool.revalidate_compact(even).unwrap_err(),
+        CompactRevalidateError::SlotNotAllocated
+    );
+
+    // Revalidación fallida por generación stale
+    let stale = CompactLink::new(42, 2, 1).unwrap();
+    assert_eq!(
+        pool.revalidate_compact(stale).unwrap_err(),
+        CompactRevalidateError::StaleGeneration
+    );
+
+    // Revalidación fallida por generación retirada
+    let ret_link = CompactLink::new(42, 3, 1).unwrap();
+    assert_eq!(
+        pool.revalidate_compact(ret_link).unwrap_err(),
+        CompactRevalidateError::GenerationRetired
+    );
 }
 
 #[test]

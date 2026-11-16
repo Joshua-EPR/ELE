@@ -381,8 +381,9 @@ impl ScopedArena {
 
 impl Drop for ScopedArena {
     fn drop(&mut self) {
-        // Guarda de búfer: garantiza que la memoria virtual se libere aunque
-        // un destructor pendiente entre en pánico durante el drop de la arena.
+        // Guarda de búfer: garantiza que la memoria virtual se libere ÚNICAMENTE
+        // DESPUÉS de que todos los destructores pendientes hayan sido ejecutados o intentados,
+        // incluso ante pánicos sucesivos.
         struct BufferGuard {
             buffer: NonNull<u8>,
             capacity: usize,
@@ -404,11 +405,34 @@ impl Drop for ScopedArena {
             base_align: self.base_align,
         };
 
-        // Ejecutar cualquier drop pendiente en orden LIFO
+        let mut first_panic: Option<Box<dyn std::any::Any + Send + 'static>> = None;
+
+        // Drenar y ejecutar todos los destructores pendientes en estricto orden LIFO.
+        // Si uno o más destructores entran en pánico, se capturan individualmente para
+        // asegurar que los objetos restantes tengan la oportunidad de ejecutarse y liberar recursos.
         while let Some(entry) = self.drops.pop() {
-            unsafe {
+            // Se extrae `entry` ANTES de la llamada; si entra en pánico, jamás se vuelve a invocar.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                 (entry.drop_fn)(entry.ptr);
+            }));
+
+            if let Err(err) = result
+                && first_panic.is_none()
+            {
+                first_panic = Some(err);
             }
+        }
+
+        // Una vez ejecutados todos los drops, `_guard` liberará la memoria virtual al salir.
+        // Si ocurrió algún pánico y el hilo no se encontraba ya en unwinding, reanudar
+        // el primer pánico para cumplir con la política de propagación transparente.
+        // Si el hilo ya estaba desenrollándose (p. ej. en catch_unwind exterior), no reanudamos
+        // para evitar un aborto fatal por doble pánico (double panic abort).
+        if let Some(panic_payload) = first_panic
+            && !std::thread::panicking()
+        {
+            drop(_guard);
+            std::panic::resume_unwind(panic_payload);
         }
     }
 }
