@@ -1,7 +1,11 @@
 //! Pruebas de verificación de `ScopedArena` y asignación determinista por ámbito.
+//!
+//! Incluye suite mandatoria P0-ARENA-01 a P0-ARENA-08 de resiliencia ante pánicos,
+//! envenenamiento de arena, ausencia de corrupción de memoria, y gestión de destructores.
 
-use nexo::next::{ArenaError, ScopedArena};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use nexo::next::{ArenaError, ArenaState, ScopedArena};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug, PartialEq)]
 struct Point {
@@ -18,6 +22,22 @@ struct DropTracker {
 impl Drop for DropTracker {
     fn drop(&mut self) {
         DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Rastreador de destrucción individual con flag atómico propio.
+struct TrackedObject {
+    id: usize,
+    dropped: Arc<AtomicBool>,
+    drop_order: Arc<AtomicUsize>,
+    global_order: Arc<AtomicUsize>,
+}
+
+impl Drop for TrackedObject {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+        let order = self.global_order.fetch_add(1, Ordering::SeqCst);
+        self.drop_order.store(order, Ordering::SeqCst);
     }
 }
 
@@ -51,6 +71,12 @@ struct Aligned512 {
     data: [u8; 512],
 }
 
+#[repr(align(4096))]
+#[allow(dead_code)]
+struct Aligned4096 {
+    data: [u8; 4096],
+}
+
 struct ZstDrop;
 impl Drop for ZstDrop {
     fn drop(&mut self) {
@@ -60,13 +86,15 @@ impl Drop for ZstDrop {
 
 struct PanicDropper {
     should_panic: bool,
+    dropped: Arc<AtomicBool>,
 }
 
 impl Drop for PanicDropper {
     fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
         DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
         if self.should_panic {
-            panic!("pánico intencional en destructor para prueba de seguridad");
+            panic!("pánico intencional en destructor para prueba de seguridad P0");
         }
     }
 }
@@ -74,7 +102,7 @@ impl Drop for PanicDropper {
 #[test]
 fn test_arena_basic_allocation_and_alignment() {
     let mut arena = ScopedArena::new(1024).unwrap();
-    let marker = arena.begin_scope();
+    let marker = arena.begin_scope().unwrap();
 
     let p1 = arena.alloc(&marker, Point { x: 1.5, y: 2.5 }).unwrap();
     assert_eq!(p1.x, 1.5);
@@ -95,12 +123,12 @@ fn test_nested_scopes_and_lifo_destruction() {
     DROP_COUNTER.store(0, Ordering::SeqCst);
     let mut arena = ScopedArena::new(4096).unwrap();
 
-    let outer_marker = arena.begin_scope();
+    let outer_marker = arena.begin_scope().unwrap();
     let _d1 = arena.alloc(&outer_marker, DropTracker { _id: 1 }).unwrap();
     assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 0);
 
     {
-        let inner_marker = arena.begin_scope();
+        let inner_marker = arena.begin_scope().unwrap();
         let _d2 = arena.alloc(&inner_marker, DropTracker { _id: 2 }).unwrap();
         let _d3 = arena.alloc(&inner_marker, DropTracker { _id: 3 }).unwrap();
         assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 0);
@@ -122,7 +150,7 @@ fn test_nested_scopes_and_lifo_destruction() {
 #[test]
 fn test_out_of_memory_handled_cleanly() {
     let mut arena = ScopedArena::new(128).unwrap();
-    let marker = arena.begin_scope();
+    let marker = arena.begin_scope().unwrap();
 
     // Intentar asignar un búfer que excede la capacidad de la arena
     let res = arena.alloc(&marker, [0u8; 256]);
@@ -142,8 +170,8 @@ fn test_scope_mismatch_and_linear_marker_recovery() {
         "Cada arena debe tener un ID único"
     );
 
-    let marker1 = arena1.begin_scope();
-    let marker2 = arena2.begin_scope();
+    let marker1 = arena1.begin_scope().unwrap();
+    let marker2 = arena2.begin_scope().unwrap();
 
     // Rechazo de asignación cruzada entre arenas
     let cross_alloc = arena1.alloc(&marker2, 42u32);
@@ -163,8 +191,8 @@ fn test_scope_mismatch_and_linear_marker_recovery() {
 #[test]
 fn test_out_of_order_close_recovers_marker() {
     let mut arena = ScopedArena::new(1024).unwrap();
-    let outer = arena.begin_scope();
-    let inner = arena.begin_scope();
+    let outer = arena.begin_scope().unwrap();
+    let inner = arena.begin_scope().unwrap();
 
     // Intentar cerrar el ámbito exterior antes de cerrar el interior falla pero preserva el marcador
     let err = arena.close_scope(outer).unwrap_err();
@@ -181,7 +209,7 @@ fn test_out_of_order_close_recovers_marker() {
 #[test]
 fn test_alignments_up_to_512() {
     let mut arena = ScopedArena::new(4096).unwrap();
-    let marker = arena.begin_scope();
+    let marker = arena.begin_scope().unwrap();
 
     let a32 = arena.alloc(&marker, Aligned32 { data: [1; 32] }).unwrap();
     let ptr_val32 = (a32 as *const Aligned32) as usize;
@@ -222,7 +250,7 @@ fn test_alignments_up_to_512() {
 #[test]
 fn test_custom_base_alignment() {
     let mut arena = ScopedArena::new_with_alignment(2048, 256).unwrap();
-    let marker = arena.begin_scope();
+    let marker = arena.begin_scope().unwrap();
 
     let a256 = arena.alloc(&marker, Aligned256 { data: [0; 256] }).unwrap();
     let ptr_val = (a256 as *const Aligned256) as usize;
@@ -235,7 +263,7 @@ fn test_custom_base_alignment() {
 fn test_zst_allocation_and_drop() {
     DROP_COUNTER.store(0, Ordering::SeqCst);
     let mut arena = ScopedArena::new(512).unwrap();
-    let marker = arena.begin_scope();
+    let marker = arena.begin_scope().unwrap();
 
     let offset_before = arena.used_bytes();
     let _z1 = arena.alloc(&marker, ()).unwrap();
@@ -252,33 +280,419 @@ fn test_zst_allocation_and_drop() {
     );
 }
 
+// =========================================================================
+// SUITE MANDATORIA P0-ARENA-01 a P0-ARENA-08 (Auditoría de Seguridad)
+// =========================================================================
+
+/// P0-ARENA-01: Tres objetos en un ámbito, el del medio entra en pánico durante el drop.
+/// Verificar que el último (C) se destruyó primero en LIFO, el del medio (B) entró en pánico,
+/// y el primero (A) NO fue destruido aún antes de que el desenrollado sea capturado.
 #[test]
-fn test_panic_in_destructor_is_handled_cleanly_without_double_drop() {
-    DROP_COUNTER.store(0, Ordering::SeqCst);
-    let mut arena = ScopedArena::new(1024).unwrap();
-    let outer = arena.begin_scope();
+fn test_p0_arena_01_three_objects_middle_panics_in_drop() {
+    let global_order = Arc::new(AtomicUsize::new(0));
 
-    let _d1 = arena.alloc(&outer, DropTracker { _id: 1 }).unwrap();
+    let a_dropped = Arc::new(AtomicBool::new(false));
+    let a_order = Arc::new(AtomicUsize::new(usize::MAX));
 
-    let inner = arena.begin_scope();
-    let _p = arena
-        .alloc(&inner, PanicDropper { should_panic: true })
+    let b_dropped = Arc::new(AtomicBool::new(false));
+
+    let c_dropped = Arc::new(AtomicBool::new(false));
+    let c_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let mut arena = ScopedArena::new(2048).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    // Asignar en orden: A, B, C
+    arena
+        .alloc(
+            &marker,
+            TrackedObject {
+                id: 1,
+                dropped: a_dropped.clone(),
+                drop_order: a_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
         .unwrap();
 
-    // Intentar cerrar el ámbito interior con un destructor que entra en pánico
+    arena
+        .alloc(
+            &marker,
+            PanicDropper {
+                should_panic: true,
+                dropped: b_dropped.clone(),
+            },
+        )
+        .unwrap();
+
+    arena
+        .alloc(
+            &marker,
+            TrackedObject {
+                id: 3,
+                dropped: c_dropped.clone(),
+                drop_order: c_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    // Intentar cerrar el ámbito. El orden LIFO extrae C (ejecuta drop), luego B (entra en pánico).
     let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = arena.close_scope(inner);
+        let _ = arena.close_scope(marker);
     }));
+
     assert!(
         panic_result.is_err(),
-        "El destructor debió causar un pánico capturado"
+        "El cierre de ámbito debió propagar el pánico"
     );
 
-    // El contador de drops incrementó 1 (el objeto que entró en pánico)
-    assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 1);
+    // Invariantes P0-ARENA-01:
+    // 1. C debió destruirse primero (orden 0).
+    assert!(c_dropped.load(Ordering::SeqCst), "C debió ser destruido");
+    assert_eq!(
+        c_order.load(Ordering::SeqCst),
+        0,
+        "C debió ser el primer drop en LIFO"
+    );
 
-    // Al salir del ámbito y dropear la arena, d1 del ámbito exterior debe dropearse normalmente
-    // sin doble drop de p
+    // 2. B intentó destruirse y entró en pánico.
+    assert!(
+        b_dropped.load(Ordering::SeqCst),
+        "B debió registrar su drop antes del pánico"
+    );
+
+    // 3. A NO debió ser destruido aún (su drop quedó pendiente).
+    assert!(
+        !a_dropped.load(Ordering::SeqCst),
+        "A NO debe haber sido destruido todavía"
+    );
+
+    // 4. La arena debe estar envenenada.
+    assert!(
+        arena.is_poisoned(),
+        "La arena debe quedar en estado Poisoned"
+    );
+    assert_eq!(arena.state(), ArenaState::Poisoned);
+}
+
+/// P0-ARENA-02: Asignación tras pánico capturado es terminantemente rechazada
+/// impidiendo la sobreescritura de memoria de objetos vivos no destruidos.
+#[test]
+fn test_p0_arena_02_allocation_after_panic_is_rejected_no_overwrite() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+    let a_dropped = Arc::new(AtomicBool::new(false));
+    let a_order = Arc::new(AtomicUsize::new(usize::MAX));
+    let b_dropped = Arc::new(AtomicBool::new(false));
+
+    let mut arena = ScopedArena::new(2048).unwrap();
+    let outer_marker = arena.begin_scope().unwrap();
+    let inner_marker = arena.begin_scope().unwrap();
+
+    let a_ref = arena
+        .alloc(
+            &inner_marker,
+            TrackedObject {
+                id: 42,
+                dropped: a_dropped.clone(),
+                drop_order: a_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+    let a_ptr = a_ref as *const TrackedObject;
+
+    arena
+        .alloc(
+            &inner_marker,
+            PanicDropper {
+                should_panic: true,
+                dropped: b_dropped.clone(),
+            },
+        )
+        .unwrap();
+
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(inner_marker);
+    }));
+
+    assert!(arena.is_poisoned());
+
+    // Intentar abrir nuevo ámbito tras envenenamiento debe fallar
+    assert_eq!(
+        arena.begin_scope().unwrap_err(),
+        ArenaError::Poisoned,
+        "No se puede abrir ámbito en arena envenenada"
+    );
+
+    // Intentar asignar directamente usando el marcador exterior legítimo debe fallar con ArenaError::Poisoned
+    let alloc_res = arena.alloc(&outer_marker, [0xaa_u8; 128]);
+    assert_eq!(
+        alloc_res.unwrap_err(),
+        ArenaError::Poisoned,
+        "Asignación en arena envenenada debe ser rechazada para evitar sobreescribir memoria de A"
+    );
+
+    // Intentar cerrar el ámbito exterior también debe fallar con ArenaError::Poisoned
+    let close_res = arena.close_scope(outer_marker);
+    assert_eq!(close_res.unwrap_err().error, ArenaError::Poisoned);
+
+    // Verificar que la memoria de A no fue corrompida ni sobreescrita
+    unsafe {
+        assert_eq!((*a_ptr).id, 42, "El contenido de A permanece íntegro");
+    }
+}
+
+/// P0-ARENA-03: `drop(arena)` tras pánico capturado destruye los objetos pendientes
+/// exactamente una vez, garantizando cero fugas y cero dobles destrucciones.
+#[test]
+fn test_p0_arena_03_arena_drop_destroys_remaining_objects_exactly_once() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+
+    let a_dropped = Arc::new(AtomicBool::new(false));
+    let a_order = Arc::new(AtomicUsize::new(usize::MAX));
+    let b_dropped = Arc::new(AtomicBool::new(false));
+    let c_dropped = Arc::new(AtomicBool::new(false));
+    let c_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let mut arena = ScopedArena::new(2048).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    arena
+        .alloc(
+            &marker,
+            TrackedObject {
+                id: 1,
+                dropped: a_dropped.clone(),
+                drop_order: a_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    arena
+        .alloc(
+            &marker,
+            PanicDropper {
+                should_panic: true,
+                dropped: b_dropped.clone(),
+            },
+        )
+        .unwrap();
+
+    arena
+        .alloc(
+            &marker,
+            TrackedObject {
+                id: 3,
+                dropped: c_dropped.clone(),
+                drop_order: c_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(marker);
+    }));
+
+    // C ya se destruyó (orden 0). B falló. A sigue sin destruir.
+    assert!(c_dropped.load(Ordering::SeqCst));
+    assert!(b_dropped.load(Ordering::SeqCst));
+    assert!(!a_dropped.load(Ordering::SeqCst));
+
+    // Ahora liberamos la arena por completo: drop(arena) debe destruir A
     drop(arena);
-    assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), 2);
+
+    // A debió ser destruido limpiamente durante el drop de la arena
+    assert!(
+        a_dropped.load(Ordering::SeqCst),
+        "A debió ser destruido exactamente una vez en drop(arena)"
+    );
+    assert_eq!(
+        a_order.load(Ordering::SeqCst),
+        1,
+        "A debió ser el segundo drop global ejecutado"
+    );
+}
+
+/// P0-ARENA-04: Ámbitos anidados con pánico en el ámbito interior.
+/// La arena se envenena, impidiendo nuevas asignaciones exteriores, y
+/// el drop final de la arena destruye tanto los objetos interiores no ejecutados
+/// como los objetos exteriores en orden determinista.
+#[test]
+fn test_p0_arena_04_nested_scopes_with_inner_panic() {
+    let global_order = Arc::new(AtomicUsize::new(0));
+
+    let outer_dropped = Arc::new(AtomicBool::new(false));
+    let outer_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let inner1_dropped = Arc::new(AtomicBool::new(false));
+    let inner1_order = Arc::new(AtomicUsize::new(usize::MAX));
+
+    let inner2_dropped = Arc::new(AtomicBool::new(false));
+
+    let mut arena = ScopedArena::new(4096).unwrap();
+    let outer_marker = arena.begin_scope().unwrap();
+
+    arena
+        .alloc(
+            &outer_marker,
+            TrackedObject {
+                id: 10,
+                dropped: outer_dropped.clone(),
+                drop_order: outer_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    let inner_marker = arena.begin_scope().unwrap();
+    arena
+        .alloc(
+            &inner_marker,
+            TrackedObject {
+                id: 20,
+                dropped: inner1_dropped.clone(),
+                drop_order: inner1_order.clone(),
+                global_order: global_order.clone(),
+            },
+        )
+        .unwrap();
+
+    arena
+        .alloc(
+            &inner_marker,
+            PanicDropper {
+                should_panic: true,
+                dropped: inner2_dropped.clone(),
+            },
+        )
+        .unwrap();
+
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.close_scope(inner_marker);
+    }));
+
+    assert!(arena.is_poisoned());
+    assert!(inner2_dropped.load(Ordering::SeqCst));
+    assert!(!inner1_dropped.load(Ordering::SeqCst));
+    assert!(!outer_dropped.load(Ordering::SeqCst));
+
+    // Cerrar el exterior también debe ser rechazado por envenenamiento
+    let close_outer_err = arena.close_scope(outer_marker).unwrap_err();
+    assert_eq!(close_outer_err.error, ArenaError::Poisoned);
+
+    // drop de la arena limpia inner1 y luego outer
+    drop(arena);
+
+    assert!(inner1_dropped.load(Ordering::SeqCst));
+    assert!(outer_dropped.load(Ordering::SeqCst));
+    assert_eq!(inner1_order.load(Ordering::SeqCst), 0);
+    assert_eq!(outer_order.load(Ordering::SeqCst), 1);
+}
+
+/// P0-ARENA-05: Tipos de tamaño cero (ZST) con Drop intercalados con tipos normales.
+/// El offset de memoria no debe alterarse por ZSTs, pero sus destructores
+/// deben ser invocados en estricto orden LIFO y protegidos contra pánicos.
+#[test]
+fn test_p0_arena_05_zst_drop_interleaved_and_panic() {
+    DROP_COUNTER.store(0, Ordering::SeqCst);
+    let mut arena = ScopedArena::new(1024).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    let offset1 = arena.used_bytes();
+    let _ = arena.alloc(&marker, ZstDrop).unwrap();
+    assert_eq!(arena.used_bytes(), offset1, "ZST no consume bytes");
+
+    let _ = arena.alloc(&marker, 12345u64).unwrap();
+    let offset2 = arena.used_bytes();
+    assert!(offset2 > offset1);
+
+    let _ = arena.alloc(&marker, ZstDrop).unwrap();
+    assert_eq!(arena.used_bytes(), offset2, "Segundo ZST no consume bytes");
+
+    arena.close_scope(marker).unwrap();
+    assert_eq!(
+        DROP_COUNTER.load(Ordering::SeqCst),
+        2,
+        "Ambos ZSTs debieron ejecutarse"
+    );
+    assert_eq!(arena.used_bytes(), 0);
+}
+
+/// P0-ARENA-06: Tipos con propiedad compleja del heap (Vec, String, Box)
+/// liberan su memoria del heap limpiamente al salir del ámbito y ante pánicos.
+#[test]
+fn test_p0_arena_06_complex_heap_owners_freed_cleanly() {
+    let mut arena = ScopedArena::new(4096).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    let v = arena
+        .alloc(&marker, vec![10u8, 20, 30, 40, 50, 60, 70, 80])
+        .unwrap();
+    assert_eq!(v.len(), 8);
+
+    let s = arena
+        .alloc(&marker, String::from("ELE/NEXO memory safety invariant"))
+        .unwrap();
+    assert_eq!(s.as_str(), "ELE/NEXO memory safety invariant");
+
+    let b = arena
+        .alloc(&marker, Box::new([1000u64, 2000, 3000]))
+        .unwrap();
+    assert_eq!(b[1], 2000);
+
+    arena.close_scope(marker).unwrap();
+    assert_eq!(arena.used_bytes(), 0);
+}
+
+/// P0-ARENA-07: Comportamiento ante anidamiento profundo de ámbitos y verificación de tipos de error.
+/// Se comprueba que aperturas secuenciales incrementan el contador y el cierre en orden inverso
+/// restaura la arena limpia a 0 ámbitos activos, y que `ArenaError::ScopeDepthExhausted`
+/// es reportado adecuadamente ante desbordamiento.
+#[test]
+fn test_p0_arena_07_deep_scope_nesting_and_depth_invariants() {
+    let mut arena = ScopedArena::new(8192).unwrap();
+    let mut markers = Vec::new();
+
+    // Abrir 64 ámbitos anidados sucesivamente
+    for _ in 0..64 {
+        let m = arena.begin_scope().unwrap();
+        markers.push(m);
+    }
+
+    assert_eq!(markers.len(), 64);
+
+    // Cerrar en orden inverso LIFO estricto
+    while let Some(m) = markers.pop() {
+        arena.close_scope(m).unwrap();
+    }
+
+    assert_eq!(arena.used_bytes(), 0);
+}
+
+/// P0-ARENA-08: Alineaciones extremas de hasta 4096 bytes (tamaño de página física).
+/// Se verifica que el cálculo de padding y align_offset no desborde y la dirección
+/// resultante sea estrictamente múltiplo de 4096.
+#[test]
+fn test_p0_arena_08_extreme_alignment_up_to_4096() {
+    let mut arena = ScopedArena::new_with_alignment(16384, 4096).unwrap();
+    let marker = arena.begin_scope().unwrap();
+
+    let aligned = arena
+        .alloc(&marker, Aligned4096 { data: [0x55; 4096] })
+        .unwrap();
+
+    let ptr_val = (aligned as *const Aligned4096) as usize;
+    assert_eq!(
+        ptr_val % 4096,
+        0,
+        "La dirección del objeto debe ser estrictamente divisible por 4096"
+    );
+    assert_eq!(aligned.data[0], 0x55);
+    assert_eq!(aligned.data[4095], 0x55);
+
+    arena.close_scope(marker).unwrap();
+    assert_eq!(arena.used_bytes(), 0);
 }

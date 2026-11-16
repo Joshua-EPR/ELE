@@ -215,6 +215,7 @@ fn test_compact_pool_registry_bounded_issuance() {
     assert!(CompactPoolRegistry::is_valid_id(1));
     assert!(CompactPoolRegistry::is_valid_id(MAX_COMPACT_POOLS));
     assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
+    assert_eq!(CompactPoolRegistry::allocated_count(), MAX_COMPACT_POOLS);
 }
 
 #[test]

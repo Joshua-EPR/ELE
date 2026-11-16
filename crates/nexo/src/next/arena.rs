@@ -14,12 +14,14 @@ pub const ARENA_BASE_ALIGN: usize = 128;
 
 static NEXT_ARENA_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Error de asignación en `ScopedArena`.
+/// Error de asignación o ámbito en `ScopedArena`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArenaError {
     OutOfMemory,
     InvalidAlignment,
     ScopeMismatch,
+    Poisoned,
+    ScopeDepthExhausted,
 }
 
 impl fmt::Display for ArenaError {
@@ -28,11 +30,29 @@ impl fmt::Display for ArenaError {
             Self::OutOfMemory => write!(f, "arena memory or capacity exhausted"),
             Self::InvalidAlignment => write!(f, "invalid alignment requested"),
             Self::ScopeMismatch => write!(f, "scope marker mismatch or out-of-order scope access"),
+            Self::Poisoned => write!(f, "arena is poisoned due to a destructor panic"),
+            Self::ScopeDepthExhausted => write!(f, "maximum active scope depth exhausted"),
         }
     }
 }
 
 impl std::error::Error for ArenaError {}
+
+/// Estado de operatividad de `ScopedArena`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArenaState {
+    Active,
+    Poisoned,
+}
+
+impl fmt::Display for ArenaState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Active => write!(f, "Active"),
+            Self::Poisoned => write!(f, "Poisoned"),
+        }
+    }
+}
 
 /// Error al cerrar un ámbito en `ScopedArena`.
 ///
@@ -92,6 +112,14 @@ impl ScopeMarker {
     pub fn scope_id(&self) -> u64 {
         self.scope_id
     }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn drop_count(&self) -> usize {
+        self.drop_count
+    }
 }
 
 /// Pila de datos y asignador por ámbito estructurado.
@@ -106,6 +134,7 @@ pub struct ScopedArena {
     base_align: usize,
     offset: usize,
     active_scopes: u64,
+    state: ArenaState,
     drops: Vec<DropEntry>,
 }
 
@@ -142,12 +171,15 @@ impl ScopedArena {
         if base_align == 0 || !base_align.is_power_of_two() {
             return Err(ArenaError::InvalidAlignment);
         }
+
+        // Asignar el ID monotónico de la arena ANTES de reservar memoria,
+        // garantizando ausencia de fugas de memoria si la asignación de ID falla.
+        let id = next_arena_id()?;
+
         let layout = Layout::from_size_align(capacity, base_align)
             .map_err(|_| ArenaError::InvalidAlignment)?;
         let ptr = unsafe { alloc(layout) };
         let buffer = NonNull::new(ptr).ok_or(ArenaError::OutOfMemory)?;
-
-        let id = next_arena_id()?;
 
         Ok(Self {
             id,
@@ -156,6 +188,7 @@ impl ScopedArena {
             base_align,
             offset: 0,
             active_scopes: 0,
+            state: ArenaState::Active,
             drops: Vec::new(),
         })
     }
@@ -176,15 +209,33 @@ impl ScopedArena {
         self.capacity.saturating_sub(self.offset)
     }
 
+    pub fn state(&self) -> ArenaState {
+        self.state
+    }
+
+    pub fn is_poisoned(&self) -> bool {
+        self.state == ArenaState::Poisoned
+    }
+
     /// Inicia un nuevo ámbito estructurado y retorna un marcador lineal ligado a esta arena.
-    pub fn begin_scope(&mut self) -> ScopeMarker {
-        self.active_scopes = self.active_scopes.saturating_add(1);
-        ScopeMarker {
+    ///
+    /// Retorna `Err(ArenaError::Poisoned)` si la arena se encuentra envenenada por un pánico previo,
+    /// o `Err(ArenaError::ScopeDepthExhausted)` si se supera la profundidad máxima representable.
+    pub fn begin_scope(&mut self) -> Result<ScopeMarker, ArenaError> {
+        if self.state == ArenaState::Poisoned {
+            return Err(ArenaError::Poisoned);
+        }
+        let next_scope = self
+            .active_scopes
+            .checked_add(1)
+            .ok_or(ArenaError::ScopeDepthExhausted)?;
+        self.active_scopes = next_scope;
+        Ok(ScopeMarker {
             arena_id: self.id,
             scope_id: self.active_scopes,
             offset: self.offset,
             drop_count: self.drops.len(),
-        }
+        })
     }
 
     /// Asigna un valor dentro del ámbito actual.
@@ -201,6 +252,9 @@ impl ScopedArena {
         marker: &ScopeMarker,
         val: T,
     ) -> Result<&mut T, ArenaError> {
+        if self.state == ArenaState::Poisoned {
+            return Err(ArenaError::Poisoned);
+        }
         if marker.arena_id != self.id || marker.scope_id != self.active_scopes {
             return Err(ArenaError::ScopeMismatch);
         }
@@ -259,12 +313,24 @@ impl ScopedArena {
     /// Cierra el ámbito estructurado consumiendo el marcador lineal.
     ///
     /// Valida la afinidad de arena y orden estricto de ámbito. Ante cualquier discordancia,
-    /// aborta retornando `Err(CloseScopeError { marker, error: ScopeMismatch })` devolviendo el marcador
-    /// intacto sin ejecutar destructores ni corromper el offset o contador de ámbitos.
+    /// aborta retornando `Err(CloseScopeError { marker, error })` devolviendo el marcador
+    /// intacto sin ejecutar destructores ni alterar el offset.
     ///
-    /// Si un destructor entra en pánico durante el cierre, un guard de limpieza garantiza que el
-    /// estado de la arena quede consistente y ningún objeto sea doblemente destruido.
+    /// Si un destructor entra en pánico durante el cierre:
+    /// 1. La arena pasa a estado `Poisoned`.
+    /// 2. El `offset` NO se retrocede hacia el inicio del ámbito, impidiendo que asignaciones
+    ///    posteriores sobreescriban memoria de objetos aún pendientes de destrucción.
+    /// 3. La entrada en `drops` correspondiente al objeto que entró en pánico ya fue extraída,
+    ///    asegurando formalmente que jamás será destruido por segunda vez.
+    /// 4. Los objetos restantes en ámbitos exteriores o previos son preservados intactos y serán
+    ///    destruidos de forma segura cuando la arena sea finalmente liberada en `Drop`.
     pub fn close_scope(&mut self, marker: ScopeMarker) -> Result<(), CloseScopeError> {
+        if self.state == ArenaState::Poisoned {
+            return Err(CloseScopeError {
+                marker,
+                error: ArenaError::Poisoned,
+            });
+        }
         if marker.arena_id != self.id || marker.scope_id != self.active_scopes {
             return Err(CloseScopeError {
                 marker,
@@ -272,51 +338,106 @@ impl ScopedArena {
             });
         }
 
-        // Estructura de guarda para asegurar consistencia ante pánicos en destructores
-        struct CleanupGuard<'a> {
+        // Guarda para envenenar la arena ante pánico durante la ejecución de destructores
+        struct ScopeCloseGuard<'a> {
             arena: &'a mut ScopedArena,
-            target_offset: usize,
-            target_scopes: u64,
+            completed: bool,
         }
 
-        impl<'a> Drop for CleanupGuard<'a> {
+        impl<'a> Drop for ScopeCloseGuard<'a> {
             fn drop(&mut self) {
-                self.arena.offset = self.target_offset;
-                self.arena.active_scopes = self.target_scopes;
+                if !self.completed {
+                    // Pánico durante el cierre de destructores:
+                    // Envenenar la arena de forma irreversible.
+                    self.arena.state = ArenaState::Poisoned;
+                    // NO retroceder offset: los objetos vivos o pendientes en la arena
+                    // no deben ser sobreescritos por código que capture el pánico.
+                }
             }
         }
 
-        let guard = CleanupGuard {
-            target_offset: marker.offset,
-            target_scopes: self.active_scopes.saturating_sub(1),
+        let mut guard = ScopeCloseGuard {
             arena: self,
+            completed: false,
         };
 
         // Ejecutar destructores registrados durante este ámbito en orden LIFO
         while guard.arena.drops.len() > marker.drop_count {
             if let Some(entry) = guard.arena.drops.pop() {
+                // Se extrae primero; si drop_fn entra en pánico, entry ya no está en drops
                 unsafe {
                     (entry.drop_fn)(entry.ptr);
                 }
             }
         }
 
-        drop(guard);
+        // Si todos los destructores concluyeron normalmente, restaurar offset y decrementar ámbitos
+        guard.arena.offset = marker.offset;
+        guard.arena.active_scopes = guard.arena.active_scopes.saturating_sub(1);
+        guard.completed = true;
         Ok(())
     }
 }
 
 impl Drop for ScopedArena {
     fn drop(&mut self) {
+        // Guarda de búfer: garantiza que la memoria virtual se libere aunque
+        // un destructor pendiente entre en pánico durante el drop de la arena.
+        struct BufferGuard {
+            buffer: NonNull<u8>,
+            capacity: usize,
+            base_align: usize,
+        }
+
+        impl Drop for BufferGuard {
+            fn drop(&mut self) {
+                let layout = Layout::from_size_align(self.capacity, self.base_align).unwrap();
+                unsafe {
+                    dealloc(self.buffer.as_ptr(), layout);
+                }
+            }
+        }
+
+        let _guard = BufferGuard {
+            buffer: self.buffer,
+            capacity: self.capacity,
+            base_align: self.base_align,
+        };
+
         // Ejecutar cualquier drop pendiente en orden LIFO
         while let Some(entry) = self.drops.pop() {
             unsafe {
                 (entry.drop_fn)(entry.ptr);
             }
         }
-        let layout = Layout::from_size_align(self.capacity, self.base_align).unwrap();
-        unsafe {
-            dealloc(self.buffer.as_ptr(), layout);
-        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scope_depth_overflow_checked_boundary() {
+        let mut arena = ScopedArena::new(1024).unwrap();
+        // Simular el límite superior absoluto de u64
+        arena.active_scopes = u64::MAX;
+
+        let res = arena.begin_scope();
+        assert_eq!(res.unwrap_err(), ArenaError::ScopeDepthExhausted);
+    }
+
+    #[test]
+    fn test_arena_state_display_and_equality() {
+        assert_eq!(format!("{}", ArenaState::Active), "Active");
+        assert_eq!(format!("{}", ArenaState::Poisoned), "Poisoned");
+        assert_eq!(
+            format!("{}", ArenaError::ScopeDepthExhausted),
+            "maximum active scope depth exhausted"
+        );
+        assert_eq!(
+            format!("{}", ArenaError::Poisoned),
+            "arena is poisoned due to a destructor panic"
+        );
     }
 }

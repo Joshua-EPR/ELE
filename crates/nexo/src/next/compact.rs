@@ -12,9 +12,9 @@ pub const GEN_RETIRADO_16: u16 = 0xfffe;
 pub const GEN_RETIRADO_8: u8 = 0xfe;
 pub const MAX_SLOT_COMPACT_32: u32 = 0xffff; // 16 bits = 65.535 slots por pool compacto de 4 bytes
 
-/// Contador monotónico atómico para la asignación de identidades de pool compacto.
-/// Inicia en 1 (0 reservado como identificador inválido).
-static NEXT_COMPACT_POOL_ID: AtomicU8 = AtomicU8::new(1);
+/// Contador monotónico atómico de pools compactos asignados (0..=255).
+/// 0 indica que ningún pool ha sido registrado aún.
+static ALLOCATED_COMPACT_POOLS: AtomicU8 = AtomicU8::new(0);
 
 /// Errores de asignación y registro de pools compactos.
 #[derive(Debug, Eq, PartialEq)]
@@ -35,28 +35,36 @@ impl CompactPoolRegistry {
     /// cualquier intento posterior retorna [`CompactPoolError::PoolIdExhausted`],
     /// impidiendo que un pool nuevo reutilice una identidad capaz de validar un enlace antiguo.
     pub fn acquire_id() -> Result<u8, CompactPoolError> {
-        let mut current = NEXT_COMPACT_POOL_ID.load(Ordering::Relaxed);
+        let mut current = ALLOCATED_COMPACT_POOLS.load(Ordering::Relaxed);
         loop {
             if current == MAX_COMPACT_POOLS {
-                // Verificar si ya fue consumido el 255
                 return Err(CompactPoolError::PoolIdExhausted);
             }
-            let next = current.saturating_add(1);
-            match NEXT_COMPACT_POOL_ID.compare_exchange_weak(
+            let next = current + 1;
+            match ALLOCATED_COMPACT_POOLS.compare_exchange_weak(
                 current,
                 next,
                 Ordering::SeqCst,
                 Ordering::Relaxed,
             ) {
-                Ok(val) => return Ok(val),
+                Ok(_) => return Ok(next),
                 Err(actual) => current = actual,
             }
         }
     }
 
     /// Comprueba si un identificador se encuentra dentro del rango asignado legítimamente.
+    ///
+    /// Un identificador es válido si y solo si:
+    /// 1. No es `INVALID_COMPACT_POOL_ID` (0).
+    /// 2. Es menor o igual al número total de identificadores efectivamente emitidos.
     pub fn is_valid_id(id: u8) -> bool {
-        id != INVALID_COMPACT_POOL_ID && id <= NEXT_COMPACT_POOL_ID.load(Ordering::Relaxed)
+        id != INVALID_COMPACT_POOL_ID && id <= ALLOCATED_COMPACT_POOLS.load(Ordering::SeqCst)
+    }
+
+    /// Retorna la cantidad de identificadores de pool efectivamente emitidos hasta el momento.
+    pub fn allocated_count() -> u8 {
+        ALLOCATED_COMPACT_POOLS.load(Ordering::SeqCst)
     }
 }
 
@@ -217,7 +225,11 @@ impl CompactLink {
         ((self.0 >> 16) & 0xff) as u8
     }
 
-    /// Comprueba si este enlace compacto coincide estrictamente con el pool y la generación del slot.
+    /// Comprueba si este enlace compacto coincide a nivel de representación con el pool y la generación del slot.
+    ///
+    /// PRECAUCIÓN: Este método es un predicado puramente representacional. No constituye por sí solo
+    /// una revalidación completa de autoridad sobre memoria física, la cual requiere verificar el estado vivo
+    /// y asignado del slot en la tabla de asignación del pool correspondiente (`PhysicalPool`).
     ///
     /// Retorna `true` únicamente si:
     /// 1. El pool coincide exactamente (`self.pool_id() == pool_id`).
@@ -282,6 +294,10 @@ impl CompactLink64 {
         ((self.0 >> 32) & 0xffff) as u16
     }
 
+    /// Comprueba si este enlace compacto de 64 bits coincide a nivel de representación con el pool y la generación del slot.
+    ///
+    /// PRECAUCIÓN: Predicado representacional. La revalidación de autoridad sobre memoria física requiere
+    /// consultar el estado efectivo del slot en el pool propietario.
     pub fn matches(&self, pool_id: u32, current_generation: u32) -> bool {
         if self.pool_id() as u32 != pool_id {
             return false;
@@ -297,5 +313,30 @@ impl CompactLink64 {
 
     pub fn raw(&self) -> u64 {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compact_pool_registry_invariants() {
+        assert!(!CompactPoolRegistry::is_valid_id(INVALID_COMPACT_POOL_ID));
+        let count = CompactPoolRegistry::allocated_count();
+        if count == 0 {
+            assert!(!CompactPoolRegistry::is_valid_id(1));
+        } else {
+            assert!(CompactPoolRegistry::is_valid_id(count));
+        }
+    }
+
+    #[test]
+    fn test_matches_representation_predicate() {
+        let link = CompactLink::new(5, 100, 3).unwrap();
+        assert!(link.matches(5, 3));
+        assert!(!link.matches(6, 3));
+        assert!(!link.matches(5, 4));
+        assert!(!link.matches(5, 254));
     }
 }

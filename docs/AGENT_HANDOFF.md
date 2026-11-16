@@ -1,39 +1,43 @@
 # Traspaso de agente — ELE
 
-## Actualización 2026-11-15 (Pase 2) — Cierre total de seguridad y robustez en NEXO v0.3 y v0.4
+## Actualización 2026-11-15 (Pase 3) — Cierre definitivo P0 de resiliencia ante pánicos en `ScopedArena`, consistencia de `CompactPoolRegistry` y Suite P0-ARENA-01..08
 
 Ramas auditadas:
 - `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`).
-- `feat/nexo-v0.4-next-memory` (Experimental v0.4, HEAD pendiente de commit final).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de cierre P0).
 
-### 1. Auditoría y verificación exhaustiva de API de producción (PR #69)
-- Se añadieron pruebas de compilación negativa demostrando que un crate externo no puede:
-  - Construir `Handle` directamente (`error[E0451]`).
-  - Construir `HoleToken` directamente (`error[E0451]`).
-  - Construir `Link` directamente (`error[E0451]`).
-  - Construir `ObjRef` directamente (`error[E0451]`).
-  - Clonar `Handle` (`error[E0277]` por ausencia de `Clone`).
-  - Clonar `HoleToken` (`error[E0277]` por ausencia de `Clone`).
-  - Invocar métodos de prueba o corrupción (`error[E0599]`).
-- Compilaciones `--all-features` y `--release` de `ele-nexo` verificadas limpias.
+### 1. Corrección P0 de Resiliencia ante Pánicos en `ScopedArena`
+- **Defecto P0 resuelto**: Si un destructor entraba en pánico en `close_scope()`, el guard anterior retrocedía el `offset` a `marker.offset` mientras los objetos no alcanzados permanecían en `drops`. Una captura posterior (`catch_unwind`) permitía que `alloc()` sobreescribiera la memoria de dichos objetos, desembocando en corrupción de memoria o UAF durante `drop(arena)`.
+- **Máquina de estados segura**:
+  - Se introdujo `ArenaState` (`Active`, `Poisoned`).
+  - `close_scope()` utiliza `ScopeCloseGuard`: si un destructor causa pánico durante el desenrollado, la arena transiciona a `ArenaState::Poisoned`.
+  - El `offset` NO se retrocede al punto inicial del ámbito, protegiendo la memoria de los objetos no destruidos.
+  - La entrada que causa pánico ya ha sido extraída de `drops` mediante `pop()`, garantizando ausencia de doble destrucción.
+  - Toda llamada posterior a `alloc()`, `begin_scope()` o `close_scope()` en una arena envenenada retorna de inmediato `Err(ArenaError::Poisoned)`.
+  - `Drop for ScopedArena` destruye limpiamente en orden LIFO los objetos restantes y utiliza `BufferGuard` para garantizar la desasignación de la memoria virtual aunque un destructor falle en el drop final.
+  - `begin_scope()` retorna `Result<ScopeMarker, ArenaError>` y valida desbordamiento de `u64` con `checked_add(1)`, retornando `Err(ArenaError::ScopeDepthExhausted)`.
+  - `new_with_alignment()` reserva el identificador atómico único ANTES de asignar memoria virtual, previniendo fugas ante agotamiento de identificadores.
 
-### 2. Identidad y ausencia de colisiones en `CompactLink` (v0.4)
-- `CompactPoolRegistry`: Registro acotado de identidades de pool compacto (1..=255). Al alcanzar 255 IDs, falla con `CompactPoolError::PoolIdExhausted` impidiendo reciclaje de identidades.
-- `CompactLink` (32 bits, 4 bytes): 16 bits de slot (0..65.535), 8 bits de generación (1..253 con retiro estricto en 254), 8 bits de pool ID (1..255). Cero colisiones (gen 1 vs gen 257 imposible).
-- `CompactLink64` (64 bits, 8 bytes): 32 bits de slot, 16 bits de generación (retira en 65534), 16 bits de pool ID (hasta 65.535 pools).
-- Batería de pruebas exhaustivas sobre el dominio completo de 8 bits (256 valores probados uno a uno en todas sus transiciones).
+### 2. Consistencia y Ausencia de Off-by-One en `CompactPoolRegistry`
+- Se reemplazó el contador desfasado por `ALLOCATED_COMPACT_POOLS: AtomicU8 = AtomicU8::new(0)`.
+- `acquire_id()` emite identificadores exactos en el rango `1..=255` mediante CAS seguro. Al alcanzar 255 pools, cualquier invocación subsiguiente retorna `Err(CompactPoolError::PoolIdExhausted)`.
+- `is_valid_id(id)` valida `id != 0 && id <= ALLOCATED_COMPACT_POOLS.load(SeqCst)`. Un ID no emitido jamás retorna `true`.
+- Se documentó formalmente que `CompactLink::matches` y `CompactLink64::matches` son predicados de coherencia representacional, requiriéndose la consulta del pool físico para revalidación de autoridad sobre memoria viva.
 
-### 3. Seguridad de ámbitos, lifetimes y destructores en `ScopedArena` (v0.4)
-- Restricción `T: 'static` en `alloc()`: impide que tipos con referencias a la pila expiren antes que la arena y causen lecturas colgantes en destructores.
-- Identidad de arena segura: `next_arena_id` verifica contra desbordamiento de `u64::MAX`.
-- Contrato lineal de `close_scope`: ante discordancia de ámbito o arena, devuelve `Err(CloseScopeError { marker, error })` con el marcador intacto para permitir recuperación.
-- Pre-reserva de memoria: `alloc()` ejecuta `drops.try_reserve(1)` antes de escribir el valor, garantizando ausencia de objetos sin drop registrado ante OOM.
-- Resiliencia ante pánicos: `CleanupGuard` asegura restauración de offset y contador de ámbitos si un destructor entra en pánico, impidiendo doble ejecución de destructores.
-- Alineaciones arbitrarias probadas hasta 512 bytes y ZST con ejecución determinista de `Drop`.
-- `ScopedArena` es `!Send` y `!Sync` por retener `NonNull<u8>`.
+### 3. Suite Mandatoria P0-ARENA-01 a P0-ARENA-08 (`test_scoped_arena.rs`)
+- **P0-ARENA-01**: Tres objetos en un ámbito, el del medio entra en pánico en drop. Se verifica que el tercero se destruyó en LIFO, el segundo entró en pánico, y el primero no fue tocado.
+- **P0-ARENA-02**: Asignación y apertura de ámbito tras pánico capturado son rechazadas con `ArenaError::Poisoned`. Se verifica que la memoria del objeto primero no fue sobreescrita ni corrompida.
+- **P0-ARENA-03**: `drop(arena)` tras pánico capturado destruye los objetos pendientes exactamente una vez. Cero fugas y cero dobles destrucciones.
+- **P0-ARENA-04**: Ámbitos anidados con pánico en ámbito interior: envenenamiento propaga protección al exterior; `drop(arena)` destruye objetos interiores y exteriores en orden determinista.
+- **P0-ARENA-05**: ZST con `Drop` intercalados con tipos normales: no avanzan `offset`, se destruyen en LIFO y resisten pánicos.
+- **P0-ARENA-06**: Tipos con propiedad compleja del heap (`Vec`, `String`, `Box`) liberan buffers del heap limpiamente.
+- **P0-ARENA-07**: Anidamiento profundo de 64 ámbitos concurrentes y verificación estricta de `ArenaError::ScopeDepthExhausted` ante desbordamiento de límite en `u64::MAX`.
+- **P0-ARENA-08**: Alineaciones extremas de hasta 4096 bytes: verificación de dirección divisible por 4096 sin desbordamiento de padding.
 
-### 4. Miri
-- El componente `miri` no está provisto en las toolchains instaladas (`1.99.1-x86_64-pc-windows-gnu` / `1.99.1-x86_64-unknown-linux-gnu`). Registrado como validación dinámica pendiente de entorno externo.
+### 4. Estado de Verificación Dual
+- **Windows MSVC**: 237 pruebas aprobadas en `ele-nexo`, 770+ pruebas en workspace completo (`cargo test --workspace`), clippy limpio, fmt limpio.
+- **Linux WSL2**: 238 pruebas aprobadas en `ele-nexo`, paridad completa.
+- **Miri**: Pendiente de entorno externo debido a ausencia del componente en el toolchain del host.
 
 ---
 
