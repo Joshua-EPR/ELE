@@ -89,10 +89,10 @@ impl<'a> CompactPoolAuthority for CompactPhysicalPool<'a> {
         // Rechazar páginas en cuarentena, no confirmadas o devueltas al SO
         match page_state {
             PageState::Committed => {}
-            PageState::Quarantined
-            | PageState::Reserved
-            | PageState::ReclaimPending
-            | PageState::Returned => {
+            PageState::Quarantined => {
+                return Err(CompactRevalidateError::SubpageQuarantined);
+            }
+            PageState::Reserved | PageState::ReclaimPending | PageState::Returned => {
                 return Err(CompactRevalidateError::SlotNotAllocated);
             }
         }
@@ -181,10 +181,10 @@ impl<'a> CompactPoolAuthority64 for CompactPhysicalPool64<'a> {
 
         match page_state {
             PageState::Committed => {}
-            PageState::Quarantined
-            | PageState::Reserved
-            | PageState::ReclaimPending
-            | PageState::Returned => {
+            PageState::Quarantined => {
+                return Err(CompactRevalidateError::SubpageQuarantined);
+            }
+            PageState::Reserved | PageState::ReclaimPending | PageState::Returned => {
                 return Err(CompactRevalidateError::SlotNotAllocated);
             }
         }
