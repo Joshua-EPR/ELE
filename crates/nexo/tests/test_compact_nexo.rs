@@ -3,10 +3,10 @@
 
 use nexo::next::{
     CompactGen, CompactGenError, CompactLink, CompactLink64, CompactLinkError, CompactObjRef,
-    CompactObjRef64, CompactPhysicalPool, CompactPoolAuthority, CompactPoolAuthority64,
-    CompactPoolRegistry, CompactPoolRegistry16, CompactPoolToken, CompactPoolToken16,
-    CompactRevalidateError, GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID,
-    INVALID_COMPACT_POOL_ID_16, MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
+    CompactObjRef64, CompactPhysicalPool, CompactPhysicalPool64, CompactPoolAuthority,
+    CompactPoolAuthority64, CompactPoolRegistry, CompactPoolRegistry16, CompactRevalidateError,
+    GEN_RETIRADO_8, GEN_RETIRADO_16, INVALID_COMPACT_POOL_ID, INVALID_COMPACT_POOL_ID_16,
+    MAX_COMPACT_POOLS, MAX_COMPACT_POOLS_16, MAX_SLOT_COMPACT_32,
 };
 use nexo::physical::{HeaderStatus, PhysicalPool, PoolConfig, ReclaimPolicy};
 
@@ -208,58 +208,81 @@ fn test_compact_pool_registry_public_api() {
         INVALID_COMPACT_POOL_ID_16
     ));
 
+    let config = PoolConfig {
+        fields: 2,
+        slot_size: 64,
+        max_superpages: 1,
+        initial_generation: 0,
+        fail_reserve: false,
+        fail_commit_at: None,
+        reclaim: ReclaimPolicy::Aggressive,
+        protect_before_discard: true,
+    };
+    let pool = PhysicalPool::new(config).unwrap();
     let allocated = CompactPoolRegistry::allocated_count();
-    let token = CompactPoolRegistry::acquire_token().unwrap();
+    let token = CompactPoolRegistry::register_pool(&pool).unwrap();
     assert_eq!(CompactPoolRegistry::allocated_count(), allocated + 1);
     assert!(CompactPoolRegistry::is_valid_id(token.id()));
+    assert!(CompactPoolRegistry::is_pool_registered(&pool));
 
     let allocated16 = CompactPoolRegistry16::allocated_count();
-    let token16 = CompactPoolRegistry16::acquire_token().unwrap();
+    let token16 = CompactPoolRegistry16::register_pool(&pool).unwrap();
     assert_eq!(CompactPoolRegistry16::allocated_count(), allocated16 + 1);
     assert!(CompactPoolRegistry16::is_valid_id(token16.id()));
+    assert!(CompactPoolRegistry16::is_pool_registered(&pool));
 }
 
 #[test]
 fn test_compact_link_authorized_revalidation_boundary() {
-    let pool = nexo::next::compact::testing::MockCompactPool {
-        id: 42,
-        capacity: 100,
-        generations: vec![1, 2, 3, GEN_RETIRADO_8], // 0: vivo (1), 1: par (2), 2: vivo (3), 3: retirado (254)
+    let config = PoolConfig {
+        fields: 2,
+        slot_size: 64,
+        max_superpages: 1,
+        initial_generation: 0,
+        fail_reserve: false,
+        fail_commit_at: None,
+        reclaim: ReclaimPolicy::Aggressive,
+        protect_before_discard: true,
     };
+    let mut pool = PhysicalPool::new(config).unwrap();
+    let token = CompactPoolRegistry::register_pool(&pool).unwrap();
+
+    let h0 = pool.allocate().unwrap();
+    assert_eq!(h0.slot(), 0);
+    assert_eq!(h0.generation(), 1);
+
+    let h1 = pool.allocate().unwrap();
+    let slot1 = h1.slot();
+    let _ = pool.destroy(h1, false);
+
+    let adapter = CompactPhysicalPool::new(&pool, &token).unwrap();
 
     // Revalidación autorizada exitosa
-    let link = CompactLink::new(42, 0, 1).unwrap();
-    let obj: CompactObjRef<'_> = pool.revalidate_compact(link).unwrap();
-    assert_eq!(obj.pool_id(), 42);
+    let link = CompactLink::new(token.id(), 0, 1).unwrap();
+    let obj: CompactObjRef<'_> = adapter.revalidate_compact(link).unwrap();
+    assert_eq!(obj.pool_id(), token.id());
     assert_eq!(obj.slot(), 0);
     assert_eq!(obj.generation(), 1);
 
     // Revalidación fallida por pool foráneo
-    let foreign = CompactLink::new(43, 0, 1).unwrap();
+    let foreign = CompactLink::new(token.id().wrapping_add(1), 0, 1).unwrap();
     assert_eq!(
-        pool.revalidate_compact(foreign).unwrap_err(),
+        adapter.revalidate_compact(foreign).unwrap_err(),
         CompactRevalidateError::ForeignPool
     );
 
     // Revalidación fallida por slot par (no asignado)
-    let even = CompactLink::new(42, 1, 1).unwrap();
+    let even = CompactLink::new(token.id(), slot1, 1).unwrap();
     assert_eq!(
-        pool.revalidate_compact(even).unwrap_err(),
+        adapter.revalidate_compact(even).unwrap_err(),
         CompactRevalidateError::SlotNotAllocated
     );
 
-    // Revalidación fallida por generación stale
-    let stale = CompactLink::new(42, 2, 1).unwrap();
+    // Revalidación fallida por slot fuera de límites
+    let oob = CompactLink::new(token.id(), 60_000, 1).unwrap();
     assert_eq!(
-        pool.revalidate_compact(stale).unwrap_err(),
-        CompactRevalidateError::StaleGeneration
-    );
-
-    // Revalidación fallida por generación retirada
-    let ret_link = CompactLink::new(42, 3, 1).unwrap();
-    assert_eq!(
-        pool.revalidate_compact(ret_link).unwrap_err(),
-        CompactRevalidateError::GenerationRetired
+        adapter.revalidate_compact(oob).unwrap_err(),
+        CompactRevalidateError::OutOfBounds
     );
 }
 
@@ -289,13 +312,30 @@ fn test_compact_link64_encoding_and_matching() {
 
 #[test]
 fn test_compact_pool_token_unforgeability_and_monotonicity() {
-    let token1: CompactPoolToken = CompactPoolRegistry::acquire_token().unwrap();
-    let token2: CompactPoolToken = CompactPoolRegistry::acquire_token().unwrap();
-    assert!(token2.id() > token1.id());
+    let config = PoolConfig {
+        fields: 2,
+        slot_size: 64,
+        max_superpages: 1,
+        initial_generation: 0,
+        fail_reserve: false,
+        fail_commit_at: None,
+        reclaim: ReclaimPolicy::Aggressive,
+        protect_before_discard: true,
+    };
+    let pool1 = PhysicalPool::new(config).unwrap();
+    let pool2 = PhysicalPool::new(config).unwrap();
 
-    let token16_1: CompactPoolToken16 = CompactPoolRegistry16::acquire_token().unwrap();
-    let token16_2: CompactPoolToken16 = CompactPoolRegistry16::acquire_token().unwrap();
+    let token1 = CompactPoolRegistry::register_pool(&pool1).unwrap();
+    let token2 = CompactPoolRegistry::register_pool(&pool2).unwrap();
+    assert!(token2.id() > token1.id());
+    assert_eq!(token1.physical_pool_id(), pool1.id());
+    assert_eq!(token2.physical_pool_id(), pool2.id());
+
+    let token16_1 = CompactPoolRegistry16::register_pool(&pool1).unwrap();
+    let token16_2 = CompactPoolRegistry16::register_pool(&pool2).unwrap();
     assert!(token16_2.id() > token16_1.id());
+    assert_eq!(token16_1.physical_pool_id(), pool1.id());
+    assert_eq!(token16_2.physical_pool_id(), pool2.id());
 }
 
 #[test]
@@ -331,7 +371,8 @@ fn test_compact_physical_pool_adapter_integration() {
         assert_eq!(obj_ref.generation(), 1);
 
         // Rechazo por pool foráneo
-        let foreign_token = CompactPoolRegistry::acquire_token().unwrap();
+        let foreign_pool = PhysicalPool::new(config).unwrap();
+        let foreign_token = CompactPoolRegistry::register_pool(&foreign_pool).unwrap();
         let foreign_link = CompactLink::new(foreign_token.id(), slot, 1).unwrap();
         assert_eq!(
             adapter.revalidate_compact(foreign_link).unwrap_err(),
@@ -373,43 +414,70 @@ fn test_compact_physical_pool_adapter_integration() {
 
 #[test]
 fn test_compact_pool_64_revalidation_and_adapter() {
-    let pool64 = nexo::next::compact::testing::MockCompactPool64 {
-        id: 100,
-        capacity: 10_000,
-        generations: vec![1, 2, 3, GEN_RETIRADO_16],
+    let config = PoolConfig {
+        fields: 2,
+        slot_size: 64,
+        max_superpages: 1,
+        initial_generation: 0,
+        fail_reserve: false,
+        fail_commit_at: None,
+        reclaim: ReclaimPolicy::Aggressive,
+        protect_before_discard: true,
     };
+    let mut physical_pool = PhysicalPool::new(config).unwrap();
+    let token16 = CompactPoolRegistry16::register_pool(&physical_pool).unwrap();
 
-    let link = CompactLink64::new(100, 0, 1).unwrap();
-    let obj: CompactObjRef64<'_> = pool64.revalidate_compact_64(link).unwrap();
-    assert_eq!(obj.pool_id(), 100);
-    assert_eq!(obj.slot(), 0);
-    assert_eq!(obj.generation(), 1);
+    let handle = physical_pool.allocate().unwrap();
+    let slot = handle.slot();
+    let link = CompactLink64::new(token16.id(), slot, 1).unwrap();
 
-    // Enlace foráneo
-    let foreign = CompactLink64::new(101, 0, 1).unwrap();
-    assert_eq!(
-        pool64.revalidate_compact_64(foreign).unwrap_err(),
-        CompactRevalidateError::ForeignPool
-    );
+    {
+        let adapter = CompactPhysicalPool64::new(&physical_pool, &token16).unwrap();
+        let obj: CompactObjRef64<'_> = adapter.revalidate_compact_64(link).unwrap();
+        assert_eq!(obj.pool_id(), token16.id());
+        assert_eq!(obj.slot(), slot);
+        assert_eq!(obj.generation(), 1);
 
-    // Slot par (no asignado)
-    let even = CompactLink64::new(100, 1, 1).unwrap();
-    assert_eq!(
-        pool64.revalidate_compact_64(even).unwrap_err(),
-        CompactRevalidateError::SlotNotAllocated
-    );
+        // Enlace foráneo
+        let foreign_pool = PhysicalPool::new(config).unwrap();
+        let foreign_token = CompactPoolRegistry16::register_pool(&foreign_pool).unwrap();
+        let foreign = CompactLink64::new(foreign_token.id(), slot, 1).unwrap();
+        assert_eq!(
+            adapter.revalidate_compact_64(foreign).unwrap_err(),
+            CompactRevalidateError::ForeignPool
+        );
 
-    // Stale
-    let stale = CompactLink64::new(100, 2, 1).unwrap();
-    assert_eq!(
-        pool64.revalidate_compact_64(stale).unwrap_err(),
-        CompactRevalidateError::StaleGeneration
-    );
+        // Out of bounds
+        let oob = CompactLink64::new(token16.id(), 10_000, 1).unwrap();
+        assert_eq!(
+            adapter.revalidate_compact_64(oob).unwrap_err(),
+            CompactRevalidateError::OutOfBounds
+        );
+    }
 
-    // Retirado
-    let retired = CompactLink64::new(100, 3, 1).unwrap();
-    assert_eq!(
-        pool64.revalidate_compact_64(retired).unwrap_err(),
-        CompactRevalidateError::GenerationRetired
-    );
+    // Destruir objeto
+    let _ = physical_pool.destroy(handle, false).unwrap();
+
+    // Revalidación tras destrucción -> SlotNotAllocated
+    {
+        let adapter = CompactPhysicalPool64::new(&physical_pool, &token16).unwrap();
+        assert_eq!(
+            adapter.revalidate_compact_64(link).unwrap_err(),
+            CompactRevalidateError::SlotNotAllocated
+        );
+    }
+
+    // Reasignar slot -> gen 3
+    let handle2 = physical_pool.allocate().unwrap();
+    assert_eq!(handle2.slot(), slot);
+    assert_eq!(handle2.generation(), 3);
+
+    // Stale generation
+    {
+        let adapter = CompactPhysicalPool64::new(&physical_pool, &token16).unwrap();
+        assert_eq!(
+            adapter.revalidate_compact_64(link).unwrap_err(),
+            CompactRevalidateError::StaleGeneration
+        );
+    }
 }

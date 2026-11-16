@@ -77,10 +77,12 @@ struct Aligned4096 {
     data: [u8; 4096],
 }
 
+static ZST_DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 struct ZstDrop;
 impl Drop for ZstDrop {
     fn drop(&mut self) {
-        DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+        ZST_DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -261,7 +263,7 @@ fn test_custom_base_alignment() {
 
 #[test]
 fn test_zst_allocation_and_drop() {
-    DROP_COUNTER.store(0, Ordering::SeqCst);
+    ZST_DROP_COUNTER.store(0, Ordering::SeqCst);
     let mut arena = ScopedArena::new(512).unwrap();
     let marker = arena.begin_scope().unwrap();
 
@@ -274,7 +276,7 @@ fn test_zst_allocation_and_drop() {
 
     arena.close_scope(marker).unwrap();
     assert_eq!(
-        DROP_COUNTER.load(Ordering::SeqCst),
+        ZST_DROP_COUNTER.load(Ordering::SeqCst),
         1,
         "El drop de ZstDrop debió ejecutarse"
     );
@@ -592,29 +594,38 @@ fn test_p0_arena_04_nested_scopes_with_inner_panic() {
     assert_eq!(outer_order.load(Ordering::SeqCst), 1);
 }
 
+static P0_05_DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+struct P0ZstDrop;
+impl Drop for P0ZstDrop {
+    fn drop(&mut self) {
+        P0_05_DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// P0-ARENA-05: Tipos de tamaño cero (ZST) con Drop intercalados con tipos normales.
 /// El offset de memoria no debe alterarse por ZSTs, pero sus destructores
 /// deben ser invocados en estricto orden LIFO y protegidos contra pánicos.
 #[test]
 fn test_p0_arena_05_zst_drop_interleaved_and_panic() {
-    DROP_COUNTER.store(0, Ordering::SeqCst);
+    P0_05_DROP_COUNTER.store(0, Ordering::SeqCst);
     let mut arena = ScopedArena::new(1024).unwrap();
     let marker = arena.begin_scope().unwrap();
 
     let offset1 = arena.used_bytes();
-    let _ = arena.alloc(&marker, ZstDrop).unwrap();
+    let _ = arena.alloc(&marker, P0ZstDrop).unwrap();
     assert_eq!(arena.used_bytes(), offset1, "ZST no consume bytes");
 
     let _ = arena.alloc(&marker, 12345u64).unwrap();
     let offset2 = arena.used_bytes();
     assert!(offset2 > offset1);
 
-    let _ = arena.alloc(&marker, ZstDrop).unwrap();
+    let _ = arena.alloc(&marker, P0ZstDrop).unwrap();
     assert_eq!(arena.used_bytes(), offset2, "Segundo ZST no consume bytes");
 
     arena.close_scope(marker).unwrap();
     assert_eq!(
-        DROP_COUNTER.load(Ordering::SeqCst),
+        P0_05_DROP_COUNTER.load(Ordering::SeqCst),
         2,
         "Ambos ZSTs debieron ejecutarse"
     );
