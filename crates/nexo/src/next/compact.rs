@@ -143,6 +143,8 @@ pub(crate) struct CompactPoolRegistryInstance {
     allocator: CompactIdAllocator8,
     registered_pools: std::sync::Mutex<Vec<RegisteredPool8>>,
     corrupted: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_reserve: std::sync::atomic::AtomicBool,
 }
 
 impl Default for CompactPoolRegistryInstance {
@@ -157,7 +159,14 @@ impl CompactPoolRegistryInstance {
             allocator: CompactIdAllocator8::new(),
             registered_pools: std::sync::Mutex::new(Vec::new()),
             corrupted: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_reserve: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_reserve_failure(&self, fail: bool) {
+        self.fail_reserve.store(fail, Ordering::SeqCst);
     }
 
     fn audit_and_recover_8(&self, guard: &mut Vec<RegisteredPool8>) -> bool {
@@ -214,6 +223,10 @@ impl CompactPoolRegistryInstance {
         match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
+                #[cfg(test)]
+                if self.fail_reserve.load(Ordering::SeqCst) {
+                    return Err(CompactPoolError::OutOfMemory);
+                }
                 pools
                     .try_reserve(1)
                     .map_err(|_| CompactPoolError::OutOfMemory)?;
@@ -329,6 +342,12 @@ impl CompactPoolRegistry {
     pub fn is_pool_registered(pool: &PhysicalPool) -> bool {
         GLOBAL_COMPACT_REGISTRY.is_pool_registered(pool.id())
     }
+
+    /// Inyecta un fallo simulado de `try_reserve` (Out of Memory) para pruebas adversariales.
+    #[cfg(test)]
+    pub fn inject_reserve_failure(fail: bool) {
+        GLOBAL_COMPACT_REGISTRY.inject_reserve_failure(fail);
+    }
 }
 
 /// Asignador monotónico acotado de identificadores numéricos de 16 bits (1..=65.535).
@@ -396,6 +415,8 @@ pub(crate) struct CompactPoolRegistryInstance16 {
     allocator: CompactIdAllocator16,
     registered_pools: std::sync::Mutex<Vec<RegisteredPool16>>,
     corrupted: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_reserve: std::sync::atomic::AtomicBool,
 }
 
 impl Default for CompactPoolRegistryInstance16 {
@@ -410,7 +431,14 @@ impl CompactPoolRegistryInstance16 {
             allocator: CompactIdAllocator16::new(),
             registered_pools: std::sync::Mutex::new(Vec::new()),
             corrupted: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_reserve: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_reserve_failure(&self, fail: bool) {
+        self.fail_reserve.store(fail, Ordering::SeqCst);
     }
 
     fn audit_and_recover_16(&self, guard: &mut Vec<RegisteredPool16>) -> bool {
@@ -466,6 +494,10 @@ impl CompactPoolRegistryInstance16 {
         match pools.binary_search_by_key(&physical_pool_id, |e| e.physical_pool_id) {
             Ok(_) => Err(CompactPoolError::AlreadyRegistered { physical_pool_id }),
             Err(insert_idx) => {
+                #[cfg(test)]
+                if self.fail_reserve.load(Ordering::SeqCst) {
+                    return Err(CompactPoolError::OutOfMemory);
+                }
                 pools
                     .try_reserve(1)
                     .map_err(|_| CompactPoolError::OutOfMemory)?;
@@ -570,6 +602,12 @@ impl CompactPoolRegistry16 {
 
     pub fn is_pool_registered(pool: &PhysicalPool) -> bool {
         GLOBAL_COMPACT_REGISTRY_16.is_pool_registered(pool.id())
+    }
+
+    /// Inyecta un fallo simulado de `try_reserve` (Out of Memory) para pruebas adversariales en 16 bits.
+    #[cfg(test)]
+    pub fn inject_reserve_failure(fail: bool) {
+        GLOBAL_COMPACT_REGISTRY_16.inject_reserve_failure(fail);
     }
 }
 
@@ -1362,5 +1400,279 @@ mod tests {
         assert_eq!(err, CompactPoolError::RegistryCorrupted);
         assert!(!registry.is_pool_registered(111));
         assert!(!registry.is_pool_registered(333));
+    }
+
+    // =========================================================================
+    // PRUEBAS DE INYECCIÓN DETERMINISTA DE OOM (REG-OOM-01 .. REG-OOM-10)
+    // Invariante obligatoria: estado_autoridad_despues == estado_autoridad_antes
+    // =========================================================================
+
+    #[test]
+    fn test_reg_oom_01_reserve_error_empty_registry() {
+        let registry = CompactPoolRegistryInstance::new();
+        assert_eq!(registry.allocated_count(), 0);
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
+
+        // Inyectar fallo de reserva
+        registry.inject_reserve_failure(true);
+
+        // Intento de registrar sobre registro vacío
+        let err = registry.register(101).unwrap_err();
+        assert_eq!(err, CompactPoolError::OutOfMemory);
+
+        // Verificar invariantes: no hay mutación de estado
+        assert_eq!(registry.allocated_count(), 0);
+        assert!(!registry.is_valid_id(1));
+        assert!(!registry.is_pool_registered(101));
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_reg_oom_02_reserve_error_existing_identities() {
+        let registry = CompactPoolRegistryInstance::new();
+        let tok1 = registry.register(100).expect("Registro inicial exitoso");
+        assert_eq!(tok1.compact_id(), 1);
+        assert_eq!(tok1.physical_pool_id(), 100);
+        assert_eq!(registry.allocated_count(), 1);
+        assert!(registry.is_pool_registered(100));
+
+        // Inyectar fallo en el siguiente registro
+        registry.inject_reserve_failure(true);
+        let err = registry.register(200).unwrap_err();
+        assert_eq!(err, CompactPoolError::OutOfMemory);
+
+        // Invariantes previas estrictamente conservadas
+        assert_eq!(registry.allocated_count(), 1);
+        assert!(registry.is_pool_registered(100));
+        assert!(!registry.is_pool_registered(200));
+        assert!(!registry.is_valid_id(2));
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_reg_oom_03_id_counter_unmutated_after_errors() {
+        let registry = CompactPoolRegistryInstance::new();
+        let _tok1 = registry.register(50).unwrap();
+        let _tok2 = registry.register(60).unwrap();
+        assert_eq!(registry.allocated_count(), 2);
+
+        registry.inject_reserve_failure(true);
+        // Múltiples intentos fallidos con distintos pools físicos
+        for id in 100..120 {
+            let res = registry.register(id);
+            assert_eq!(res.unwrap_err(), CompactPoolError::OutOfMemory);
+        }
+
+        // El contador algorítmico no se incrementó en absoluto
+        assert_eq!(registry.allocated_count(), 2);
+    }
+
+    #[test]
+    fn test_reg_oom_04_absence_of_physical_pool_registration() {
+        let registry = CompactPoolRegistryInstance::new();
+        registry.inject_reserve_failure(true);
+
+        let failed_ids = [401, 402, 403, 404, 405];
+        for &id in &failed_ids {
+            let _ = registry.register(id);
+        }
+
+        for &id in &failed_ids {
+            assert!(!registry.is_pool_registered(id));
+        }
+
+        // Acceso directo al guard para confirmar que el vector de pools está vacío
+        let guard = registry.registered_pools.lock().unwrap();
+        assert_eq!(guard.len(), 0);
+    }
+
+    #[test]
+    fn test_reg_oom_05_no_token_emitted() {
+        let registry = CompactPoolRegistryInstance::new();
+        registry.inject_reserve_failure(true);
+
+        // Demostrar exhaustivamente que la llamada retorna Err y jamás emite un CompactPoolToken
+        match registry.register(999) {
+            Ok(_) => panic!("Inaceptable: se emitió un token bajo condición de OOM"),
+            Err(e) => assert_eq!(e, CompactPoolError::OutOfMemory),
+        }
+    }
+
+    #[test]
+    fn test_reg_oom_06_withdraw_injection_subsequent_registration_succeeds() {
+        let registry = CompactPoolRegistryInstance::new();
+        let tok1 = registry.register(10).unwrap();
+        assert_eq!(tok1.compact_id(), 1);
+
+        // Forzar OOM
+        registry.inject_reserve_failure(true);
+        assert_eq!(
+            registry.register(20).unwrap_err(),
+            CompactPoolError::OutOfMemory
+        );
+        assert_eq!(registry.allocated_count(), 1);
+
+        // Retirar la inyección
+        registry.inject_reserve_failure(false);
+
+        // Reintentar registrar el mismo pool que falló: debe tener éxito
+        let tok2 = registry
+            .register(20)
+            .expect("El registro debe recuperarse limpiamente");
+        // El ID debe ser estrictamente secuencial (2) sin huecos
+        assert_eq!(tok2.compact_id(), 2);
+        assert_eq!(tok2.physical_pool_id(), 20);
+        assert_eq!(registry.allocated_count(), 2);
+        assert!(registry.is_pool_registered(10));
+        assert!(registry.is_pool_registered(20));
+    }
+
+    #[test]
+    fn test_reg_oom_07_verification_16bit_allocator_and_registry() {
+        let registry16 = CompactPoolRegistryInstance16::new();
+        assert_eq!(registry16.allocated_count(), 0);
+
+        let tok1 = registry16.register(1001).unwrap();
+        assert_eq!(tok1.compact_id(), 1);
+        assert_eq!(registry16.allocated_count(), 1);
+
+        // Inyectar OOM en 16 bits
+        registry16.inject_reserve_failure(true);
+        for id in 2000..2020 {
+            assert_eq!(
+                registry16.register(id).unwrap_err(),
+                CompactPoolError::OutOfMemory
+            );
+        }
+        assert_eq!(registry16.allocated_count(), 1);
+        assert!(!registry16.is_pool_registered(2000));
+
+        // Retirar inyección
+        registry16.inject_reserve_failure(false);
+        let tok2 = registry16.register(2000).unwrap();
+        assert_eq!(tok2.compact_id(), 2);
+        assert_eq!(registry16.allocated_count(), 2);
+        assert!(registry16.is_pool_registered(2000));
+    }
+
+    #[test]
+    fn test_reg_oom_08_multithreaded_contention_and_failure_injection() {
+        use std::sync::Arc;
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let mut handles = Vec::new();
+
+        // Lanzar 8 hilos que intentan registrar concurrentemente mientras se conmuta la inyección
+        for thread_idx in 0..8 {
+            let reg = registry.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut successes = Vec::new();
+                for i in 0..20 {
+                    let pool_id = (thread_idx as u64) * 1000 + i;
+                    match reg.register(pool_id) {
+                        Ok(tok) => successes.push(tok.compact_id()),
+                        Err(CompactPoolError::OutOfMemory) => {
+                            // Esperado bajo inyección
+                        }
+                        Err(other) => panic!("Error inesperado en concurrencia: {other:?}"),
+                    }
+                }
+                successes
+            }));
+        }
+
+        // Hilo controlador que conmuta la inyección
+        let reg_ctrl = registry.clone();
+        let ctrl_handle = std::thread::spawn(move || {
+            for i in 0..10 {
+                reg_ctrl.inject_reserve_failure(i % 2 == 0);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            reg_ctrl.inject_reserve_failure(false);
+        });
+
+        let mut all_successes = Vec::new();
+        for h in handles {
+            all_successes.extend(h.join().unwrap());
+        }
+        ctrl_handle.join().unwrap();
+
+        // Verificar que los tokens emitidos fueron todos estrictamente únicos
+        let total_issued = all_successes.len();
+        all_successes.sort_unstable();
+        all_successes.dedup();
+        assert_eq!(all_successes.len(), total_issued);
+
+        // El número de pools registrados coincide exactamente con allocated_count
+        assert_eq!(registry.allocated_count() as usize, total_issued);
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
+        let registry = CompactPoolRegistryInstance::new();
+
+        // Inyectar OOM de forma determinista intercalada: fallan impares
+        let mut tokens = Vec::new();
+        let mut pool_id = 1u64;
+
+        while tokens.len() < MAX_COMPACT_POOLS as usize {
+            if pool_id % 2 == 1 {
+                registry.inject_reserve_failure(true);
+                assert_eq!(
+                    registry.register(pool_id).unwrap_err(),
+                    CompactPoolError::OutOfMemory
+                );
+                registry.inject_reserve_failure(false);
+            }
+            // Registro con inyección inactiva
+            let tok = registry.register(pool_id).unwrap();
+            tokens.push(tok);
+            pool_id += 1;
+        }
+
+        assert_eq!(registry.allocated_count(), MAX_COMPACT_POOLS);
+        // Al intentar uno más, se obtiene PoolIdExhausted sin importar si hay OOM o no
+        registry.inject_reserve_failure(true);
+        assert_eq!(
+            registry.register(pool_id).unwrap_err(),
+            CompactPoolError::OutOfMemory
+        );
+        registry.inject_reserve_failure(false);
+        assert_eq!(
+            registry.register(pool_id).unwrap_err(),
+            CompactPoolError::PoolIdExhausted
+        );
+    }
+
+    #[test]
+    fn test_reg_oom_10_registry_invariants_and_sorted_uniqueness_post_oom() {
+        let registry = CompactPoolRegistryInstance::new();
+
+        // Generar una secuencia con múltiples errores y aciertos desordenados
+        for i in (1..=50).rev() {
+            if i % 3 == 0 {
+                registry.inject_reserve_failure(true);
+                assert_eq!(
+                    registry.register(i).unwrap_err(),
+                    CompactPoolError::OutOfMemory
+                );
+                registry.inject_reserve_failure(false);
+            }
+            let tok = registry.register(i).unwrap();
+            assert_eq!(tok.physical_pool_id(), i);
+        }
+
+        // Verificar invariantes internas de registered_pools
+        let guard = registry.registered_pools.lock().unwrap();
+        assert_eq!(guard.len(), 50);
+        // Debe estar estrictamente ordenado por physical_pool_id
+        for w in guard.windows(2) {
+            assert!(w[0].physical_pool_id < w[1].physical_pool_id);
+            assert_ne!(w[0].compact_id, w[1].compact_id);
+        }
+        drop(guard);
+
+        // Sin corrupción
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
     }
 }
