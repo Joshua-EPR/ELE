@@ -76,6 +76,7 @@ unsafe extern "system" {
     fn CloseHandle(handle: Handle) -> i32;
     fn GetLastError() -> u32;
     fn GetFileType(handle: Handle) -> u32;
+    fn GetFileSizeEx(handle: Handle, size: *mut i64) -> i32;
     fn QueryPerformanceCounter(ticks: *mut i64) -> i32;
     fn QueryPerformanceFrequency(ticks_per_second: *mut i64) -> i32;
     fn l_rt_alloc(bytes: usize) -> *mut u8;
@@ -340,6 +341,17 @@ pub unsafe extern "system" fn l_platform_read_text(
     let reading = Phase::start(trace, &READ_TICKS);
     let limit = limit as usize;
     let mut buffer = Buffer::new();
+    // Size the buffer once from the file length so typical reads never
+    // reallocate. The extra byte lets EOF be observed without a probe. The
+    // doubling loop below remains the fallback if the query fails or the
+    // file grows while it is being read.
+    let mut size = 0i64;
+    if unsafe { GetFileSizeEx(file.handle, &mut size) } != 0 && size > 0 {
+        let initial = (size as u64).saturating_add(1).min(limit as u64) as usize;
+        if initial > 0 {
+            buffer.grow(initial);
+        }
+    }
     let mut len = 0;
     loop {
         if len == buffer.capacity {

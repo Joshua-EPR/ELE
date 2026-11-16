@@ -28,10 +28,14 @@ fn l_read_text(path: &LText, limit: i64) -> Result<LText, i64> {
             3
         }
     })?;
-    if !file.metadata().map_err(|_| 3i64)?.is_file() {
+    let metadata = file.metadata().map_err(|_| 3i64)?;
+    if !metadata.is_file() {
         return Err(3);
     }
-    let mut bytes = Vec::new();
+    // Reserve once from the file length; the doubling below is only a
+    // fallback for files that grow while being read.
+    let initial = metadata.len().saturating_add(1).min(limit as u64) as usize;
+    let mut bytes = Vec::with_capacity(if metadata.len() == 0 { 0 } else { initial });
     let mut chunk = [0; 8192];
     loop {
         let wanted = (limit - bytes.len() + 1).min(chunk.len());

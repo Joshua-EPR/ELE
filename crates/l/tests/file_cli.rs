@@ -197,6 +197,53 @@ fn main() -> Int {
     }
 }
 
+#[test]
+fn native_read_text_sizes_buffer_once_without_reallocs() {
+    let source = r#"
+fn read(path: Text, max: Int) {
+    match readText(path, max) {
+        Ok(text) => { print(text.byteLength) }
+        Err(code) => { print("error:{code}") }
+    }
+}
+fn main() -> Int {
+    read("grande.l", 1048576)
+    read("grande.l", 40000)
+    read("grande.l", 39999)
+    read("pequeño.l", 100)
+    return 0
+}
+"#;
+    let exe = Exe::build("files-once", "cranelift", source);
+    // Above 32 KB the old 8 KB doubling needed three reallocations.
+    exe.fixture("grande.l", &vec![b'y'; 40_000]);
+    exe.fixture("pequeño.l", b"hola");
+    let output = Command::new(&exe.path)
+        .current_dir(&exe.dir)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "40000\n40000\nerror:5\n4\n"
+    );
+    let stats = stderr.rsplit_once("l-alloc: ").unwrap().1;
+    let count = |name: &str| -> u64 {
+        stats
+            .split_whitespace()
+            .find_map(|field| field.strip_prefix(name))
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    assert_eq!(count("reallocs="), 0, "{stats}");
+    assert_eq!(count("allocs="), count("frees="), "{stats}");
+    assert_eq!(count("file_opens="), 4, "{stats}");
+    assert_eq!(count("file_closes="), 4, "{stats}");
+}
+
 fn offset(source: &str, span: project_l::Span) -> usize {
     let line_start = source
         .split_inclusive('\n')
