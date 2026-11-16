@@ -1,5 +1,55 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Cierre de Invariantes, Agotamiento de Identidades y Validación Estadística — fix/nexo-v04-final-invariant-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown histórica (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: Rama base de consolidación (`a1c05b3083e54bcd541144230f9a222c5eb99b76`).
+- `fix/nexo-v04-release-uncertain-hardening`: Rama base directa (`9cd549d85c9255e621224a54a2c66ca4b0243bc6`).
+- `fix/nexo-v04-final-invariant-hardening`: **Rama activa de corrección**, creada a partir de `9cd549d`.
+
+### 1. Defectos P1/P2 Cerrados en esta Fase
+1. **P1-018 (Validación operativa y fallo cerrado en `validate_superpage` y `check_invariants`)**:
+   - `PhysicalPool::validate_superpage()` y `check_invariants()` verifican `self.ensure_operational()?` antes de cualquier cálculo.
+   - Si el pool está cerrado: retornan `Err(PoolError::Closed)`.
+   - Si el pool está en estado incierto de liberación (`ReleaseUncertain`): retornan `Err(PoolError::Physical(PhysicalError::ReleaseUncertain))`.
+   - Se demostró que un `SuperpageIndex` previamente obtenido no permite eludir los controles operativos posteriores.
+   - Nueva prueba exhaustiva de ciclo de vida en `crates/nexo/tests/close_contract.rs::superpage_validation_lifecycle_and_operational_invariants`.
+2. **P1-019 (Reserva no infalible en registros compactos mediante `try_reserve`)**:
+   - Se sustituyó `Vec::reserve(1)` por `Vec::try_reserve(1).map_err(|_| CompactPoolError::OutOfMemory)?` en `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`.
+   - Se eliminó la presunción errónea de que `reserve` es infalible ante agotamiento de recursos del sistema. Ante OOM, la operación falla cerrado sin consumir IDs del asignador atómico ni envenenar el mutex.
+3. **P2-020 (Demostración exhaustiva del espacio de 16 bits y concurrencia bajo contención)**:
+   - Verificación secuencial completa de los 65.535 identificadores sin colisión y con orden monótono estricto en `CompactIdAllocator16`.
+   - Comprobación del fallo cerrado `PoolIdExhausted` en el intento 65.536 sin wraparound numérico.
+   - Nueva prueba concurrente `test_concurrent_compact_id_allocator_exhaustion_and_contention` con 8 hilos compitiendo donde se demostró la emisión exacta y unívoca de los 65.535 IDs y la denegación total de autoridad en estado post-agotamiento.
+4. **P2-021 (Metodología de benchmarking independiente multi-proceso)**:
+   - Diferenciación formal entre muestreo por lotes intra-proceso (7 corridas $\times$ 100 lotes $= 700$ muestras) y mediciones independientes a nivel de proceso del SO (5 ejecuciones independientes en perfil `release`).
+   - Enriquecimiento del binario `nexo-physical-bench` con reporte de mínimo, máximo, desviación estándar y número de muestras.
+   - Documentación en `NEXO_NEXT_BENCHMARKS.md` de métricas consolidadas entre procesos y análisis metrológico riguroso.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 40/41 | **40/40 APROBADAS** | **41/41 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+---
+
 ## Actualización 2026-11-16 (Operación Endurecimiento ReleaseUncertain y Consistencia de Autoridad — fix/nexo-v04-release-uncertain-hardening)
 
 Ramas y estado de Git:
@@ -27,7 +77,7 @@ Ramas y estado de Git:
    - Prueba unitaria exhaustiva validada en `crates/nexo/src/next/adapter.rs::tests::test_convert_pool_error_exhaustive_coverage`.
 3. **P1-015 (Atomicidad transaccional y auditoría de invariantes tras envenenamiento de Mutex)**:
    - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` asocian atómicamente `(physical_pool_id, compact_id)`.
-   - Pre-reserva infalible de capacidad vectorial (`pools.reserve(1)`) antes de asignar IDs.
+   - Pre-reserva de capacidad vectorial (posteriormente endurecida a `pools.try_reserve(1)` con `OutOfMemory`) antes de asignar IDs.
    - Auditoría de invariantes tras recuperación de mutex envenenado (`audit_and_recover_8` / `audit_and_recover_16`): verifica unicidad de IDs físicos y compactos, límites numéricos, y consistencia de orden. Ante corrupción detectada, la instancia pasa a `corrupted = true` y falla cerrado con `CompactPoolError::RegistryCorrupted`.
    - Pruebas unitarias validadas en `crates/nexo/src/next/compact.rs`.
 4. **P2-016 (Erradicación de wraparound en pruebas de enlaces compactos)**:
