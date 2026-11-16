@@ -54,39 +54,69 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
 ### T5: Frontera de Autoridad y Revalidación de Enlaces Compactos
 - **Separación de conceptos**:
   1. **Enlace como dato (`CompactLink`, `CompactLink64`)**: Identificador plano de 32 o 64 bits copiable (`Copy`, `Clone`). Carece por completo de autoridad propietaria o capacidad de desreferenciación directa. Sus métodos `matches()` son predicados puramente representacionales.
-  2. **Revalidación autorizada (`CompactPoolAuthority`, `CompactPoolAuthority64`)**: Operación ejecutada exclusivamente por el pool físico bajo verificación estricta de:
-     - Afinidad de `pool_id`.
+  2. **Token lineal de autoridad única (`CompactPoolToken`, `CompactPoolToken16`)**: Token no clonable (`!Clone`, `!Copy`) emitible exclusivamente por el registro global de producción (`CompactPoolRegistry::acquire_token`). Garantiza unicidad global absoluta dentro del espacio de direcciones y ausencia de colisiones por instancias independientes.
+  3. **Trait sellado (`CompactPoolAuthority: private::Sealed`, `CompactPoolAuthority64: private::Sealed`)**: Solo implementaciones verificadas y auditadas del runtime (`CompactPhysicalPool`, `CompactPhysicalPool64`) pueden implementar el contrato de autoridad. Se rechaza estáticamente cualquier intento de consumidores externos de fabricar autoridades ficticias.
+  4. **Revalidación autorizada y acotada por préstamo (`CompactObjRef<'a>`, `CompactObjRef64<'a>`)**: Operación ejecutada exclusivamente por el pool físico bajo verificación estricta de:
+     - Afinidad de `pool_id` mediante posesión de `CompactPoolToken`.
      - Límites de capacidad (`slot < slot_capacity`).
+     - Estado de confirmación de subpágina en memoria virtual (rechaza `Quarantined`, `Reserved`, `ReclaimPending`, `Returned`).
      - Estado de asignación del slot (no libre, no en hueco, impar).
      - Estado no retirado ($\text{gen} < \text{GEN\_RETIRADO}$).
      - Coincidencia exacta de generación viva.
-  3. **Token de acceso no propietario (`CompactObjRef`, `CompactObjRef64`)**: Representación opaca con campos privados y sin constructor público, emitible únicamente tras el éxito de la revalidación autorizada. Jamás es convertible a `Handle` (conservación estricta de las reglas de posesión R2, R3, R6, R7, R8 y R9 de ELE).
+  5. **Token de acceso no propietario acotado (`CompactObjRef<'a>`)**: Representación opaca con campos privados y sin constructor público, ligada formalmente al préstamo `'a` del pool. Mientras exista un token revalidado, el pool no puede ser mutado exclusivamente ni destruido. Jamás es convertible a `Handle` (conservación estricta de las reglas de posesión R2, R3, R6, R7, R8 y R9 de ELE).
+
+### T6: Resiliencia Exhaustiva de Destrucción y Ausencia de Corrupción ante Pánicos en `ScopedArena`
+- **Garantías de DROP-01 a DROP-16**:
+  1. **Drenaje LIFO Total**: Si un destructor entra en pánico durante el cierre de la arena o `drop(arena)`, todos los destructores restantes se ejecutan incondicionalmente en estricto orden inverso.
+  2. **Prevención de Aborto por Doble Pánico**: Al desenrollar durante un pánico preexistente del hilo, la arena detecta `std::thread::panicking()` y suprime el relanzamiento secundario, evitando abortos del proceso (*double panic abort*).
+  3. **Preservación de Memoria Virtual**: `BufferGuard` garantiza que el bloque virtual se libera únicamente tras finalizar todos los destructores.
+  4. **Tipos de Tamaño Cero (ZST)**: Destrucción determinista sin avance de offset ni desalineación.
+  5. **Ámbitos Anidados Envenenados**: Un pánico en un ámbito interior envenena la arena pero preserva la destrucción LIFO de los objetos del ámbito exterior en `drop(arena)`.
 
 ---
 
-## 2. Matriz de verificación empírica
+## 2. Matriz de verificación empírica y formal
 
-| Propiedad | Mecanismo de control | Prueba automatizada | Estado |
+Clasificación de estados:
+- **ESPECIFICADA**: Formalizada matemáticamente o en especificación normativa.
+- **IMPLEMENTADA**: Codificada en Rust en las crates del workspace.
+- **PROBADA**: Validada mediante arnés de pruebas automatizado con evidencia reproducible.
+- **DEMOSTRADA**: Deducción lógica o prueba por tipos en safe Rust.
+- **PENDIENTE / BLOQUEADA**: Requiere infraestructura externa o desarrollo en etapas futuras.
+
+| Propiedad | Mecanismo de control | Prueba automatizada | Clasificación |
 |---|---|---|---|
-| **No-UAF** | Generación impar/par y descarte físico | `adversarial_atomicity::a08`, `physical::f07` | Verificada |
-| **No-Double-Free** | Linearidad de `Handle` | `pool.rs` compile_fail doctests, `api_security.rs` | Verificada |
-| **No-ABA (32-bit)** | Retirada en $2^{32}-2$ | `bislab::agotamiento_de_generacion_sin_wraparound` | Verificada |
-| **No-ABA (16-bit)** | Retirada en $2^{16}-2$ | `test_compact_nexo::test_compact_gen_exhaustion_and_no_aba`, `test_compact_gen_16bit_boundary_correctness` | Verificada |
-| **No-ABA (8-bit)** | Retirada en 254 (`GEN_RETIRADO_8`) | `test_compact_nexo::test_exhaustive_8bit_domain_and_invariants` | Verificada |
-| **Compact Registry 8-bit** | Límite estricto 255 IDs sin reciclaje ni colisiones concurrentes | `test_compact_nexo::test_compact_pool_registry_bounded_issuance`, `test_compact_pool_registry_concurrent_issuance_no_duplicates` | Verificada |
-| **Compact Registry 16-bit** | Límite estricto 65.535 IDs sin reciclaje | `test_compact_nexo::test_compact_pool_registry_16_bounded_issuance` | Verificada |
-| **Compact Authority** | Revalidación autorizada y rechazo de slots foráneos/stale/pares | `test_compact_nexo::test_compact_link_authorized_revalidation_boundary` | Verificada |
-| **Aislamiento Scope** | Marcador lineal de ámbito | `test_scoped_arena::test_nested_scopes_and_lifo_destruction` | Verificada |
-| **Panic Resilience** | Envenenamiento y guard LIFO | `test_scoped_arena::test_p0_arena_01_three_objects_middle_panics_in_drop` | Verificada |
-| **No Memory Overwrite** | Bloqueo de asignación envenenada | `test_scoped_arena::test_p0_arena_02_allocation_after_panic_is_rejected_no_overwrite` | Verificada |
-| **Final Drop Resilient** | Drenado total LIFO ante pánico individual | `test_scoped_arena::test_drop_01_single_panic_with_three_pending_destructors` | Verificada |
-| **Multi-Panic Resilience**| Drenado total LIFO ante múltiples pánicos | `test_scoped_arena::test_drop_02_multiple_panics_during_arena_drop` | Verificada |
-| **Poisoned Final Drop** | Liberación de arena envenenada | `test_scoped_arena::test_drop_03_poisoned_arena_final_drop` | Verificada |
-| **Panic Propagation** | Reanudación fiel de carga útil de pánico | `test_scoped_arena::test_drop_04_panic_propagation_payload` | Verificada |
-| **No Double-Panic Abort**| Intercepción segura durante unwinding activo | `test_scoped_arena::test_drop_05_no_double_panic_abort_during_unwinding` | Verificada |
-| **Complex Heap Drops** | Liberación de buffers complejos de heap | `test_scoped_arena::test_drop_06_complex_heap_resources_cleaned_on_panic`, `test_p0_arena_06_complex_heap_owners_freed_cleanly` | Verificada |
-| **Nested Cascade Cleanup**| Limpieza en cascada en ámbitos anidados | `test_scoped_arena::test_drop_07_nested_scopes_cascade_cleanup`, `test_p0_arena_04_nested_scopes_with_inner_panic` | Verificada |
-| **ZST Drop Safety** | Destrucción LIFO sin avance de offset | `test_scoped_arena::test_p0_arena_05_zst_drop_interleaved_and_panic` | Verificada |
-| **Scope Overflow** | `checked_add` y `ScopeDepthExhausted` | `test_scoped_arena::test_p0_arena_07_deep_scope_nesting_and_depth_invariants` | Verificada |
-| **Alineación 4096** | Padding seguro y potencia de dos | `test_scoped_arena::test_p0_arena_08_extreme_alignment_up_to_4096` | Verificada |
-| **PFS Reconcile** | Cuarentena y reparación | PFS01–PFS12, `nexo-physical-fuzz` | Verificada |
+| **No-UAF** | Generación impar/par y descarte físico | `adversarial_atomicity::a08`, `physical::f07` | IMPLEMENTADA / PROBADA |
+| **No-Double-Free** | Linearidad de `Handle` | `pool.rs` compile_fail doctests, `api_security.rs` | DEMOSTRADA / PROBADA |
+| **No-ABA (32-bit)** | Retirada en $2^{32}-2$ | `bislab::agotamiento_de_generacion_sin_wraparound` | IMPLEMENTADA / PROBADA |
+| **No-ABA (16-bit)** | Retirada en $2^{16}-2$ | `test_compact_nexo::test_compact_gen_exhaustion_and_no_aba`, `test_compact_gen_16bit_boundary_correctness` | IMPLEMENTADA / PROBADA |
+| **No-ABA (8-bit)** | Retirada en 254 (`GEN_RETIRADO_8`) | `test_compact_nexo::test_exhaustive_8bit_domain_and_invariants` | IMPLEMENTADA / PROBADA |
+| **Compact Registry 8-bit** | Límite estricto 255 IDs sin reciclaje ni colisiones concurrentes | `test_compact_nexo::test_compact_pool_registry_bounded_issuance`, `test_compact_pool_registry_concurrent_issuance_no_duplicates` | IMPLEMENTADA / PROBADA |
+| **Compact Registry 16-bit** | Límite estricto 65.535 IDs sin reciclaje | `test_compact_nexo::test_compact_pool_registry_16_bounded_issuance` | IMPLEMENTADA / PROBADA |
+| **Tokens Unforgeable** | `CompactPoolToken` lineal privado | `test_compact_nexo::test_compact_pool_token_unforgeability_and_monotonicity` | DEMOSTRADA / PROBADA |
+| **Compact Authority Sealed** | Trait sellado y revalidación en `PhysicalPool` | `test_compact_nexo::test_compact_link_authorized_revalidation_boundary`, `test_compact_physical_pool_adapter_integration` | DEMOSTRADA / PROBADA |
+| **64-bit Compact Authority**| Trait sellado de 8 bytes y revalidación | `test_compact_nexo::test_compact_pool_64_revalidation_and_adapter` | IMPLEMENTADA / PROBADA |
+| **Aislamiento Scope** | Marcador lineal de ámbito | `test_scoped_arena::test_nested_scopes_and_lifo_destruction` | DEMOSTRADA / PROBADA |
+| **Panic Resilience** | Envenenamiento y guard LIFO | `test_scoped_arena::test_p0_arena_01_three_objects_middle_panics_in_drop` | IMPLEMENTADA / PROBADA |
+| **No Memory Overwrite** | Bloqueo de asignación envenenada | `test_scoped_arena::test_p0_arena_02_allocation_after_panic_is_rejected_no_overwrite` | IMPLEMENTADA / PROBADA |
+| **DROP-01 (Single Panic)** | Drenado total LIFO ante pánico individual | `test_scoped_arena::test_drop_01_single_panic_with_three_pending_destructors` | IMPLEMENTADA / PROBADA |
+| **DROP-02 (Multi-Panic)** | Drenado total LIFO ante múltiples pánicos | `test_scoped_arena::test_drop_02_multiple_panics_during_arena_drop` | IMPLEMENTADA / PROBADA |
+| **DROP-03 (Poisoned Drop)**| Liberación de arena envenenada | `test_scoped_arena::test_drop_03_poisoned_arena_final_drop` | IMPLEMENTADA / PROBADA |
+| **DROP-04 (Payload)** | Reanudación fiel de carga útil de pánico | `test_scoped_arena::test_drop_04_panic_propagation_payload` | IMPLEMENTADA / PROBADA |
+| **DROP-05 (No Abort)** | Intercepción segura durante unwinding activo | `test_scoped_arena::test_drop_05_no_double_panic_abort_during_unwinding` | IMPLEMENTADA / PROBADA |
+| **DROP-06 (Complex Heap)** | Liberación de buffers complejos de heap | `test_scoped_arena::test_drop_06_complex_heap_resources_cleaned_on_panic`, `test_p0_arena_06_complex_heap_owners_freed_cleanly` | IMPLEMENTADA / PROBADA |
+| **DROP-07 (Nested Cascade)**| Limpieza en cascada en ámbitos anidados | `test_scoped_arena::test_drop_07_nested_scopes_cascade_cleanup`, `test_p0_arena_04_nested_scopes_with_inner_panic` | IMPLEMENTADA / PROBADA |
+| **DROP-08 (Partial Panic)**| Destructor con pánico tras liberación parcial | `test_scoped_arena::test_drop_08_partial_release_and_panic` | IMPLEMENTADA / PROBADA |
+| **DROP-09 (State Mutation)**| Mutación externa persistente antes de fallo | `test_scoped_arena::test_drop_09_external_state_mutation_before_panic` | IMPLEMENTADA / PROBADA |
+| **DROP-10 (Thread Unwind)**| Múltiples fallos durante unwinding de hilo | `test_scoped_arena::test_drop_10_multiple_failures_during_thread_unwinding` | IMPLEMENTADA / PROBADA |
+| **DROP-11 (ZST Panic)** | Destructor de ZST que entra en pánico | `test_scoped_arena::test_drop_11_zero_sized_type_destructor_panic`, `test_p0_arena_05_zst_drop_interleaved_and_panic` | IMPLEMENTADA / PROBADA |
+| **DROP-12 (Inner Poison)** | Ámbito interior envenenado con pendientes | `test_scoped_arena::test_drop_12_inner_scope_poisoned_with_outer_pending` | IMPLEMENTADA / PROBADA |
+| **DROP-13 (Strict LIFO)** | Dependencias estrictas de orden LIFO | `test_scoped_arena::test_drop_13_strict_dependency_lifo_order` | IMPLEMENTADA / PROBADA |
+| **DROP-14 (Mismatch Drop)**| Desajuste de marcador seguido de drop final | `test_scoped_arena::test_drop_14_close_scope_mismatch_then_final_drop` | IMPLEMENTADA / PROBADA |
+| **DROP-15 (Miri Pureness)**| Layout de memoria pura heap sin syscalls | `test_scoped_arena::test_drop_15_miri_layout_and_zero_leak_verification` | ESPECIFICADA / PENDIENTE MIRI |
+| **DROP-16 (Process Guard)**| Contención de pánicos en hilo aislado | `test_scoped_arena::test_drop_16_isolated_child_panic_resilience` | IMPLEMENTADA / PROBADA |
+| **Scope Overflow** | `checked_add` y `ScopeDepthExhausted` | `test_scoped_arena::test_p0_arena_07_deep_scope_nesting_and_depth_invariants` | DEMOSTRADA / PROBADA |
+| **Arena ID Exhaustion** | Detección exacta de `ArenaIdExhausted` | `next::arena::tests::test_arena_id_exhausted_boundary` | DEMOSTRADA / PROBADA |
+| **Alineación 4096** | Padding seguro y potencia de dos | `test_scoped_arena::test_p0_arena_08_extreme_alignment_up_to_4096` | IMPLEMENTADA / PROBADA |
+| **PFS Reconcile** | Cuarentena y reparación | PFS01–PFS12, `nexo-physical-fuzz` | IMPLEMENTADA / PROBADA |
+| **Child Isolation** | Protección de página de SO en proceso hijo | `child_isolation::p03_*` (SIGSEGV verificado) | IMPLEMENTADA / PROBADA |

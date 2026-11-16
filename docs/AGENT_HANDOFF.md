@@ -1,6 +1,45 @@
 # Traspaso de agente — ELE
 
-## Actualización 2026-11-16 — Endurecimiento final de seguridad y cierre sin regresiones (DROP-01..07, CompactPoolAuthority, Registry16)
+## Actualización 2026-11-16 (Zero-Trust Hardening) — Resolución de Identidad de Registros, Traits Sellados, Tokens Infalsificables, Adaptador Físico y Suite DROP-08..16
+
+Ramas auditadas:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (intacta, sin cambios).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de endurecimiento Zero-Trust).
+
+### 1. Resolución de Identidad Inequívoca de Pools Compactos (P0)
+- **Defecto auditado**: La existencia de `CompactPoolRegistryInstance` pública permitía a consumidores independientes crear registros que emitieran `pool_id = 1`, arriesgando colisiones en dominios de revalidación.
+- **Corrección aplicada**:
+  - Se introdujo `CompactPoolToken` y `CompactPoolToken16`: tokens lineales con campos privados y sin constructor público, no clonables (`!Clone`, `!Copy`), emitibles exclusivamente a través de los registros globales de producción (`CompactPoolRegistry::acquire_token` y `CompactPoolRegistry16::acquire_token`).
+  - Las instancias desacopladas (`CompactPoolRegistryInstance`) se confinaron al módulo interno `testing`, eliminando la ambigüedad en el contrato público de producción.
+  - La unicidad de `pool_id` queda matemáticamente garantizada a nivel de proceso mediante asignación atómica sin reciclaje ni wraparound.
+
+### 2. Frontera de Autoridad y Traits Sellados (P0)
+- **Defecto auditado**: El trait público `CompactPoolAuthority` podía ser implementado por consumidores externos con datos arbitrarios para obtener `CompactObjRef`.
+- **Corrección aplicada**:
+  - Se sellaron los traits `CompactPoolAuthority` y `CompactPoolAuthority64` mediante el submódulo sellado `private::Sealed`. Ningún consumidor externo puede implementarlos.
+  - Se vincularon formalmente los tokens de acceso `CompactObjRef<'a>` y `CompactObjRef64<'a>` al tiempo de vida del préstamo `'a` del pool (`PhantomData<&'a ()>`). El borrow checker de Rust impide estáticamente llamar a `destroy`, `close` o mutaciones sobre el pool mientras exista una referencia revalidada activa.
+  - Se implementaron los adaptadores seguros `CompactPhysicalPool` y `CompactPhysicalPool64` en `crates/nexo/src/next/adapter.rs`, validando estados de subpágina (`Committed`, rechazando `Quarantined`, `Reserved`, `ReclaimPending`, `Returned`), límites físicos de slots y generaciones lógicas en `PhysicalPool`.
+
+### 3. Precisión de Errores y Aritmética en `ScopedArena`
+- Se agregó el error tipado `ArenaError::ArenaIdExhausted` en sustitución de `OutOfMemory` cuando el generador monotónico alcanza `u64::MAX`.
+- Se verificó la aritmética de punteros, alineaciones de hasta 4096 bytes y tipos de tamaño cero (ZST).
+
+### 4. Suite Exhaustiva DROP-08 a DROP-16 (`test_scoped_arena.rs`)
+- `DROP-08`: Destructor compuesto con liberación parcial antes del pánico; los objetos pendientes se liberan incondicionalmente en LIFO.
+- `DROP-09`: Mutación de estado externo persistente antes del pánico; la mutación persiste y los hermanos se destruyen.
+- `DROP-10`: Doble pánico durante unwinding inicial de hilo; la arena drena todos los drops sin provocar doble pánico ni aborto de proceso.
+- `DROP-11`: Destructor de tipo de tamaño cero (ZST) que entra en pánico; layout y punteros preservados.
+- `DROP-12`: Ámbito interior envenenado; preservación estricta de la destrucción de objetos del ámbito exterior en `drop(arena)`.
+- `DROP-13`: Dependencias complejas de recursos en estricto orden LIFO (5, 4, 3, 2, 1) con pánicos intermedios.
+- `DROP-14`: Desajuste de marcador en `close_scope` (recuperación lineal) seguido de destrucción final de la arena sin fugas.
+- `DROP-15`: Prueba de pureza de layout heap sin syscalls virtuales (documentada compatibilidad conceptual con Miri).
+- `DROP-16`: Contención de pánicos en hilo aislado para validar ausencia de corrupción.
+
+### 5. Estado de Validación Dual-OS
+- **Windows MSVC**: 260 pruebas aprobadas en `ele-nexo`, 780+ en workspace completo, clippy con 0 advertencias, fmt limpio, 5/5 child isolation, 65.536 comandos de fuzzer físico (0 divergencias), 10.000 casos de fuzzer lingüístico (0 fallos P1).
+- **Linux WSL2**: 261 pruebas aprobadas en `ele-nexo` (incluye prueba de protección `madvise` de Linux), 5/5 child isolation con intercepción real de SIGSEGV.
+- **Miri**: Toolchain del host carece del componente `cargo-miri` para el canal instalado; limitación documentada con precisión y honestidad técnica.
 
 Ramas auditadas:
 - `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`).
