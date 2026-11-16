@@ -26,24 +26,25 @@ $$\forall h_1, h_2 \in \text{Handle} : h_1 = h_2 \implies \text{False (no duplic
   3. `destroy(h)` toma posesión por valor de `h`.
   4. Por las reglas de ownership lineal de Rust y el verificador estático de ELE, un valor consumido no puede volver a invocarse (verificado por prueba de compilación negativa `compile_fail,E0382`).
 
-### T3: No-ABA en Generaciones Compactas (16 bits)
+### T3: No-ABA y Ausencia de Colisiones en Generaciones Compactas (16 bits y 8 bits)
 - **Hipótesis**: Un slot se asigna y libera reiteradamente.
-- **Riesgo**: Que tras $2^{16}$ ciclos la generación vuelva a $g_0$ y valide un enlace antiguo.
+- **Riesgo**: Que tras ciclos repetidos la generación vuelva a $g_0$ o colisione en una codificación truncada (p. ej. Gen 1 vs Gen 257 en 8 bits).
 - **Solución implementada**:
-  1. La generación inicia en $1$ y avanza $g \leftarrow g + 2$ en cada asignación.
-  2. Al alcanzar el umbral de seguridad $g_{\text{max}} = 65533$, el siguiente ciclo de destrucción marca el slot como `GEN_RETIRADO_16 = 0xfffe`.
-  3. Todo slot en estado retirado queda permanentemente excluido de las listas y bitmaps de asignación.
-  4. La función `allocate()` rechaza slots retirados.
-  5. Ningún enlace antiguo puede volver a colisionar con una generación reutilizada.
+  1. En 16 bits (`CompactGen`), la generación inicia en $1$ y avanza $g \leftarrow g + 2$. Al alcanzar $65533$, el siguiente ciclo de destrucción marca el slot como `GEN_RETIRADO_16 = 0xfffe`.
+  2. En 8 bits (`CompactLink`), la generación compacta inicia en $1$, avanza de 2 en 2, y al alcanzar $253$, la destrucción transiciona definitivamente a `GEN_RETIRADO_8 = 254` (`0xfe`).
+  3. Todo intento de asignar o revalidar con generación $\ge 254$ es rechazado (`CompactGenError::Retired`, `CompactLinkError::GenerationRetired`).
+  4. La generación 257 jamás puede ser alcanzada ni creada para ese slot, eliminando de forma absoluta cualquier colisión de hash módulo 256.
+  5. `CompactLink::matches()` comprueba tanto la coincidencia estricta de `pool_id`, la no paridad (`is_live`, impar), el límite de retiro, y la igualdad exacta.
 
-### T4: Seguridad de Ámbitos y Arenas (`ScopedArena`)
-- **Teorema**: Ningún préstamo o puntero derivado de `ScopedArena` puede sobrevivir a `close_scope(marker)`.
+### T4: Seguridad de Ámbitos, Arenas (`ScopedArena`) y Aislamiento de Hilos
+- **Teorema**: Ningún préstamo o puntero derivado de `ScopedArena` puede sobrevivir a `close_scope(marker)`, ni transferirse incorrectamente entre arenas o hilos.
 - **Demostración**:
-  1. `ScopedArena::begin_scope()` genera un `ScopeMarker` lineal que contiene un contador de generación de ámbito.
-  2. Las referencias emitidas dentro del ámbito portan una ligadura de tiempo de vida estática $\alpha$ subordinada al marcador.
+  1. `ScopedArena::begin_scope()` genera un `ScopeMarker` lineal que contiene tanto el identificador atómico único de arena (`arena_id`) como el nivel de ámbito activo (`scope_id`).
+  2. `alloc()` y `close_scope()` validan estrictamente la coincidencia de `arena_id` y `scope_id`. Cualquier marcador foráneo o de orden incorrecto es rechazado inmediatamente con `ArenaError::ScopeMismatch` sin corromper el estado ni ejecutar destructores erróneos.
   3. `close_scope` consume el `ScopeMarker` por valor.
   4. Si existiese cualquier préstamo activo de la arena, el borrow checker rechaza la llamada a `close_scope` por solapamiento de préstamos vivos.
-  5. Una vez ejecutada `close_scope`, la memoria queda invalidada para los objetos anteriores y el puntero de asignación se restablece de forma segura.
+  5. `ScopedArena` no implementa `Send` ni `Sync` (retiene punteros crudos `NonNull<u8>`), impidiendo formalmente que tipos no aptos para concurrencia (como `Rc`) sean transferidos entre hilos a través de la arena.
+  6. La arena garantiza alineación base de 128 bytes y soporta alineaciones arbitrarias de tipos sin desbordamiento aritmético gracias a `align_offset` y comprobaciones `checked_add`. Tipos de tamaño cero (ZST) no consumen capacidad de memoria y ejecutan sus destructores deterministamente.
 
 ---
 

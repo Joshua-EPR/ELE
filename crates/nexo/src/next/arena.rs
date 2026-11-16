@@ -6,6 +6,12 @@
 
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Alineación base garantizada del búfer de la arena (128 bytes).
+pub const ARENA_BASE_ALIGN: usize = 128;
+
+static NEXT_ARENA_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Error de asignación en `ScopedArena`.
 #[derive(Debug, Eq, PartialEq)]
@@ -26,18 +32,27 @@ struct DropEntry {
 /// explícito mediante [`ScopedArena::close_scope`].
 #[derive(Debug)]
 pub struct ScopeMarker {
+    arena_id: u64,
     scope_id: u64,
     offset: usize,
     drop_count: usize,
 }
 
 impl ScopeMarker {
+    pub fn arena_id(&self) -> u64 {
+        self.arena_id
+    }
+
     pub fn scope_id(&self) -> u64 {
         self.scope_id
     }
 }
 
 /// Pila de datos y asignador por ámbito estructurado.
+///
+/// `ScopedArena` contiene punteros crudos (`NonNull<u8>`) y no implementa `Send` ni `Sync`,
+/// garantizando que tipos no aptos para concurrencia (como `Rc`) no puedan ser transferidos
+/// entre hilos a través de la arena.
 pub struct ScopedArena {
     id: u64,
     buffer: NonNull<u8>,
@@ -47,21 +62,21 @@ pub struct ScopedArena {
     drops: Vec<DropEntry>,
 }
 
-unsafe impl Send for ScopedArena {}
-
 impl ScopedArena {
     /// Crea una nueva arena con la capacidad en bytes indicada.
     pub fn new(capacity: usize) -> Result<Self, ArenaError> {
         if capacity == 0 {
             return Err(ArenaError::OutOfMemory);
         }
-        let layout =
-            Layout::from_size_align(capacity, 16).map_err(|_| ArenaError::InvalidAlignment)?;
+        let layout = Layout::from_size_align(capacity, ARENA_BASE_ALIGN)
+            .map_err(|_| ArenaError::InvalidAlignment)?;
         let ptr = unsafe { alloc(layout) };
         let buffer = NonNull::new(ptr).ok_or(ArenaError::OutOfMemory)?;
 
+        let id = NEXT_ARENA_ID.fetch_add(1, Ordering::Relaxed);
+
         Ok(Self {
-            id: 1,
+            id,
             buffer,
             capacity,
             offset: 0,
@@ -86,10 +101,11 @@ impl ScopedArena {
         self.capacity.saturating_sub(self.offset)
     }
 
-    /// Inicia un nuevo ámbito estructurado y retorna un marcador lineal.
+    /// Inicia un nuevo ámbito estructurado y retorna un marcador lineal ligado a esta arena.
     pub fn begin_scope(&mut self) -> ScopeMarker {
         self.active_scopes = self.active_scopes.saturating_add(1);
         ScopeMarker {
+            arena_id: self.id,
             scope_id: self.active_scopes,
             offset: self.offset,
             drop_count: self.drops.len(),
@@ -98,10 +114,11 @@ impl ScopedArena {
 
     /// Asigna un valor dentro del ámbito actual.
     ///
-    /// El destructor del valor `T` se registrará automáticamente y será invocado
-    /// de forma determinista cuando se cierre el ámbito correspondiente.
+    /// Valida la afinidad estricta entre el marcador y la arena, así como el nivel de ámbito.
+    /// Si el tipo `T` necesita destrucción (`std::mem::needs_drop`), su destructor se registrará
+    /// para ejecución determinista LIFO al cerrar el ámbito.
     pub fn alloc<T>(&mut self, marker: &ScopeMarker, val: T) -> Result<&mut T, ArenaError> {
-        if marker.scope_id != self.active_scopes {
+        if marker.arena_id != self.id || marker.scope_id != self.active_scopes {
             return Err(ArenaError::ScopeMismatch);
         }
 
@@ -109,22 +126,26 @@ impl ScopedArena {
         let align = layout.align();
         let size = layout.size();
 
-        // Alinear el offset actual
+        // Calcular desplazamiento de alineación de forma segura contra desbordamientos
         let current_ptr = unsafe { self.buffer.as_ptr().add(self.offset) };
-        let unaligned_addr = current_ptr as usize;
-        let aligned_addr = (unaligned_addr + align - 1) & !(align - 1);
-        let padding = aligned_addr - unaligned_addr;
+        let align_offset = current_ptr.align_offset(align);
+        if align_offset == usize::MAX {
+            return Err(ArenaError::InvalidAlignment);
+        }
 
-        let total_needed = padding.checked_add(size).ok_or(ArenaError::OutOfMemory)?;
+        let total_needed = align_offset
+            .checked_add(size)
+            .ok_or(ArenaError::OutOfMemory)?;
         let new_offset = self
             .offset
             .checked_add(total_needed)
             .ok_or(ArenaError::OutOfMemory)?;
+
         if new_offset > self.capacity {
             return Err(ArenaError::OutOfMemory);
         }
 
-        let target_ptr = aligned_addr as *mut T;
+        let target_ptr = unsafe { self.buffer.as_ptr().add(self.offset + align_offset) as *mut T };
         unsafe {
             target_ptr.write(val);
         }
@@ -147,14 +168,15 @@ impl ScopedArena {
 
     /// Cierra el ámbito estructurado consumiendo el marcador lineal.
     ///
-    /// Ejecuta todos los destructores de los objetos asignados en el ámbito
-    /// en orden LIFO y retrocede el puntero de asignación de forma atómica.
+    /// Valida la afinidad de arena y orden estricto de ámbito. Ante cualquier discordancia,
+    /// aborta retornando `Err(ArenaError::ScopeMismatch)` sin ejecutar destructores ni corromper
+    /// el offset o contador de ámbitos.
     pub fn close_scope(&mut self, marker: ScopeMarker) -> Result<(), ArenaError> {
-        if marker.scope_id != self.active_scopes {
+        if marker.arena_id != self.id || marker.scope_id != self.active_scopes {
             return Err(ArenaError::ScopeMismatch);
         }
 
-        // Ejecutar destructores registrados durante este ámbito en orden inverso
+        // Ejecutar destructores registrados durante este ámbito en orden LIFO
         while self.drops.len() > marker.drop_count {
             if let Some(entry) = self.drops.pop() {
                 unsafe {
@@ -178,7 +200,7 @@ impl Drop for ScopedArena {
                 (entry.drop_fn)(entry.ptr);
             }
         }
-        let layout = Layout::from_size_align(self.capacity, 16).unwrap();
+        let layout = Layout::from_size_align(self.capacity, ARENA_BASE_ALIGN).unwrap();
         unsafe {
             dealloc(self.buffer.as_ptr(), layout);
         }

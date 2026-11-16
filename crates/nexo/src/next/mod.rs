@@ -11,6 +11,7 @@ pub mod optimize;
 
 pub use arena::{ArenaError, ScopeMarker, ScopedArena};
 pub use compact::{
-    CompactGen, CompactGenError, CompactLink, CompactLinkError, GEN_RETIRADO_16, MAX_SLOT_COMPACT,
+    CompactGen, CompactGenError, CompactLink, CompactLinkError, GEN_RETIRADO_8, GEN_RETIRADO_16,
+    MAX_SLOT_COMPACT_32,
 };
 pub use optimize::{BatchRevalidator, HoistSafety};
