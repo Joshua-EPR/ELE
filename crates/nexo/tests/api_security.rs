@@ -116,3 +116,55 @@ fn test_external_consumer_cannot_construct_hole_token_struct() {
         "Se esperaba error E0451 por campos privados de HoleToken, recibido:\n{stderr}"
     );
 }
+
+#[test]
+fn test_external_consumer_cannot_construct_link_struct() {
+    let (success, stderr) = run_fixture_check("construct-link-struct");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar construir Link directamente"
+    );
+    assert!(
+        stderr.contains("E0451") && stderr.contains("Link"),
+        "Se esperaba error E0451 por campos privados de Link, recibido:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_external_consumer_cannot_construct_objref_struct() {
+    let (success, stderr) = run_fixture_check("construct-objref-struct");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar construir ObjRef directamente"
+    );
+    assert!(
+        stderr.contains("E0451") && stderr.contains("ObjRef"),
+        "Se esperaba error E0451 por campos privados de ObjRef, recibido:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_external_consumer_cannot_clone_handle() {
+    let (success, stderr) = run_fixture_check("clone-handle");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar clonar Handle"
+    );
+    assert!(
+        (stderr.contains("E0277") || stderr.contains("E0599")) && stderr.contains("Clone"),
+        "Se esperaba error E0277/E0599 por ausencia de Clone en Handle, recibido:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_external_consumer_cannot_clone_hole_token() {
+    let (success, stderr) = run_fixture_check("clone-hole-token");
+    assert!(
+        !success,
+        "La compilación debió ser rechazada al intentar clonar HoleToken"
+    );
+    assert!(
+        (stderr.contains("E0277") || stderr.contains("E0599")) && stderr.contains("Clone"),
+        "Se esperaba error E0277/E0599 por ausencia de Clone en HoleToken, recibido:\n{stderr}"
+    );
+}
