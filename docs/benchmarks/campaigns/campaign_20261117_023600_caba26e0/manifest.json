@@ -1,0 +1,24 @@
+{
+  "campaign_id": "campaign_20261117_023600_caba26e0",
+  "mode": "experimental",
+  "schema_version": "v0.4.1",
+  "stats_spec_version": "1.1.0",
+  "timestamp": "2026-11-17T02:36:00.798016+00:00",
+  "binary_sha256": "52f854e3d899b46291e6c5b8d4242c544ed9626cae797c09df0c471a8435e5f2",
+  "git": {
+    "head": "3d4b5292692f450b6745c7986eed70d1f28a8643",
+    "branch": "fix/nexo-v04-evidence-final-hardening",
+    "dirty": true,
+    "diff_sha256": "3efa81685a9d6662de324c4c0e364ba88cd4fb1c6a0d79e955b423ead2deda3c"
+  },
+  "files": {
+    "summary.json": "f7bc8f139cce2c356fd0e69d903483937af53154086d57c8541e4cf86e7ef26c",
+    "raw/process_1.json": "218040048808e40f25ec9a6ab7dec68791ff05355a7cc18cb078def6df78e536",
+    "raw/process_2.json": "f7674dd85797196dc0b9ed1f6e761d1231f213f1502204f18755ce9f883ccd0d",
+    "raw/process_3.json": "a660aad464576f0d73590407d9615a639308702571d1a985c68ed29428935aa0",
+    "raw/process_4.json": "650da0e4499414bcbfad2a9e9cd4aca8dea62f02ca1b216292d1b446bf4728d8",
+    "raw/process_5.json": "39167af714b8641c124c7ce521f17ef62b1e61365f3ad812250605f679388d4e",
+    "patch.diff": "3efa81685a9d6662de324c4c0e364ba88cd4fb1c6a0d79e955b423ead2deda3c",
+    "untracked_files.txt": "1c6e6340e9154c3aa1e2f7051be77051cd8b3fed4905930c22bbfc51f6d265da"
+  }
+}

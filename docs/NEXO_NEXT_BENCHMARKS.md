@@ -233,3 +233,47 @@ Para garantizar que los resultados de benchmark no puedan ser contaminados por a
    - Verificación estricta de esquema versionado (`schema_version: "v0.4.1"`), especificación estadística (`stats_spec_version: "1.1.0"`), coincidencia de identificadores de campaña y proceso, conteo exacto de 16 escenarios sin duplicados, muestras requeridas (700 estándar, 336 en ráfaga) y ausencia de valores no finitos.
 5. **Paridad Estadística Exacta Rust/Python (STAT-CROSS-01..10)**:
    - La especificación estadística `1.1.0` define la misma interpolación lineal uniforme estándar $r = (N-1) \times p, w = r - \lfloor r \rfloor, x_i(1-w) + x_j w$ en Rust y Python, verificada mediante pruebas cruzadas automáticas en ambas plataformas.
+
+---
+
+### 4.8 Publicación Transaccional, Reemplazo Seguro en Windows y Verificación de Muestras (Operación Evidence Final Hardening)
+
+En la consolidación final de NEXO v0.4 se resolvieron todos los vectores restantes de integridad de evidencia y persistencia atómica:
+
+1. **Reemplazo Atómico Seguro en Windows sin Borrado Previo (ATOMIC-01..10)**:
+   - Se eliminó el patrón inseguro `remove_file(path)` previo a `rename(tmp, path)` en `crates/nexo/src/bin/nexo-physical-bench.rs`.
+   - Se adoptó una estrategia transaccional de *backup-and-restore*: si el archivo previo existe, se renombra primero a `<path>.bak.<pid>`. A continuación, se renombra el archivo temporal `<tmp>` a `<path>`. Si esta segunda operación falla, se restaura inmediatamente el backup original, garantizando que el archivo anterior jamás se pierde ni queda truncado. Tras el éxito de la operación, el archivo `.bak` temporal se elimina de forma limpia.
+   - Verificado mediante pruebas adversariales en `crates/nexo/tests/test_bench_io.rs` (`test_atomic_05_and_06_previous_file_preserved_on_failure_and_no_tmp_bak`).
+
+2. **Pipeline de Publicación Transaccional en 5 Fases (PUBLISH-01..10)**:
+   En `scripts/run_benchmarks.py`, el proceso de benchmarking se estructuró en cinco fases estrictamente desacopladas:
+   - **Fase A (Aislamiento)**: Creación del directorio aislado `docs/benchmarks/campaigns/<campaign_id>/`. En modo experimental o dirty, se genera `patch.diff` y se registran los archivos no rastreados en `untracked_files.txt`. Los directorios y resúmenes públicos (`docs/benchmarks/summary.json` y `LATEST_CAMPAIGN`) no se tocan.
+   - **Fase B (Ejecución Aislada)**: Ejecución de 5 procesos independientes de SO (`nexo-physical-bench --completo`), emitiendo su salida exclusivamente a `campaigns/<campaign_id>/raw/process_{1..5}.json`. Se verifica el hash del binario antes y después de cada proceso.
+   - **Fase C (Validación Integral y Recálculo)**: Verificación estructural, de esquema y recálculo matemático de las 13 métricas a partir de `batch_samples` y `run_means`. Si algún proceso falla, la campaña se aborta inmediatamente sin tocar la publicación pública.
+   - **Fase D (Consolidación y Verificación Matemática)**: Construcción del `summary.json` y verificación cruzada contra los datos de los 5 procesos individuales.
+   - **Fase E (Publicación Transaccional Atómica)**: Generación de `manifest.json` y `checksums.sha256` en la carpeta de campaña. Únicamente tras la verificación total, se actualiza atómicamente `docs/benchmarks/LATEST_CAMPAIGN`, `docs/benchmarks/summary.json` y las copias retrocompatibles en `docs/benchmarks/raw/`.
+
+3. **Recálculo Estadístico Real contra Muestras Brutas (STATS-INTEGRITY-01..10)**:
+   - Se audita que `batch_stats` coincida campo por campo con el recálculo independiente de Welford ejecutado sobre los 700 lotes (336 en ráfagas), verificando las 13 métricas: `count`, `mean`, `median`, `min`, `max`, `variance_sample`, `variance_pop`, `stddev_sample`, `stddev_pop`, `cv_sample`, `cv_pop`, `p50`, `p95` y `p99`.
+   - Se audita que `run_means` contenga exactamente 7 valores finitos, que su promedio coincida con la media de `batch_samples`, y que `run_stats` coincida con la distribución de las 7 corridas.
+   - Evaluado mediante la suite `scripts/test_stats_integrity.py` (10 pruebas adversariales).
+
+4. **Trazabilidad y Control de Modo Oficial vs Experimental (SOURCE-01..10)**:
+   - `--official`: Exige un worktree de Git 100% limpio. Si se detectan cambios locales o archivos staged, aborta *fail-closed*.
+   - `--experimental`: Si el árbol contiene cambios no commiteados, genera automáticamente `patch.diff` (`git diff HEAD`) y registra los archivos en `untracked_files.txt`, incorporando dichos artefactos al `manifest.json` y `checksums.sha256`.
+
+5. **Pruebas Cruzadas Reales Rust <-> Python con Fixtures en Disco**:
+   - Creación de fixtures compartidos en `crates/nexo/tests/fixtures/stats/` (`uniform.json`, `outliers.json`, `large_values.json`, `repeated_values.json`, `percentile_edges.json`).
+   - Implementación del CLI `--compute-stats <fixture.json>` en `nexo-physical-bench`, permitiendo que `scripts/test_stats_cross.py` invoque el binario Rust real y compare todas las métricas contra Python.
+
+6. **Resultados de la Campaña de Cierre (`campaign_20261117_023600_caba26e0`)**:
+   - Binario release SHA-256: `52f854e3d899b46291e6c5b8d4242c544ed9626cae797c09df0c471a8435e5f2`
+   - Revalidación estándar puro: **13.4 ns/op** ($s_{\text{proc}} = 1.10$ ns, CV = 8.2%)
+   - Revalidación compacta 32b: **24.4 ns/op** ($s_{\text{proc}} = 6.06$ ns)
+   - Revalidación compacta 64b: **22.8 ns/op** ($s_{\text{proc}} = 1.43$ ns)
+   - Revalidar + leer int: **50.0 ns/op** ($s_{\text{proc}} = 0.29$ ns, CV = 0.6%)
+   - Hot allocate + free: **272.0 ns/op** ($s_{\text{proc}} = 3.41$ ns, CV = 1.3%)
+   - Hole destroy + reuse: **247.3 ns/op** ($s_{\text{proc}} = 4.37$ ns, CV = 1.8%)
+   - Commit + reclaim diferido (`keep=1`): **275.0 ns/op** ($s_{\text{proc}} = 0.96$ ns, CV = 0.3%, 0.000 llamadas al SO/op)
+   - Box global asignar + liberar: **111.9 ns/op** ($s_{\text{proc}} = 20.19$ ns, CV = 18.1%)
+

@@ -1,5 +1,72 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-17 (Operación Evidence Integrity, Memory Safety & Prototype Readiness — fix/nexo-v04-evidence-final-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-benchmark-evidence-lockdown`: Rama base directa (`3d4b5292692f450b6745c7986eed70d1f28a8643`).
+- `fix/nexo-v04-evidence-final-hardening`: **Rama activa de corrección, endurecimiento y consolidación**.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+
+1. **P1-028 (Reemplazo Atómico Seguro en Windows sin Borrado Previo ATOMIC-01..10)**:
+   - En `crates/nexo/src/bin/nexo-physical-bench.rs`, se eliminó el patrón inseguro `remove_file(path)` previo a `rename(tmp, path)`.
+   - Se implementó un protocolo transaccional de backup-and-restore (`<path>.bak.<pid>`): se renombra el archivo previo a backup, se renombra el temporal al destino, y si este paso falla, se restaura inmediatamente el backup original intacto sin pérdida de datos.
+   - Verificado con `test_atomic_05_and_06_previous_file_preserved_on_failure_and_no_tmp_bak` en `crates/nexo/tests/test_bench_io.rs`.
+
+2. **P1-029 (Pipeline de Publicación Transaccional en 5 Fases PUBLISH-01..10)**:
+   - En `scripts/run_benchmarks.py`, se implementaron las Fases A (Aislamiento), B (Ejecución de 5 procesos independientes), C (Validación integral y recálculo), D (Consolidación y verificación cruzada) y E (Publicación atómica transaccional).
+   - Los resúmenes públicos (`docs/benchmarks/LATEST_CAMPAIGN`, `docs/benchmarks/summary.json` y `docs/benchmarks/raw/`) no se modifican hasta que todas las fases previas hayan concluido al 100% y se hayan generado el `manifest.json` y `checksums.sha256`.
+
+3. **P1-030 (Recálculo Estadístico Real contra Muestras Brutas STATS-INTEGRITY-01..10)**:
+   - Se valida independientemente que `batch_stats` y `run_stats` coincidan con el recálculo numérico de Welford ejecutado sobre los 700 lotes (336 en ráfagas) y las 7 corridas dentro de tolerancia matemática para las 13 métricas (`count`, `mean`, `median`, `min`, `max`, `variance_sample`, `variance_pop`, `stddev_sample`, `stddev_pop`, `cv_sample`, `cv_pop`, `p50`, `p95`, `p99`).
+   - Se audita que `run_means` contenga 7 valores finitos y que su promedio coincida con la media de `batch_samples`.
+   - Implementación de la suite adversarial `scripts/test_stats_integrity.py` (10 pruebas aprobadas).
+
+4. **P1-031 (Trazabilidad Estricta de Código Fuente, Modo Oficial y Registro de Diff SOURCE-01..10)**:
+   - Modo oficial (`--official`): exige un worktree de Git 100% limpio, fallando cerrado si hay modificaciones locales.
+   - Modo experimental (`--experimental`): genera automáticamente `patch.diff` con `git diff HEAD`, registra los archivos no rastreados en `untracked_files.txt`, graba el SHA-256 del binario y cataloga los artefactos en el manifiesto.
+
+5. **P2-032 (Pruebas Cruzadas Reales Rust <-> Python con Fixtures en Disco y CLI `--compute-stats`)**:
+   - Creación de fixtures compartidos en `crates/nexo/tests/fixtures/stats/*.json` (`uniform`, `outliers`, `large_values`, `repeated_values`, `percentile_edges`).
+   - CLI `--compute-stats <fixture.json>` en `nexo-physical-bench` calculando métricas mediante `nexo::stats::compute_stats` y emitiendo JSON estandarizado.
+   - `scripts/test_stats_cross.py` ejecuta el binario Rust real sobre cada fixture y compara campo por campo todas las métricas contra Python (15 pruebas aprobadas).
+
+6. **P2-033 (Determinismo en Inyección OOM con Contadores Atómicos Observables OOM-CONC-01..10)**:
+   - En `crates/nexo/src/next/compact.rs`, se coordinó el inyector OOM multihilo mediante `Arc<AtomicUsize>` (`oom_observed`, `attempts_total`), garantizando que la suite registre y observe eventos reales de OOM (`assert!(total_oom > 0)`) antes de terminar.
+
+7. **P1-034 (NEXO Prototype 0.1: Integración de Extremo a Extremo con APIs 100% Públicas)**:
+   - Creación del ejemplo ejecutable `crates/nexo/examples/nexo_prototype_01.rs` demostrando el ciclo de vida completo de memoria física.
+   - Suite de prueba de integración de extremo a extremo `crates/nexo/tests/test_prototype_01.rs` validando asignación, lectura/escritura tipada, revalidación de enlaces, destrucción con retención de huecos, rechazo de referencias obsoletas (`StaleGeneration`), reutilización determinista de huecos (+2 de avance generacional) y cierre limpio del pool.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O & Atomic Replacement** | `crates/nexo/tests/test_bench_io.rs` | 7 | **7/7 APROBADAS** | **7/7 APROBADAS** |
+| **Statistical Consistency** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Statistical Sample Integrity** | `scripts/test_stats_integrity.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Publish** | `scripts/test_benchmark_isolation.py` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **NEXO Prototype 0.1 E2E** | `crates/nexo/tests/test_prototype_01.rs` | 1 | **1/1 APROBADA** | **1/1 APROBADA** |
+| **NEXO Prototype 0.1 Example** | `crates/nexo/examples/nexo_prototype_01.rs` | 1 | **EJECUTADO CON ÉXITO** | **EJECUTADO CON ÉXITO** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 61/62 | **61/61 APROBADAS** | **62/62 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
 ## Actualización 2026-11-16 (Operación Benchmark Evidence Lockdown & Concurrent Authority Verification — fix/nexo-v04-benchmark-evidence-lockdown)
 
 Ramas y estado de Git:
