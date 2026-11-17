@@ -79,7 +79,7 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     ctx.flow.current = join
 }
 
-fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: Int) -> Int {
+pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: Int) -> Int {
     if stmt_id < 0 || stmt_id >= tree.statements.length {
         return 0
     }

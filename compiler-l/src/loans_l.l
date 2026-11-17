@@ -33,7 +33,7 @@ pub fn loanColAt(source: &Text, offset: Int) -> Int {
     return col
 }
 
-fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) -> Int {
+pub fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) -> Int {
     let id = graph.loans.length
     graph.loans.push(Loan(kind: kind, place: place, parent: parent, alt: -1, param: -1, start: start, end: end))
     return id
@@ -51,7 +51,7 @@ pub fn loanOfPath(graph: &FlowGraph, path: Int) -> Int {
     return graph.binding_loans[root]
 }
 
-fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
+pub fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
     if path < 0 { return }
     while graph.binding_loans.length < graph.paths.length {
         graph.binding_loans.push(-1)
@@ -61,7 +61,7 @@ fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
 
 // A reference parameter carries a loan on its own place. The loan has no
 // creation event: it is live from entry and roots parameter provenance.
-fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
+pub fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
     var kind = LOAN_SHARED
     if is_mut { kind = LOAN_MUT }
     let loan = loanNew(&mut graph, kind, path, -1, start, end)
@@ -114,7 +114,7 @@ pub fn loanDescendsFrom(graph: &FlowGraph, loan: Int, ancestor: Int) -> Bool {
 // of a borrowed call result). Both always point to a smaller id, so walks
 // terminate. True when every root reachable from `loan` is a reference
 // parameter: the value cannot outlive the call that received it.
-fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
+pub fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
     var stack: List<Int> = List[]
     stack.push(loan)
     while stack.length > 0 {
@@ -139,7 +139,7 @@ fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
 // Result loan of a call to a borrowing function: one node per origin
 // argument, chained through `alt`. Each node reborrows its origin so a use
 // of the result keeps every possible owner borrowed.
-fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int, end: Int) -> Int {
+pub fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int, end: Int) -> Int {
     var head = -1
     var i = origins.length - 1
     while i >= 0 {

@@ -167,7 +167,7 @@ fn dropMerge(table: &mut List<Int>, cells: &List<Int>, target: Int, paths: Int, 
     return changed
 }
 
-fn dropVerify(graph: &FlowGraph, plan: &DropPlan) -> DropVerdict {
+pub fn dropVerify(graph: &FlowGraph, plan: &DropPlan) -> DropVerdict {
     let blocks = graph.blocks.length
     if blocks == 0 || graph.reached.length != blocks { return DropVerdict(status: 0, iterations: 0) }
     let paths = graph.entry.length / blocks
@@ -233,7 +233,7 @@ fn dropVerify(graph: &FlowGraph, plan: &DropPlan) -> DropVerdict {
 //   5 delete the first flag set (flag out of sync)
 //   6 anchor the first drop to another block
 //   7 aim the first drop at the root of a partly owned struct
-fn dropInjectFault(graph: &FlowGraph, plan: &mut DropPlan, fault: Int) -> Bool {
+pub fn dropInjectFault(graph: &FlowGraph, plan: &mut DropPlan, fault: Int) -> Bool {
     var target = -1
     for i in 0..plan.ops.length {
         if target < 0 {

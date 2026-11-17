@@ -183,7 +183,7 @@ fn lirTermText(l: &LirFn, body: &LirBody, source: &Text, b: Int) -> Text {
     return "t unreachable"
 }
 
-fn lirWriteFunction(lines: &mut List<Text>, starts: &List<Int>, l: &LirFn, body: &LirBody, source: &Text, types: &TypeTable, lm: &LirModule, fn_index: Int, name_start: Int, name_end: Int) {
+pub fn lirWriteFunction(lines: &mut List<Text>, starts: &List<Int>, l: &LirFn, body: &LirBody, source: &Text, types: &TypeTable, lm: &LirModule, fn_index: Int, name_start: Int, name_end: Int) {
     let name = lirSpanText(source, name_start, name_end)
     let params = l.params
     let result = lirTypeCode(types, lm, lm.fn_ret[fn_index])

@@ -17,7 +17,7 @@ import lir_builtin_union
 // `let name = value` after FLOW_INIT: a reference binding names the
 // reference variable produced by the initializer; any other binding gets
 // its own variable assigned from the value.
-fn lirLetBind(ctx: &mut SemaContext, path: Int, ty: Int, reference: Bool) {
+pub fn lirLetBind(ctx: &mut SemaContext, path: Int, ty: Int, reference: Bool) {
     let value = lirTakeOperand(&mut ctx, ty)
     if reference && lirIsVar(value) {
         lirBindPath(&mut ctx.lir, path, value)
@@ -29,7 +29,7 @@ fn lirLetBind(ctx: &mut SemaContext, path: Int, ty: Int, reference: Bool) {
 }
 
 // `target = value` / `target op= value` after FLOW_WRITE.
-fn lirAssign(ctx: &mut SemaContext, source: &Text, place: Int, value: Int, ty: Int, op_start: Int, op_end: Int) {
+pub fn lirAssign(ctx: &mut SemaContext, source: &Text, place: Int, value: Int, ty: Int, op_start: Int, op_end: Int) {
     if place < 0 { return }
     var result = value
     if op_end - op_start > 1 {
@@ -42,14 +42,14 @@ fn lirAssign(ctx: &mut SemaContext, source: &Text, place: Int, value: Int, ty: I
 }
 
 // Branch condition of the current block (if, while, for).
-fn lirCondition(ctx: &mut SemaContext) {
+pub fn lirCondition(ctx: &mut SemaContext) {
     let operand = lirTakeOperand(&mut ctx, 4)
     lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
     ctx.lir.cond[ctx.flow.current] = operand
 }
 
 // Return value of the current block, recorded before it is detached.
-fn lirReturnAt(ctx: &mut SemaContext, value: Int, reference: Bool) {
+pub fn lirReturnAt(ctx: &mut SemaContext, value: Int, reference: Bool) {
     lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
     var operand = value
     if operand == LIR_NONE { operand = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0) }
@@ -58,7 +58,7 @@ fn lirReturnAt(ctx: &mut SemaContext, value: Int, reference: Bool) {
 }
 
 // Forget whatever a discarded expression left in the value channel.
-fn lirDiscard(ctx: &mut SemaContext) {
+pub fn lirDiscard(ctx: &mut SemaContext) {
     ctx.lir.place = -1
     ctx.lir.val = LIR_NONE
 }
@@ -66,26 +66,26 @@ fn lirDiscard(ctx: &mut SemaContext) {
 // `for i in start..end`: counter and limit are evaluated once; the header
 // tests `counter < limit`, the body binds `i`, and the step block (also the
 // target of `continue`) increments the counter.
-fn lirForInit(ctx: &mut SemaContext, start: Int, end: Int) -> Int {
+pub fn lirForInit(ctx: &mut SemaContext, start: Int, end: Int) -> Int {
     // The limit variable is always the one right after the counter.
     let counter = lirNew(&mut ctx, 1, false, LIR_USE, start, 0, 0)
     lirNew(&mut ctx, 1, false, LIR_USE, end, 0, 0)
     return counter
 }
 
-fn lirForTest(ctx: &mut SemaContext, counter: Int) {
+pub fn lirForTest(ctx: &mut SemaContext, counter: Int) {
     ctx.lir.val = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_LT, counter, counter + 1)
     ctx.lir.place = -1
     lirCondition(&mut ctx)
 }
 
-fn lirForStep(ctx: &mut SemaContext, counter: Int) {
+pub fn lirForStep(ctx: &mut SemaContext, counter: Int) {
     let one = lirConst(&mut ctx.lir, LIR_CONST_INT, 1, 0, 0)
     let next = lirNew(&mut ctx, 1, false, LIR_BINARY, LIR_ADD, counter, one)
     lirAt(&mut ctx, LIR_USE, counter, next, 0, 0)
 }
 
-fn lirMatchScrutVar(ctx: &mut SemaContext, scrut_t: Int) -> Int {
+pub fn lirMatchScrutVar(ctx: &mut SemaContext, scrut_t: Int) -> Int {
     let scrut_op = lirTakeOperand(&mut ctx, scrut_t)
     if lirIsVar(scrut_op) { return scrut_op }
     let v = lirVar(&mut ctx.lir, scrut_t, false)
@@ -93,7 +93,7 @@ fn lirMatchScrutVar(ctx: &mut SemaContext, scrut_t: Int) -> Int {
     return v
 }
 
-fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) -> Bool {
+pub fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) -> Bool {
     // A wildcard needs no discriminant or payload binding. A proven final
     // named arm is handled by its type-specific branch below: builtin
     // Option/Result arms must still bind their payloads before entry.
@@ -198,7 +198,7 @@ fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
 // copied; a drop-free shape/choice payload (lirBuiltinPayloadOk) is moved out
 // of the scrutinee. Owned payloads (Text, lists) need drop elaboration and
 // remain intentionally unsupported (L0016).
-fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, scrut_path: Int) {
+pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, scrut_path: Int) {
     if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
     // Primitive builtin unions reuse the exact checked LIR_PAYLOAD protocol
     // of nominal enums. Never bind before testing the active tag.
@@ -320,7 +320,7 @@ fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start
     lirMarkUnsupported(&mut ctx.lir, p_start)
 }
 
-fn semaConstructorField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, decl_id: Int, arg: &AstExpr, ty: Int, seen: &mut List<Bool>, slots: &mut List<Int>) {
+pub fn semaConstructorField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, decl_id: Int, arg: &AstExpr, ty: Int, seen: &mut List<Bool>, slots: &mut List<Int>) {
     let decl = &tree.declarations[decl_id]
     let field = semaNamedField(source, tree, decl_id, arg)
     if field < 0 || seen[field - decl.c] {
@@ -335,7 +335,7 @@ fn semaConstructorField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, de
     }
 }
 
-fn semaConstructorFinish(ctx: &mut SemaContext, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int, seen: &List<Bool>, slots: &List<Int>) {
+pub fn semaConstructorFinish(ctx: &mut SemaContext, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int, seen: &List<Bool>, slots: &List<Int>) {
     let decl = &tree.declarations[decl_id]
     for i in 0..decl.d {
         if !seen[i] {
@@ -350,7 +350,7 @@ fn semaConstructorFinish(ctx: &mut SemaContext, tree: &AstTree, expr: &AstExpr, 
 // A qualified enum variant constructor is parsed as a MethodCall on an
 // enum name. Never type-check the enum name as a runtime object.
 // Return -1 when this is an ordinary method call.
-fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+pub fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
     if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
     let base = &tree.expressions[expr.a]
     match base.kind {
@@ -406,7 +406,7 @@ fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
     return 7
 }
 
-fn semaEnumField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+pub fn semaEnumField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
     if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
     match tree.expressions[expr.a].kind {
         AstExprKind.Name => {}

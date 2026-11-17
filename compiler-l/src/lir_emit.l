@@ -72,7 +72,7 @@ fn lirDecode(source: &Text, start: Int, end: Int) -> List<Int> {
 }
 
 // Line start offsets of a source, for offset -> line:column.
-fn lirLineStarts(source: &Text) -> List<Int> {
+pub fn lirLineStarts(source: &Text) -> List<Int> {
     var starts: List<Int> = List[]
     starts.push(0)
     for i in 0..source.byteLength {
@@ -82,7 +82,7 @@ fn lirLineStarts(source: &Text) -> List<Int> {
 }
 
 // ` @line:col` of a byte offset (columns count code points, as the CLI).
-fn lirAtText(source: &Text, starts: &List<Int>, offset: Int) -> Text {
+pub fn lirAtText(source: &Text, starts: &List<Int>, offset: Int) -> Text {
     if offset < 0 || offset > source.byteLength { return "" }
     var low = 0
     var high = starts.length - 1
@@ -109,14 +109,14 @@ fn lirBytesText(bytes: &List<Int>) -> Text {
     return out
 }
 
-fn lirSpanText(source: &Text, start: Int, end: Int) -> Text {
+pub fn lirSpanText(source: &Text, start: Int, end: Int) -> Text {
     var bytes: List<Int> = List[]
     for i in start..end { bytes.push(source.byteAt(i)) }
     return lirBytesText(&bytes)
 }
 
 // Type code: i Int, f Float, b Bool, t Text, u Unit, s<k> struct k.
-fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
+pub fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
     if ty == 1 { return "i" }
     if ty == 2 { return "f" }
     if ty == 4 { return "b" }
@@ -156,7 +156,7 @@ fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
     return "?"
 }
 
-fn lirOperandText(l: &LirFn, source: &Text, operand: Int) -> Text {
+pub fn lirOperandText(l: &LirFn, source: &Text, operand: Int) -> Text {
     if lirIsVar(operand) { return "v{operand}" }
     let id = lirConstId(operand)
     if id < 0 || id >= l.consts.length { return "?" }
@@ -176,7 +176,7 @@ fn lirOperandText(l: &LirFn, source: &Text, operand: Int) -> Text {
 }
 
 // Place: p<var> followed by .<field> per projection, outermost last.
-fn lirPlaceText(l: &LirFn, place: Int) -> Text {
+pub fn lirPlaceText(l: &LirFn, place: Int) -> Text {
     if place < 0 || place >= l.places.length { return "?" }
     var suffix = ""
     var cursor = place
@@ -196,7 +196,7 @@ fn lirPlaceText(l: &LirFn, place: Int) -> Text {
     return "p{root}{suffix}"
 }
 
-fn lirArgText(l: &LirFn, source: &Text, arg: Int) -> Text {
+pub fn lirArgText(l: &LirFn, source: &Text, arg: Int) -> Text {
     if arg < 0 || arg >= l.args.length { return "?" }
     if l.args[arg].by_ref {
         let place = lirPlaceText(l, l.args[arg].value)

@@ -61,7 +61,7 @@ fn dropKindName(kind: Int) -> Text {
     return "ref"
 }
 
-fn dropDump(graph: &FlowGraph, plan: &DropPlan, source: &Text, tree: &AstTree, name: Int) {
+pub fn dropDump(graph: &FlowGraph, plan: &DropPlan, source: &Text, tree: &AstTree, name: Int) {
     let at = dropLine(source, name)
     let blocks = graph.blocks.length
     let flags = plan.flag_paths.length

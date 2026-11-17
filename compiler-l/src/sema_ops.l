@@ -15,12 +15,12 @@ import lir_builtin_union
 // sema_expr.l (CORE-1 budget). Each function receives what the recursive
 // walk already inferred and leaves the result in the LIR value channel.
 
-fn semaLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int) -> Int {
+pub fn semaLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int) -> Int {
     lirSetVal(&mut ctx, lirLiteral(&mut ctx, source, tree, expr_id))
     return ty
 }
 
-fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, site: Int) -> Int {
+pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, site: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     let sym_id = semaLookupVisible(&mut ctx, source, expr.start, expr.end)
     if sym_id == -2 { return 7 }
@@ -89,7 +89,7 @@ fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: I
 
 // `a && b` / `a || b`: the result variable holds `a`, the current block
 // branches on it to the block evaluating `b` (swapped for `||`).
-fn semaShortVar(ctx: &mut SemaContext, lhs: Int, is_or: Bool) -> Int {
+pub fn semaShortVar(ctx: &mut SemaContext, lhs: Int, is_or: Bool) -> Int {
     let result = lirNew(&mut ctx, 4, false, LIR_USE, lhs, 0, 0)
     lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
     ctx.lir.cond[ctx.flow.current] = result
@@ -97,7 +97,7 @@ fn semaShortVar(ctx: &mut SemaContext, lhs: Int, is_or: Bool) -> Int {
     return result
 }
 
-fn semaBinaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, lhs_t: Int, rhs_t: Int, lhs: Int, rhs: Int) -> Int {
+pub fn semaBinaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, lhs_t: Int, rhs_t: Int, lhs: Int, rhs: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     let op_len = expr.d - expr.c
     if op_len > 0 && expr.c >= 0 && expr.d <= source.byteLength {
@@ -141,7 +141,7 @@ fn semaBinaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
     return lhs_t
 }
 
-fn semaUnaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, sub_t: Int, operand: Int) -> Int {
+pub fn semaUnaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, sub_t: Int, operand: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     if expr.b >= 0 && expr.b < source.byteLength {
         let b0 = source.byteAt(expr.b)
@@ -165,7 +165,7 @@ fn semaUnaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id
 
 // `base.field` once the base was inferred as a place (`parent` path) or a
 // value (left in the LIR channel).
-fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_type: Int, parent: Int) -> Int {
+pub fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_type: Int, parent: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     var base_t = base_type
     let referent = semaRefElem(ctx, base_t)
@@ -245,7 +245,7 @@ fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id
 
 // Capacity hint of an interpolation buffer: literal bytes plus 20 per
 // interpolated value (Stage 0 uses a similar estimate).
-fn semaInterpCapacity(tree: &AstTree, expr_id: Int) -> Int {
+pub fn semaInterpCapacity(tree: &AstTree, expr_id: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     var capacity = 0
     for i in 0..expr.b {
@@ -259,7 +259,7 @@ fn semaInterpCapacity(tree: &AstTree, expr_id: Int) -> Int {
 }
 
 // Append one part to an interpolation buffer; empty text segments vanish.
-fn semaAppendPart(ctx: &mut SemaContext, tree: &AstTree, buffer: Int, part: Int, ty: Int) {
+pub fn semaAppendPart(ctx: &mut SemaContext, tree: &AstTree, buffer: Int, part: Int, ty: Int) {
     let expr = &tree.expressions[part]
     match expr.kind {
         AstExprKind.TextLit => {
@@ -275,7 +275,7 @@ fn semaAppendPart(ctx: &mut SemaContext, tree: &AstTree, buffer: Int, part: Int,
 
 // Call instruction into a new variable of the result type (a reference
 // variable for a borrowed result).
-fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_t: Int) {
+pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_t: Int) {
     let first = lirSequence(&mut ctx, args)
     let elem = semaRefElem(ctx, ret_t)
     var ty = ret_t
@@ -283,7 +283,7 @@ fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_t: I
     lirSetVal(&mut ctx, lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, ctx.lir_func_index[decl_id], first, args.length))
 }
 
-fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {
+pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {
     let first = lirSequence(&mut ctx, args)
     let res_var = lirVar(&mut ctx.lir, res_t, false)
     lirAt(&mut ctx, LIR_PLATFORM, res_var, op, first, args.length)

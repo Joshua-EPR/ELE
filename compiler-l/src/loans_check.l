@@ -248,7 +248,7 @@ fn loanResolveThrough(graph: &mut FlowGraph) {
     }
 }
 
-fn loanVerify(graph: &mut FlowGraph) -> LoanCheck {
+pub fn loanVerify(graph: &mut FlowGraph) -> LoanCheck {
     let loans = graph.loans.length
     let blocks = graph.blocks.length
     if loans == 0 || blocks == 0 { return loanCheckNew(LOAN_OK) }
