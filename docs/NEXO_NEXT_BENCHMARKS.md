@@ -213,3 +213,23 @@ Con 50.000 objetos vivos de 64 B (3.05 MiB de carga útil neta), se midió la me
    - Se eliminó la mezcla de desviaciones estándar entre lotes ($N=700$), corridas ($N=7$) y procesos ($N=5$). Cada métrica de dispersión se reporta en su propio contexto muestral y satisface formalmente la cota de Samuelson en toda ejecución.
 3. **Eficacia de amortización de llamadas al SO**: En la política `Deferred` (`keep=1`), la latencia promedia **344.0 ns/op** con **0.000 llamadas al SO/op**, mientras que la política agresiva requiere **3.634.2 ns/op** debido a 2 llamadas al kernel por operación (`VirtualAlloc`/`VirtualFree`).
 4. **Devolución de memoria**: Al descender de 50.000 a 0 objetos vivos, la memoria comprometida desciende de **3.26 MiB a 0.21 MiB** (reducción del 93.5%), confirmando la descommitación física efectiva hacia el sistema operativo.
+
+---
+
+### 4.7 Blindaje Criptográfico de Evidencia y Validación Adversarial (Evidence Lockdown)
+
+Para garantizar que los resultados de benchmark no puedan ser contaminados por artefactos obsoletos ni ejecuciones parciales o adulteradas, se implementó el protocolo de bloqueo de evidencia:
+
+1. **Aislamiento Criptográfico por Campaña**:
+   - Cada ejecución de `scripts/run_benchmarks.py` genera un identificador único de campaña (`campaign_id`), persistiendo todos los resultados en un subdirectorio exclusivo: `docs/benchmarks/campaigns/<campaign_id>/raw/process_{1..5}.json`.
+   - Se genera el manifiesto criptográfico `checksums.sha256` con los hashes SHA-256 de todos los archivos producidos.
+2. **Inmutabilidad y Trazabilidad del Binario**:
+   - Se calcula el hash SHA-256 del binario release `nexo-physical-bench` antes de iniciar las mediciones y se revalida tras cada proceso independiente, garantizando que el binario no ha sido sustituido ni modificado.
+   - Se registra el estado de Git (`git_head`, `git_branch`, `git_dirty`) y el hash SHA-256 de `git diff HEAD`.
+3. **Escritura Atómica y Rechazo Fail-Closed (JSON-IO-01..10)**:
+   - Todo archivo JSON se genera mediante escritura atómica (`<target>.tmp.<pid>` y renombre atómico).
+   - Cualquier error de I/O o validación numérica termina con código de salida no cero (`std::process::exit(1)`), emitiendo el error a `stderr`.
+4. **Validación Adversarial contra Artefactos Obsoletos (BENCH-STALE-01..10)**:
+   - Verificación estricta de esquema versionado (`schema_version: "v0.4.1"`), especificación estadística (`stats_spec_version: "1.1.0"`), coincidencia de identificadores de campaña y proceso, conteo exacto de 16 escenarios sin duplicados, muestras requeridas (700 estándar, 336 en ráfaga) y ausencia de valores no finitos.
+5. **Paridad Estadística Exacta Rust/Python (STAT-CROSS-01..10)**:
+   - La especificación estadística `1.1.0` define la misma interpolación lineal uniforme estándar $r = (N-1) \times p, w = r - \lfloor r \rfloor, x_i(1-w) + x_j w$ en Rust y Python, verificada mediante pruebas cruzadas automáticas en ambas plataformas.

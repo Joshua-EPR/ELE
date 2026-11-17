@@ -1,5 +1,57 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-16 (Operación Benchmark Evidence Lockdown & Concurrent Authority Verification — fix/nexo-v04-benchmark-evidence-lockdown)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-benchmark-integrity-and-oom`: Rama base directa (`87ed9f3ef007baffd3079be6f903b901cdb3e556`).
+- `fix/nexo-v04-benchmark-evidence-lockdown`: **Rama activa de corrección y endurecimiento**.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+1. **P1-024 (Propagación Estricta de Errores I/O y Escrituras Atómicas JSON-IO-01..10)**:
+   - En `crates/nexo/src/bin/nexo-physical-bench.rs`, toda falla de creación de directorio, escritura en archivo o ruta inválida termina inmediatamente con código de salida no cero (`std::process::exit(1)`), emite un mensaje explícito a `stderr`, y previene la emisión de mensajes falsos de éxito o archivos truncados.
+   - La persistencia se realiza mediante escritura atómica con archivo temporal `<target>.tmp.<pid>`, reemplazo con `std::fs::rename` (con eliminación previa en Windows) y eliminación limpia del archivo temporal en caso de fallo.
+   - Implementación de la suite de pruebas de integración `crates/nexo/tests/test_bench_io.rs` que valida los 10 requisitos `JSON-IO-01..10`.
+2. **P1-025 (Aislamiento Criptográfico por Campaña y Blindaje contra Artefactos Obsoletos BENCH-STALE-01..10)**:
+   - En `scripts/run_benchmarks.py`, cada ejecución genera un identificador único de campaña (`campaign_id`), aislando los artefactos brutos y el resumen en `docs/benchmarks/campaigns/<campaign_id>/`.
+   - Se implementó la verificación exhaustiva *fail-closed* contra artefactos antiguos o corruptos mediante la suite adversarial `scripts/test_benchmark_isolation.py` (`BENCH-STALE-01..10`), rechazando esquemas incompatibles, identificadores de campaña o proceso disonantes, JSON truncado o muestras no finitas.
+   - Se genera `checksums.sha256` en el directorio de la campaña conteniendo los hashes de todos los artefactos JSON.
+3. **P1-026 (Trazabilidad Criptográfica del Binario y del Código Fuente)**:
+   - Se calcula y verifica el hash criptográfico SHA-256 del binario release `nexo-physical-bench` antes de la ejecución (`binary_sha256_pre`) y tras cada proceso (`binary_sha256_post`), garantizando inmutabilidad.
+   - Se registra el estado de Git (`git_head`, `git_branch`, `git_dirty`) y el hash SHA-256 de `git diff HEAD` cuando el árbol de trabajo contiene modificaciones.
+   - Se registran versiones de `rustc`, `cargo`, arquitectura del host, información del procesador y versión de especificación estadística.
+4. **P1-027 (Unificación Matemática de Especificación Estadística STATS_SPEC_VERSION 1.1.0 y STAT-CROSS-01..10)**:
+   - En `crates/nexo/src/stats.rs` y `scripts/run_benchmarks.py`, se unificó la especificación estadística `1.1.0` con la misma interpolación lineal uniforme estándar $r = (N-1) \times p, w = r - \lfloor r \rfloor, x_i(1-w) + x_j w$.
+   - Se implementaron las pruebas cruzadas de paridad matemática `scripts/test_stats_cross.py` y `crates/nexo/tests/test_statistical_consistency.rs` (`STAT-CROSS-01..10`), demostrando equivalencia exacta en medias, medianas, varianzas muestrales/poblacionales, desviaciones estándar, CV y percentiles p50, p95 y p99.
+5. **P1-028 (Verificación Concurrente Multihilo de Inyección OOM y Agotamiento de Identidades OOM-CONC-01..10)**:
+   - En `crates/nexo/src/next/compact.rs`, se sustituyó el bucle secuencial en `REG-OOM-09` por una prueba multihilo con `Arc<Barrier>`, 8 hilos de trabajo concurrentes y un hilo inyector que conmuta fallos OOM bajo alta contención.
+   - Se añadieron `test_oom_conc_02_same_pool_id_multithreaded_race` (16 hilos compitiendo simultáneamente por el mismo ID) y `test_oom_conc_10_registry16_multithreaded_contention_and_recovery` (verificación sobre el registro de 16 bits), comprobando las 10 propiedades `OOM-CONC-01..10`.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O Integration** | `crates/nexo/tests/test_bench_io.rs` | 6 | **6/6 APROBADAS** | **6/6 APROBADAS** |
+| **Statistical Consistency & Cross** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Stale Defense** | `scripts/test_benchmark_isolation.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 61/62 | **61/61 APROBADAS** | **62/62 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
 ## Actualización 2026-11-16 (Operación Integridad Estadística de Benchmarks y Fallos OOM en Registros — fix/nexo-v04-benchmark-integrity-and-oom)
 
 Ramas y estado de Git:
