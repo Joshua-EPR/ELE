@@ -25,7 +25,7 @@ const DROP_UNKNOWN = 0
 const DROP_NO = 1
 const DROP_YES = 2
 
-fn semaFieldType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, field: Int) -> Int {
+pub fn semaFieldType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, field: Int) -> Int {
     while ctx.field_types.length < tree.fields.length { ctx.field_types.push(-2) }
     if ctx.field_types[field] == -2 {
         let ty = semaResolveAstType(&mut ctx, source, tree, tree.fields[field].type_id)
@@ -36,7 +36,7 @@ fn semaFieldType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, field: In
 
 // Does a value of type `ty` own something that must be released? Mirrors
 // Stage 0 `Ownership::needs_drop` for the Stage 1 subset. Memoized per type.
-fn semaNeedsDrop(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int) -> Bool {
+pub fn semaNeedsDrop(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int) -> Bool {
     if ty < 0 || ty >= ctx.types.types.length { return false }
     while ctx.drop_memo.length < ctx.types.types.length { ctx.drop_memo.push(DROP_UNKNOWN) }
     if ctx.drop_memo[ty] != DROP_UNKNOWN { return ctx.drop_memo[ty] == DROP_YES }
@@ -113,7 +113,7 @@ fn semaMaterialize(ctx: &mut SemaContext, source: &Text, tree: &AstTree, path: I
 
 // Register an owned binding: parameter (origin -1 - index), local
 // (origin = initializer offset). Bindings owning nothing are not tracked.
-fn semaOwn(ctx: &mut SemaContext, source: &Text, tree: &AstTree, path: Int, ty: Int, origin: Int) {
+pub fn semaOwn(ctx: &mut SemaContext, source: &Text, tree: &AstTree, path: Int, ty: Int, origin: Int) {
     if path < 0 { return }
     semaOrigin(&mut ctx, path, origin)
     if semaMaterialize(&mut ctx, source, tree, path, ty) {
@@ -123,7 +123,7 @@ fn semaOwn(ctx: &mut SemaContext, source: &Text, tree: &AstTree, path: Int, ty: 
 
 // Source offset that names the value of an initializer, as Stage 0 spans
 // its lowering: a field read is named by its `.`, a borrow by its place.
-fn semaValueOrigin(source: &Text, tree: &AstTree, expr_id: Int) -> Int {
+pub fn semaValueOrigin(source: &Text, tree: &AstTree, expr_id: Int) -> Int {
     var cursor = expr_id
     while cursor >= 0 && cursor < tree.expressions.length {
         let expr = &tree.expressions[cursor]
@@ -148,18 +148,18 @@ fn semaValueOrigin(source: &Text, tree: &AstTree, expr_id: Int) -> Int {
 }
 
 // Record where a binding (owned or reference) was defined.
-fn semaOrigin(ctx: &mut SemaContext, path: Int, origin: Int) {
+pub fn semaOrigin(ctx: &mut SemaContext, path: Int, origin: Int) {
     if path < 0 { return }
     flowPad(&mut ctx.flow)
     ctx.flow.origins[path] = origin
 }
 
-fn semaScopeEnter(ctx: &mut SemaContext) {
+pub fn semaScopeEnter(ctx: &mut SemaContext) {
     ctx.scope_marks.push(ctx.owned_locals.length)
 }
 
 // Emit FLOW_DROP for owned bindings declared after `mark`, last first.
-fn semaDropFrom(ctx: &mut SemaContext, mark: Int, start: Int, end: Int) {
+pub fn semaDropFrom(ctx: &mut SemaContext, mark: Int, start: Int, end: Int) {
     var i = ctx.owned_locals.length - 1
     while i >= mark && i >= 0 {
         flowEvent(&mut ctx.flow, FLOW_DROP, ctx.owned_locals[i], start, end)
@@ -167,7 +167,7 @@ fn semaDropFrom(ctx: &mut SemaContext, mark: Int, start: Int, end: Int) {
     }
 }
 
-fn semaScopeExit(ctx: &mut SemaContext, start: Int, end: Int) {
+pub fn semaScopeExit(ctx: &mut SemaContext, start: Int, end: Int) {
     var mark = 0
     match ctx.scope_marks.pop() {
         Some(m) => { mark = m }
@@ -182,7 +182,7 @@ fn semaScopeExit(ctx: &mut SemaContext, start: Int, end: Int) {
 // An owned value produced and not consumed by its statement. It is placed
 // in creation order at `mark`: an interpolation buffer exists before the
 // temporaries of its parts, so it is released after them.
-fn semaTempAt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start: Int, end: Int, mark: Int) {
+pub fn semaTempAt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start: Int, end: Int, mark: Int) {
     let before = ctx.pending_temps.length
     semaTemp(&mut ctx, source, tree, ty, start, end)
     if ctx.pending_temps.length == before { return }
@@ -195,7 +195,7 @@ fn semaTempAt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, sta
     }
 }
 
-fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start: Int, end: Int) {
+pub fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start: Int, end: Int) {
     if !semaNeedsDrop(&mut ctx, source, tree, ty) { return }
     let path = flowRoot(&mut ctx.flow, -1)
     lirBindPath(&mut ctx.lir, path, lirValueVar(&mut ctx, ty))
@@ -207,7 +207,7 @@ fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start
 }
 
 // Temporaries die at the end of their statement, last created first.
-fn semaFlushTemps(ctx: &mut SemaContext, start: Int, end: Int) {
+pub fn semaFlushTemps(ctx: &mut SemaContext, start: Int, end: Int) {
     while ctx.pending_temps.length > 0 {
         match ctx.pending_temps.pop() {
             Some(path) => { flowEvent(&mut ctx.flow, FLOW_DROP, path, start, end) }
@@ -217,7 +217,7 @@ fn semaFlushTemps(ctx: &mut SemaContext, start: Int, end: Int) {
 }
 
 // Reset the per-function drop bookkeeping.
-fn semaDropReset(ctx: &mut SemaContext) {
+pub fn semaDropReset(ctx: &mut SemaContext) {
     while ctx.owned_locals.length > 0 { ctx.owned_locals.pop() }
     while ctx.scope_marks.length > 0 { ctx.scope_marks.pop() }
     while ctx.pending_temps.length > 0 { ctx.pending_temps.pop() }
