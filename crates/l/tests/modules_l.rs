@@ -651,10 +651,8 @@ fn check_stage1_directory(dir: &Path) -> Output {
 
 #[test]
 fn stage1_accepts_import_chain_at_depth_limit() {
-    let dir = stage1_import_chain_fixture(
-        "stage1_import_depth_at_limit",
-        STAGE1_IMPORT_DEPTH_LIMIT,
-    );
+    let dir =
+        stage1_import_chain_fixture("stage1_import_depth_at_limit", STAGE1_IMPORT_DEPTH_LIMIT);
     let result = check_stage1_directory(&dir);
     assert_eq!(result.code, Some(0), "{}", result.stderr);
     assert!(!result.stderr.contains("error[L0014]"), "{}", result.stderr);
