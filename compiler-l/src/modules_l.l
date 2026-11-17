@@ -152,6 +152,15 @@ fn loadModuleRecursive(
         return 0
     }
 
+    // Match Stage 0's MAX_IMPORT_DEPTH: bound active recursion, not the
+    // total number of files in a shallow (wide or diamond-shaped) graph.
+    // Check after cycle detection so cyclic imports keep their own L0014.
+    // A loader diagnostic is printed once; the caller propagates -14.
+    if loading_stack.length >= 128 {
+        printError("error[L0014]: profundidad de imports excede el límite de 128 módulos: {path}")
+        return -14
+    }
+
     let stack_path = "{path}"
     loading_stack.push(stack_path)
 
