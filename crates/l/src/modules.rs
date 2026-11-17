@@ -3,7 +3,7 @@ use crate::{
     parser::{self, Program},
 };
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -28,7 +28,9 @@ pub fn load_program_files(entry_path: &Path) -> Result<(Program, Vec<String>), D
     })?;
 
     let mut loaded_modules = Vec::new();
-    let mut loaded_paths = HashSet::new();
+    // Canonical module path -> stable Span::file ID (entry source is 1).
+    // One index replaces both the visited set and O(n) path scans per import.
+    let mut file_ids = HashMap::new();
     let mut loading_stack = Vec::new();
     let mut files = Vec::new();
 
@@ -36,7 +38,7 @@ pub fn load_program_files(entry_path: &Path) -> Result<(Program, Vec<String>), D
         &canonical_entry,
         Span::default(),
         &mut loaded_modules,
-        &mut loaded_paths,
+        &mut file_ids,
         &mut loading_stack,
         &mut files,
     )
@@ -96,12 +98,12 @@ fn load_module_recursive(
     canonical_path: &Path,
     import_span: Span,
     loaded_modules: &mut Vec<(PathBuf, Program)>,
-    loaded_paths: &mut HashSet<PathBuf>,
+    file_ids: &mut HashMap<PathBuf, u32>,
     loading_stack: &mut Vec<PathBuf>,
     files: &mut Vec<String>,
 ) -> Result<(), Diagnostic> {
     // Cycle detection
-    if loading_stack.contains(&canonical_path.to_path_buf()) {
+    if loading_stack.iter().any(|path| path.as_path() == canonical_path) {
         let mut chain: Vec<String> = loading_stack
             .iter()
             .map(|p| {
@@ -127,7 +129,7 @@ fn load_module_recursive(
     }
 
     // Deduplication check
-    if loaded_paths.contains(canonical_path) {
+    if file_ids.contains_key(canonical_path) {
         return Ok(());
     }
 
@@ -178,6 +180,9 @@ fn load_module_recursive(
     let tokens =
         lexer::lex_file(&source, file_id).map_err(|d| d.with_file(shown(canonical_path)))?;
     let mut prog = parser::parse(tokens).map_err(|d| d.with_file(shown(canonical_path)))?;
+    // Register before walking imports. Cycles are still checked first via
+    // loading_stack, while diamond dependencies reuse the original file ID.
+    file_ids.insert(canonical_path.to_path_buf(), file_id);
 
     // Resolve dependencies relative to current module's directory
     let dir = canonical_path.parent().unwrap_or(Path::new("."));
@@ -211,29 +216,21 @@ fn load_module_recursive(
             &canonical_candidate,
             imp.span,
             loaded_modules,
-            loaded_paths,
+            file_ids,
             loading_stack,
             files,
         )?;
         // Keep the canonical identity of the directly imported module.
         // The merged AST otherwise loses the link between import and file ID.
-        let target = files
-            .iter()
-            .position(|path| path == &shown(&canonical_candidate))
-            .ok_or_else(|| {
-                Diagnostic::new(imp.span, "módulo cargado sin identificador de archivo")
-                    .with_file(shown(canonical_path))
-                    .classify("L0014", "módulos")
-            })?;
-        imp.target_file = Some(u32::try_from(target + 1).map_err(|_| {
-            Diagnostic::new(imp.span, "demasiados módulos en el programa")
+        imp.target_file = Some(*file_ids.get(&canonical_candidate).ok_or_else(|| {
+            Diagnostic::new(imp.span, "módulo cargado sin identificador de archivo")
                 .with_file(shown(canonical_path))
                 .classify("L0014", "módulos")
         })?);
     }
 
     loading_stack.pop();
-    loaded_paths.insert(canonical_path.to_path_buf());
+    // file_ids already tracks successfully parsed modules.
     loaded_modules.push((canonical_path.to_path_buf(), prog));
 
     Ok(())
