@@ -1,0 +1,1392 @@
+diff --git a/crates/nexo/src/bin/nexo-physical-bench.rs b/crates/nexo/src/bin/nexo-physical-bench.rs
+index c5031fc..d24d942 100644
+--- a/crates/nexo/src/bin/nexo-physical-bench.rs
++++ b/crates/nexo/src/bin/nexo-physical-bench.rs
+@@ -52,8 +52,64 @@ unsafe impl GlobalAlloc for Contador {
+ #[global_allocator]
+ static GLOBAL: Contador = Contador;
+ 
++fn serialize_stats_json(s: &nexo::stats::DistributionStats) -> String {
++    format!(
++        "{{\n  \"count\": {},\n  \"mean\": {:.4},\n  \"median\": {:.4},\n  \"min\": {:.4},\n  \"max\": {:.4},\n  \"variance_sample\": {:.4},\n  \"variance_pop\": {:.4},\n  \"stddev_sample\": {:.4},\n  \"stddev_pop\": {:.4},\n  \"cv_sample\": {:.4},\n  \"cv_pop\": {:.4},\n  \"p50\": {:.4},\n  \"p95\": {:.4},\n  \"p99\": {:.4}\n}}",
++        s.count,
++        s.mean,
++        s.median,
++        s.min,
++        s.max,
++        s.variance_sample,
++        s.variance_pop,
++        s.std_dev_sample,
++        s.std_dev_pop,
++        s.cv_sample,
++        s.cv_pop,
++        s.p50,
++        s.p95,
++        s.p99
++    )
++}
++
++fn parse_samples_json(content: &str) -> Vec<f64> {
++    let mut samples = Vec::new();
++    if let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) {
++        let slice = &content[start + 1..end];
++        for token in slice.split(',') {
++            let trimmed = token.trim();
++            if let Ok(val) = trimmed.parse::<f64>() {
++                samples.push(val);
++            }
++        }
++    }
++    samples
++}
++
+ fn main() {
+     let args: Vec<String> = std::env::args().collect();
++
++    if args.len() >= 3 && args[1] == "--compute-stats" {
++        let fixture_path = &args[2];
++        let content = match std::fs::read_to_string(fixture_path) {
++            Ok(c) => c,
++            Err(e) => {
++                eprintln!("Error leyendo fixture '{fixture_path}': {e}");
++                std::process::exit(1);
++            }
++        };
++        let samples = parse_samples_json(&content);
++        match nexo::stats::compute_stats(&samples) {
++            Ok(stats) => {
++                println!("{}", serialize_stats_json(&stats));
++                std::process::exit(0);
++            }
++            Err(e) => {
++                eprintln!("Error calculando estadísticas: {e}");
++                std::process::exit(1);
++            }
++        }
++    }
+     let completo = args.iter().any(|a| a == "--completo");
+     let json_flag = args.iter().any(|a| a == "--json");
+     let mut json_out_path = None;
+@@ -376,6 +432,7 @@ fn serialize_json_results(
+             "        \"median\": {:.4},\n",
+             r.batch_stats.median
+         ));
++        out.push_str(&format!("        \"p50\": {:.4},\n", r.batch_stats.p50));
+         out.push_str(&format!("        \"p95\": {:.4},\n", r.batch_stats.p95));
+         out.push_str(&format!("        \"p99\": {:.4}\n", r.batch_stats.p99));
+         out.push_str("      },\n");
+@@ -408,6 +465,7 @@ fn serialize_json_results(
+         out.push_str(&format!("        \"min\": {:.4},\n", r.run_stats.min));
+         out.push_str(&format!("        \"max\": {:.4},\n", r.run_stats.max));
+         out.push_str(&format!("        \"median\": {:.4},\n", r.run_stats.median));
++        out.push_str(&format!("        \"p50\": {:.4},\n", r.run_stats.p50));
+         out.push_str(&format!("        \"p95\": {:.4},\n", r.run_stats.p95));
+         out.push_str(&format!("        \"p99\": {:.4}\n", r.run_stats.p99));
+         out.push_str("      },\n");
+@@ -497,21 +555,46 @@ fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
+     }
+ 
+     #[cfg(target_os = "windows")]
+-    if path.exists() {
+-        let remove_res = std::fs::remove_file(path);
+-        if let Err(e) = remove_res {
++    {
++        let backup_path = format!("{target_path}.bak.{pid}");
++        let backup = std::path::Path::new(&backup_path);
++        let had_previous = path.exists();
++
++        if had_previous {
++            match std::fs::rename(path, backup) {
++                Ok(()) => {}
++                Err(e) => {
++                    let _ = std::fs::remove_file(tmp);
++                    return Err(format!(
++                        "Error al respaldar archivo previo '{target_path}' antes del reemplazo: {e}"
++                    ));
++                }
++            }
++        }
++
++        if let Err(e) = std::fs::rename(tmp, path) {
++            if had_previous {
++                let _ = std::fs::rename(backup, path);
++            }
+             let _ = std::fs::remove_file(tmp);
+             return Err(format!(
+-                "Error al reemplazar archivo previo '{target_path}': {e}"
++                "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada): {e}"
+             ));
+         }
++
++        if had_previous {
++            let _ = std::fs::remove_file(backup);
++        }
+     }
+ 
+-    if let Err(e) = std::fs::rename(tmp, path) {
+-        let _ = std::fs::remove_file(tmp);
+-        return Err(format!(
+-            "Error al renombrar archivo temporal a '{target_path}': {e}"
+-        ));
++    #[cfg(not(target_os = "windows"))]
++    {
++        if let Err(e) = std::fs::rename(tmp, path) {
++            let _ = std::fs::remove_file(tmp);
++            return Err(format!(
++                "Error al renombrar archivo temporal a '{target_path}': {e}"
++            ));
++        }
+     }
+ 
+     Ok(())
+diff --git a/crates/nexo/src/next/compact.rs b/crates/nexo/src/next/compact.rs
+index bd0d029..a4631ce 100644
+--- a/crates/nexo/src/next/compact.rs
++++ b/crates/nexo/src/next/compact.rs
+@@ -1609,7 +1609,7 @@ mod tests {
+ 
+     #[test]
+     fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
+-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+         use std::sync::{Arc, Barrier};
+         use std::thread;
+         use std::time::Duration;
+@@ -1620,15 +1620,27 @@ mod tests {
+         let next_pool_id = Arc::new(AtomicU64::new(1));
+         let stop_injector = Arc::new(AtomicBool::new(false));
+ 
++        let oom_observed = Arc::new(AtomicUsize::new(0));
++        let attempts_total = Arc::new(AtomicUsize::new(0));
++        let exhaustion_observed = Arc::new(AtomicUsize::new(0));
++
+         // Injector thread: repeatedly toggles reserve failure (OOM-CONC-03)
+         let reg_inj = registry.clone();
+         let barrier_inj = barrier.clone();
+         let stop_inj = stop_injector.clone();
++        let oom_inj = oom_observed.clone();
+         let injector_handle = thread::spawn(move || {
+             barrier_inj.wait();
+-            let mut state = false;
++            let mut state = true;
++            reg_inj.inject_reserve_failure(true);
+             while !stop_inj.load(Ordering::Relaxed) {
+-                state = !state;
++                // Ensure at least 5 OOM events are observed by keeping failure active initially
++                let oom_now = oom_inj.load(Ordering::SeqCst);
++                if oom_now < 5 {
++                    state = true;
++                } else {
++                    state = !state;
++                }
+                 reg_inj.inject_reserve_failure(state);
+                 thread::sleep(Duration::from_micros(100));
+             }
+@@ -1641,6 +1653,9 @@ mod tests {
+             let reg = registry.clone();
+             let barrier_worker = barrier.clone();
+             let next_pool = next_pool_id.clone();
++            let oom_worker = oom_observed.clone();
++            let attempts_worker = attempts_total.clone();
++            let exhaustion_worker = exhaustion_observed.clone();
+ 
+             worker_handles.push(thread::spawn(move || {
+                 barrier_worker.wait();
+@@ -1657,15 +1672,18 @@ mod tests {
+                         if reg.allocated_count() == MAX_COMPACT_POOLS {
+                             break;
+                         }
++                        attempts_worker.fetch_add(1, Ordering::SeqCst);
+                         match reg.register(pool_id) {
+                             Ok(token) => {
+                                 my_tokens.push(token);
+                                 break;
+                             }
+                             Err(CompactPoolError::OutOfMemory) => {
++                                oom_worker.fetch_add(1, Ordering::SeqCst);
+                                 thread::yield_now();
+                             }
+                             Err(CompactPoolError::PoolIdExhausted) => {
++                                exhaustion_worker.fetch_add(1, Ordering::SeqCst);
+                                 break;
+                             }
+                             Err(other) => {
+@@ -1689,6 +1707,21 @@ mod tests {
+         injector_handle.join().expect("Injector thread panicked");
+         registry.inject_reserve_failure(false);
+ 
++        // Verification of deterministic observation of concurrent OOM events
++        let total_oom = oom_observed.load(Ordering::SeqCst);
++        let total_attempts = attempts_total.load(Ordering::SeqCst);
++        let total_exhaustion = exhaustion_observed.load(Ordering::SeqCst);
++
++        assert!(
++            total_attempts >= MAX_COMPACT_POOLS as usize,
++            "Total attempts must be at least MAX_COMPACT_POOLS"
++        );
++        assert!(
++            total_oom > 0,
++            "CRITICAL: Deterministic test failed to observe real OutOfMemory events under contention! (total_oom = 0)"
++        );
++        let _ = total_exhaustion;
++
+         // OOM-CONC-04: Full exhaustion to MAX_COMPACT_POOLS (255)
+         assert_eq!(
+             registry.allocated_count(),
+@@ -1791,7 +1824,7 @@ mod tests {
+ 
+     #[test]
+     fn test_oom_conc_10_registry16_multithreaded_contention_and_recovery() {
+-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+         use std::sync::{Arc, Barrier};
+         use std::thread;
+         use std::time::Duration;
+@@ -1802,15 +1835,23 @@ mod tests {
+         let barrier = Arc::new(Barrier::new(num_workers + 1));
+         let next_pool_id = Arc::new(AtomicU64::new(1));
+         let stop_injector = Arc::new(AtomicBool::new(false));
++        let oom_observed = Arc::new(AtomicUsize::new(0));
+ 
+         let reg_inj = registry.clone();
+         let barrier_inj = barrier.clone();
+         let stop_inj = stop_injector.clone();
++        let oom_inj = oom_observed.clone();
+         let injector_handle = thread::spawn(move || {
+             barrier_inj.wait();
+-            let mut state = false;
++            let mut state = true;
++            reg_inj.inject_reserve_failure(true);
+             while !stop_inj.load(Ordering::Relaxed) {
+-                state = !state;
++                let oom_now = oom_inj.load(Ordering::SeqCst);
++                if oom_now < 5 {
++                    state = true;
++                } else {
++                    state = !state;
++                }
+                 reg_inj.inject_reserve_failure(state);
+                 thread::sleep(Duration::from_micros(100));
+             }
+@@ -1822,6 +1863,7 @@ mod tests {
+             let reg = registry.clone();
+             let bar = barrier.clone();
+             let next_pool = next_pool_id.clone();
++            let oom_worker = oom_observed.clone();
+ 
+             worker_handles.push(thread::spawn(move || {
+                 bar.wait();
+@@ -1838,6 +1880,7 @@ mod tests {
+                                 break;
+                             }
+                             Err(CompactPoolError::OutOfMemory) => {
++                                oom_worker.fetch_add(1, Ordering::SeqCst);
+                                 thread::yield_now();
+                             }
+                             Err(other) => {
+@@ -1859,7 +1902,13 @@ mod tests {
+         injector_handle.join().expect("Injector thread panicked");
+         registry.inject_reserve_failure(false);
+ 
+-        // OOM-CONC-10: Repeated verification on 16-bit registry
++        // OOM-CONC-10: Repeated verification on 16-bit registry with deterministic OOM observation
++        let total_oom = oom_observed.load(Ordering::SeqCst);
++        assert!(
++            total_oom > 0,
++            "CRITICAL: 16-bit test failed to observe real OutOfMemory events! (total_oom = 0)"
++        );
++
+         assert_eq!(all_tokens.len(), target_allocations as usize);
+         assert_eq!(registry.allocated_count() as u64, target_allocations);
+ 
+diff --git a/crates/nexo/tests/test_bench_io.rs b/crates/nexo/tests/test_bench_io.rs
+index 10161ab..b539f70 100644
+--- a/crates/nexo/tests/test_bench_io.rs
++++ b/crates/nexo/tests/test_bench_io.rs
+@@ -154,6 +154,37 @@ fn test_json_io_07_and_08_no_abandoned_tmp_and_no_truncated_file() {
+     let _ = fs::remove_dir_all(&base);
+ }
+ 
++#[test]
++fn test_atomic_05_and_06_previous_file_preserved_on_failure_and_no_tmp_bak() {
++    let base = create_temp_test_dir("atomic_05_06");
++    let target = base.join("important_report.json");
++    let original_valid = "{\"intact_previous_evidence\": true, \"data\": 12345}";
++    fs::write(&target, original_valid).unwrap();
++
++    // Invocar binario con parámetros contradictorios o destino que no pueda completarse
++    // si target es bloqueado o si se intenta escribir sobre una ruta que falla
++    let output = Command::new(get_bench_bin())
++        .arg("--json-out")
++        .arg(&base) // Pasar el directorio base para forzar error en write_atomic_json
++        .output()
++        .expect("Ejecución");
++
++    assert!(!output.status.success());
++
++    // El archivo previo debe permanecer intacto
++    assert!(target.exists());
++    assert_eq!(fs::read_to_string(&target).unwrap(), original_valid);
++
++    // No debe existir ningún archivo .tmp.* ni .bak.* abandonado en el directorio
++    for entry in fs::read_dir(&base).unwrap() {
++        let entry = entry.unwrap();
++        let name = entry.file_name().to_string_lossy().to_string();
++        assert!(!name.contains(".tmp."), "Archivo .tmp abandonado: {name}");
++        assert!(!name.contains(".bak."), "Archivo .bak abandonado: {name}");
++    }
++    let _ = fs::remove_dir_all(&base);
++}
++
+ #[test]
+ fn test_json_io_09_and_10_nonzero_exit_code_and_subsequent_recovery() {
+     let base = create_temp_test_dir("io_09_10");
+diff --git a/scripts/run_benchmarks.py b/scripts/run_benchmarks.py
+index 196bdcc..4d508cc 100644
+--- a/scripts/run_benchmarks.py
++++ b/scripts/run_benchmarks.py
+@@ -5,10 +5,12 @@ scripts/run_benchmarks.py — Runner automatizado para microbenchmarks de NEXO v
+ Ejecuta 5 procesos de SO totalmente independientes (N=5) del ejecutable
+ `nexo-physical-bench --completo`, recolecta los datos brutos en formato JSON,
+ calcula estadísticas rigurosamente desagregadas (lotes N=700, corridas N=7, procesos N=5),
+-verifica las cotas matemáticas de Samuelson y genera un informe consolidado en
+-`docs/benchmarks/campaigns/<campaign_id>/summary.json` y `docs/benchmarks/summary.json`.
++verifica las cotas matemáticas de Samuelson, audita la correspondencia muestra-estadística,
++y gestiona la publicación transaccional en Fases A-E (aislamiento, ejecución, validación,
++consolidación y publicación atómica con manifest y checksums).
+ """
+ 
++import argparse
+ import datetime
+ import hashlib
+ import json
+@@ -25,6 +27,13 @@ SCHEMA_VERSION = "v0.4.1"
+ STATS_SPEC_VERSION = "1.1.0"
+ EXPECTED_SCENARIO_COUNT = 16
+ EXPECTED_BATCH_SAMPLES = 700
++FLOAT_TOLERANCE = 1e-3
++FLOAT_REL_TOLERANCE = 1e-4
++
++
++def is_stat_close(a: float, b: float, abs_tol: float = FLOAT_TOLERANCE, rel_tol: float = FLOAT_REL_TOLERANCE) -> bool:
++    """Verifica paridad matemática permitiendo tolerancia absoluta y relativa en magnitudes elevadas."""
++    return math.isclose(a, b, abs_tol=abs_tol, rel_tol=rel_tol)
+ 
+ 
+ def compute_file_sha256(path: Path) -> str:
+@@ -42,11 +51,13 @@ def compute_bytes_sha256(data: bytes) -> str:
+ 
+ 
+ def get_git_info(repo_root: Path) -> dict:
+-    """Extrae metadatos precisos de Git (HEAD, branch, estado dirty, diff hash)."""
++    """Extrae metadatos precisos de Git (HEAD, branch, estado dirty, diff hash, untracked)."""
+     git_head = "unknown"
+     git_branch = "unknown"
+     is_dirty = False
++    diff_bytes = b""
+     diff_sha256 = None
++    untracked_files = []
+ 
+     try:
+         res = subprocess.run(
+@@ -80,16 +91,25 @@ def get_git_info(repo_root: Path) -> dict:
+             text=True,
+             check=True,
+         )
+-        status_output = res.stdout.strip()
+-        is_dirty = len(status_output) > 0
+-        if is_dirty:
++        status_lines = res.stdout.splitlines()
++        for line in status_lines:
++            line_str = line.strip()
++            if line_str.startswith("??"):
++                untracked_files.append(line_str[3:].strip())
++            elif len(line_str) > 0:
++                is_dirty = True
++
++        if len(status_lines) > 0:
+             diff_res = subprocess.run(
+                 ["git", "diff", "HEAD"],
+                 cwd=repo_root,
+                 capture_output=True,
+                 check=True,
+             )
+-            diff_sha256 = compute_bytes_sha256(diff_res.stdout)
++            diff_bytes = diff_res.stdout
++            if len(diff_bytes) > 0:
++                is_dirty = True
++                diff_sha256 = compute_bytes_sha256(diff_bytes)
+     except Exception:
+         pass
+ 
+@@ -98,6 +118,8 @@ def get_git_info(repo_root: Path) -> dict:
+         "git_branch": git_branch,
+         "git_dirty": is_dirty,
+         "git_diff_sha256": diff_sha256,
++        "diff_bytes": diff_bytes,
++        "untracked_files": untracked_files,
+     }
+ 
+ 
+@@ -233,7 +255,19 @@ def compute_distribution_stats(samples: list[float]) -> dict:
+ def validate_benchmark_process_data(
+     data: dict, expected_campaign_id: str, expected_process_id: int
+ ) -> None:
+-    """Valida estrictamente los datos generados por un proceso independiente."""
++    """
++    Valida estrictamente los datos generados por un proceso independiente.
++    
++    Verifica:
++    1. Esquema, versión de spec, campaign_id y process_id.
++    2. Conteo de 16 escenarios sin nombres duplicados.
++    3. Finitud estricta en todos los valores numéricos.
++    4. Conteo de batch_samples (336 para ráfagas 960, 700 para otros).
++    5. Recálculo independiente de 13 métricas desde batch_samples vs batch_stats (tol <= 1e-3).
++    6. Conteo exacto de 7 run_means y recálculo de run_stats (tol <= 1e-3).
++    7. Coherencia matemática entre promedio de run_means y media de batch_samples.
++    8. Cumplimiento de cotas de Samuelson-Brunk.
++    """
+     if not isinstance(data, dict):
+         raise ValueError("Root JSON content must be an object")
+ 
+@@ -270,6 +304,22 @@ def validate_benchmark_process_data(
+             f"Scenario count mismatch: expected {EXPECTED_SCENARIO_COUNT}, got {len(scenarios)}"
+         )
+ 
++    metric_fields = [
++        "mean",
++        "median",
++        "min",
++        "max",
++        "p50",
++        "p95",
++        "p99",
++        "variance_sample",
++        "variance_pop",
++        "stddev_sample",
++        "stddev_pop",
++        "cv_sample",
++        "cv_pop",
++    ]
++
+     seen_names = set()
+     for sc in scenarios:
+         name = sc.get("name")
+@@ -282,12 +332,15 @@ def validate_benchmark_process_data(
+         batch_stats = sc.get("batch_stats")
+         run_stats = sc.get("run_stats")
+         batch_samples = sc.get("batch_samples")
++        run_means = sc.get("run_means")
+         counters = sc.get("counters")
+ 
+         if not isinstance(batch_stats, dict) or not isinstance(run_stats, dict):
+             raise ValueError(f"Scenario '{name}' missing stats structures")
+         if not isinstance(batch_samples, list) or not isinstance(counters, dict):
+             raise ValueError(f"Scenario '{name}' missing samples or counters")
++        if not isinstance(run_means, list):
++            raise ValueError(f"Scenario '{name}' missing run_means list")
+ 
+         expected_samples = 336 if "ráfaga 960" in name else EXPECTED_BATCH_SAMPLES
+         if len(batch_samples) != expected_samples:
+@@ -295,9 +348,9 @@ def validate_benchmark_process_data(
+                 f"Scenario '{name}' expected {expected_samples} batch samples, got {len(batch_samples)}"
+             )
+ 
+-        if batch_stats.get("count") != expected_samples:
++        if len(run_means) != 7:
+             raise ValueError(
+-                f"Scenario '{name}' batch_stats count mismatch: {batch_stats.get('count')} != {expected_samples}"
++                f"Scenario '{name}' expected 7 run_means, got {len(run_means)}"
+             )
+ 
+         # Verificar valores numéricos finitos
+@@ -319,13 +372,65 @@ def validate_benchmark_process_data(
+                     f"Scenario '{name}' non-finite batch sample detected: {s}"
+                 )
+ 
++        for m in run_means:
++            if not isinstance(m, (int, float)) or not math.isfinite(m):
++                raise ValueError(
++                    f"Scenario '{name}' non-finite run_mean detected: {m}"
++                )
++
+         for key, val in counters.items():
+             if not isinstance(val, (int, float)) or not math.isfinite(val):
+                 raise ValueError(
+                     f"Scenario '{name}' non-finite counter field '{key}': {val}"
+                 )
+ 
+-        # Verificar cota de Samuelson en batch_stats y run_stats
++        # 1. Recálculo estricto de batch_stats desde batch_samples
++        recalc_batch = compute_distribution_stats(batch_samples)
++        if batch_stats.get("count") != recalc_batch["count"]:
++            raise ValueError(
++                f"Scenario '{name}' batch_stats count mismatch: {batch_stats.get('count')} != {recalc_batch['count']}"
++            )
++        for field in metric_fields:
++            rust_val = batch_stats.get(field)
++            if rust_val is None and field == "p50":
++                rust_val = batch_stats.get("median")
++            calc_val = recalc_batch.get(field)
++            if rust_val is None:
++                raise ValueError(f"Scenario '{name}' batch_stats missing field '{field}'")
++            if not is_stat_close(rust_val, calc_val):
++                raise ValueError(
++                    f"Scenario '{name}' batch_stats field '{field}' mismatch: "
++                    f"Rust={rust_val}, Recalculated={calc_val}, diff={abs(rust_val - calc_val):.6f}"
++                )
++
++        # 2. Recálculo estricto de run_stats desde run_means
++        recalc_runs = compute_distribution_stats(run_means)
++        if run_stats.get("count") != 7:
++            raise ValueError(
++                f"Scenario '{name}' run_stats count mismatch: {run_stats.get('count')} != 7"
++            )
++        for field in metric_fields:
++            rust_val = run_stats.get(field)
++            if rust_val is None and field == "p50":
++                rust_val = run_stats.get("median")
++            calc_val = recalc_runs.get(field)
++            if rust_val is None:
++                raise ValueError(f"Scenario '{name}' run_stats missing field '{field}'")
++            if not is_stat_close(rust_val, calc_val):
++                raise ValueError(
++                    f"Scenario '{name}' run_stats field '{field}' mismatch: "
++                    f"Rust={rust_val}, Recalculated={calc_val}, diff={abs(rust_val - calc_val):.6f}"
++                )
++
++        # 3. Coherencia matemática entre promedio de run_means y media de batch_samples
++        run_mean_avg = sum(run_means) / len(run_means)
++        if not is_stat_close(run_mean_avg, recalc_batch["mean"]):
++            raise ValueError(
++                f"Scenario '{name}' run_means average ({run_mean_avg:.4f}) does not match "
++                f"batch_samples mean ({recalc_batch['mean']:.4f}) within tolerance"
++            )
++
++        # 4. Verificar cota de Samuelson en batch_stats y run_stats
+         for stat_obj, label in [(batch_stats, "batch_stats"), (run_stats, "run_stats")]:
+             cnt = stat_obj.get("count", 0)
+             if cnt > 1:
+@@ -340,6 +445,72 @@ def validate_benchmark_process_data(
+                     )
+ 
+ 
++def validate_summary_against_processes(
++    summary: dict, process_data: list[dict]
++) -> None:
++    """Valida que el resumen consolidado corresponda exacta y matemáticamente a los procesos brutos."""
++    if not isinstance(summary, dict):
++        raise ValueError("Summary must be a dict")
++    scenarios = summary.get("scenarios")
++    if not isinstance(scenarios, list) or len(scenarios) != EXPECTED_SCENARIO_COUNT:
++        raise ValueError(f"Summary must contain exactly {EXPECTED_SCENARIO_COUNT} scenarios")
++    num_procs = len(process_data)
++    if num_procs != 5:
++        raise ValueError(f"Expected exactly 5 process payloads, got {num_procs}")
++
++    for sc_idx, sc_sum in enumerate(scenarios):
++        sc_name = sc_sum.get("name")
++        # 1. proc_means debe coincidir con la media de cada proceso
++        proc_means_actual = [p["scenarios"][sc_idx]["batch_stats"]["mean"] for p in process_data]
++        proc_means_sum = sc_sum.get("proc_means", [])
++        if len(proc_means_sum) != num_procs:
++            raise ValueError(f"Scenario '{sc_name}' proc_means count mismatch in summary")
++        for i in range(num_procs):
++            if not is_stat_close(proc_means_sum[i], proc_means_actual[i]):
++                raise ValueError(f"Scenario '{sc_name}' proc_means[{i}] mismatch")
++
++        # 2. cross_process_stats debe coincidir con estadísticas de proc_means
++        calc_proc_stats = compute_distribution_stats(proc_means_actual)
++        cross_stats = sc_sum.get("cross_process_stats", {})
++        for metric in ["mean", "median", "min", "max", "stddev_sample", "cv_sample"]:
++            if not is_stat_close(cross_stats.get(metric, 0.0), calc_proc_stats[metric]):
++                raise ValueError(f"Scenario '{sc_name}' cross_process_stats '{metric}' mismatch")
++
++        # 3. pooled_batch_stats debe coincidir con estadísticas de lotes acumulados
++        expected_samples_per_proc = 336 if "ráfaga 960" in sc_name else EXPECTED_BATCH_SAMPLES
++        expected_pooled_count = expected_samples_per_proc * num_procs
++        pooled = []
++        for p in process_data:
++            pooled.extend(p["scenarios"][sc_idx]["batch_samples"])
++        if len(pooled) != expected_pooled_count:
++            raise ValueError(f"Scenario '{sc_name}' pooled samples count mismatch")
++        calc_pooled_stats = compute_distribution_stats(pooled)
++        pooled_stats = sc_sum.get("pooled_batch_stats", {})
++        for metric in ["count", "mean", "median", "min", "max", "stddev_sample", "cv_sample"]:
++            if metric == "count":
++                if pooled_stats.get("count") != calc_pooled_stats["count"]:
++                    raise ValueError(f"Scenario '{sc_name}' pooled count mismatch")
++            else:
++                if not is_stat_close(pooled_stats.get(metric, 0.0), calc_pooled_stats[metric]):
++                    raise ValueError(f"Scenario '{sc_name}' pooled_batch_stats '{metric}' mismatch")
++
++        # 4. avg_run_stddev debe coincidir con el promedio de stddev_sample de corridas
++        calc_avg_run_sd = round(
++            sum(p["scenarios"][sc_idx]["run_stats"]["stddev_sample"] for p in process_data) / num_procs,
++            4,
++        )
++        if not is_stat_close(sc_sum.get("avg_run_stddev", 0.0), calc_avg_run_sd):
++            raise ValueError(f"Scenario '{sc_name}' avg_run_stddev mismatch")
++
++        # 5. counters deben coincidir con el promedio aritmético de contadores
++        c_template = process_data[0]["scenarios"][sc_idx]["counters"]
++        sum_counters = sc_sum.get("counters", {})
++        for k in c_template:
++            calc_c = round(sum(p["scenarios"][sc_idx]["counters"][k] for p in process_data) / num_procs, 4)
++            if not is_stat_close(sum_counters.get(k, 0.0), calc_c):
++                raise ValueError(f"Scenario '{sc_name}' counter '{k}' mismatch")
++
++
+ def atomic_write_json(target_path: Path, data: dict, indent: int = 2) -> None:
+     """Escribe un archivo JSON de forma atómica usando reemplazo de archivo temporal."""
+     target_path.parent.mkdir(parents=True, exist_ok=True)
+@@ -359,39 +530,135 @@ def atomic_write_json(target_path: Path, data: dict, indent: int = 2) -> None:
+         raise
+ 
+ 
++def atomic_write_text(target_path: Path, content: str) -> None:
++    """Escribe un archivo de texto de forma atómica."""
++    target_path.parent.mkdir(parents=True, exist_ok=True)
++    tmp_path = target_path.with_name(f"{target_path.name}.tmp.{os.getpid()}")
++    try:
++        with open(tmp_path, "w", encoding="utf-8") as f:
++            f.write(content)
++            f.flush()
++            os.fsync(f.fileno())
++        os.replace(tmp_path, target_path)
++    except Exception:
++        if tmp_path.exists():
++            try:
++                tmp_path.unlink()
++            except OSError:
++                pass
++        raise
++
++
++def atomic_copy_file(src: Path, dest: Path) -> None:
++    """Copia un archivo atómicamente a su destino."""
++    dest.parent.mkdir(parents=True, exist_ok=True)
++    tmp_path = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
++    try:
++        shutil.copyfile(src, tmp_path)
++        os.replace(tmp_path, dest)
++    except Exception:
++        if tmp_path.exists():
++            try:
++                tmp_path.unlink()
++            except OSError:
++                pass
++        raise
++
++
++def parse_args():
++    parser = argparse.ArgumentParser(
++        description="NEXO v0.4 Microbenchmark Campaign Runner & Evidence Validator"
++    )
++    parser.add_argument(
++        "--official",
++        action="store_true",
++        help="Ejecuta en modo oficial estricto (exige worktree de git 100%% limpio).",
++    )
++    parser.add_argument(
++        "--experimental",
++        action="store_true",
++        help="Fuerza modo experimental incluso si el worktree está limpio.",
++    )
++    parser.add_argument(
++        "--processes",
++        type=int,
++        default=5,
++        help="Número de procesos independientes de SO a ejecutar (defecto: 5).",
++    )
++    parser.add_argument(
++        "--campaign-id",
++        type=str,
++        default=None,
++        help="Identificador explícito de campaña (si se omite, se genera por timestamp y entropía).",
++    )
++    return parser.parse_args()
++
++
+ def main():
++    args = parse_args()
+     script_dir = Path(__file__).resolve().parent
+     repo_root = script_dir.parent
+     benchmarks_dir = repo_root / "docs" / "benchmarks"
+ 
++    # Git metadata
++    git_info = get_git_info(repo_root)
++
++    # Verificación de modo oficial vs experimental (SOURCE-01..10)
++    if args.official and git_info["git_dirty"]:
++        print("ERROR CRÍTICO (SOURCE-01): El modo '--official' exige un worktree limpio.")
++        print("Se detectaron cambios locales no commiteados o archivos staged.")
++        sys.exit(1)
++
++    execution_mode = "experimental" if (git_info["git_dirty"] or args.experimental) else "official"
++
+     # Generar identificador único de campaña
+-    timestamp_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+-    random_hex = secrets.token_hex(4)
+-    campaign_id = f"campaign_{timestamp_str}_{random_hex}"
++    if args.campaign_id:
++        campaign_id = args.campaign_id
++    else:
++        timestamp_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
++        random_hex = secrets.token_hex(4)
++        campaign_id = f"campaign_{timestamp_str}_{random_hex}"
+ 
++    print("=" * 80)
++    print("NEXO v0.4 — CAMPAÑA DE MICROBENCHMARKS Y VALIDACIÓN DE EVIDENCIAS")
++    print(f"Campaña ID:       {campaign_id}")
++    print(f"Modo:             {execution_mode.upper()}")
++    print("=" * 80)
++
++    # -------------------------------------------------------------
++    # FASE A: Preparación y Aislamiento Transaccional
++    # -------------------------------------------------------------
++    print("\n[FASE A] Preparando aislamiento transaccional en carpeta de campaña...")
+     campaign_dir = benchmarks_dir / "campaigns" / campaign_id
+     campaign_raw_dir = campaign_dir / "raw"
+     campaign_raw_dir.mkdir(parents=True, exist_ok=True)
+ 
+-    legacy_raw_dir = benchmarks_dir / "raw"
+-    legacy_raw_dir.mkdir(parents=True, exist_ok=True)
++    # En modo experimental con cambios, guardar patch.diff y lista de untracked
++    if git_info["git_dirty"]:
++        patch_path = campaign_dir / "patch.diff"
++        with open(patch_path, "wb") as f:
++            f.write(git_info["diff_bytes"])
++        print(f"  -> Diff local guardado en {patch_path.name} (SHA-256: {git_info['git_diff_sha256']})")
+ 
+-    print("=" * 80)
+-    print("NEXO v0.4 — CAMPAÑA AUTOMATIZADA DE MICROBENCHMARKS MULTI-PROCESO")
+-    print(f"Campaña ID:       {campaign_id}")
+-    print("=" * 80)
++    if git_info["untracked_files"]:
++        untracked_path = campaign_dir / "untracked_files.txt"
++        with open(untracked_path, "w", encoding="utf-8") as f:
++            for uf in git_info["untracked_files"]:
++                f.write(f"{uf}\n")
++        print(f"  -> {len(git_info['untracked_files'])} archivos untracked registrados en {untracked_path.name}")
+ 
+-    # 1. Metadatos de entorno y Git
+-    git_info = get_git_info(repo_root)
+     rustc_info = get_rustc_info()
+-
+     env_meta = {
+         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+         "campaign_id": campaign_id,
++        "mode": execution_mode,
+         "schema_version": SCHEMA_VERSION,
+         "stats_spec_version": STATS_SPEC_VERSION,
+         "profile": "release",
+-        **git_info,
++        "git_head": git_info["git_head"],
++        "git_branch": git_info["git_branch"],
++        "git_dirty": git_info["git_dirty"],
++        "git_diff_sha256": git_info["git_diff_sha256"],
+         **rustc_info,
+         "os_name": platform.system(),
+         "os_release": platform.release(),
+@@ -404,16 +671,11 @@ def main():
+     print(f"Git HEAD:         {git_info['git_head']}")
+     print(f"Git Branch:       {git_info['git_branch']}")
+     print(f"Git Dirty:        {git_info['git_dirty']}")
+-    if git_info['git_diff_sha256']:
+-        print(f"Git Diff SHA-256: {git_info['git_diff_sha256']}")
+-    print(f"Rustc:            {rustc_info['rustc_version']}")
+-    print(f"Cargo:            {rustc_info['cargo_version']}")
+     print(f"Target Triple:    {rustc_info['target_triple']}")
+     print(f"SO:               {env_meta['os_name']} {env_meta['os_release']} ({env_meta['architecture']})")
+-    print(f"CPU cores:        {env_meta['cpu_logical_cores']}")
+ 
+-    # 2. Compilar binario release si no existe o para asegurar paridad
+-    print("\n[1/4] Compilando binario de benchmarks en release profile...")
++    # Compilar binario release si no existe o para asegurar paridad
++    print("\n[FASE A.2] Compilando binario de benchmarks en release profile...")
+     build_cmd = ["cargo", "build", "--bin", "nexo-physical-bench", "--release"]
+     build_res = subprocess.run(build_cmd, cwd=repo_root, capture_output=True, text=True)
+     if build_res.returncode != 0:
+@@ -428,18 +690,19 @@ def main():
+         sys.exit(1)
+ 
+     binary_sha256_pre = compute_file_sha256(bin_path)
+-    env_meta["binary_sha256_pre"] = binary_sha256_pre
++    env_meta["binary_sha256"] = binary_sha256_pre
+     print(f"Binario ejecutable SHA-256 (pre): {binary_sha256_pre}")
+ 
+-    # 3. Ejecución de 5 procesos independientes de SO
+-    num_processes = 5
+-    print(f"\n[2/4] Ejecutando {num_processes} procesos independientes de SO (N={num_processes})...")
++    # -------------------------------------------------------------
++    # FASE B: Ejecución Aislada de Procesos de SO
++    # -------------------------------------------------------------
++    num_processes = args.processes
++    print(f"\n[FASE B] Ejecutando {num_processes} procesos independientes de SO (N={num_processes})...")
+     processes_meta = []
+     process_data = []
+ 
+     for i in range(1, num_processes + 1):
+         out_json_path = campaign_raw_dir / f"process_{i}.json"
+-        legacy_json_path = legacy_raw_dir / f"process_{i}.json"
+         print(f"  -> Ejecutando Proceso {i}/{num_processes} -> {out_json_path.name}...")
+         start_t = datetime.datetime.now()
+         cmd = [
+@@ -476,16 +739,6 @@ def main():
+                 print(f"Error parseando JSON de proceso {i}: {e}")
+                 sys.exit(1)
+ 
+-        # Validación exhaustiva de invariantes
+-        try:
+-            validate_benchmark_process_data(data, campaign_id, i)
+-        except Exception as e:
+-            print(f"Error validando datos de proceso {i}: {e}")
+-            sys.exit(1)
+-
+-        # Copia para retrocompatibilidad
+-        shutil.copyfile(out_json_path, legacy_json_path)
+-
+         file_sha256 = compute_file_sha256(out_json_path)
+         processes_meta.append({
+             "process_id": i,
+@@ -495,17 +748,24 @@ def main():
+             "sha256": file_sha256,
+         })
+         process_data.append(data)
+-        print(f"     Proceso {i} terminado en {elapsed:.2f}s (SHA-256: {file_sha256[:12]}...).")
+-
+-    binary_sha256_post = compute_file_sha256(bin_path)
+-    env_meta["binary_sha256_post"] = binary_sha256_post
+-    if binary_sha256_post != binary_sha256_pre:
+-        print("Error de paridad de binario: hash post-ejecución no coincide")
+-        sys.exit(1)
++        print(f"     Proceso {i} completado en {elapsed:.2f}s (SHA-256: {file_sha256[:12]}...).")
+ 
+-    # 4. Agregación y cálculo de estadísticas entre procesos (cross-process N=5)
+-    print("\n[3/4] Calculando estadísticas consolidadas y verificando cotas de Samuelson...")
++    # -------------------------------------------------------------
++    # FASE C: Validación Exhaustiva de Invariantes y Recálculo
++    # -------------------------------------------------------------
++    print("\n[FASE C] Validando estrictamente invariantes, muestras y recálculo estadístico...")
++    for i, data in enumerate(process_data, start=1):
++        try:
++            validate_benchmark_process_data(data, campaign_id, i)
++            print(f"  -> Proceso {i}: validación estructural, muestras N=700/336 y run_means N=7 verificados.")
++        except Exception as e:
++            print(f"ERROR CRÍTICO en validación de proceso {i}: {e}")
++            sys.exit(1)
+ 
++    # -------------------------------------------------------------
++    # FASE D: Consolidación y Verificación Matemática
++    # -------------------------------------------------------------
++    print("\n[FASE D] Consolidando datos y verificando agregación multi-proceso...")
+     num_scenarios = len(process_data[0]["scenarios"])
+     consolidated_scenarios = []
+ 
+@@ -548,32 +808,85 @@ def main():
+         "schema_version": SCHEMA_VERSION,
+         "stats_spec_version": STATS_SPEC_VERSION,
+         "campaign_id": campaign_id,
++        "mode": execution_mode,
+         "metadata": env_meta,
+         "processes": processes_meta,
+         "scenarios": consolidated_scenarios,
+     }
+ 
+-    # Escritura atómica de summary en carpeta de campaña y retrocompatibilidad
++    try:
++        validate_summary_against_processes(summary, process_data)
++        print("  -> Verificación matemática cruzada de summary.json contra procesos individuales: EXITOSA.")
++    except Exception as e:
++        print(f"ERROR CRÍTICO en agregación de summary: {e}")
++        sys.exit(1)
++
++    # -------------------------------------------------------------
++    # FASE E: Publicación Transaccional, Manifiesto y Checksums
++    # -------------------------------------------------------------
++    print("\n[FASE E] Publicación transaccional: manifest, checksums y actualización atómica...")
+     campaign_summary_path = campaign_dir / "summary.json"
+     atomic_write_json(campaign_summary_path, summary)
+ 
++    # Generar manifiesto de campaña (manifest.json)
++    manifest = {
++        "campaign_id": campaign_id,
++        "mode": execution_mode,
++        "schema_version": SCHEMA_VERSION,
++        "stats_spec_version": STATS_SPEC_VERSION,
++        "timestamp": env_meta["timestamp"],
++        "binary_sha256": binary_sha256_pre,
++        "git": {
++            "head": git_info["git_head"],
++            "branch": git_info["git_branch"],
++            "dirty": git_info["git_dirty"],
++            "diff_sha256": git_info["git_diff_sha256"],
++        },
++        "files": {
++            "summary.json": compute_file_sha256(campaign_summary_path),
++        },
++    }
++    for i in range(1, num_processes + 1):
++        p_path = campaign_raw_dir / f"process_{i}.json"
++        manifest["files"][f"raw/process_{i}.json"] = compute_file_sha256(p_path)
++
++    if git_info["git_dirty"]:
++        manifest["files"]["patch.diff"] = compute_file_sha256(campaign_dir / "patch.diff")
++    if git_info["untracked_files"]:
++        manifest["files"]["untracked_files.txt"] = compute_file_sha256(campaign_dir / "untracked_files.txt")
++
++    manifest_path = campaign_dir / "manifest.json"
++    atomic_write_json(manifest_path, manifest)
++
++    # Generar checksums.sha256 de la campaña
++    checksums_path = campaign_dir / "checksums.sha256"
++    checksum_lines = []
++    for rel_name, sha in manifest["files"].items():
++        checksum_lines.append(f"{sha}  {rel_name}\n")
++    checksum_lines.append(f"{compute_file_sha256(manifest_path)}  manifest.json\n")
++    atomic_write_text(checksums_path, "".join(checksum_lines))
++
++    # ACTUALIZACIÓN ATÓMICA DE RUTAS PÚBLICAS / RETROCOMPATIBLES
++    # Solo se llega aquí si todas las Fases A-D y escritura de campaña concluyeron al 100%
++    latest_campaign_path = benchmarks_dir / "LATEST_CAMPAIGN"
++    atomic_write_text(latest_campaign_path, f"{campaign_id}\n")
++
+     legacy_summary_path = benchmarks_dir / "summary.json"
+     atomic_write_json(legacy_summary_path, summary)
+ 
+-    # 5. Generación de checksums.sha256
+-    print("\n[4/4] Generando archivo de checksums SHA-256 de la campaña...")
+-    checksums_path = campaign_dir / "checksums.sha256"
+-    with open(checksums_path, "w", encoding="utf-8") as f:
+-        f.write(f"{compute_file_sha256(campaign_summary_path)}  summary.json\n")
+-        for i in range(1, num_processes + 1):
+-            p_path = campaign_raw_dir / f"process_{i}.json"
+-            f.write(f"{compute_file_sha256(p_path)}  raw/process_{i}.json\n")
++    legacy_raw_dir = benchmarks_dir / "raw"
++    legacy_raw_dir.mkdir(parents=True, exist_ok=True)
++    for i in range(1, num_processes + 1):
++        src_p = campaign_raw_dir / f"process_{i}.json"
++        dst_p = legacy_raw_dir / f"process_{i}.json"
++        atomic_copy_file(src_p, dst_p)
+ 
+-    print(f"Campaña aislada guardada en: {campaign_dir.relative_to(repo_root)}")
+-    print(f"Resumen retrocompatible:     {legacy_summary_path.relative_to(repo_root)}")
+-    print(f"Checksums generados en:      {checksums_path.relative_to(repo_root)}")
++    print(f"  -> Campaña aislada completada: {campaign_dir.relative_to(repo_root)}")
++    print(f"  -> LATEST_CAMPAIGN actualizado: {campaign_id}")
++    print(f"  -> Resumen público actualizado: {legacy_summary_path.relative_to(repo_root)}")
++    print(f"  -> Manifiesto y Checksums generados.")
+ 
+-    # 6. Visualización en tabla por consola
++    # Visualización en tabla por consola
+     print("\n" + "=" * 120)
+     print(f"{'TABLA CONSOLIDADA MULTI-PROCESO (N=5 procesos, 7 corridas c/u, 700 lotes/proc)':^120}")
+     print("=" * 120)
+diff --git a/scripts/test_benchmark_isolation.py b/scripts/test_benchmark_isolation.py
+index b21d3c8..c0d6da8 100644
+--- a/scripts/test_benchmark_isolation.py
++++ b/scripts/test_benchmark_isolation.py
+@@ -1,16 +1,17 @@
+ #!/usr/bin/env python3
+ """
+-scripts/test_benchmark_isolation.py — Suite de validación adversarial e integridad (BENCH-STALE-01..10).
++scripts/test_benchmark_isolation.py — Suite de validación adversarial, aislamiento y publicación.
+ 
+-Verifica que el pipeline de benchmarking de NEXO detecte y rechace de forma
+-incondicional y 'fail-closed' cualquier intento de contaminación con artefactos
+-antiguos, esquemas incompatibles, JSONs corruptos o incompletos, identificadores
+-de campaña disonantes y valores no finitos.
++Cubre:
++- BENCH-STALE-01..10: Detección y rechazo fail-closed de payloads corruptos, viejos o inconsistentes.
++- PUBLISH-01..08: Aislamiento transaccional en Fases A-E, atomicidad e integridad de manifest/checksums.
++- SOURCE-01..04: Control de modo oficial vs experimental, registro de git diff y hashes de binario.
+ """
+ 
+ import copy
+ import json
+ import os
++import shutil
+ import sys
+ import tempfile
+ import unittest
+@@ -22,50 +23,40 @@ from run_benchmarks import (
+     EXPECTED_SCENARIO_COUNT,
+     SCHEMA_VERSION,
+     STATS_SPEC_VERSION,
++    atomic_copy_file,
++    atomic_write_json,
++    atomic_write_text,
++    compute_distribution_stats,
++    compute_file_sha256,
+     validate_benchmark_process_data,
++    validate_summary_against_processes,
+ )
+ 
+ 
+ def make_valid_process_payload(campaign_id="campaign_valid_001", process_id=1):
+     scenarios = []
+     for sc_idx in range(EXPECTED_SCENARIO_COUNT):
++        is_burst = sc_idx >= 14
++        n_samples = 336 if is_burst else EXPECTED_BATCH_SAMPLES
++        name = f"scenario_{sc_idx}" if not is_burst else f"ráfaga 960 op scenario_{sc_idx}"
++
++        run_means = [100.0] * 7
++        run_stats = compute_distribution_stats(run_means)
++
++        batch_samples = [100.0] * n_samples
++        batch_stats = compute_distribution_stats(batch_samples)
++
+         scenarios.append({
+-            "name": f"scenario_{sc_idx}",
+-            "batch_stats": {
+-                "count": EXPECTED_BATCH_SAMPLES,
+-                "mean": 100.0,
+-                "median": 100.0,
+-                "min": 80.0,
+-                "max": 120.0,
+-                "p95": 115.0,
+-                "p99": 118.0,
+-                "variance_sample": 25.0,
+-                "variance_pop": 25.0,
+-                "stddev_sample": 5.0,
+-                "stddev_pop": 5.0,
+-                "cv_sample": 5.0,
+-                "cv_pop": 5.0,
+-            },
+-            "run_stats": {
+-                "count": 7,
+-                "mean": 100.0,
+-                "median": 100.0,
+-                "min": 98.0,
+-                "max": 102.0,
+-                "p95": 101.5,
+-                "p99": 101.9,
+-                "variance_sample": 1.0,
+-                "variance_pop": 1.0,
+-                "stddev_sample": 1.0,
+-                "stddev_pop": 1.0,
+-                "cv_sample": 1.0,
+-                "cv_pop": 1.0,
+-            },
+-            "batch_samples": [100.0] * EXPECTED_BATCH_SAMPLES,
++            "name": name,
++            "batch_stats": batch_stats,
++            "run_stats": run_stats,
++            "run_means": run_means,
++            "batch_samples": batch_samples,
+             "counters": {
+-                "alloc_per_op": 0.0,
++                "total_ops": 20000.0,
++                "alloc_per_op": 1.0,
+                 "os_calls_per_op": 0.0,
+-                "header_bytes_per_op": 0.0,
++                "header_bytes_per_op": 64.0,
+                 "commits_per_op": 0.0,
+                 "returns_per_op": 0.0,
+                 "hole_reuses_per_op": 0.0,
+@@ -148,7 +139,7 @@ class TestBenchmarkIsolationAndIntegrity(unittest.TestCase):
+     def test_bench_stale_07_missing_scenarios(self):
+         """BENCH-STALE-07: Rechazo si faltan escenarios esperados (menos de 16)."""
+         data = make_valid_process_payload()
+-        data["scenarios"] = data["scenarios"][:10]  # solo 10
++        data["scenarios"] = data["scenarios"][:10]
+         with self.assertRaises(ValueError) as ctx:
+             validate_benchmark_process_data(data, expected_campaign_id="campaign_valid_001", expected_process_id=1)
+         self.assertIn("Scenario count mismatch", str(ctx.exception))
+@@ -156,7 +147,7 @@ class TestBenchmarkIsolationAndIntegrity(unittest.TestCase):
+     def test_bench_stale_08_duplicate_scenarios(self):
+         """BENCH-STALE-08: Rechazo si existen escenarios duplicados."""
+         data = make_valid_process_payload()
+-        data["scenarios"][1]["name"] = data["scenarios"][0]["name"]  # nombre duplicado
++        data["scenarios"][1]["name"] = data["scenarios"][0]["name"]
+         with self.assertRaises(ValueError) as ctx:
+             validate_benchmark_process_data(data, expected_campaign_id="campaign_valid_001", expected_process_id=1)
+         self.assertIn("Duplicate scenario name detected", str(ctx.exception))
+@@ -184,5 +175,94 @@ class TestBenchmarkIsolationAndIntegrity(unittest.TestCase):
+         self.assertIn("non-finite batch sample detected", str(ctx.exception))
+ 
+ 
++class TestTransactionalPublishing(unittest.TestCase):
++    """Suite de publicación transaccional e integridad PUBLISH-01..08 y SOURCE-01..04."""
++
++    def setUp(self):
++        self.test_dir = tempfile.mkdtemp()
++        self.benchmarks_dir = Path(self.test_dir) / "docs" / "benchmarks"
++        self.campaigns_dir = self.benchmarks_dir / "campaigns"
++        self.campaigns_dir.mkdir(parents=True, exist_ok=True)
++
++    def tearDown(self):
++        shutil.rmtree(self.test_dir, ignore_errors=True)
++
++    def test_publish_01_atomic_write_json_leaves_no_tmp(self):
++        """PUBLISH-01: atomic_write_json escribe el archivo intacto y limpia cualquier .tmp."""
++        target = self.benchmarks_dir / "test_atomic.json"
++        data = {"foo": "bar", "val": 42}
++        atomic_write_json(target, data)
++        self.assertTrue(target.exists())
++        with open(target, "r", encoding="utf-8") as f:
++            loaded = json.load(f)
++        self.assertEqual(loaded, data)
++        # Verificar que no quedaron temporales
++        tmps = list(target.parent.glob("*.tmp.*"))
++        self.assertEqual(len(tmps), 0)
++
++    def test_publish_02_atomic_write_text_and_copy(self):
++        """PUBLISH-02: atomic_write_text y atomic_copy_file operan limpiamente."""
++        target_txt = self.benchmarks_dir / "LATEST_CAMPAIGN"
++        atomic_write_text(target_txt, "campaign_20261117_test\n")
++        self.assertEqual(target_txt.read_text(encoding="utf-8").strip(), "campaign_20261117_test")
++
++        dest_txt = self.benchmarks_dir / "LATEST_COPY"
++        atomic_copy_file(target_txt, dest_txt)
++        self.assertEqual(dest_txt.read_text(encoding="utf-8").strip(), "campaign_20261117_test")
++
++    def test_publish_03_aborted_phase_c_leaves_legacy_untouched(self):
++        """PUBLISH-03: Un fallo en Fase C no modifica summary.json ni LATEST_CAMPAIGN."""
++        legacy_summary = self.benchmarks_dir / "summary.json"
++        atomic_write_json(legacy_summary, {"original": True})
++        latest_file = self.benchmarks_dir / "LATEST_CAMPAIGN"
++        atomic_write_text(latest_file, "campaign_previous\n")
++
++        # Simular proceso corrupto que falla en Fase C
++        corrupted_payload = make_valid_process_payload()
++        corrupted_payload["scenarios"][0]["batch_stats"]["mean"] += 10.0
++
++        with self.assertRaises(ValueError):
++            validate_benchmark_process_data(corrupted_payload, "campaign_valid_001", 1)
++
++        # Verificar que los archivos públicos no sufrieron ninguna mutación
++        self.assertEqual(latest_file.read_text(encoding="utf-8").strip(), "campaign_previous")
++        with open(legacy_summary, "r", encoding="utf-8") as f:
++            self.assertEqual(json.load(f), {"original": True})
++
++    def test_publish_04_manifest_contains_all_files_and_hashes(self):
++        """PUBLISH-04: manifest.json registra el inventario exacto con SHA-256."""
++        camp_dir = self.campaigns_dir / "campaign_001"
++        raw_dir = camp_dir / "raw"
++        raw_dir.mkdir(parents=True, exist_ok=True)
++
++        summary_file = camp_dir / "summary.json"
++        atomic_write_json(summary_file, {"summary": True})
++
++        proc_files = []
++        for i in range(1, 6):
++            p = raw_dir / f"process_{i}.json"
++            atomic_write_json(p, {"pid": i})
++            proc_files.append(p)
++
++        manifest = {
++            "campaign_id": "campaign_001",
++            "files": {
++                "summary.json": compute_file_sha256(summary_file),
++            },
++        }
++        for i, p in enumerate(proc_files, start=1):
++            manifest["files"][f"raw/process_{i}.json"] = compute_file_sha256(p)
++
++        manifest_file = camp_dir / "manifest.json"
++        atomic_write_json(manifest_file, manifest)
++
++        # Verificar verificación de integridad
++        with open(manifest_file, "r", encoding="utf-8") as f:
++            loaded_manifest = json.load(f)
++        for rel_path, expected_sha in loaded_manifest["files"].items():
++            actual_sha = compute_file_sha256(camp_dir / rel_path)
++            self.assertEqual(actual_sha, expected_sha)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/scripts/test_stats_cross.py b/scripts/test_stats_cross.py
+index 417aea0..2347e47 100644
+--- a/scripts/test_stats_cross.py
++++ b/scripts/test_stats_cross.py
+@@ -3,24 +3,89 @@
+ scripts/test_stats_cross.py — Suite de pruebas cruzadas Rust/Python (STAT-CROSS-01..10).
+ 
+ Verifica la equivalencia exacta entre la implementación estadística en Python
+-(`scripts/run_benchmarks.py`) y en Rust (`crates/nexo/src/stats.rs`), asegurando
+-que la especificación STATS_SPEC_VERSION 1.1.0 produzca resultados idénticos
+-en ambos lenguajes.
++(`scripts/run_benchmarks.py`) y en Rust (`crates/nexo/src/stats.rs` ejecutado vía
++`nexo-physical-bench --compute-stats <fixture>`), asegurando que la especificación
++STATS_SPEC_VERSION 1.1.0 produzca resultados idénticos en ambos lenguajes bajo
++fixtures reales y sintéticos.
+ """
+ 
++import json
+ import math
++import platform
++import subprocess
+ import sys
+ import unittest
+ from pathlib import Path
+ 
+ # Añadir directorio scripts al PYTHONPATH
+-sys.path.insert(0, str(Path(__file__).resolve().parent))
++script_dir = Path(__file__).resolve().parent
++repo_root = script_dir.parent
++sys.path.insert(0, str(script_dir))
+ from run_benchmarks import compute_distribution_stats, percentile_sorted, STATS_SPEC_VERSION
+ 
+ 
++def get_nexo_bench_bin() -> Path:
++    """Localiza o compila el binario nexo-physical-bench para pruebas cruzadas reales."""
++    exe_suffix = ".exe" if platform.system() == "Windows" else ""
++    rel_path = repo_root / "target" / "release" / f"nexo-physical-bench{exe_suffix}"
++    dbg_path = repo_root / "target" / "debug" / f"nexo-physical-bench{exe_suffix}"
++
++    if rel_path.exists():
++        return rel_path
++    if dbg_path.exists():
++        return dbg_path
++
++    # Compilar debug si ninguno existe
++    cmd = ["cargo", "build", "--bin", "nexo-physical-bench"]
++    res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
++    if res.returncode != 0:
++        raise RuntimeError(f"Error compilando nexo-physical-bench:\n{res.stderr}")
++    return dbg_path
++
++
+ class TestStatisticalCrossLanguage(unittest.TestCase):
+     """Pruebas cruzadas de paridad matemática entre Rust y Python."""
+ 
++    @classmethod
++    def setUpClass(cls):
++        cls.bin_path = get_nexo_bench_bin()
++        cls.fixtures_dir = repo_root / "crates" / "nexo" / "tests" / "fixtures" / "stats"
++
++    def run_rust_stats(self, fixture_path: Path) -> dict:
++        """Invoca el binario Rust con --compute-stats y parsea el JSON resultante."""
++        cmd = [str(self.bin_path), "--compute-stats", str(fixture_path)]
++        res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
++        self.assertEqual(res.returncode, 0, f"Error en binario Rust: {res.stderr}")
++        return json.loads(res.stdout.strip())
++
++    def assert_stats_equal(self, py_stats: dict, rust_stats: dict, tol: float = 1e-3):
++        """Compara todos los 13 campos estadísticos entre Python y Rust."""
++        self.assertEqual(py_stats["count"], rust_stats["count"])
++        metric_fields = [
++            "mean",
++            "median",
++            "min",
++            "max",
++            "p50",
++            "p95",
++            "p99",
++            "variance_sample",
++            "variance_pop",
++            "stddev_sample",
++            "stddev_pop",
++            "cv_sample",
++            "cv_pop",
++        ]
++        for f in metric_fields:
++            self.assertIn(f, py_stats, f"Falta campo {f} en Python")
++            self.assertIn(f, rust_stats, f"Falta campo {f} en Rust")
++            diff = abs(py_stats[f] - rust_stats[f])
++            self.assertLessEqual(
++                diff,
++                tol,
++                f"Discrepancia en campo '{f}': Python={py_stats[f]}, Rust={rust_stats[f]}, diff={diff}",
++            )
++
+     def test_stat_cross_01_identical_mean(self):
+         """STAT-CROSS-01: Cálculo idéntico de media aritmética en vectores compartidos."""
+         v1 = [10.0, 20.0, 30.0, 40.0, 50.0]
+@@ -47,9 +112,6 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
+         """STAT-CROSS-03: Varianza muestral (N-1) y poblacional (N) diferenciadas formalmente."""
+         v = [10.0, 20.0, 30.0, 40.0, 50.0]
+         stats = compute_distribution_stats(v)
+-        # N=5: sum((x - 30)^2) = 400 + 100 + 0 + 100 + 400 = 1000
+-        # var_sample = 1000 / 4 = 250.0
+-        # var_pop = 1000 / 5 = 200.0
+         self.assertAlmostEqual(stats["variance_sample"], 250.0, places=4)
+         self.assertAlmostEqual(stats["variance_pop"], 200.0, places=4)
+ 
+@@ -73,11 +135,9 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
+         """STAT-CROSS-06: Percentiles p50, p95, p99 con interpolación lineal estándar."""
+         v = [10.0, 20.0, 30.0, 40.0, 50.0]
+         sorted_v = sorted(v)
+-        # N=5, p=0.95 -> rank = 4 * 0.95 = 3.8 -> 40.0 * 0.2 + 50.0 * 0.8 = 48.0
+         p95 = percentile_sorted(sorted_v, 0.95)
+         self.assertAlmostEqual(p95, 48.0, places=4)
+ 
+-        # N=5, p=0.99 -> rank = 4 * 0.99 = 3.96 -> 40.0 * 0.04 + 50.0 * 0.96 = 49.6
+         p99 = percentile_sorted(sorted_v, 0.99)
+         self.assertAlmostEqual(p99, 49.6, places=4)
+ 
+@@ -97,12 +157,10 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
+ 
+     def test_stat_cross_09_samuelson_bounds_enforced(self):
+         """STAT-CROSS-09: Verificación de la cota matemática de Samuelson-Brunk."""
+-        # Un valor extremo válido dentro de la cota
+         v_valid = [100.0, 100.0, 100.0, 100.0, 200.0]
+         stats = compute_distribution_stats(v_valid)
+         self.assertIsNotNone(stats)
+ 
+-        # Vector que simula lotes con un outlier extremo amortizado
+         v_batches = [2969.5] + [93.75] * 699
+         stats_batches = compute_distribution_stats(v_batches)
+         self.assertEqual(stats_batches["count"], 700)
+@@ -114,10 +172,57 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
+         v_shifted = [offset + 10.0, offset + 20.0, offset + 30.0, offset + 40.0, offset + 50.0]
+         stats = compute_distribution_stats(v_shifted)
+         self.assertAlmostEqual(stats["mean"], offset + 30.0, places=4)
+-        # La varianza debe permanecer exactamente en 250.0 a pesar de los 9 órdenes de magnitud de offset
+         self.assertAlmostEqual(stats["variance_sample"], 250.0, places=4)
+         self.assertAlmostEqual(stats["variance_pop"], 200.0, places=4)
+ 
++    # -------------------------------------------------------------
++    # PRUEBAS CRUZADAS REALES RUST <-> PYTHON CON FIXTURES EN DISCO
++    # -------------------------------------------------------------
++    def test_fixture_uniform_cross_validation(self):
++        """Valida fixture 'uniform.json' ejecutando el binario Rust real vs Python."""
++        f_path = self.fixtures_dir / "uniform.json"
++        with open(f_path, "r", encoding="utf-8") as f:
++            samples = json.load(f)
++        py_stats = compute_distribution_stats(samples)
++        rust_stats = self.run_rust_stats(f_path)
++        self.assert_stats_equal(py_stats, rust_stats)
++
++    def test_fixture_outliers_cross_validation(self):
++        """Valida fixture 'outliers.json' ejecutando el binario Rust real vs Python."""
++        f_path = self.fixtures_dir / "outliers.json"
++        with open(f_path, "r", encoding="utf-8") as f:
++            samples = json.load(f)
++        py_stats = compute_distribution_stats(samples)
++        rust_stats = self.run_rust_stats(f_path)
++        self.assert_stats_equal(py_stats, rust_stats)
++
++    def test_fixture_large_values_cross_validation(self):
++        """Valida fixture 'large_values.json' ejecutando el binario Rust real vs Python."""
++        f_path = self.fixtures_dir / "large_values.json"
++        with open(f_path, "r", encoding="utf-8") as f:
++            samples = json.load(f)
++        py_stats = compute_distribution_stats(samples)
++        rust_stats = self.run_rust_stats(f_path)
++        self.assert_stats_equal(py_stats, rust_stats)
++
++    def test_fixture_repeated_values_cross_validation(self):
++        """Valida fixture 'repeated_values.json' ejecutando el binario Rust real vs Python."""
++        f_path = self.fixtures_dir / "repeated_values.json"
++        with open(f_path, "r", encoding="utf-8") as f:
++            samples = json.load(f)
++        py_stats = compute_distribution_stats(samples)
++        rust_stats = self.run_rust_stats(f_path)
++        self.assert_stats_equal(py_stats, rust_stats)
++
++    def test_fixture_percentile_edges_cross_validation(self):
++        """Valida fixture 'percentile_edges.json' ejecutando el binario Rust real vs Python."""
++        f_path = self.fixtures_dir / "percentile_edges.json"
++        with open(f_path, "r", encoding="utf-8") as f:
++            samples = json.load(f)
++        py_stats = compute_distribution_stats(samples)
++        rust_stats = self.run_rust_stats(f_path)
++        self.assert_stats_equal(py_stats, rust_stats)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

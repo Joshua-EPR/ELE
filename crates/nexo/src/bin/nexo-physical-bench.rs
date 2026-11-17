@@ -14,8 +14,14 @@ use std::hint::black_box;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use nexo::next::adapter::{CompactPhysicalPool, CompactPhysicalPool64};
+use nexo::next::compact::{
+    CompactLink, CompactLink64, CompactPoolAuthority, CompactPoolAuthority64, CompactPoolRegistry,
+    CompactPoolRegistry16,
+};
 use nexo::physical::{DestroyOutcome, Handle, PhysicalPool, PoolConfig, ReclaimPolicy};
 use nexo::rt::pool::{Eventos, Pool};
+use nexo::stats::{DistributionStats, compute_stats, verify_samuelson_bounds};
 
 const WARMUP: usize = 2_000;
 const ITERATIONS: usize = 20_000;
@@ -46,14 +52,208 @@ unsafe impl GlobalAlloc for Contador {
 #[global_allocator]
 static GLOBAL: Contador = Contador;
 
+fn serialize_stats_json(s: &nexo::stats::DistributionStats) -> String {
+    format!(
+        "{{\n  \"count\": {},\n  \"mean\": {:.4},\n  \"median\": {:.4},\n  \"min\": {:.4},\n  \"max\": {:.4},\n  \"variance_sample\": {:.4},\n  \"variance_pop\": {:.4},\n  \"stddev_sample\": {:.4},\n  \"stddev_pop\": {:.4},\n  \"cv_sample\": {:.4},\n  \"cv_pop\": {:.4},\n  \"p50\": {:.4},\n  \"p95\": {:.4},\n  \"p99\": {:.4}\n}}",
+        s.count,
+        s.mean,
+        s.median,
+        s.min,
+        s.max,
+        s.variance_sample,
+        s.variance_pop,
+        s.std_dev_sample,
+        s.std_dev_pop,
+        s.cv_sample,
+        s.cv_pop,
+        s.p50,
+        s.p95,
+        s.p99
+    )
+}
+
+fn validate_rfc8259_number(token: &str) -> Result<f64, String> {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return Err("Token numérico vacío".to_string());
+    }
+    let mut i = 0;
+    // Signo: en RFC 8259 solo se permite '-' opcional; '+' está estrictamente prohibido
+    if bytes[i] == b'-' {
+        i += 1;
+        if i >= bytes.len() {
+            return Err("Número contiene únicamente '-'".to_string());
+        }
+    } else if bytes[i] == b'+' {
+        return Err("El signo '+' inicial no está permitido en JSON RFC 8259".to_string());
+    }
+
+    // Parte entera: zero / ( digit1-9 *DIGIT )
+    if bytes[i] == b'0' {
+        i += 1;
+        // Si comienza en 0, no puede haber otro dígito inmediatamente después (ej. 01, 007 están prohibidos)
+        if i < bytes.len() && bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "Cero a la izquierda inválido en número RFC 8259: '{token}'"
+            ));
+        }
+    } else if bytes[i].is_ascii_digit() {
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    } else {
+        return Err(format!(
+            "Dígito entero esperado en '{token}' (ej. '.5' o palabras no permitidas)"
+        ));
+    }
+
+    // Parte fraccionaria: frac = decimal-point 1*DIGIT
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "El punto decimal debe ser seguido de al menos un dígito en '{token}' (ej. '1.' o '1.e2')"
+            ));
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+
+    // Exponente: exp = e [ minus / plus ] 1*DIGIT
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+            i += 1;
+        }
+        if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "El exponente debe contener al menos un dígito en '{token}' (ej. '1e')"
+            ));
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+
+    if i != bytes.len() {
+        return Err(format!(
+            "Caracteres no válidos al final del número en '{token}'"
+        ));
+    }
+
+    let val = token
+        .parse::<f64>()
+        .map_err(|e| format!("Error parseando número '{token}': {e}"))?;
+    if val.is_nan() || !val.is_finite() {
+        return Err(format!(
+            "Valor no finito (desbordamiento o NaN) en '{token}'"
+        ));
+    }
+    Ok(val)
+}
+
+fn parse_samples_json(content: &str) -> Result<Vec<f64>, String> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return Err("El documento debe ser un arreglo JSON delimitado por '[' y ']'".to_string());
+    }
+    let inner = trimmed[1..trimmed.len() - 1].trim();
+    if inner.is_empty() {
+        return Err(
+            "El arreglo JSON de muestras no puede estar vacío (según el contrato de estadísticas)"
+                .to_string(),
+        );
+    }
+
+    // Rechazar objetos anidados o subarreglos
+    if inner.contains('[') || inner.contains(']') || inner.contains('{') || inner.contains('}') {
+        return Err(
+            "Arreglos anidados u objetos no permitidos en arreglo plano de muestras".to_string(),
+        );
+    }
+
+    let mut samples = Vec::new();
+    let tokens: Vec<&str> = inner.split(',').collect();
+    for (idx, token) in tokens.iter().enumerate() {
+        let t = token.trim();
+        if t.is_empty() {
+            return Err(format!(
+                "Token vacío detectado en posición {idx} (coma inicial, final o consecutiva no permitida)"
+            ));
+        }
+        let val = validate_rfc8259_number(t)?;
+        samples.push(val);
+    }
+
+    if samples.is_empty() {
+        return Err("No se encontraron muestras válidas en el arreglo JSON".to_string());
+    }
+    Ok(samples)
+}
+
 fn main() {
-    let completo = std::env::args().any(|a| a == "--completo");
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() >= 3 && args[1] == "--compute-stats" {
+        let fixture_path = &args[2];
+        let content = match std::fs::read_to_string(fixture_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error leyendo fixture '{fixture_path}': {e}");
+                std::process::exit(1);
+            }
+        };
+        let samples = match parse_samples_json(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error de formato JSON en fixture '{fixture_path}': {e}");
+                std::process::exit(1);
+            }
+        };
+        match nexo::stats::compute_stats(&samples) {
+            Ok(stats) => {
+                println!("{}", serialize_stats_json(&stats));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("Error calculando estadísticas: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let completo = args.iter().any(|a| a == "--completo");
+    let json_flag = args.iter().any(|a| a == "--json");
+    let mut json_out_path = None;
+    let mut campaign_id = None;
+    let mut process_id = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--json-out" && i + 1 < args.len() {
+            json_out_path = Some(args[i + 1].clone());
+            i += 1;
+        } else if args[i] == "--campaign-id" && i + 1 < args.len() {
+            campaign_id = Some(args[i + 1].clone());
+            i += 1;
+        } else if args[i] == "--process-id" && i + 1 < args.len() {
+            process_id = Some(args[i + 1].clone());
+            i += 1;
+        }
+        i += 1;
+    }
+
     println!(
-        "nexo-physical-bench os={} arch={} warmup={} iterations={}",
+        "nexo-physical-bench os={} arch={} warmup={} iterations={} profile={}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         WARMUP,
-        ITERATIONS
+        ITERATIONS,
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     );
     // Escenarios originales (mismo formato de salida que v0.3).
     bench("physical hot allocate+free", physical_hot);
@@ -72,8 +272,13 @@ fn main() {
         std::mem::size_of_val(&pool),
     );
     pool.destroy(handle, false).unwrap();
-    if completo {
-        ampliado();
+    if completo || json_flag || json_out_path.is_some() {
+        ampliado(
+            json_flag,
+            json_out_path.as_deref(),
+            campaign_id.as_deref(),
+            process_id.as_deref(),
+        );
     }
 }
 
@@ -193,13 +398,366 @@ impl Muestras {
     }
 }
 
-fn percentil(v: &mut [f64], p: f64) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let i = ((v.len() as f64 - 1.0) * p).round() as usize;
-    v[i]
+struct EscenarioResult {
+    nombre: &'static str,
+    batch_stats: DistributionStats,
+    run_stats: DistributionStats,
+    run_means: Vec<f64>,
+    batch_samples: Vec<f64>,
+    total_ops: f64,
+    allocs_per_op: f64,
+    os_calls_per_op: f64,
+    header_bytes_per_op: f64,
+    commits_per_op: f64,
+    returns_per_op: f64,
+    hole_reuses_per_op: f64,
 }
 
-fn ampliado() {
+fn serialize_json_results(
+    results: &[EscenarioResult],
+    warmup: usize,
+    iterations: usize,
+    campaign_id: &str,
+    process_id: &str,
+) -> Result<String, String> {
+    // 1. Validar exhaustivamente que ningún valor de métrica o muestra sea no finito
+    for r in results {
+        let stats_vals = [
+            r.batch_stats.mean,
+            r.batch_stats.variance_sample,
+            r.batch_stats.variance_pop,
+            r.batch_stats.std_dev_sample,
+            r.batch_stats.std_dev_pop,
+            r.batch_stats.cv_sample,
+            r.batch_stats.cv_pop,
+            r.batch_stats.min,
+            r.batch_stats.max,
+            r.batch_stats.median,
+            r.batch_stats.p95,
+            r.batch_stats.p99,
+            r.run_stats.mean,
+            r.run_stats.variance_sample,
+            r.run_stats.variance_pop,
+            r.run_stats.std_dev_sample,
+            r.run_stats.std_dev_pop,
+            r.run_stats.cv_sample,
+            r.run_stats.cv_pop,
+            r.run_stats.min,
+            r.run_stats.max,
+            r.run_stats.median,
+            r.run_stats.p95,
+            r.run_stats.p99,
+            r.allocs_per_op,
+            r.os_calls_per_op,
+            r.header_bytes_per_op,
+            r.commits_per_op,
+            r.returns_per_op,
+            r.hole_reuses_per_op,
+        ];
+        for &v in &stats_vals {
+            if !v.is_finite() {
+                return Err(format!(
+                    "Error de serialización: valor no finito detectado en escenario '{}': {v}",
+                    r.nombre
+                ));
+            }
+        }
+        for &s in &r.batch_samples {
+            if !s.is_finite() {
+                return Err(format!(
+                    "Error de serialización: muestra no finita en escenario '{}': {s}",
+                    r.nombre
+                ));
+            }
+        }
+    }
+
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"version\": \"v0.4\",\n");
+    out.push_str("  \"schema_version\": \"v0.4.1\",\n");
+    out.push_str(&format!(
+        "  \"stats_spec_version\": \"{}\",\n",
+        nexo::stats::STATS_SPEC_VERSION
+    ));
+    out.push_str(&format!(
+        "  \"campaign_id\": \"{}\",\n",
+        campaign_id.replace('\"', "\\\"")
+    ));
+    out.push_str(&format!(
+        "  \"process_id\": \"{}\",\n",
+        process_id.replace('\"', "\\\"")
+    ));
+    out.push_str(&format!("  \"os\": \"{}\",\n", std::env::consts::OS));
+    out.push_str(&format!("  \"arch\": \"{}\",\n", std::env::consts::ARCH));
+    out.push_str(&format!(
+        "  \"profile\": \"{}\",\n",
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    ));
+    out.push_str(&format!("  \"warmup\": {warmup},\n"));
+    out.push_str(&format!("  \"iterations\": {iterations},\n"));
+    out.push_str(&format!("  \"runs\": {RUNS},\n"));
+    out.push_str(&format!("  \"batch_size\": {BATCH},\n"));
+    out.push_str("  \"scenarios\": [\n");
+    for (i, r) in results.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            r.nombre.replace('\"', "\\\"")
+        ));
+
+        // batch_stats
+        out.push_str("      \"batch_stats\": {\n");
+        out.push_str(&format!("        \"count\": {},\n", r.batch_stats.count));
+        out.push_str(&format!("        \"mean\": {:.4},\n", r.batch_stats.mean));
+        out.push_str(&format!(
+            "        \"variance_sample\": {:.4},\n",
+            r.batch_stats.variance_sample
+        ));
+        out.push_str(&format!(
+            "        \"variance_pop\": {:.4},\n",
+            r.batch_stats.variance_pop
+        ));
+        out.push_str(&format!(
+            "        \"stddev_sample\": {:.4},\n",
+            r.batch_stats.std_dev_sample
+        ));
+        out.push_str(&format!(
+            "        \"stddev_pop\": {:.4},\n",
+            r.batch_stats.std_dev_pop
+        ));
+        out.push_str(&format!(
+            "        \"cv_sample\": {:.4},\n",
+            r.batch_stats.cv_sample
+        ));
+        out.push_str(&format!(
+            "        \"cv_pop\": {:.4},\n",
+            r.batch_stats.cv_pop
+        ));
+        out.push_str(&format!("        \"min\": {:.4},\n", r.batch_stats.min));
+        out.push_str(&format!("        \"max\": {:.4},\n", r.batch_stats.max));
+        out.push_str(&format!(
+            "        \"median\": {:.4},\n",
+            r.batch_stats.median
+        ));
+        out.push_str(&format!("        \"p50\": {:.4},\n", r.batch_stats.p50));
+        out.push_str(&format!("        \"p95\": {:.4},\n", r.batch_stats.p95));
+        out.push_str(&format!("        \"p99\": {:.4}\n", r.batch_stats.p99));
+        out.push_str("      },\n");
+
+        // run_stats
+        out.push_str("      \"run_stats\": {\n");
+        out.push_str(&format!("        \"count\": {},\n", r.run_stats.count));
+        out.push_str(&format!("        \"mean\": {:.4},\n", r.run_stats.mean));
+        out.push_str(&format!(
+            "        \"variance_sample\": {:.4},\n",
+            r.run_stats.variance_sample
+        ));
+        out.push_str(&format!(
+            "        \"variance_pop\": {:.4},\n",
+            r.run_stats.variance_pop
+        ));
+        out.push_str(&format!(
+            "        \"stddev_sample\": {:.4},\n",
+            r.run_stats.std_dev_sample
+        ));
+        out.push_str(&format!(
+            "        \"stddev_pop\": {:.4},\n",
+            r.run_stats.std_dev_pop
+        ));
+        out.push_str(&format!(
+            "        \"cv_sample\": {:.4},\n",
+            r.run_stats.cv_sample
+        ));
+        out.push_str(&format!("        \"cv_pop\": {:.4},\n", r.run_stats.cv_pop));
+        out.push_str(&format!("        \"min\": {:.4},\n", r.run_stats.min));
+        out.push_str(&format!("        \"max\": {:.4},\n", r.run_stats.max));
+        out.push_str(&format!("        \"median\": {:.4},\n", r.run_stats.median));
+        out.push_str(&format!("        \"p50\": {:.4},\n", r.run_stats.p50));
+        out.push_str(&format!("        \"p95\": {:.4},\n", r.run_stats.p95));
+        out.push_str(&format!("        \"p99\": {:.4}\n", r.run_stats.p99));
+        out.push_str("      },\n");
+
+        // counters
+        out.push_str("      \"counters\": {\n");
+        out.push_str(&format!("        \"total_ops\": {:.0},\n", r.total_ops));
+        out.push_str(&format!(
+            "        \"alloc_per_op\": {:.4},\n",
+            r.allocs_per_op
+        ));
+        out.push_str(&format!(
+            "        \"os_calls_per_op\": {:.4},\n",
+            r.os_calls_per_op
+        ));
+        out.push_str(&format!(
+            "        \"header_bytes_per_op\": {:.4},\n",
+            r.header_bytes_per_op
+        ));
+        out.push_str(&format!(
+            "        \"commits_per_op\": {:.4},\n",
+            r.commits_per_op
+        ));
+        out.push_str(&format!(
+            "        \"returns_per_op\": {:.4},\n",
+            r.returns_per_op
+        ));
+        out.push_str(&format!(
+            "        \"hole_reuses_per_op\": {:.4}\n",
+            r.hole_reuses_per_op
+        ));
+        out.push_str("      },\n");
+
+        // run_means
+        out.push_str("      \"run_means\": [");
+        for (j, m) in r.run_means.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{:.4}", m));
+        }
+        out.push_str("],\n");
+
+        // batch_samples
+        out.push_str("      \"batch_samples\": [");
+        for (j, s) in r.batch_samples.iter().enumerate() {
+            if j > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format!("{:.4}", s));
+        }
+        out.push_str("]\n");
+
+        if i + 1 < results.len() {
+            out.push_str("    },\n");
+        } else {
+            out.push_str("    }\n");
+        }
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    Ok(out)
+}
+
+fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
+    let path = std::path::Path::new(target_path);
+    if path.is_dir() {
+        return Err(format!(
+            "Error: la ruta destino '{target_path}' es un directorio existente"
+        ));
+    }
+
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Error al crear directorio para '{target_path}': {e}"))?;
+    }
+
+    let pid = std::process::id();
+    let tmp_path = format!("{target_path}.tmp.{pid}");
+    let tmp = std::path::Path::new(&tmp_path);
+
+    if let Err(e) = std::fs::write(tmp, content) {
+        let _ = std::fs::remove_file(tmp);
+        return Err(format!(
+            "Error al escribir en archivo temporal '{tmp_path}': {e}"
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let backup_path = format!("{target_path}.bak.{pid}");
+        let backup = std::path::Path::new(&backup_path);
+        let had_previous = path.exists();
+
+        // Frontera interna de inyección de fallos controlada para pruebas deterministas
+        let fault_stage = std::env::var("NEXO_TEST_FAULT_ATOMIC_STAGE").ok();
+
+        if had_previous {
+            if fault_stage.as_deref() == Some("FAIL_BACKUP") {
+                let _ = std::fs::remove_file(tmp);
+                return Err(format!(
+                    "Error al respaldar archivo previo '{target_path}' antes del reemplazo: Fallo inyectado en etapa BACKUP"
+                ));
+            }
+            match std::fs::rename(path, backup) {
+                Ok(()) => {}
+                Err(e) => {
+                    let _ = std::fs::remove_file(tmp);
+                    return Err(format!(
+                        "Error al respaldar archivo previo '{target_path}' antes del reemplazo: {e}"
+                    ));
+                }
+            }
+        }
+
+        let publish_result = if fault_stage.as_deref() == Some("FAIL_PUBLISH")
+            || fault_stage.as_deref() == Some("FAIL_RESTORE")
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Fallo inyectado al publicar archivo temporal",
+            ))
+        } else {
+            std::fs::rename(tmp, path)
+        };
+
+        if let Err(e) = publish_result {
+            let _ = std::fs::remove_file(tmp);
+            if had_previous {
+                let restore_result = if fault_stage.as_deref() == Some("FAIL_RESTORE") {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Fallo inyectado durante la reversión del respaldo",
+                    ))
+                } else {
+                    std::fs::rename(backup, path)
+                };
+
+                match restore_result {
+                    Ok(()) => {
+                        return Err(format!(
+                            "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada exitosamente desde '{backup_path}'): {e}"
+                        ));
+                    }
+                    Err(restore_err) => {
+                        return Err(format!(
+                            "CRÍTICO: Error al renombrar archivo temporal a '{target_path}': {e}. Además, falló la restauración del respaldo desde '{backup_path}': {restore_err}. El respaldo original se conserva en '{backup_path}'."
+                        ));
+                    }
+                }
+            }
+            return Err(format!(
+                "Error al renombrar archivo temporal a '{target_path}': {e}"
+            ));
+        }
+
+        if had_previous {
+            let _ = std::fs::remove_file(backup);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Err(e) = std::fs::rename(tmp, path) {
+            let _ = std::fs::remove_file(tmp);
+            return Err(format!(
+                "Error al renombrar archivo temporal a '{target_path}': {e}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn ampliado(
+    json_flag: bool,
+    json_out_path: Option<&str>,
+    campaign_id: Option<&str>,
+    process_id: Option<&str>,
+) {
     let escenarios = [
         Escenario {
             nombre: "hot allocate+free (pool con ancla)",
@@ -252,9 +810,24 @@ fn ampliado() {
             run: e_grande,
         },
         Escenario {
-            nombre: "revalidar enlace + leer",
+            nombre: "revalidar estándar + leer (PhysicalPool)",
             ops: ITERATIONS,
-            run: e_revalidar,
+            run: e_revalidar_estandar,
+        },
+        Escenario {
+            nombre: "revalidar estándar puro (PhysicalPool)",
+            ops: ITERATIONS,
+            run: e_revalidar_estandar_puro,
+        },
+        Escenario {
+            nombre: "revalidar compacto 32b (CompactPhysicalPool)",
+            ops: ITERATIONS,
+            run: e_revalidar_compacto_32,
+        },
+        Escenario {
+            nombre: "revalidar compacto 64b (CompactPhysicalPool64)",
+            ops: ITERATIONS,
+            run: e_revalidar_compacto_64,
         },
         Escenario {
             nombre: "Box<[u8;64]> asignar+liberar",
@@ -267,15 +840,22 @@ fn ampliado() {
             run: e_box_rafaga,
         },
     ];
-    println!("\n== ampliado: {RUNS} corridas × lotes de {BATCH} ops; ns/op");
+
     println!(
-        "{:<46} {:>9} {:>9} {:>9} {:>9} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>9}",
+        "\n== ampliado: {RUNS} corridas × lotes de {BATCH} ops; ns/op (estadísticas desagregadas: lote vs corrida)"
+    );
+    println!(
+        "{:<44} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>12} {:>10} {:>11} {:>8} {:>8} {:>8} {:>9} {:>8} {:>9}",
         "escenario",
-        "media",
-        "mediana",
-        "p95",
-        "p99",
-        "cv%",
+        "batch_mean",
+        "batch_median",
+        "batch_min",
+        "batch_max",
+        "batch_p95",
+        "batch_p99",
+        "batch_stddev",
+        "run_stddev",
+        "batch_count",
         "alloc/op",
         "so/op",
         "cab B/op",
@@ -283,43 +863,110 @@ fn ampliado() {
         "devol/op",
         "huecos/op"
     );
+
+    let mut results = Vec::new();
+
     for e in &escenarios {
         let mut medias = Vec::new();
         let mut todas = Muestras::default();
-        let mut c = Contadores::default();
+        let mut total_c = Contadores::default();
         let mut allocs = 0u64;
         black_box((e.run)(e.ops / 10, &mut Muestras::default()));
         for _ in 0..RUNS {
             let mut m = Muestras::default();
             let a0 = ALLOCS.load(Ordering::Relaxed);
-            c = (e.run)(e.ops, &mut m);
+            let c = (e.run)(e.ops, &mut m);
             allocs += ALLOCS.load(Ordering::Relaxed) - a0;
+            total_c.os_calls += c.os_calls;
+            total_c.header_bytes += c.header_bytes;
+            total_c.commits += c.commits;
+            total_c.returns += c.returns;
+            total_c.hole_reuses += c.hole_reuses;
             medias.push(m.lotes.iter().sum::<f64>() / m.lotes.len() as f64);
             todas.lotes.extend(m.lotes);
         }
-        let media = medias.iter().sum::<f64>() / RUNS as f64;
-        let sd = (medias.iter().map(|x| (x - media).powi(2)).sum::<f64>() / RUNS as f64).sqrt();
-        let ops = e.ops as f64;
+
+        let batch_stats = compute_stats(&todas.lotes).expect("Valores de lote válidos");
+        let run_stats = compute_stats(&medias).expect("Valores de corrida válidos");
+        verify_samuelson_bounds(&batch_stats).expect("Cota de Samuelson en lotes");
+        verify_samuelson_bounds(&run_stats).expect("Cota de Samuelson en corridas");
+
+        let total_ops = RUNS as f64 * e.ops as f64;
+        let allocs_per_op = allocs as f64 / total_ops;
+        let os_calls_per_op = total_c.os_calls as f64 / total_ops;
+        let header_bytes_per_op = total_c.header_bytes as f64 / total_ops;
+        let commits_per_op = total_c.commits as f64 / total_ops;
+        let returns_per_op = total_c.returns as f64 / total_ops;
+        let hole_reuses_per_op = total_c.hole_reuses as f64 / total_ops;
+
         println!(
-            "{:<46} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>7.1} {:>8.3} {:>8.3} {:>8.1} {:>8.3} {:>8.3} {:>9.3}",
+            "{:<44} {:>10.1} {:>12.1} {:>9.1} {:>9.1} {:>9.1} {:>9.1} {:>12.2} {:>10.2} {:>11} {:>8.3} {:>8.3} {:>8.1} {:>9.3} {:>8.3} {:>9.3}",
             e.nombre,
-            media,
-            percentil(&mut todas.lotes, 0.5),
-            percentil(&mut todas.lotes, 0.95),
-            percentil(&mut todas.lotes, 0.99),
-            100.0 * sd / media,
-            allocs as f64 / (RUNS as f64 * ops),
-            c.os_calls as f64 / ops,
-            c.header_bytes as f64 / ops,
-            c.commits as f64 / ops,
-            c.returns as f64 / ops,
-            c.hole_reuses as f64 / ops,
+            batch_stats.mean,
+            batch_stats.median,
+            batch_stats.min,
+            batch_stats.max,
+            batch_stats.p95,
+            batch_stats.p99,
+            batch_stats.std_dev_sample,
+            run_stats.std_dev_sample,
+            batch_stats.count,
+            allocs_per_op,
+            os_calls_per_op,
+            header_bytes_per_op,
+            commits_per_op,
+            returns_per_op,
+            hole_reuses_per_op,
         );
+
+        results.push(EscenarioResult {
+            nombre: e.nombre,
+            batch_stats,
+            run_stats,
+            run_means: medias,
+            batch_samples: todas.lotes,
+            total_ops,
+            allocs_per_op,
+            os_calls_per_op,
+            header_bytes_per_op,
+            commits_per_op,
+            returns_per_op,
+            hole_reuses_per_op,
+        });
     }
+
     println!(
         "(alloc/op incluye la preparación de cada escenario —vectores de handles, pools— repartida entre sus ops)"
     );
     memoria();
+
+    if json_flag || json_out_path.is_some() {
+        let cid = campaign_id.unwrap_or("standalone");
+        let pid_str = process_id.unwrap_or("0");
+        let json_content = match serialize_json_results(&results, WARMUP, ITERATIONS, cid, pid_str)
+        {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        };
+
+        if json_flag {
+            println!("\n== json output ==");
+            println!("{json_content}");
+        }
+
+        if let Some(path) = json_out_path {
+            match write_atomic_json(path, &json_content) {
+                Ok(()) => println!("JSON escrito exitosamente en: {path}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 }
 
 type Base = (u64, u64, u64, u64, u64);
@@ -485,7 +1132,7 @@ fn e_grande(ops: usize, m: &mut Muestras) -> Contadores {
     churn(pool, vivos, ops, m)
 }
 
-fn e_revalidar(ops: usize, m: &mut Muestras) -> Contadores {
+fn e_revalidar_estandar(ops: usize, m: &mut Muestras) -> Contadores {
     let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
     let h = pool.allocate().unwrap();
     let link = h.link();
@@ -493,6 +1140,49 @@ fn e_revalidar(ops: usize, m: &mut Muestras) -> Contadores {
     m.medir(ops, || {
         let obj = black_box(pool.revalidate(black_box(link)).unwrap());
         black_box(pool.read_int(obj, 0).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_estandar_puro(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = h.link();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(pool.revalidate(black_box(link)).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_compacto_32(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let token = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = CompactLink::new(token.id(), h.slot(), h.generation() as u16).unwrap();
+    let adapter = CompactPhysicalPool::new(&pool, &token).unwrap();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(adapter.revalidate_compact(black_box(link)).unwrap());
+    });
+    let c = contadores(&pool, b);
+    pool.destroy(h, false).unwrap();
+    c
+}
+
+fn e_revalidar_compacto_64(ops: usize, m: &mut Muestras) -> Contadores {
+    let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
+    let token = CompactPoolRegistry16::register_pool(&pool).unwrap();
+    let h = pool.allocate().unwrap();
+    let link = CompactLink64::new(token.id(), h.slot(), h.generation() as u16).unwrap();
+    let adapter = CompactPhysicalPool64::new(&pool, &token).unwrap();
+    let b = base(&pool);
+    m.medir(ops, || {
+        black_box(adapter.revalidate_compact_64(black_box(link)).unwrap());
     });
     let c = contadores(&pool, b);
     pool.destroy(h, false).unwrap();
@@ -651,4 +1341,95 @@ fn memoria() {
         "PhysicalPool: {} B inmediatos (cota inferior: los vectores de páginas, superpáginas e índice van aparte)",
         std::mem::size_of_val(&pool)
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_samples_valid_floats() {
+        let input = "[0, -0, 1.5, 1e3, 1E3, -2.5E-4, 2.5e+4, 1.0, 2.5, 3.75, -4.2, 1e-3, 2.5E4]";
+        let samples = parse_samples_json(input).expect("Debe parsear muestras válidas");
+        assert_eq!(samples.len(), 13);
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[1], -0.0);
+        assert_eq!(samples[2], 1.5);
+        assert_eq!(samples[3], 1000.0);
+        assert_eq!(samples[4], 1000.0);
+        assert_eq!(samples[5], -0.00025);
+        assert_eq!(samples[6], 25000.0);
+        assert!((samples[7] - 1.0).abs() < 1e-9);
+        assert!((samples[8] - 2.5).abs() < 1e-9);
+        assert!((samples[9] - 3.75).abs() < 1e-9);
+        assert!((samples[10] - (-4.2)).abs() < 1e-9);
+        assert!((samples[11] - 0.001).abs() < 1e-9);
+        assert!((samples[12] - 25000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_parse_samples_whitespace_tolerance() {
+        let input = "  \n\t [  10.0  ,   20.5   ] \r\n ";
+        let samples = parse_samples_json(input).expect("Debe tolerar espacios válidos");
+        assert_eq!(samples, vec![10.0, 20.5]);
+    }
+
+    #[test]
+    fn test_parse_samples_reject_empty_or_no_brackets() {
+        assert!(parse_samples_json("").is_err());
+        assert!(parse_samples_json("   ").is_err());
+        assert!(parse_samples_json("1.0, 2.0").is_err());
+        assert!(parse_samples_json("[1.0, 2.0").is_err());
+        assert!(parse_samples_json("1.0, 2.0]").is_err());
+        assert!(parse_samples_json("prefix [1.0] suffix").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_empty_array() {
+        assert!(parse_samples_json("[]").is_err());
+        assert!(parse_samples_json("[   ]").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_commas_misplaced() {
+        assert!(parse_samples_json("[1.0,]").is_err());
+        assert!(parse_samples_json("[,1.0]").is_err());
+        assert!(parse_samples_json("[1.0,,2.0]").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_rfc8259_grammar_violations() {
+        // Leading zeros
+        assert!(parse_samples_json("[01]").is_err());
+        assert!(parse_samples_json("[007]").is_err());
+        assert!(parse_samples_json("[-01]").is_err());
+        // Missing leading digit before decimal
+        assert!(parse_samples_json("[.5]").is_err());
+        // Missing fraction digit after decimal
+        assert!(parse_samples_json("[1.]").is_err());
+        assert!(parse_samples_json("[1.e2]").is_err());
+        // Leading plus sign
+        assert!(parse_samples_json("[+1]").is_err());
+        assert!(parse_samples_json("[+1.0]").is_err());
+        // Incomplete exponent
+        assert!(parse_samples_json("[1e]").is_err());
+        assert!(parse_samples_json("[1e+]").is_err());
+        assert!(parse_samples_json("[1e-]").is_err());
+        // Non-finite tokens
+        assert!(parse_samples_json("[NaN]").is_err());
+        assert!(parse_samples_json("[Infinity]").is_err());
+        assert!(parse_samples_json("[-Infinity]").is_err());
+        assert!(parse_samples_json("[inf]").is_err());
+        // Overflow to infinity
+        assert!(parse_samples_json("[1e309]").is_err());
+        // Hex / binary
+        assert!(parse_samples_json("[0x10]").is_err());
+        // Non-number tokens
+        assert!(parse_samples_json("[true]").is_err());
+        assert!(parse_samples_json("[false]").is_err());
+        assert!(parse_samples_json("[null]").is_err());
+        assert!(parse_samples_json("[\"1.0\"]").is_err());
+        assert!(parse_samples_json("[{}]").is_err());
+        assert!(parse_samples_json("[[1.0]]").is_err());
+    }
 }

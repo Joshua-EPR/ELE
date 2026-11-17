@@ -1,5 +1,743 @@
 # Traspaso de agente — ELE
 
+## Integración de NEXO v0.4 después del merge del PR #69 (2026-11-17)
+
+- **Origen de integración:** `main` en `adf88ad70110664ea7bc5ba3b69108248aaee5f4` (PR #69 fusionado). El subsistema NEXO v0.3 ya forma parte de `main`.
+- **Segundo padre:** `fix/nexo-v04-release-stabilization` en `c352ac51d86c3ba01b55df864f191d4b05b5f300`, para conservar íntegramente el historial de NEXO v0.4.
+- **Resolución de archivos solapados:** `physical/address_space.rs` es idéntico en ambos extremos; `physical/pool.rs` adopta la versión de v0.4, que contiene los controles fail-closed del PR #69 y además `Link::pool()`; `tests/close_contract.rs` combina las pruebas de autoridad compacta v0.4 con las comprobaciones de cierre y retry introducidas por el PR #69.
+- **Alcance:** integración de fuente Rust, pruebas, scripts, documentación y campañas históricas de NEXO v0.4. **No** se ha integrado NEXO con el compilador de programas `.l`, ni se han declarado Stage 2/3 o self-hosting.
+- **Validación en esta operación:** se inspeccionaron los objetos Git y las diferencias de los tres árboles; los únicos archivos editados en ambos lados fueron `physical/pool.rs` y `tests/close_contract.rs`. No se pudo ejecutar Cargo ni Python sobre el checkout integrado en el entorno de esta integración; las pruebas locales anteriores corresponden a otros SHAs y no sustituyen las pruebas del commit de integración.
+- **Estado de aceptación:** **DRAFT / NOT VALIDATED**. Antes de fusionar, ejecutar `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --no-fail-fast -- --test-threads=1`, el prototipo y las pruebas Python de benchmarks en los entornos disponibles. El CI de GitHub Actions puede seguir bloqueado por cuota; no falsear ese estado.
+- **Benchmarks:** la campaña oficial `campaign_20261117_034851_1634f3ec` mide el commit `6fb21a06`, no el commit de integración. Sus datos crudos fueron internamente consistentes, pero ninguno de los 16 escenarios alcanzó el umbral documental de CV interproceso inferior a 5%; no presentarla como validación de rendimiento del merge.
+- **Regla:** no fusionar el PR de integración hasta la revisión y validación explícitas. No reescribir ramas históricas ni tocar ENCA.
+
+
+## Actualización 2026-11-17 (Operación Release Candidate 0.1 — Cierre Definitivo de Bloqueos, Validación Adversarial y Preparación de Integración — fix/nexo-v04-release-stabilization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-evidence-final-hardening`: Rama base del PR (`edad487a559b4adfe60241e377ff1d32694e5698`).
+- `fix/nexo-v04-release-stabilization`: **Rama activa consolidada de Release Candidate 0.1 (HEAD: `6fb21a0`)**.
+
+### 1. Defectos de Estabilización Cerrados por Causa Raíz
+
+1. **P1 — Clasificación Errónea de Ejecuciones por Fallo de Git (OFFICIAL-01..10)**:
+   - *Causa raíz*: Si la invocación a `git` fallaba (`git_error = True`) o el repositorio no era un clon Git válido, la lógica clasificaba por defecto la ejecución como `"official"`, violando el principio fail-closed.
+   - *Solución*: Implementación de `determine_execution_mode(git_info, force_official, force_experimental)` con verificación de HEAD commit SHA real (40 caracteres hexadecimales), ausencia de excepciones en Git, ausencia de modificaciones locales y cero archivos untracked. Si cualquier condición falla y se requirió `--official`, aborta inmediatamente con `ValueError`. Sin flags, clasifica como `"experimental"`.
+   - *Verificación*: 10 pruebas unitarias `OFFICIAL-01` a `OFFICIAL-10` en `scripts/test_benchmark_isolation.py`.
+
+2. **P2 — Terminación Controlada y Detección de Pánico/Cancelación en Pruebas OOM (OOM-GUARD-01..04)**:
+   - *Causa raíz*: El hilo inyector de fallos OOM en `test_reg_oom_09` y `test_oom_conc_10` esperaba en un bucle `while tracker.oom_count < target { thread::yield_now(); }` sin condición de parada si los hilos trabajadores entraban en pánico o terminaban prematuramente.
+   - *Solución*: Creación de las estructuras `WorkerTracker` y `WorkerGuard` implementando el patrón RAII. Se monitorean `cancelled`, `worker_panicked`, y `active_workers`. Si todos los trabajadores finalizan o entran en pánico, o si se excede el límite estricto de yields (`MAX_INJECTOR_YIELDS = 200_000`), el inyector aborta limpiamente restaurando el flag `fail_reserve(false)`.
+   - *Verificación*: Pruebas unitarias de cancelación, salida de trabajadores y pánico en `crates/nexo/src/next/compact.rs`.
+
+3. **P2 — Inconsistencias Numéricas y Parser JSON Permisivo (RFC 8259)**:
+   - *Causa raíz*: El analizador de muestras numéricas permitía sintaxis no estándar (signos más iniciales `+1`, ceros a la izquierda `01`, números sin entero `.5` o sin fracción `1.`, exponentes incompletos `1e`, `NaN` e `Infinity`).
+   - *Solución*: Analizador léxico y sintáctico estricto `validate_rfc8259_number(token)` en `crates/nexo/src/bin/nexo-physical-bench.rs` que cumple la gramática formal de la RFC 8259, rechazando extensiones, desbordamientos a infinito (`1e309`) y arrays no planos.
+   - *Verificación*: 6 pruebas unitarias en `nexo-physical-bench.rs` y suite cruzada con Python en `scripts/test_stats_cross.py`.
+
+4. **P2 — Ejecución de Binario Obsoleto en Pruebas Estadísticas Cruzadas (STAT-FRESH-01..03)**:
+   - *Causa raíz*: `test_stats_cross.py` verificaba si existía un ejecutable en `target/release/` y lo utilizaba directamente sin forzar su recompilación, arriesgando ejecutar binarios desactualizados respecto al código fuente.
+   - *Solución*: `get_nexo_bench_bin(force_rebuild=True)` ejecuta de forma obligatoria `cargo build -p ele-nexo --bin nexo-physical-bench --release`, comprueba código de salida 0, valida la existencia del binario y extrae ruta, tamaño, marca de tiempo mtime y hash SHA-256 criptográfico.
+   - *Verificación*: Suite `TestBinaryFreshnessAndRebuild` en `scripts/test_stats_cross.py`.
+
+5. **P2 — Condición de Carrera en Creación de Carpetas de Campaña (CAMPAIGN-RACE-01..03)**:
+   - *Causa raíz*: Uso de `mkdir(parents=True, exist_ok=True)` sobre la carpeta raíz de la campaña permitía que dos ejecuciones concurrentes compartieran o sobreescribieran la misma carpeta.
+   - *Solución*: Función `create_exclusive_campaign_dir(campaigns_dir, campaign_id)` que invoca `os.mkdir()` exclusivo a nivel de carpeta de campaña, fallando con `FileExistsError` fail-closed si la carpeta ya existe. Las subcarpetas internas (`raw/`) se crean una vez garantizada la exclusividad.
+   - *Verificación*: Suite `TestCampaignRaceExclusivity` en `scripts/test_benchmark_isolation.py`.
+
+6. **P2 — Inyección de Fallos Determinista y Verificación de Rollback en Windows**:
+   - *Causa raíz*: No existían pruebas de integración que inyectaran fallos en etapas intermedias del protocolo de rollback atómico en Windows (renombrado de temporal a destino o restauración de respaldo).
+   - *Solución*: Hook interno de prueba `NEXO_TEST_FAULT_ATOMIC_STAGE` (`FAIL_PUBLISH`, `FAIL_RESTORE`) en `nexo-physical-bench.rs`. Pruebas `test_json_io_12` y `test_json_io_13` en `crates/nexo/tests/test_bench_io.rs` que verifican que ante fallo de publicación se restaura la versión previa original eliminando temporales, y ante fallo de restauración se preserva intacto el backup `<path>.bak.<pid>` emitiendo alerta crítica.
+
+### 2. Campaña Oficial de Benchmarks Consolidada (Release Candidate 0.1)
+
+- **Campaña ID**: `campaign_20261117_034851_1634f3ec`
+- **Modo**: `OFFICIAL` (Worktree limpio, sin modificaciones locales)
+- **Git HEAD**: `6fb21a06e669a0a635dda8019f0927c760f80073`
+- **Binario release SHA-256**: `847259cf54fc7b271545dbe9bbb2b8af9f24dafa5cf9ae8ba5dfd247a240be0c`
+- **Integridad**: Manifiesto `manifest.json`, checksums SHA-256 completos y confirmación atómica en `docs/benchmarks/LATEST_CAMPAIGN`.
+
+### 3. Matriz de Validación Dual-OS (Windows MSVC + Linux WSL2 glibc)
+
+- Windows MSVC: 279 pruebas Rust aprobadas (0 fallos).
+- Linux WSL2 glibc: 280 pruebas Rust aprobadas (0 fallos).
+- Pruebas Python (`test_benchmark_isolation.py`, `test_stats_cross.py`, `test_stats_integrity.py`): 62 pruebas aprobadas (0 fallos).
+- Prototype 0.1 E2E y Example: Ejecutados con éxito en ambos sistemas operativos.
+
+---
+
+## Actualización previa 2026-11-17 (Operación Zero Regression — Consolidación Definitiva y Estabilización de NEXO Prototype 0.1 — fix/nexo-v04-release-stabilization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-evidence-final-hardening`: Rama base directa (`edad487a559b4adfe60241e377ff1d32694e5698`).
+- `fix/nexo-v04-release-stabilization`: **Rama activa de consolidación definitiva, estabilización zero-regression y entrega**.
+
+### 1. Defectos Cerrados y Causa Raíz Estabilizada
+
+1. **P1-A (Detección de Archivos Untracked y Modo Oficial Fail-Closed SOURCE-01..02)**:
+   - *Causa raíz*: `run_benchmarks.py` clasificaba las líneas `??` en `untracked_files` pero solo activaba `is_dirty = True` en `elif len(line_str) > 0`, permitiendo que árboles con archivos untracked pero sin diff de rastreados se ejecutaran en `--official`. Asimismo, excepciones en Git se ignoraban silenciosamente.
+   - *Corrección*: Se fuerza `is_dirty = True` ante cualquier archivo `??` o si `len(untracked_files) > 0`. Se capturan excepciones de Git marcando `git_error = True`. El modo `--official` rechaza inmediatamente cualquier repositorio sucio o error de inspección.
+
+2. **P1-B (Transaccionalidad Estricta y Single Source of Truth PUBLISH-05..06)**:
+   - *Causa raíz*: `LATEST_CAMPAIGN` se escribía antes de actualizar las rutas legacy `docs/benchmarks/summary.json` y `raw/`, rompiendo la atomicidad y creando estados inconsistentes ante interrupciones.
+   - *Corrección*: Se fijó el orden transaccional: 1) Escritura y checksums en carpeta de campaña, 2) Verificación criptográfica de hashes de todos los artefactos, 3) Actualización de mirrors derivados retrocompatibles, 4) Escritura atómica de `LATEST_CAMPAIGN` como único *commit point* de confirmación.
+
+3. **P1-C (Verificación y Reporte Verídico de Rollback en Windows ATOMIC-11)**:
+   - *Causa raíz*: En `crates/nexo/src/bin/nexo-physical-bench.rs`, la llamada `rename(backup, path)` ante fallo en la sustitución atómica ignoraba el resultado con `let _ = ...` y reportaba `(versión previa restaurada)` incluso si la restauración había fallado.
+   - *Corrección*: Se comprueba explícitamente el `Result` de `rename(backup, path)`. Si tiene éxito, se confirma verídicamente en el error. Si falla, se emite una alarma crítica indicando la ruta del archivo de respaldo `<path>.bak.<pid>` conservado en disco para impedir pérdida de datos.
+
+4. **P2-A (Parser Estricto RFC 8259 JSON en CLI de Estadísticas JSON-STRICT-01..06)**:
+   - *Causa raíz*: `parse_samples_json` extraía texto entre corchetes mediante `split(',')` y parseaba con `parse::<f64>()`, ignorando silenciosamente tokens no numéricos, admitiendo arrays vacíos, comas flotantes, `NaN` e `Infinity`.
+   - *Corrección*: Parser estricto que valida delimitadores `[` y `]`, rechaza arrays vacíos, comas consecutivas/iniciales/finales, valores `NaN`/`Infinity`, tokens no numéricos y formatos no conformes (`+`, `0x`), retornando `Result<Vec<f64>, String>`.
+
+5. **P2-B (Erradicación Total de Sleeps en Pruebas Concurrentes OOM-CONC-08..10)**:
+   - *Causa raíz*: `test_reg_oom_08`, `test_reg_oom_09` y `test_oom_conc_10` en `crates/nexo/src/next/compact.rs` utilizaban `thread::sleep` para sincronizar hilos de inyección de fallos, introduciendo demoras arbitrarias y potenciales carreras.
+   - *Corrección*: Se eliminaron todos los `sleep()`, sustituyéndolos por barreras (`std::sync::Barrier`) y sincronización determinista por fases con contadores atómicos (`AtomicUsize`). La prueba concluye en milisegundos con cero flakiness.
+
+6. **P2-C (Empaquetamiento y Reproducibilidad de Archivos Untracked REPRO-01..02)**:
+   - *Causa raíz*: En ejecuciones experimentales con archivos no rastreados, el diff de Git no contenía el contenido de dichos archivos, imposibilitando la reconstrucción del estado.
+   - *Corrección*: Los archivos untracked se empaquetan en `campaigns/<campaign_id>/untracked_bundle/` y el manifiesto incorpora el bloque `"reproducibility"` documentando si la campaña es reproducible a partir de los artefactos.
+
+7. **P2-D (Sanitización Estricta de `--campaign-id` contra Path Traversal CAMPAIGN-SANITY-01..03)**:
+   - *Causa raíz*: `--campaign-id` se concatenaba sin sanitización a la ruta de benchmarks.
+   - *Corrección*: Función `sanitize_campaign_id()` validando regex `^[a-zA-Z0-9_-]+$`, impidiendo secuencias `..` o separadores de ruta, y bloqueando colisiones con campañas existentes.
+
+8. **Campaña Oficial de Benchmarks Consolidada**:
+   - Campaña ID: `campaign_20261117_031829_1696d953`
+   - Modo: `OFFICIAL` (Worktree limpio, sin cambios locales)
+   - Git HEAD: `39e5ff3025e339c07b2fc72b36454319f9fe1499`
+   - Binario release SHA-256: `f4738f5d00e4ce453cd27af937e38e5acece83546cbd1a9516c06be2ad2a2213`
+   - Checksums SHA-256 verificados al 100%.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O & Atomic Rollback** | `crates/nexo/tests/test_bench_io.rs` | 8 | **8/8 APROBADAS** | **8/8 APROBADAS** |
+| **Statistical Consistency** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Statistical Sample Integrity** | `scripts/test_stats_integrity.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Publish** | `scripts/test_benchmark_isolation.py` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **NEXO Prototype 0.1 E2E** | `crates/nexo/tests/test_prototype_01.rs` | 1 | **1/1 APROBADA** | **1/1 APROBADA** |
+| **NEXO Prototype 0.1 Example** | `crates/nexo/examples/nexo_prototype_01.rs` | 1 | **EJECUTADO CON ÉXITO** | **EJECUTADO CON ÉXITO** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 62 | **62/62 APROBADAS** | **62/62 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
+## Actualización previa 2026-11-17 (Operación Evidence Integrity, Memory Safety & Prototype Readiness — fix/nexo-v04-evidence-final-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-benchmark-evidence-lockdown`: Rama base directa (`3d4b5292692f450b6745c7986eed70d1f28a8643`).
+- `fix/nexo-v04-evidence-final-hardening`: **Rama activa de corrección, endurecimiento y consolidación**.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+
+1. **P1-028 (Reemplazo Atómico Seguro en Windows sin Borrado Previo ATOMIC-01..10)**:
+   - En `crates/nexo/src/bin/nexo-physical-bench.rs`, se eliminó el patrón inseguro `remove_file(path)` previo a `rename(tmp, path)`.
+   - Se implementó un protocolo transaccional de backup-and-restore (`<path>.bak.<pid>`): se renombra el archivo previo a backup, se renombra el temporal al destino, y si este paso falla, se restaura inmediatamente el backup original intacto sin pérdida de datos.
+   - Verificado con `test_atomic_05_and_06_previous_file_preserved_on_failure_and_no_tmp_bak` en `crates/nexo/tests/test_bench_io.rs`.
+
+2. **P1-029 (Pipeline de Publicación Transaccional en 5 Fases PUBLISH-01..10)**:
+   - En `scripts/run_benchmarks.py`, se implementaron las Fases A (Aislamiento), B (Ejecución de 5 procesos independientes), C (Validación integral y recálculo), D (Consolidación y verificación cruzada) y E (Publicación atómica transaccional).
+   - Los resúmenes públicos (`docs/benchmarks/LATEST_CAMPAIGN`, `docs/benchmarks/summary.json` y `docs/benchmarks/raw/`) no se modifican hasta que todas las fases previas hayan concluido al 100% y se hayan generado el `manifest.json` y `checksums.sha256`.
+
+3. **P1-030 (Recálculo Estadístico Real contra Muestras Brutas STATS-INTEGRITY-01..10)**:
+   - Se valida independientemente que `batch_stats` y `run_stats` coincidan con el recálculo numérico de Welford ejecutado sobre los 700 lotes (336 en ráfagas) y las 7 corridas dentro de tolerancia matemática para las 13 métricas (`count`, `mean`, `median`, `min`, `max`, `variance_sample`, `variance_pop`, `stddev_sample`, `stddev_pop`, `cv_sample`, `cv_pop`, `p50`, `p95`, `p99`).
+   - Se audita que `run_means` contenga 7 valores finitos y que su promedio coincida con la media de `batch_samples`.
+   - Implementación de la suite adversarial `scripts/test_stats_integrity.py` (10 pruebas aprobadas).
+
+4. **P1-031 (Trazabilidad Estricta de Código Fuente, Modo Oficial y Registro de Diff SOURCE-01..10)**:
+   - Modo oficial (`--official`): exige un worktree de Git 100% limpio, fallando cerrado si hay modificaciones locales.
+   - Modo experimental (`--experimental`): genera automáticamente `patch.diff` con `git diff HEAD`, registra los archivos no rastreados en `untracked_files.txt`, graba el SHA-256 del binario y cataloga los artefactos en el manifiesto.
+
+5. **P2-032 (Pruebas Cruzadas Reales Rust <-> Python con Fixtures en Disco y CLI `--compute-stats`)**:
+   - Creación de fixtures compartidos en `crates/nexo/tests/fixtures/stats/*.json` (`uniform`, `outliers`, `large_values`, `repeated_values`, `percentile_edges`).
+   - CLI `--compute-stats <fixture.json>` en `nexo-physical-bench` calculando métricas mediante `nexo::stats::compute_stats` y emitiendo JSON estandarizado.
+   - `scripts/test_stats_cross.py` ejecuta el binario Rust real sobre cada fixture y compara campo por campo todas las métricas contra Python (15 pruebas aprobadas).
+
+6. **P2-033 (Determinismo en Inyección OOM con Contadores Atómicos Observables OOM-CONC-01..10)**:
+   - En `crates/nexo/src/next/compact.rs`, se coordinó el inyector OOM multihilo mediante `Arc<AtomicUsize>` (`oom_observed`, `attempts_total`), garantizando que la suite registre y observe eventos reales de OOM (`assert!(total_oom > 0)`) antes de terminar.
+
+7. **P1-034 (NEXO Prototype 0.1: Integración de Extremo a Extremo con APIs 100% Públicas)**:
+   - Creación del ejemplo ejecutable `crates/nexo/examples/nexo_prototype_01.rs` demostrando el ciclo de vida completo de memoria física.
+   - Suite de prueba de integración de extremo a extremo `crates/nexo/tests/test_prototype_01.rs` validando asignación, lectura/escritura tipada, revalidación de enlaces, destrucción con retención de huecos, rechazo de referencias obsoletas (`StaleGeneration`), reutilización determinista de huecos (+2 de avance generacional) y cierre limpio del pool.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O & Atomic Replacement** | `crates/nexo/tests/test_bench_io.rs` | 7 | **7/7 APROBADAS** | **7/7 APROBADAS** |
+| **Statistical Consistency** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Statistical Sample Integrity** | `scripts/test_stats_integrity.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Publish** | `scripts/test_benchmark_isolation.py` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **NEXO Prototype 0.1 E2E** | `crates/nexo/tests/test_prototype_01.rs` | 1 | **1/1 APROBADA** | **1/1 APROBADA** |
+| **NEXO Prototype 0.1 Example** | `crates/nexo/examples/nexo_prototype_01.rs` | 1 | **EJECUTADO CON ÉXITO** | **EJECUTADO CON ÉXITO** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 61/62 | **61/61 APROBADAS** | **62/62 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
+## Actualización 2026-11-16 (Operación Benchmark Evidence Lockdown & Concurrent Authority Verification — fix/nexo-v04-benchmark-evidence-lockdown)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-benchmark-integrity-and-oom`: Rama base directa (`87ed9f3ef007baffd3079be6f903b901cdb3e556`).
+- `fix/nexo-v04-benchmark-evidence-lockdown`: **Rama activa de corrección y endurecimiento**.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+1. **P1-024 (Propagación Estricta de Errores I/O y Escrituras Atómicas JSON-IO-01..10)**:
+   - En `crates/nexo/src/bin/nexo-physical-bench.rs`, toda falla de creación de directorio, escritura en archivo o ruta inválida termina inmediatamente con código de salida no cero (`std::process::exit(1)`), emite un mensaje explícito a `stderr`, y previene la emisión de mensajes falsos de éxito o archivos truncados.
+   - La persistencia se realiza mediante escritura atómica con archivo temporal `<target>.tmp.<pid>`, reemplazo con `std::fs::rename` (con eliminación previa en Windows) y eliminación limpia del archivo temporal en caso de fallo.
+   - Implementación de la suite de pruebas de integración `crates/nexo/tests/test_bench_io.rs` que valida los 10 requisitos `JSON-IO-01..10`.
+2. **P1-025 (Aislamiento Criptográfico por Campaña y Blindaje contra Artefactos Obsoletos BENCH-STALE-01..10)**:
+   - En `scripts/run_benchmarks.py`, cada ejecución genera un identificador único de campaña (`campaign_id`), aislando los artefactos brutos y el resumen en `docs/benchmarks/campaigns/<campaign_id>/`.
+   - Se implementó la verificación exhaustiva *fail-closed* contra artefactos antiguos o corruptos mediante la suite adversarial `scripts/test_benchmark_isolation.py` (`BENCH-STALE-01..10`), rechazando esquemas incompatibles, identificadores de campaña o proceso disonantes, JSON truncado o muestras no finitas.
+   - Se genera `checksums.sha256` en el directorio de la campaña conteniendo los hashes de todos los artefactos JSON.
+3. **P1-026 (Trazabilidad Criptográfica del Binario y del Código Fuente)**:
+   - Se calcula y verifica el hash criptográfico SHA-256 del binario release `nexo-physical-bench` antes de la ejecución (`binary_sha256_pre`) y tras cada proceso (`binary_sha256_post`), garantizando inmutabilidad.
+   - Se registra el estado de Git (`git_head`, `git_branch`, `git_dirty`) y el hash SHA-256 de `git diff HEAD` cuando el árbol de trabajo contiene modificaciones.
+   - Se registran versiones de `rustc`, `cargo`, arquitectura del host, información del procesador y versión de especificación estadística.
+4. **P1-027 (Unificación Matemática de Especificación Estadística STATS_SPEC_VERSION 1.1.0 y STAT-CROSS-01..10)**:
+   - En `crates/nexo/src/stats.rs` y `scripts/run_benchmarks.py`, se unificó la especificación estadística `1.1.0` con la misma interpolación lineal uniforme estándar $r = (N-1) \times p, w = r - \lfloor r \rfloor, x_i(1-w) + x_j w$.
+   - Se implementaron las pruebas cruzadas de paridad matemática `scripts/test_stats_cross.py` y `crates/nexo/tests/test_statistical_consistency.rs` (`STAT-CROSS-01..10`), demostrando equivalencia exacta en medias, medianas, varianzas muestrales/poblacionales, desviaciones estándar, CV y percentiles p50, p95 y p99.
+5. **P1-028 (Verificación Concurrente Multihilo de Inyección OOM y Agotamiento de Identidades OOM-CONC-01..10)**:
+   - En `crates/nexo/src/next/compact.rs`, se sustituyó el bucle secuencial en `REG-OOM-09` por una prueba multihilo con `Arc<Barrier>`, 8 hilos de trabajo concurrentes y un hilo inyector que conmuta fallos OOM bajo alta contención.
+   - Se añadieron `test_oom_conc_02_same_pool_id_multithreaded_race` (16 hilos compitiendo simultáneamente por el mismo ID) y `test_oom_conc_10_registry16_multithreaded_contention_and_recovery` (verificación sobre el registro de 16 bits), comprobando las 10 propiedades `OOM-CONC-01..10`.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O Integration** | `crates/nexo/tests/test_bench_io.rs` | 6 | **6/6 APROBADAS** | **6/6 APROBADAS** |
+| **Statistical Consistency & Cross** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Stale Defense** | `scripts/test_benchmark_isolation.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 61/62 | **61/61 APROBADAS** | **62/62 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
+## Actualización 2026-11-16 (Operación Integridad Estadística de Benchmarks y Fallos OOM en Registros — fix/nexo-v04-benchmark-integrity-and-oom)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-final-invariant-hardening`: Rama base directa (`7bd85f0afb7d7a77bd91a34c3b2e8811a37b9130`).
+- `fix/nexo-v04-benchmark-integrity-and-oom`: **Rama activa de corrección**, creada a partir de `7bd85f0a`.
+
+### 1. Defectos Cerrados y Mejoras Implementadas
+1. **P1-022 (Desagregación estadística estricta, algoritmo de Welford e integridad de Samuelson)**:
+   - Erradicación absoluta de la mezcla de desviaciones estándar en microbenchmarks (`crates/nexo/src/bin/nexo-physical-bench.rs` y `docs/NEXO_NEXT_BENCHMARKS.md`).
+   - Desagregación rigurosa en tres niveles muestrales independientes: Lotes ($N=700$, $s_{\text{batch}}$), Corridas ($N=7$, $s_{\text{run}}$) y Procesos de SO independientes ($N=5$, $s_{\text{proc}}$).
+   - Demostración y resolución matemática formal de la aparente contradicción de Samuelson ($s \ge |x_{\max} - \bar{x}|/\sqrt{N-1}$): se demostró que el valor reportado previamente de 18.8 ns era la dispersión entre las 7 corridas ($N=7$), no de los 700 lotes individuales ($N=700$), donde la dispersión real $s_{\text{batch}} \ge 108.6$ ns cumple estrictamente la cota.
+   - Creación del módulo `crates/nexo/src/stats.rs` con acumulador de Welford (1962), cálculo de varianza insesgada ($N-1$), percentiles e interpolación, y verificación algorítmica obligatoria de cotas de Samuelson en tiempo de ejecución.
+   - Soporte en `nexo-physical-bench` para emisión de JSON estructurado mediante `--json` y `--json-out <path>` sin dependencias externas.
+   - Implementación del runner automatizado `scripts/run_benchmarks.py`, ejecutando 5 procesos de SO independientes y generando `docs/benchmarks/summary.json` y `docs/benchmarks/raw/process_{1..5}.json`.
+2. **P0-023 (Verificación adversarial de atomicidad e inyección determinista de fallo de memoria REG-OOM-01..10)**:
+   - Implementación de inyección determinista de fallo de reserva de memoria (`try_reserve` OOM) exclusiva para pruebas (`#[cfg(test)]`) en `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`.
+   - Verificación estricta de la invariante obligatoria: `estado_autoridad_despues == estado_autoridad_antes`.
+   - Suite completa de 10 pruebas unitarias adversariales (`REG-OOM-01` a `REG-OOM-10`) en `crates/nexo/src/next/compact.rs`:
+     - `REG-OOM-01`: fallo con registro vacío.
+     - `REG-OOM-02`: fallo con identidades existentes registradas.
+     - `REG-OOM-03`: verificación de que el contador numérico de IDs permanece estrictamente inmutable tras el error.
+     - `REG-OOM-04`: ausencia total de registro para el pool físico fallido.
+     - `REG-OOM-05`: demostración de que jamás se emite un token de autoridad.
+     - `REG-OOM-06`: retirada de inyección y verificación de que la siguiente asignación tiene éxito y emite el ID contiguo exacto.
+     - `REG-OOM-07`: verificación idéntica sobre el registro y asignador de 16 bits.
+     - `REG-OOM-08`: contención multihilo concurrente entre registros legítimos e inyecciones de OOM.
+     - `REG-OOM-09`: agotamiento concurrente de IDs con fallos intercalados sin pérdida de identificadores.
+     - `REG-OOM-10`: verificación de invariantes internas, ordenación binaria estricta y ausencia total de corrupción tras fallos.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Stats & Samuelson Bounds** | `crates/nexo/src/stats.rs` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **REG-OOM Registry Tests** | `crates/nexo/src/next/compact.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 59/59 | **59/59 APROBADAS** | **59/59 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Microbenchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
+## Actualización 2026-11-16 (Operación Cierre de Invariantes, Agotamiento de Identidades y Validación Estadística — fix/nexo-v04-final-invariant-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown histórica (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: Rama base de consolidación (`a1c05b3083e54bcd541144230f9a222c5eb99b76`).
+- `fix/nexo-v04-release-uncertain-hardening`: Rama base directa (`9cd549d85c9255e621224a54a2c66ca4b0243bc6`).
+- `fix/nexo-v04-final-invariant-hardening`: **Rama activa de corrección**, creada a partir de `9cd549d`.
+
+### 1. Defectos P1/P2 Cerrados en esta Fase
+1. **P1-018 (Validación operativa y fallo cerrado en `validate_superpage` y `check_invariants`)**:
+   - `PhysicalPool::validate_superpage()` y `check_invariants()` verifican `self.ensure_operational()?` antes de cualquier cálculo.
+   - Si el pool está cerrado: retornan `Err(PoolError::Closed)`.
+   - Si el pool está en estado incierto de liberación (`ReleaseUncertain`): retornan `Err(PoolError::Physical(PhysicalError::ReleaseUncertain))`.
+   - Se demostró que un `SuperpageIndex` previamente obtenido no permite eludir los controles operativos posteriores.
+   - Nueva prueba exhaustiva de ciclo de vida en `crates/nexo/tests/close_contract.rs::superpage_validation_lifecycle_and_operational_invariants`.
+2. **P1-019 (Reserva no infalible en registros compactos mediante `try_reserve`)**:
+   - Se sustituyó `Vec::reserve(1)` por `Vec::try_reserve(1).map_err(|_| CompactPoolError::OutOfMemory)?` en `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`.
+   - Se eliminó la presunción errónea de que `reserve` es infalible ante agotamiento de recursos del sistema. Ante OOM, la operación falla cerrado sin consumir IDs del asignador atómico ni envenenar el mutex.
+3. **P2-020 (Demostración exhaustiva del espacio de 16 bits y concurrencia bajo contención)**:
+   - Verificación secuencial completa de los 65.535 identificadores sin colisión y con orden monótono estricto en `CompactIdAllocator16`.
+   - Comprobación del fallo cerrado `PoolIdExhausted` en el intento 65.536 sin wraparound numérico.
+   - Nueva prueba concurrente `test_concurrent_compact_id_allocator_exhaustion_and_contention` con 8 hilos compitiendo donde se demostró la emisión exacta y unívoca de los 65.535 IDs y la denegación total de autoridad en estado post-agotamiento.
+4. **P2-021 (Metodología de benchmarking independiente multi-proceso)**:
+   - Diferenciación formal entre muestreo por lotes intra-proceso (7 corridas $\times$ 100 lotes $= 700$ muestras) y mediciones independientes a nivel de proceso del SO (5 ejecuciones independientes en perfil `release`).
+   - Enriquecimiento del binario `nexo-physical-bench` con reporte de mínimo, máximo, desviación estándar y número de muestras.
+   - Documentación en `NEXO_NEXT_BENCHMARKS.md` de métricas consolidadas entre procesos y análisis metrológico riguroso.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 40/41 | **40/40 APROBADAS** | **41/41 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+---
+
+## Actualización 2026-11-16 (Operación Endurecimiento ReleaseUncertain y Consistencia de Autoridad — fix/nexo-v04-release-uncertain-hardening)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown histórica (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: Rama base de consolidación (`a1c05b3083e54bcd541144230f9a222c5eb99b76`).
+- `fix/nexo-v04-release-uncertain-hardening`: **Rama activa de corrección**, creada a partir de `a1c05b3`.
+
+### 1. Defectos P1/P2 Cerrados en esta Fase
+1. **P1-013 (Bloqueo absoluto de autoridad durante `ReleaseUncertain`)**:
+   - `AddressSpace` expone `is_released()` e `is_release_uncertain()`.
+   - `PhysicalPool` preserva la distinción entre `is_closed()`, `is_open()`, `is_release_uncertain()` e `is_operational()`.
+   - `PhysicalPool::ensure_operational()` valida que el pool esté abierto y no incierto antes de permitir accesos.
+   - `CompactPoolRegistry::register_pool` y `CompactPoolRegistry16::register_pool` rechazan pools en `ReleaseUncertain` con `Err(CompactPoolError::ReleaseUncertain)`.
+   - `CompactPhysicalPool::new` y `CompactPhysicalPool64::new` rechazan pools en `ReleaseUncertain` con `Err(CompactPoolError::ReleaseUncertain)`.
+   - `generation()`, `page_state()`, `physical_access()`, `base_addr()` y `validate()` invocan `ensure_operational()`, fallando cerrado con `Err(PoolError::Physical(PhysicalError::ReleaseUncertain))`.
+   - Suite completa de 12 puntos implementada y validada en `crates/nexo/tests/close_contract.rs::release_uncertain_blocks_all_authority_and_revalidations`.
+2. **P1-014 (Conversión exhaustiva y tipada de errores en adaptadores compactos)**:
+   - Eliminación total del comodín `_ => OutOfBounds` en `convert_pool_error`.
+   - Mapeo explícito y exhaustivo de las 13 variantes de `PoolError`.
+   - Mapeo de `PhysicalError::ReleaseUncertain` a `CompactRevalidateError::ReleaseUncertain`.
+   - Prueba unitaria exhaustiva validada en `crates/nexo/src/next/adapter.rs::tests::test_convert_pool_error_exhaustive_coverage`.
+3. **P1-015 (Atomicidad transaccional y auditoría de invariantes tras envenenamiento de Mutex)**:
+   - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` asocian atómicamente `(physical_pool_id, compact_id)`.
+   - Pre-reserva de capacidad vectorial (posteriormente endurecida a `pools.try_reserve(1)` con `OutOfMemory`) antes de asignar IDs.
+   - Auditoría de invariantes tras recuperación de mutex envenenado (`audit_and_recover_8` / `audit_and_recover_16`): verifica unicidad de IDs físicos y compactos, límites numéricos, y consistencia de orden. Ante corrupción detectada, la instancia pasa a `corrupted = true` y falla cerrado con `CompactPoolError::RegistryCorrupted`.
+   - Pruebas unitarias validadas en `crates/nexo/src/next/compact.rs`.
+4. **P2-016 (Erradicación de wraparound en pruebas de enlaces compactos)**:
+   - Eliminación de `wrapping_add(1)` en `test_compact_nexo.rs`, utilizando pools foráneos legítimos.
+   - Adición de prueba de cotas mínimas (1), máximas (255 / 65535) y rechazo de ID cero en `test_compact_id_boundary_invariants`.
+5. **P2-017 (Diferenciación metodológica de benchmarks de revalidación y agregación exacta)**:
+   - Separación estricta de revalidación estándar pura (14.5 ns), revalidación estándar con lectura (53.1 ns), revalidación compacta 32b (22.7 ns) y 64b (23.0 ns) en `nexo-physical-bench`.
+   - Corrección del acumulador estadístico para agregar llamadas al SO, bytes de cabecera y commits a través de todas las corridas (`RUNS = 7`) con denominadores normalizados exactos.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 40/41 | **40/40 APROBADAS** | **41/41 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+---
+
+## Actualización 2026-11-16 (Operación Finalización y Endurecimiento Definitivo — fix/nexo-v04-security-finalization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama histórica (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: Rama de lockdown completada y publicada (`07138c6e4e1a920911d756285d59e69c50b03aa5`).
+- `fix/nexo-v04-security-finalization`: **Rama activa de entrega final**, creada a partir de `07138c6`.
+
+### 1. Defectos P0/P1 y Endurecimiento Adicional Cerrados en esta Fase
+1. **P0-007 (Fallo cerrado en inspección de metadatos tras cierre de piscina)**:
+   - Se blindaron `PhysicalPool::generation()` y `PhysicalPool::page_state()` invocando `self.space()?;` antes de ubicar cualquier slot.
+   - Si el pool fue cerrado con `close()` o `try_close()`, toda inspección retorna inmediatamente `Err(PoolError::Closed)`.
+   - Se añadió `self.superpages.clear()` en `PhysicalPool::close()` para garantizar la erradicación total de metadatos residuales tras liberar la reserva virtual.
+   - Prueba de regresión agregada y validada en `crates/nexo/tests/close_contract.rs::closed_pool_rejects_generation_page_state_and_physical_access`.
+2. **P0-008 (Validación defensiva de límites en `ScopedArena::close_scope`)**:
+   - `close_scope` rechaza inmediatamente cualquier marcador con `offset > self.offset` o `drop_count > self.drops.len()` retornando `ArenaError::ScopeMismatch`.
+   - Impide formalmente corrupciones de punteros u omisiones de destructores ante marcadores adulterados.
+   - Prueba unitaria de regresión añadida y validada en `crates/nexo/src/next/arena.rs::tests::test_marker_defensive_bounds_validation`.
+3. **P1-009 (Rechazo de piscinas cerradas en adaptadores compactos y registros)**:
+   - `CompactPhysicalPool::new` y `CompactPhysicalPool64::new` fallan cerrado inmediatamente con `Err(CompactPoolError::PoolClosed)` si el pool ya fue cerrado antes de crear el adaptador.
+   - `CompactPoolRegistry::register_pool` y `CompactPoolRegistry16::register_pool` impiden registrar una piscina cerrada, retornando `Err(CompactPoolError::PoolClosed)`.
+   - Prueba de regresión en `crates/nexo/tests/test_authority_lockdown.rs::test_auth_harden_06_closed_pool_fails_closed`.
+4. **P1-010 (Preservación de errores tipados en revalidación compacta)**:
+   - `CompactPhysicalPool::current_compact_generation` sustituye el mapeo genérico a `OutOfBounds` por `convert_pool_error`, preservando `PoolClosed`, `Physical(p)`, `Invariant(s)`, `GenerationRetired`, `SubpageQuarantined`, y `StaleGeneration`.
+   - Permite discriminar fallos del kernel o cierre de piscina de verdaderos accesos fuera de rango.
+5. **P1-011 (Recuperación resiliente ante envenenamiento de mutex en el registro global)**:
+   - `CompactPoolRegistryInstance::register` y `CompactPoolRegistryInstance16::register` implementan recuperación explícita con `.unwrap_or_else(|poisoned| ...)` ordenando y deduplicando el vector de IDs para evitar que un pánico en un hilo inhabilite permanentemente el registro global.
+   - Prueba unitaria de regresión validada en `crates/nexo/src/next/compact.rs::tests::test_registry_mutex_poisoning_recovery`.
+6. **P1-012 (Auditoría de ScopedArena y verificación de límites de ciclo de vida con DROP-17..20)**:
+   - Casos agregados en `crates/nexo/tests/test_scoped_arena.rs`:
+     - `DROP-17`: rechazo de cierre de marcadores desordenados con recuperación de marcador.
+     - `DROP-18`: rechazo de marcadores de arenas foráneas.
+     - `DROP-19`: manejo seguro de marcadores tras pánicos y envenenamiento en destructores.
+     - `DROP-20`: asignaciones ZST con alineación extrema en la frontera exacta de capacidad.
+7. **Auditoría Exhaustiva de Código `unsafe`**:
+   - Se auditaron y documentaron formalmente todos los bloques `unsafe` en `crates/nexo/src/next/arena.rs`, `address_space.rs`, `windows.rs` y `linux.rs`. Contratos de precondiciones y comportamiento ante pánicos y fallos documentados en `docs/NEXO_NEXT_SAFETY.md`.
+8. **Metodología y Mediciones Empíricas de Rendimiento**:
+   - Se ejecutó `nexo-physical-bench --completo` en modo release (7 corridas × 200 ops por escenario) registrando métricas de media, mediana, p95/p99, CV%, syscalls/op y consumo de memoria/Working Set en `docs/NEXO_NEXT_BENCHMARKS.md`.
+   - Revalidación compacta validada a 51.4 ns/op (CV 3.8%); ráfaga 960+960 a 178.5 ns/op (CV 0.5%); reciclaje de huecos a 277.6 ns/op (CV 0.4%).
+   - Fuzzer físico ejecutado en modo adversarial (`--fallos 1000 16`): 16.000 comandos de inyección del SO con 0 divergencias.
+9. **Especificación Normativa de Integración con ELE**:
+   - Se elaboró `docs/NEXO_ELE_COMPATIBILITY.md` documentando el mapeo de capacidades lineales, representación LIR, invariantes de verificación y pre-requisitos de ABI para futura integración cuando proceda, sin conectar el runtime prematuramente.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 13 | **13/13 APROBADAS** | **13/13 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 8 | **8/8 APROBADAS** | **8/8 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests lib.rs** | `crates/nexo/src/lib.rs` | 37/38 | **37/37 APROBADAS** | **38/38 APROBADAS** |
+| **Physical Fuzz tests** | `crates/nexo/src/bin/nexo-physical-fuzz.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Revalidation Opt** | `crates/nexo/tests/test_revalidation_opt.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+### 2. Estado de CI Remoto
+- **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA** (`0 minutes remaining` en GitHub Actions).
+- No se han modificado flujos en `.github/` para evadir restricciones.
+- Toda validación está certificada localmente de forma reproducible y exhaustiva en modo Dual-OS (Windows MSVC + Linux WSL2).
+
+---
+
+## Actualización 2026-11-16 (Operación Security Lockdown — fix/nexo-v0.4-authority-lockdown)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama previa (`cac1dcb44498d643485c421143dcc21a72a4a67e`).
+- `fix/nexo-v0.4-authority-lockdown`: **Nueva rama de trabajo**, creada a partir de `cac1dcb`, donde se ejecutó el cierre total y definitivo de autoridad e identidad.
+
+### 1. Defectos P0 y P1 Cerrados en Security Lockdown
+
+1. **P0-001 (Eliminación Terminante de Emisión Arbitraria de Autoridad)**:
+   - Se erradicaron por completo `CompactPoolRegistry::acquire_token_for(physical_pool_id: u64)` y `CompactPoolRegistry::acquire_token()`. Ningún token de autoridad puede ser emitido a partir de enteros numéricos.
+   - La única vía legal y pública de emisión es `register_pool(&PhysicalPool)`, requiriendo la posesión de una referencia viva a la memoria física.
+2. **P0-002 (Invariante de Registro Único de Pool Físico)**:
+   - `CompactPoolRegistry` y `CompactPoolRegistry16` rechazan de forma atómica e idempotente el registro duplicado de un mismo pool físico con `CompactPoolError::AlreadyRegistered { physical_pool_id }`.
+   - Garantiza una correspondencia biyectiva $1:1$ entre el `PhysicalPool` en memoria virtual y su token de autoridad `CompactPoolToken`.
+3. **P0-003 (Cierre de Cadena Física y Reporte Explícito de Cuarentena)**:
+   - Los adaptadores `CompactPhysicalPool` y `CompactPhysicalPool64` validan la cadena de autoridad completa sobre `PhysicalPool`.
+   - Ante subpáginas en estado `PageState::Quarantined`, retornan el error tipado y dedicado `CompactRevalidateError::SubpageQuarantined`.
+4. **P1-004 (Eliminación Absoluta de Mocks Privilegiados de la Distribución)**:
+   - Se eliminó la feature `test-mocks` de `crates/nexo/Cargo.toml` y el módulo público `pub mod testing` de `compact.rs`.
+   - Los mocks privilegiados residen estrictamente en `#[cfg(test)] mod tests` para pruebas unitarias internas. Las compilaciones de producción (incluso con `--all-features`) tienen cero mocks expuestos.
+5. **P1-005 (Desacoplamiento de Asignadores Numéricos Puros)**:
+   - Se factorizaron `CompactIdAllocator8` y `CompactIdAllocator16` como asignadores numéricos atómicos puros (1..=255 y 1..=65535) sin autoridad de memoria.
+   - Permiten probar agotamiento y concurrencia en instancias aisladas sin contaminar ni agotar los singletons globales `GLOBAL_COMPACT_REGISTRY` y `GLOBAL_COMPACT_REGISTRY_16`.
+6. **P1-006 (Reparación de Pruebas Adversariales con Fallos Reales de Compilación)**:
+   - Se migraron las pruebas de comentarios a pruebas reales de compilación externa ejecutadas con arnés `run_fixture_check` contra `crates/nexo/tests/fixtures/external_consumer` (`E0277`, `E0433`, `E0502`, `E0515`, `E0560`, `E0599`).
+   - Se implementó la nueva suite de 20 escenarios `AUTH-HARDEN-01..20` en `crates/nexo/tests/test_authority_lockdown.rs`.
+   - Se eliminaron condiciones `if` de escape en `AUTH-15` y `AUTH-HARDEN-13` para asegurar verificación incondicional.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 12 | **12/12 APROBADAS** | **12/12 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 32 | **32/32 APROBADAS** | **32/32 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests lib.rs** | `crates/nexo/src/lib.rs` | 36/37 | **36/36 APROBADAS** | **37/37 APROBADAS** |
+| **Physical Fuzz tests** | `crates/nexo/src/bin/nexo-physical-fuzz.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Revalidation Opt** | `crates/nexo/tests/test_revalidation_opt.rs` | 2 | **2/2 APROBADAS** | **2/2 APROBADAS** |
+| **Doctests nexo** | `crates/nexo/src/...` | 9 | **9/9 APROBADAS** | **9/9 APROBADAS** |
+| **Child Isolation** | `crates/nexo/tests/child_isolation.rs` | 5 | N/A (Windows) | **5/5 APROBADAS** (SIGSEGV) |
+| **Workspace Completo** | `cargo test --workspace` | ~800+ | **100% APROBADO** | **100% APROBADO** |
+
+Determinismo multi-hilo certificado:
+- `cargo test -p ele-nexo --test test_authority_soundness --test test_authority_lockdown -- --test-threads=1` -> 40/40 OK.
+- `cargo test -p ele-nexo --test test_authority_soundness --test test_authority_lockdown -- --test-threads=8` -> 40/40 OK.
+
+### 3. Estado de CI Remoto
+- **CI REMOTO: BLOQUEADO POR CUOTA AGOTADA** (`0 minutes remaining` en GitHub Actions).
+- No se han modificado flujos en `.github/` para evadir restricciones.
+- Toda validación está certificada localmente de forma reproducible y exhaustiva en modo Dual-OS.
+
+---
+
+## Actualización 2026-11-16 (Auditoría Definitiva de Autoridad e Identidad — fix/nexo-v0.4-authority-soundness)
+
+Ramas auditadas:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (intacta, inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v0.4-authority-soundness`: Rama de trabajo con correcciones definitivas P0-001..P0-003 y P1-004..P1-006.
+
+### 1. Correcciones P0 y P1 Implementadas
+
+1. **P0-001 (Sellado Auténtico de Traits de Autoridad)**:
+   - Se erradicó el pseudo-sellado `pub mod private` que permitía a crates foráneas implementar `Sealed`.
+   - Se estableció el sellado canónico: `pub(crate) mod private { pub trait Sealed {} pub struct InternalSeal; }`.
+   - Se incorporó el método privado sellado `fn __seal_authority(&self, _: private::InternalSeal)` en `CompactPoolAuthority` y `CompactPoolAuthority64`.
+   - Pruebas doctest negativas con `compile_fail` agregadas y verificadas (9 doctests pasados).
+
+2. **P0-002 (Vinculación Infalsificable Pool ↔ Token)**:
+   - `CompactPoolToken` y `CompactPoolToken16` almacenan de forma inmutable el `physical_pool_id: u64` correspondiente al `PhysicalPool` registrado.
+   - `CompactPhysicalPool::new(&pool, &token)` y `CompactPhysicalPool64::new(&pool, &token)` devuelven `Result<Self, CompactPoolError>` y validan estrictamente `token.physical_pool_id() == pool.id()`, abortando con `CompactPoolError::PoolMismatch` ante cualquier discrepancia.
+
+3. **P0-003 (Confinamiento Absoluto de Mocks)**:
+   - `MockCompactPool` y `MockCompactPool64` están condicionados a `#[cfg(any(test, feature = "test-mocks"))]`.
+   - `crates/nexo/Cargo.toml` define la feature `test-mocks` y la inyecta solo en `dev-dependencies`, eliminándolos completamente de las compilaciones de producción.
+
+4. **P1-004 (Confinamiento de Registros Independientes)**:
+   - `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16` son `pub(crate)` y fueron retirados de la re-exportación pública en `nexo::next`.
+
+5. **P1-005 (Aislamiento de Contador Global en Pruebas de Agotamiento)**:
+   - `allocate_arena_id(counter: &AtomicU64) -> Result<u64, ArenaError>` extraído para permitir que las pruebas de agotamiento utilicen contadores locales aislados sin mutar el singleton `NEXT_ARENA_ID`.
+
+6. **P1-006 (Acotamiento de Capacidad de Slots en Adaptador)**:
+   - `CompactPhysicalPool::slot_capacity()` acotado a `pool_cap.min((MAX_SLOT_COMPACT_32 as u64) + 1) as u32` (máximo 65.536), garantizando que los índices encajen en la representación de 16 bits de `CompactLink`.
+
+### 2. Suite de Validación Adversarial AUTH-01 a AUTH-20 (`crates/nexo/tests/test_authority_soundness.rs`)
+- `AUTH-01`: Intento externo de implementar `CompactPoolAuthority` falla estáticamente (doctest `compile_fail`).
+- `AUTH-02`: Intento externo de implementar `CompactPoolAuthority64` falla estáticamente (doctest `compile_fail`).
+- `AUTH-03`: Intento de construir `CompactObjRef` directamente falla estáticamente (doctest `compile_fail`).
+- `AUTH-04`: Mocks no disponibles en producción sin `feature = "test-mocks"`.
+- `AUTH-05`: Emparejamiento de token foráneo falla en adaptador de 32 bits (`PoolMismatch`).
+- `AUTH-06`: Emparejamiento de token foráneo falla en adaptador de 64 bits (`PoolMismatch`).
+- `AUTH-07`: `CompactPoolToken` almacena el `physical_pool_id` exacto.
+- `AUTH-08`: `compact_id` idéntico pero diferente `physical_pool_id` es rechazado.
+- `AUTH-09`: Revalidación cruzada rechazada con pool físico foráneo.
+- `AUTH-10`: Generación par rechazada como `SlotNotAllocated`.
+- `AUTH-11`: Generación obsoleta rechazada tras reasignación (`StaleGeneration`).
+- `AUTH-12`: Generación $\ge 254$ en 8 bits rechazada permanentemente (`GenerationRetired`).
+- `AUTH-13`: Generación $\ge 65534$ en 16 bits rechazada permanentemente (`GenerationRetired`).
+- `AUTH-14`: Slot en subpágina en cuarentena rechazado (`SubpageQuarantined`).
+- `AUTH-15`: Slot en subpágina no confirmada rechazado (`SlotNotAllocated`).
+- `AUTH-16`: Slot fuera de límites rechazado (`SlotOutOfBounds`) y capacidad acotada a 65.536.
+- `AUTH-17`: `CompactObjRef` es de solo lectura y no convertible a `Handle`.
+- `AUTH-18`: `CompactObjRef<'a>` tiene tiempo de vida acotado al préstamo del pool.
+- `AUTH-19`: `CompactPoolRegistry` emisión acotada a 255 IDs sin reciclaje.
+- `AUTH-20`: Concurrencia atómica de 16 bits sin duplicados en emisión.
+
+### 3. Matriz de Validación Dual-OS
+
+| Plataforma | Suite `ele-nexo` | Suite `test_authority_soundness` | Suite `test_compact_nexo` | Child Isolation | Fuzzers |
+|---|---|---|---|---|---|
+| **Windows MSVC** | 35 lib + 9 doc + 11 api = 55 tests OK | 20/20 OK | 12/12 OK | N/A (Windows) | 4.096 comandos (4 seeds) OK; 64 campañas $\times$ 5.000 pasos PFS OK; `nexo-fuzz` 1.000 casos OK |
+| **Linux WSL2** | 36 lib + 9 doc + 11 api = 56 tests OK | 20/20 OK | 12/12 OK | 5/5 OK (SIGSEGV verificado) | 100% concordancia con Windows |
+
+### 4. Estado de CI Remoto
+- **CI EXTERNO: BLOQUEADO POR CUOTA DE GITHUB ACTIONS** (`0 minutes remaining`).
+- Toda validación se ejecuta y certifica localmente.
+
+---
+
+## Actualización 2026-11-16 (Zero-Trust Hardening) — Resolución de Identidad de Registros, Traits Sellados, Tokens Infalsificables, Adaptador Físico y Suite DROP-08..16
+
+Ramas auditadas:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (intacta, sin cambios).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de endurecimiento Zero-Trust).
+
+### 1. Resolución de Identidad Inequívoca de Pools Compactos (P0)
+- **Defecto auditado**: La existencia de `CompactPoolRegistryInstance` pública permitía a consumidores independientes crear registros que emitieran `pool_id = 1`, arriesgando colisiones en dominios de revalidación.
+- **Corrección aplicada**:
+  - Se introdujo `CompactPoolToken` y `CompactPoolToken16`: tokens lineales con campos privados y sin constructor público, no clonables (`!Clone`, `!Copy`), emitibles exclusivamente a través de los registros globales de producción (`CompactPoolRegistry::acquire_token` y `CompactPoolRegistry16::acquire_token`).
+  - Las instancias desacopladas (`CompactPoolRegistryInstance`) se confinaron al módulo interno `testing`, eliminando la ambigüedad en el contrato público de producción.
+  - La unicidad de `pool_id` queda formalmente garantizada a nivel de proceso mediante asignación atómica sin reciclaje ni wraparound.
+
+### 2. Frontera de Autoridad y Traits Sellados (P0)
+- **Defecto auditado**: El trait público `CompactPoolAuthority` podía ser implementado por consumidores externos con datos arbitrarios para obtener `CompactObjRef`.
+- **Corrección aplicada**:
+  - Se sellaron los traits `CompactPoolAuthority` y `CompactPoolAuthority64` mediante el submódulo sellado `private::Sealed`. Ningún consumidor externo puede implementarlos.
+  - Se vincularon formalmente los tokens de acceso `CompactObjRef<'a>` y `CompactObjRef64<'a>` al tiempo de vida del préstamo `'a` del pool (`PhantomData<&'a ()>`). El borrow checker de Rust impide estáticamente llamar a `destroy`, `close` o mutaciones sobre el pool mientras exista una referencia revalidada activa.
+  - Se implementaron los adaptadores seguros `CompactPhysicalPool` y `CompactPhysicalPool64` en `crates/nexo/src/next/adapter.rs`, validando estados de subpágina (`Committed`, rechazando `Quarantined`, `Reserved`, `ReclaimPending`, `Returned`), límites físicos de slots y generaciones lógicas en `PhysicalPool`.
+
+### 3. Precisión de Errores y Aritmética en `ScopedArena`
+- Se agregó el error tipado `ArenaError::ArenaIdExhausted` en sustitución de `OutOfMemory` cuando el generador monotónico alcanza `u64::MAX`.
+- Se verificó la aritmética de punteros, alineaciones de hasta 4096 bytes y tipos de tamaño cero (ZST).
+
+### 4. Suite Exhaustiva DROP-08 a DROP-16 (`test_scoped_arena.rs`)
+- `DROP-08`: Destructor compuesto con liberación parcial antes del pánico; los objetos pendientes se liberan incondicionalmente en LIFO.
+- `DROP-09`: Mutación de estado externo persistente antes del pánico; la mutación persiste y los hermanos se destruyen.
+- `DROP-10`: Doble pánico durante unwinding inicial de hilo; la arena drena todos los drops sin provocar doble pánico ni aborto de proceso.
+- `DROP-11`: Destructor de tipo de tamaño cero (ZST) que entra en pánico; layout y punteros preservados.
+- `DROP-12`: Ámbito interior envenenado; preservación estricta de la destrucción de objetos del ámbito exterior en `drop(arena)`.
+- `DROP-13`: Dependencias complejas de recursos en estricto orden LIFO (5, 4, 3, 2, 1) con pánicos intermedios.
+- `DROP-14`: Desajuste de marcador en `close_scope` (recuperación lineal) seguido de destrucción final de la arena sin fugas.
+- `DROP-15`: Prueba de pureza de layout heap sin syscalls virtuales (documentada compatibilidad conceptual con Miri).
+- `DROP-16`: Contención de pánicos en hilo aislado para validar ausencia de corrupción.
+
+### 5. Estado de Validación Dual-OS
+- **Windows MSVC**: 260 pruebas aprobadas en `ele-nexo`, 780+ en workspace completo, clippy con 0 advertencias, fmt limpio, 5/5 child isolation, 65.536 comandos de fuzzer físico (0 divergencias), 10.000 casos de fuzzer lingüístico (0 fallos P1).
+- **Linux WSL2**: 261 pruebas aprobadas en `ele-nexo` (incluye prueba de protección `madvise` de Linux), 5/5 child isolation con intercepción real de SIGSEGV.
+- **Miri**: Toolchain del host carece del componente `cargo-miri` para el canal instalado; limitación documentada con precisión y honestidad técnica.
+
+Ramas auditadas:
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de endurecimiento final).
+
+### 1. Protocolo de Destrucción Final Resiliente en `Drop for ScopedArena` (P0)
+- **Defecto P0 resuelto**: Si un destructor fallaba con pánico durante `drop(arena)`, el bucle de liberación se interrumpía; aunque el búfer se liberaba por RAII, los destructores pendientes restantes eran omitidos, provocando fugas de recursos y riesgo de aborto por doble pánico (*double panic abort*) si el hilo ya se encontraba en unwinding.
+- **Protocolo implementado**:
+  - `drop(&mut self)` encapsula cada llamada a `(entry.drop_fn)(entry.ptr)` con `std::panic::catch_unwind(AssertUnwindSafe(..))`.
+  - El primer pánico se almacena en `first_panic: Option<Box<dyn Any + Send>>`.
+  - Todos los destructores pendientes continúan drenándose y ejecutándose en estricto orden LIFO hasta que `self.drops` queda completamente vacío.
+  - El `BufferGuard` desasigna el búfer de memoria virtual de forma infalible una vez que todos los destructores han concluido.
+  - Si hubo pánicos y `!std::thread::panicking()`, se reanuda el primer pánico mediante `std::panic::resume_unwind(panic_payload)`.
+  - Si el hilo ya se encontraba en unwinding (`std::thread::panicking()`), no se invoca `resume_unwind`, evitando el aborto del proceso y permitiendo que el pánico original continúe de forma segura.
+- **Suite DROP-01 a DROP-07 (`test_scoped_arena.rs`)**:
+  - `DROP-01`: Pánico en un destructor con 3 pendientes; los 4 destructores se ejecutan en orden LIFO exacto una vez cada uno.
+  - `DROP-02`: Múltiples destructores paniquean; todos se ejecutan sin doble destrucción ni UB.
+  - `DROP-03`: Destrucción final de arena previamente envenenada (`ArenaState::Poisoned`).
+  - `DROP-04`: Propagación fiel del payload del primer pánico.
+  - `DROP-05`: Ausencia de doble pánico / aborto durante unwinding activo en hilo aislado.
+  - `DROP-06`: Liberación limpia de recursos complejos (`Box`, `Vec`, `String`) ante pánico.
+  - `DROP-07`: Cascada de ámbitos anidados con múltiples pánicos en orden LIFO estricto.
+
+### 2. Revalidación Autorizada de Enlaces Compactos (`CompactPoolAuthority`)
+- Se implementó la frontera formal entre:
+  - **Enlace como dato (`CompactLink`, `CompactLink64`)**: Identificador plano de 32 o 64 bits copiable (`Copy`), sin autoridad de acceso directo a memoria.
+  - **Revalidación autorizada (`CompactPoolAuthority`, `CompactPoolAuthority64`)**: Trait de pool físico que valida `compact_id`, límites de slot, estado asignado (no par/libre), ausencia de retiro y coincidencia exacta de generación, retornando `Result<CompactObjRef, CompactRevalidateError>`.
+  - **Token no propietario (`CompactObjRef`, `CompactObjRef64`)**: Campos estrictamente privados, sin constructor público, jamás convertible a `Handle`.
+
+### 3. Registro Aislado y Registro de 16 Bits (`CompactPoolRegistry16`)
+- `CompactPoolRegistryInstance` y `CompactPoolRegistryInstance16`: Estructuras instanciables para evitar contaminación cruzada entre pruebas unitarias que agotan identidades y el singleton global.
+- `CompactPoolRegistry16`: Registro de 16 bits (1..=65.535) para respaldar formalmente la identidad de `CompactLink64` sin reciclaje ni colisiones ABA.
+- Corrección del dominio de 16 bits en `CompactGen`: `is_live` valida estrictamente `g < GEN_RETIRADO_16`, corrigiendo el valor 65535 (`0xffff`) que era erróneamente clasificado como vivo.
+
+### 4. Estado de Validación Dual
+- **Windows MSVC**: 249 pruebas aprobadas en `ele-nexo`, 780+ pruebas en workspace completo (`cargo test --workspace`), clippy con 0 advertencias, fmt limpio, release build limpio, 5/5 child isolation, 65.536 comandos de fuzzer físico sin divergencias, 10.000 casos de fuzzer lingüístico (0 fallos P1).
+- **Linux WSL2**: 250 pruebas aprobadas en `ele-nexo` (incluye prueba de `madvise` específica de Linux), paridad completa.
+- **Miri**: Documentada como limitación pendiente de herramienta externa.
+
+---
+
+## Actualización 2026-11-15 (Pase 3) — Cierre definitivo P0 de resiliencia ante pánicos en `ScopedArena`, consistencia de `CompactPoolRegistry` y Suite P0-ARENA-01..08
+
+Ramas auditadas:
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`).
+- `feat/nexo-v0.4-next-memory` (Experimental v0.4, commit de cierre P0).
+
+### 1. Corrección P0 de Resiliencia ante Pánicos en `ScopedArena`
+- **Defecto P0 resuelto**: Si un destructor entraba en pánico en `close_scope()`, el guard anterior retrocedía el `offset` a `marker.offset` mientras los objetos no alcanzados permanecían en `drops`. Una captura posterior (`catch_unwind`) permitía que `alloc()` sobreescribiera la memoria de dichos objetos, desembocando en corrupción de memoria o UAF durante `drop(arena)`.
+- **Máquina de estados segura**:
+  - Se introdujo `ArenaState` (`Active`, `Poisoned`).
+  - `close_scope()` utiliza `ScopeCloseGuard`: si un destructor causa pánico durante el desenrollado, la arena transiciona a `ArenaState::Poisoned`.
+  - El `offset` NO se retrocede al punto inicial del ámbito, protegiendo la memoria de los objetos no destruidos.
+  - La entrada que causa pánico ya ha sido extraída de `drops` mediante `pop()`, garantizando ausencia de doble destrucción.
+  - Toda llamada posterior a `alloc()`, `begin_scope()` o `close_scope()` en una arena envenenada retorna de inmediato `Err(ArenaError::Poisoned)`.
+  - `Drop for ScopedArena` destruye limpiamente en orden LIFO los objetos restantes y utiliza `BufferGuard` para garantizar la desasignación de la memoria virtual aunque un destructor falle en el drop final.
+  - `begin_scope()` retorna `Result<ScopeMarker, ArenaError>` y valida desbordamiento de `u64` con `checked_add(1)`, retornando `Err(ArenaError::ScopeDepthExhausted)`.
+  - `new_with_alignment()` reserva el identificador atómico único ANTES de asignar memoria virtual, previniendo fugas ante agotamiento de identificadores.
+
+### 2. Consistencia y Ausencia de Off-by-One en `CompactPoolRegistry`
+- Se reemplazó el contador desfasado por `ALLOCATED_COMPACT_POOLS: AtomicU8 = AtomicU8::new(0)`.
+- `acquire_id()` emite identificadores exactos en el rango `1..=255` mediante CAS seguro. Al alcanzar 255 pools, cualquier invocación subsiguiente retorna `Err(CompactPoolError::PoolIdExhausted)`.
+- `is_valid_id(id)` valida `id != 0 && id <= ALLOCATED_COMPACT_POOLS.load(SeqCst)`. Un ID no emitido jamás retorna `true`.
+- Se documentó formalmente que `CompactLink::matches` y `CompactLink64::matches` son predicados de coherencia representacional, requiriéndose la consulta del pool físico para revalidación de autoridad sobre memoria viva.
+
+### 3. Suite Mandatoria P0-ARENA-01 a P0-ARENA-08 (`test_scoped_arena.rs`)
+- **P0-ARENA-01**: Tres objetos en un ámbito, el del medio entra en pánico en drop. Se verifica que el tercero se destruyó en LIFO, el segundo entró en pánico, y el primero no fue tocado.
+- **P0-ARENA-02**: Asignación y apertura de ámbito tras pánico capturado son rechazadas con `ArenaError::Poisoned`. Se verifica que la memoria del objeto primero no fue sobreescrita ni corrompida.
+- **P0-ARENA-03**: `drop(arena)` tras pánico capturado destruye los objetos pendientes exactamente una vez. Cero fugas y cero dobles destrucciones.
+- **P0-ARENA-04**: Ámbitos anidados con pánico en ámbito interior: envenenamiento propaga protección al exterior; `drop(arena)` destruye objetos interiores y exteriores en orden determinista.
+- **P0-ARENA-05**: ZST con `Drop` intercalados con tipos normales: no avanzan `offset`, se destruyen en LIFO y resisten pánicos.
+- **P0-ARENA-06**: Tipos con propiedad compleja del heap (`Vec`, `String`, `Box`) liberan buffers del heap limpiamente.
+- **P0-ARENA-07**: Anidamiento profundo de 64 ámbitos concurrentes y verificación estricta de `ArenaError::ScopeDepthExhausted` ante desbordamiento de límite en `u64::MAX`.
+- **P0-ARENA-08**: Alineaciones extremas de hasta 4096 bytes: verificación de dirección divisible por 4096 sin desbordamiento de padding.
+
+### 4. Estado de Verificación Dual
+- **Windows MSVC**: 237 pruebas aprobadas en `ele-nexo`, 770+ pruebas en workspace completo (`cargo test --workspace`), clippy limpio, fmt limpio.
+- **Linux WSL2**: 238 pruebas aprobadas en `ele-nexo`, paridad completa.
+- **Miri**: Pendiente de entorno externo debido a ausencia del componente en el toolchain del host.
+
+---
+
 ## Actualización 2026-11-15 — Cierre de P0: encapsulación de API pública y aislamiento de instrumentación (PR #69)
 
 Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
