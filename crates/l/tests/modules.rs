@@ -570,3 +570,45 @@ fn two_direct_public_generic_imports_are_ambiguous() {
         assert!(stderr.contains("main.l"), "{backend}: {stderr}");
     }
 }
+
+#[test]
+fn entry_main_wins_over_public_main_in_imported_module() {
+    // The dependency is declared before the entry source in the merged AST.
+    // Its public main must not override the entry file's private main.
+    let fix = ModuleFixture::new("entry_main_vs_public_import");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn entry_main_wins_over_private_main_in_imported_module() {
+    // Private names can be reused across modules without entry ambiguity.
+    let fix = ModuleFixture::new("entry_main_vs_private_import");
+    fix.write_file("lib.l", "flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn imported_public_main_is_not_an_implicit_entry_point() {
+    // Importing a library with a public main does not make it the executable's
+    // entry point when the root module has not declared its own main.
+    let fix = ModuleFixture::new("imported_main_without_entry");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow helper() { print(42) }\n");
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("falta fn main()"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn entry_public_main_wins_over_imported_public_main() {
+    let fix = ModuleFixture::new("entry_public_main_vs_public_import");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nexpose flow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
