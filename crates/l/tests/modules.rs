@@ -683,3 +683,83 @@ fn invalid_utf8_in_small_module_has_a_file_diagnostic() {
         "{diag:?}"
     );
 }
+
+#[test]
+fn diamond_imports_reuse_canonical_module_file_ids() {
+    // Three direct imports of shared.l through two branches and main itself
+    // must all resolve to the same source ID without reloading the module.
+    let fix = ModuleFixture::new("stable_file_id_diamond");
+    fix.write_file("shared.l", "expose flow common() => Int { give 41 }\n");
+    fix.write_file(
+        "left.l",
+        "take shared\nexpose flow left() => Int { give common() }\n",
+    );
+    fix.write_file(
+        "right.l",
+        "take shared\nexpose flow right() => Int { give common() + 1 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take left\ntake right\ntake shared\nflow main() { print(left() + right()) }\n",
+    );
+
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    assert_eq!(files.len(), 4, "a diamond must load shared.l only once");
+    assert!(files[0].ends_with("main.l"));
+    let file_id = |name: &str| {
+        u32::try_from(
+            files
+                .iter()
+                .position(|file| file.ends_with(name))
+                .expect("imported module missing")
+                + 1,
+        )
+        .unwrap()
+    };
+    let shared_id = file_id("shared.l");
+    let left_id = file_id("left.l");
+    let right_id = file_id("right.l");
+    let shared_imports: Vec<_> = program
+        .imports
+        .iter()
+        .filter(|import| import.path == "shared")
+        .collect();
+    assert_eq!(shared_imports.len(), 3);
+    assert!(
+        shared_imports
+            .iter()
+            .all(|import| import.target_file == Some(shared_id))
+    );
+
+    let mut importing_files: Vec<_> = shared_imports
+        .iter()
+        .map(|import| import.span.file)
+        .collect();
+    importing_files.sort_unstable();
+    importing_files.dedup();
+    assert_eq!(importing_files.len(), 3);
+    assert!(importing_files.contains(&1));
+    assert!(importing_files.contains(&left_id));
+    assert!(importing_files.contains(&right_id));
+    assert_eq!(
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "left")
+            .unwrap()
+            .target_file,
+        Some(left_id)
+    );
+    assert_eq!(
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "right")
+            .unwrap()
+            .target_file,
+        Some(right_id)
+    );
+
+    // Verify the unchanged semantics across both native backends as well.
+    fix.check("main.l", "83\n");
+}
