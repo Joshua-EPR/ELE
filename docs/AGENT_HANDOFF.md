@@ -1,6 +1,77 @@
 # Traspaso de agente — ELE
 
-## Actualización 2026-11-17 (Operación Evidence Integrity, Memory Safety & Prototype Readiness — fix/nexo-v04-evidence-final-hardening)
+## Actualización 2026-11-17 (Operación Zero Regression — Consolidación Definitiva y Estabilización de NEXO Prototype 0.1 — fix/nexo-v04-release-stabilization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-evidence-final-hardening`: Rama base directa (`edad487a559b4adfe60241e377ff1d32694e5698`).
+- `fix/nexo-v04-release-stabilization`: **Rama activa de consolidación definitiva, estabilización zero-regression y entrega**.
+
+### 1. Defectos Cerrados y Causa Raíz Estabilizada
+
+1. **P1-A (Detección de Archivos Untracked y Modo Oficial Fail-Closed SOURCE-01..02)**:
+   - *Causa raíz*: `run_benchmarks.py` clasificaba las líneas `??` en `untracked_files` pero solo activaba `is_dirty = True` en `elif len(line_str) > 0`, permitiendo que árboles con archivos untracked pero sin diff de rastreados se ejecutaran en `--official`. Asimismo, excepciones en Git se ignoraban silenciosamente.
+   - *Corrección*: Se fuerza `is_dirty = True` ante cualquier archivo `??` o si `len(untracked_files) > 0`. Se capturan excepciones de Git marcando `git_error = True`. El modo `--official` rechaza inmediatamente cualquier repositorio sucio o error de inspección.
+
+2. **P1-B (Transaccionalidad Estricta y Single Source of Truth PUBLISH-05..06)**:
+   - *Causa raíz*: `LATEST_CAMPAIGN` se escribía antes de actualizar las rutas legacy `docs/benchmarks/summary.json` y `raw/`, rompiendo la atomicidad y creando estados inconsistentes ante interrupciones.
+   - *Corrección*: Se fijó el orden transaccional: 1) Escritura y checksums en carpeta de campaña, 2) Verificación criptográfica de hashes de todos los artefactos, 3) Actualización de mirrors derivados retrocompatibles, 4) Escritura atómica de `LATEST_CAMPAIGN` como único *commit point* de confirmación.
+
+3. **P1-C (Verificación y Reporte Verídico de Rollback en Windows ATOMIC-11)**:
+   - *Causa raíz*: En `crates/nexo/src/bin/nexo-physical-bench.rs`, la llamada `rename(backup, path)` ante fallo en la sustitución atómica ignoraba el resultado con `let _ = ...` y reportaba `(versión previa restaurada)` incluso si la restauración había fallado.
+   - *Corrección*: Se comprueba explícitamente el `Result` de `rename(backup, path)`. Si tiene éxito, se confirma verídicamente en el error. Si falla, se emite una alarma crítica indicando la ruta del archivo de respaldo `<path>.bak.<pid>` conservado en disco para impedir pérdida de datos.
+
+4. **P2-A (Parser Estricto RFC 8259 JSON en CLI de Estadísticas JSON-STRICT-01..06)**:
+   - *Causa raíz*: `parse_samples_json` extraía texto entre corchetes mediante `split(',')` y parseaba con `parse::<f64>()`, ignorando silenciosamente tokens no numéricos, admitiendo arrays vacíos, comas flotantes, `NaN` e `Infinity`.
+   - *Corrección*: Parser estricto que valida delimitadores `[` y `]`, rechaza arrays vacíos, comas consecutivas/iniciales/finales, valores `NaN`/`Infinity`, tokens no numéricos y formatos no conformes (`+`, `0x`), retornando `Result<Vec<f64>, String>`.
+
+5. **P2-B (Erradicación Total de Sleeps en Pruebas Concurrentes OOM-CONC-08..10)**:
+   - *Causa raíz*: `test_reg_oom_08`, `test_reg_oom_09` y `test_oom_conc_10` en `crates/nexo/src/next/compact.rs` utilizaban `thread::sleep` para sincronizar hilos de inyección de fallos, introduciendo demoras arbitrarias y potenciales carreras.
+   - *Corrección*: Se eliminaron todos los `sleep()`, sustituyéndolos por barreras (`std::sync::Barrier`) y sincronización determinista por fases con contadores atómicos (`AtomicUsize`). La prueba concluye en milisegundos con cero flakiness.
+
+6. **P2-C (Empaquetamiento y Reproducibilidad de Archivos Untracked REPRO-01..02)**:
+   - *Causa raíz*: En ejecuciones experimentales con archivos no rastreados, el diff de Git no contenía el contenido de dichos archivos, imposibilitando la reconstrucción del estado.
+   - *Corrección*: Los archivos untracked se empaquetan en `campaigns/<campaign_id>/untracked_bundle/` y el manifiesto incorpora el bloque `"reproducibility"` documentando si la campaña es reproducible a partir de los artefactos.
+
+7. **P2-D (Sanitización Estricta de `--campaign-id` contra Path Traversal CAMPAIGN-SANITY-01..03)**:
+   - *Causa raíz*: `--campaign-id` se concatenaba sin sanitización a la ruta de benchmarks.
+   - *Corrección*: Función `sanitize_campaign_id()` validando regex `^[a-zA-Z0-9_-]+$`, impidiendo secuencias `..` o separadores de ruta, y bloqueando colisiones con campañas existentes.
+
+8. **Campaña Oficial de Benchmarks Consolidada**:
+   - Campaña ID: `campaign_20261117_031829_1696d953`
+   - Modo: `OFFICIAL` (Worktree limpio, sin cambios locales)
+   - Git HEAD: `39e5ff3025e339c07b2fc72b36454319f9fe1499`
+   - Binario release SHA-256: `f4738f5d00e4ce453cd27af937e38e5acece83546cbd1a9516c06be2ad2a2213`
+   - Checksums SHA-256 verificados al 100%.
+
+### 2. Suites de Validación Ejecutadas y Aprobadas (Dual-OS)
+
+| Suite de Prueba | Archivo | Casos | Resultado Windows MSVC | Resultado Linux WSL2 |
+|---|---|---|---|---|
+| **JSON I/O & Atomic Rollback** | `crates/nexo/tests/test_bench_io.rs` | 8 | **8/8 APROBADAS** | **8/8 APROBADAS** |
+| **Statistical Consistency** | `crates/nexo/tests/test_statistical_consistency.rs` | 14 | **14/14 APROBADAS** | **14/14 APROBADAS** |
+| **Cross-Language Python Stats** | `scripts/test_stats_cross.py` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Statistical Sample Integrity** | `scripts/test_stats_integrity.py` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Benchmark Isolation & Publish** | `scripts/test_benchmark_isolation.py` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **NEXO Prototype 0.1 E2E** | `crates/nexo/tests/test_prototype_01.rs` | 1 | **1/1 APROBADA** | **1/1 APROBADA** |
+| **NEXO Prototype 0.1 Example** | `crates/nexo/examples/nexo_prototype_01.rs` | 1 | **EJECUTADO CON ÉXITO** | **EJECUTADO CON ÉXITO** |
+| **REG-OOM & OOM-CONC Multi-thread** | `crates/nexo/src/next/compact.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Lockdown** | `crates/nexo/tests/test_authority_lockdown.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Authority Soundness** | `crates/nexo/tests/test_authority_soundness.rs` | 20 | **20/20 APROBADAS** | **20/20 APROBADAS** |
+| **Compact Nexo** | `crates/nexo/tests/test_compact_nexo.rs` | 15 | **15/15 APROBADAS** | **15/15 APROBADAS** |
+| **Close Contract** | `crates/nexo/tests/close_contract.rs` | 10 | **10/10 APROBADAS** | **10/10 APROBADAS** |
+| **Partial Failures** | `crates/nexo/tests/partial_failures.rs` | 16 | **16/16 APROBADAS** | **16/16 APROBADAS** |
+| **Scoped Arena** | `crates/nexo/tests/test_scoped_arena.rs` | 36 | **36/36 APROBADAS** | **36/36 APROBADAS** |
+| **API Security** | `crates/nexo/tests/api_security.rs` | 11 | **11/11 APROBADAS** | **11/11 APROBADAS** |
+| **Verificador Semántico** | `crates/nexo/tests/verificador.rs` | 42 | **42/42 APROBADAS** | **42/42 APROBADAS** |
+| **Unit tests en lib.rs** | `crates/nexo/src/lib.rs` | 62 | **62/62 APROBADAS** | **62/62 APROBADAS** |
+| **Automated Benchmark Campaign** | `scripts/run_benchmarks.py` | 5 proc. | **5/5 EXITOSOS** | **5/5 EXITOSOS** |
+
+---
+
+## Actualización previa 2026-11-17 (Operación Evidence Integrity, Memory Safety & Prototype Readiness — fix/nexo-v04-evidence-final-hardening)
 
 Ramas y estado de Git:
 - `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).

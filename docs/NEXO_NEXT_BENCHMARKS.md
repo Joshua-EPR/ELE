@@ -277,3 +277,50 @@ En la consolidación final de NEXO v0.4 se resolvieron todos los vectores restan
    - Commit + reclaim diferido (`keep=1`): **275.0 ns/op** ($s_{\text{proc}} = 0.96$ ns, CV = 0.3%, 0.000 llamadas al SO/op)
    - Box global asignar + liberar: **111.9 ns/op** ($s_{\text{proc}} = 20.19$ ns, CV = 18.1%)
 
+---
+
+### 4.9 Consolidación Definitiva y Estabilización Zero Regression (Operación Zero Regression)
+
+En la consolidación final de la rama `fix/nexo-v04-release-stabilization` se cerraron por causa raíz todos los hallazgos técnicos pendientes:
+
+1. **Verificación Estricta y Verídica de Rollback en Windows (P1-C)**:
+   - En `crates/nexo/src/bin/nexo-physical-bench.rs`, se verificó explícitamente el resultado de `rename(backup, path)` ante fallos de sustitución atómica.
+   - Si la restauración tiene éxito, se confirma verídicamente en el error. Si la restauración falla, se emite una alarma crítica reportando la ruta donde se preservó intacto el archivo `<path>.bak.<pid>`, impidiendo pérdidas silenciosas de datos.
+   - Verificado mediante `test_json_io_11_rollback_verification_and_truthful_reporting` en `crates/nexo/tests/test_bench_io.rs`.
+
+2. **Parser Numérico JSON Conforme a RFC 8259 (P2-A)**:
+   - Se reemplazó el parser laxo de muestras por un analizador estricto en `nexo-physical-bench.rs`.
+   - Rechazo *fail-closed* de arrays vacíos (`[]`), comas iniciales/finales/duplicadas (`[1.0,]`), valores no finitos (`NaN`, `Infinity`), tokens no numéricos y prefijos no estándar como `+` o `0x`.
+   - Verificado con 6 pruebas unitarias en `nexo-physical-bench.rs` y la suite cruzada `test_compute_stats_rejects_malformed_and_non_finite_fixtures` en `scripts/test_stats_cross.py`.
+
+3. **Erradicación Total de `sleep()` en Pruebas Concurrentes OOM (P2-B)**:
+   - En `crates/nexo/src/next/compact.rs`, se eliminó todo uso de `thread::sleep` en `test_reg_oom_08`, `test_reg_oom_09` y `test_oom_conc_10`.
+   - Se implementó sincronización determinista de fases mediante barreras (`std::sync::Barrier`) y contadores atómicos (`AtomicUsize`), garantizando la observación reproducible de eventos OOM y la recuperación limpia bajo contención multihilo en microsegundos y sin condiciones de carrera.
+
+4. **Detección Estricta de Archivos Untracked y Modo Oficial Fail-Closed (P1-A)**:
+   - `get_git_info()` en `scripts/run_benchmarks.py` clasifica los archivos `??` (untracked) como estado sucio (`is_dirty = True`) y detecta fallos en la invocación de `git` (`git_error = True`).
+   - El modo `--official` rechaza inmediatamente cualquier repositorio sucio, con cambios locales o con archivos untracked.
+
+5. **Transaccionalidad Estricta y Single Source of Truth (P1-B)**:
+   - Se ordenó el pipeline de Fase E: 1) Creación de artefactos inmutables en carpeta de campaña, 2) Verificación criptográfica de hashes contra `manifest.json` y `checksums.sha256`, 3) Actualización de mirrors retrocompatibles (`summary.json`, `raw/`), 4) Escritura atómica de `docs/benchmarks/LATEST_CAMPAIGN` como único *commit point* de confirmación.
+   - Jerarquía formal establecida: `LATEST_CAMPAIGN -> immutable campaign -> manifest.json -> verified artifacts`.
+
+6. **Empaquetamiento Experimental y Trazabilidad de Reproducibilidad (P2-C)**:
+   - En campañas experimentales, el contenido real de los archivos no rastreados se empaqueta en `campaigns/<campaign_id>/untracked_bundle/` y se registra en el manifiesto bajo el objeto `reproducibility` (`reproducible_from_artifacts`).
+
+7. **Sanitización Estricta de `--campaign-id` contra Path Traversal (P2-D)**:
+   - Función `sanitize_campaign_id()` validando contra regex `^[a-zA-Z0-9_-]+$`, impidiendo secuencias de escape de directorio (`..`, `/`, `\`) y bloqueando colisiones con campañas existentes para garantizar exclusividad transaccional.
+
+8. **Resultados de la Campaña Oficial Consolidada (`campaign_20261117_031829_1696d953`)**:
+   - Git HEAD: `39e5ff3025e339c07b2fc72b36454319f9fe1499` (limpio, modo `official`)
+   - Binario release SHA-256: `f4738f5d00e4ce453cd27af937e38e5acece83546cbd1a9516c06be2ad2a2213`
+   - Revalidación estándar puro: **18.4 ns/op** ($s_{\text{proc}} = 5.25$ ns)
+   - Revalidación compacta 32b: **26.7 ns/op** ($s_{\text{proc}} = 3.23$ ns, CV = 12.1%)
+   - Revalidación compacta 64b: **25.6 ns/op** ($s_{\text{proc}} = 3.53$ ns, CV = 13.8%)
+   - Revalidar + leer int: **65.7 ns/op** ($s_{\text{proc}} = 9.64$ ns)
+   - Hot allocate + free: **445.0 ns/op** ($s_{\text{proc}} = 66.76$ ns)
+   - Hole destroy + reuse: **397.9 ns/op** ($s_{\text{proc}} = 57.40$ ns)
+   - Commit + reclaim diferido (`keep=1`): **438.9 ns/op** ($s_{\text{proc}} = 30.04$ ns, CV = 6.8%, 0.000 llamadas al SO/op)
+   - Box global asignar + liberar: **147.1 ns/op** ($s_{\text{proc}} = 14.36$ ns, CV = 9.8%)
+
+
