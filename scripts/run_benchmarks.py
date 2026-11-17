@@ -17,6 +17,7 @@ import json
 import math
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -55,6 +56,7 @@ def get_git_info(repo_root: Path) -> dict:
     git_head = "unknown"
     git_branch = "unknown"
     is_dirty = False
+    git_error = False
     diff_bytes = b""
     diff_sha256 = None
     untracked_files = []
@@ -70,6 +72,7 @@ def get_git_info(repo_root: Path) -> dict:
         git_head = res.stdout.strip()
     except Exception as e:
         git_head = f"unknown ({e})"
+        git_error = True
 
     try:
         res = subprocess.run(
@@ -81,7 +84,7 @@ def get_git_info(repo_root: Path) -> dict:
         )
         git_branch = res.stdout.strip()
     except Exception:
-        pass
+        git_error = True
 
     try:
         res = subprocess.run(
@@ -96,6 +99,7 @@ def get_git_info(repo_root: Path) -> dict:
             line_str = line.strip()
             if line_str.startswith("??"):
                 untracked_files.append(line_str[3:].strip())
+                is_dirty = True
             elif len(line_str) > 0:
                 is_dirty = True
 
@@ -111,16 +115,48 @@ def get_git_info(repo_root: Path) -> dict:
                 is_dirty = True
                 diff_sha256 = compute_bytes_sha256(diff_bytes)
     except Exception:
-        pass
+        git_error = True
+
+    if len(untracked_files) > 0:
+        is_dirty = True
 
     return {
         "git_head": git_head,
         "git_branch": git_branch,
         "git_dirty": is_dirty,
+        "git_error": git_error,
         "git_diff_sha256": diff_sha256,
         "diff_bytes": diff_bytes,
         "untracked_files": untracked_files,
     }
+
+
+def sanitize_campaign_id(raw_id: str, campaigns_dir: Path) -> str:
+    """Valida y sanitiza estrictamente el identificador de campaña contra path traversal y colisiones."""
+    if not raw_id or not isinstance(raw_id, str):
+        raise ValueError("El identificador de campaña no puede estar vacío.")
+    # Exclusivamente alfanuméricos, guiones y guiones bajos
+    if not re.match(r"^[a-zA-Z0-9_-]+$", raw_id):
+        raise ValueError(
+            f"Identificador de campaña inválido '{raw_id}': solo se permiten caracteres [a-zA-Z0-9_-]."
+        )
+    candidate_path = (campaigns_dir / raw_id).resolve()
+    resolved_campaigns = campaigns_dir.resolve()
+    try:
+        candidate_path.relative_to(resolved_campaigns)
+    except ValueError:
+        raise ValueError(
+            f"Identificador de campaña inseguro '{raw_id}': intento de escape de directorio detectado."
+        )
+    if candidate_path.parent != resolved_campaigns:
+        raise ValueError(
+            f"Identificador de campaña inseguro '{raw_id}': no es hijo directo de {resolved_campaigns}."
+        )
+    if candidate_path.exists():
+        raise ValueError(
+            f"Conflicto de campaña: la carpeta '{raw_id}' ya existe en campaigns/. Debe ser única."
+        )
+    return raw_id
 
 
 def get_rustc_info() -> dict:
@@ -604,16 +640,27 @@ def main():
     git_info = get_git_info(repo_root)
 
     # Verificación de modo oficial vs experimental (SOURCE-01..10)
-    if args.official and git_info["git_dirty"]:
-        print("ERROR CRÍTICO (SOURCE-01): El modo '--official' exige un worktree limpio.")
-        print("Se detectaron cambios locales no commiteados o archivos staged.")
-        sys.exit(1)
+    if args.official:
+        if git_info.get("git_error"):
+            print("ERROR CRÍTICO (SOURCE-01): Falló la inspección de Git. El modo '--official' exige verificación estricta.")
+            sys.exit(1)
+        if git_info["git_dirty"] or len(git_info.get("untracked_files", [])) > 0:
+            print("ERROR CRÍTICO (SOURCE-01): El modo '--official' exige un worktree limpio.")
+            print(f"Modificaciones detectadas: dirty={git_info['git_dirty']}, untracked={len(git_info.get('untracked_files', []))}")
+            sys.exit(1)
 
     execution_mode = "experimental" if (git_info["git_dirty"] or args.experimental) else "official"
 
-    # Generar identificador único de campaña
+    campaigns_dir = benchmarks_dir / "campaigns"
+    campaigns_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generar / sanitizar identificador único de campaña
     if args.campaign_id:
-        campaign_id = args.campaign_id
+        try:
+            campaign_id = sanitize_campaign_id(args.campaign_id, campaigns_dir)
+        except ValueError as e:
+            print(f"ERROR CRÍTICO (CAMPAIGN-SANITY): {e}")
+            sys.exit(1)
     else:
         timestamp_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
         random_hex = secrets.token_hex(4)
@@ -629,11 +676,12 @@ def main():
     # FASE A: Preparación y Aislamiento Transaccional
     # -------------------------------------------------------------
     print("\n[FASE A] Preparando aislamiento transaccional en carpeta de campaña...")
-    campaign_dir = benchmarks_dir / "campaigns" / campaign_id
+    campaign_dir = campaigns_dir / campaign_id
     campaign_raw_dir = campaign_dir / "raw"
     campaign_raw_dir.mkdir(parents=True, exist_ok=True)
 
-    # En modo experimental con cambios, guardar patch.diff y lista de untracked
+    # En modo experimental con cambios, guardar patch.diff y respaldar archivos untracked
+    untracked_backed_up = []
     if git_info["git_dirty"]:
         patch_path = campaign_dir / "patch.diff"
         with open(patch_path, "wb") as f:
@@ -646,6 +694,18 @@ def main():
             for uf in git_info["untracked_files"]:
                 f.write(f"{uf}\n")
         print(f"  -> {len(git_info['untracked_files'])} archivos untracked registrados en {untracked_path.name}")
+
+        # P2-C: Empaquetar contenido real de archivos untracked para reproducibilidad experimental
+        untracked_bundle_dir = campaign_dir / "untracked_bundle"
+        for uf in git_info["untracked_files"]:
+            src_file = repo_root / uf
+            if src_file.is_file():
+                dst_file = untracked_bundle_dir / uf
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                untracked_backed_up.append(uf)
+        if untracked_backed_up:
+            print(f"  -> {len(untracked_backed_up)} archivos untracked empaquetados en untracked_bundle/")
 
     rustc_info = get_rustc_info()
     env_meta = {
@@ -842,6 +902,18 @@ def main():
             "dirty": git_info["git_dirty"],
             "diff_sha256": git_info["git_diff_sha256"],
         },
+        "reproducibility": {
+            "status": "official_clean" if execution_mode == "official" else (
+                "experimental_bundled" if git_info["git_dirty"] and not git_info.get("git_error") else "unreproducible"
+            ),
+            "reproducible_from_artifacts": (execution_mode == "official") or (
+                git_info["git_dirty"] and not git_info.get("git_error") and (len(git_info["untracked_files"]) == len(untracked_backed_up))
+            ),
+            "dirty": git_info["git_dirty"],
+            "has_diff": len(git_info["diff_bytes"]) > 0,
+            "untracked_count": len(git_info["untracked_files"]),
+            "untracked_bundled_count": len(untracked_backed_up),
+        },
         "files": {
             "summary.json": compute_file_sha256(campaign_summary_path),
         },
@@ -850,10 +922,15 @@ def main():
         p_path = campaign_raw_dir / f"process_{i}.json"
         manifest["files"][f"raw/process_{i}.json"] = compute_file_sha256(p_path)
 
-    if git_info["git_dirty"]:
+    if git_info["git_dirty"] and (campaign_dir / "patch.diff").exists():
         manifest["files"]["patch.diff"] = compute_file_sha256(campaign_dir / "patch.diff")
-    if git_info["untracked_files"]:
+    if git_info["untracked_files"] and (campaign_dir / "untracked_files.txt").exists():
         manifest["files"]["untracked_files.txt"] = compute_file_sha256(campaign_dir / "untracked_files.txt")
+    for uf in untracked_backed_up:
+        b_file = campaign_dir / "untracked_bundle" / uf
+        if b_file.exists():
+            rel_b = f"untracked_bundle/{uf}".replace("\\", "/")
+            manifest["files"][rel_b] = compute_file_sha256(b_file)
 
     manifest_path = campaign_dir / "manifest.json"
     atomic_write_json(manifest_path, manifest)
@@ -866,11 +943,14 @@ def main():
     checksum_lines.append(f"{compute_file_sha256(manifest_path)}  manifest.json\n")
     atomic_write_text(checksums_path, "".join(checksum_lines))
 
-    # ACTUALIZACIÓN ATÓMICA DE RUTAS PÚBLICAS / RETROCOMPATIBLES
-    # Solo se llega aquí si todas las Fases A-D y escritura de campaña concluyeron al 100%
-    latest_campaign_path = benchmarks_dir / "LATEST_CAMPAIGN"
-    atomic_write_text(latest_campaign_path, f"{campaign_id}\n")
+    # P1-B: VERIFICACIÓN CRIPTOGRÁFICA DE INTEGRIDAD PREVIA A PUBLICACIÓN
+    # Asegurar que todos los archivos en el manifest concuerdan con su hash calculado
+    for rel_name, exp_sha in manifest["files"].items():
+        act_sha = compute_file_sha256(campaign_dir / rel_name)
+        if act_sha != exp_sha:
+            raise ValueError(f"Fallo de integridad pre-publicación en '{rel_name}': {act_sha} != {exp_sha}")
 
+    # P1-B: ACTUALIZACIÓN DE RUTAS DERIVADAS RETROCOMPATIBLES
     legacy_summary_path = benchmarks_dir / "summary.json"
     atomic_write_json(legacy_summary_path, summary)
 
@@ -881,10 +961,15 @@ def main():
         dst_p = legacy_raw_dir / f"process_{i}.json"
         atomic_copy_file(src_p, dst_p)
 
+    # P1-B: SINGLE SOURCE OF TRUTH COMMIT POINT (LATEST_CAMPAIGN)
+    # LATEST_CAMPAIGN se actualiza al final de forma atómica como único punto de confirmación
+    latest_campaign_path = benchmarks_dir / "LATEST_CAMPAIGN"
+    atomic_write_text(latest_campaign_path, f"{campaign_id}\n")
+
     print(f"  -> Campaña aislada completada: {campaign_dir.relative_to(repo_root)}")
-    print(f"  -> LATEST_CAMPAIGN actualizado: {campaign_id}")
     print(f"  -> Resumen público actualizado: {legacy_summary_path.relative_to(repo_root)}")
-    print(f"  -> Manifiesto y Checksums generados.")
+    print(f"  -> Manifiesto y Checksums generados y verificados.")
+    print(f"  -> LATEST_CAMPAIGN comprometido atómicamente: {campaign_id}")
 
     # Visualización en tabla por consola
     print("\n" + "=" * 120)

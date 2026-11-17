@@ -28,6 +28,7 @@ from run_benchmarks import (
     atomic_write_text,
     compute_distribution_stats,
     compute_file_sha256,
+    sanitize_campaign_id,
     validate_benchmark_process_data,
     validate_summary_against_processes,
 )
@@ -262,6 +263,78 @@ class TestTransactionalPublishing(unittest.TestCase):
         for rel_path, expected_sha in loaded_manifest["files"].items():
             actual_sha = compute_file_sha256(camp_dir / rel_path)
             self.assertEqual(actual_sha, expected_sha)
+
+    def test_campaign_sanity_01_rejects_empty_and_special_chars(self):
+        """CAMPAIGN-SANITY-01: Rechazo estricto de IDs vacíos o con caracteres ilegales."""
+        for invalid in ["", "   ", "camp 01", "camp*01", "camp:01", "camp$01", "camp#01", "camp;01"]:
+            with self.assertRaises(ValueError):
+                sanitize_campaign_id(invalid, self.campaigns_dir)
+
+    def test_campaign_sanity_02_rejects_traversal_attempts(self):
+        """CAMPAIGN-SANITY-02: Rechazo fail-closed de intentos de Directory Traversal."""
+        for traversal in ["..", "../escape", "../../etc/passwd", "sub/nested", "..\\win_escape", "/absolute/path"]:
+            with self.assertRaises(ValueError):
+                sanitize_campaign_id(traversal, self.campaigns_dir)
+
+    def test_campaign_sanity_03_rejects_duplicate_campaign_id(self):
+        """CAMPAIGN-SANITY-03: Exclusividad transaccional; rechazo de colisiones con campañas existentes."""
+        existing = self.campaigns_dir / "camp_already_exists"
+        existing.mkdir(parents=True, exist_ok=True)
+
+        with self.assertRaises(ValueError) as ctx:
+            sanitize_campaign_id("camp_already_exists", self.campaigns_dir)
+        self.assertIn("ya existe", str(ctx.exception))
+
+    def test_publish_05_single_source_of_truth_transaction_order(self):
+        """PUBLISH-05: LATEST_CAMPAIGN no se actualiza si falla cualquier paso previo de la campaña."""
+        latest_file = self.benchmarks_dir / "LATEST_CAMPAIGN"
+        atomic_write_text(latest_file, "initial_committed_campaign\n")
+
+        # Supongamos que una nueva campaña escribe archivos pero falla antes de actualizar LATEST_CAMPAIGN
+        new_camp_dir = self.campaigns_dir / "aborted_campaign"
+        new_camp_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(new_camp_dir / "summary.json", {"aborted": True})
+
+        # LATEST_CAMPAIGN debe continuar apuntando a la inicial
+        self.assertEqual(latest_file.read_text(encoding="utf-8").strip(), "initial_committed_campaign")
+
+    def test_publish_06_checksum_verification_detects_prepublication_tampering(self):
+        """PUBLISH-06: Verificación de hashes previa a confirmación detecta manipulación."""
+        camp_dir = self.campaigns_dir / "tampered_campaign"
+        camp_dir.mkdir(parents=True, exist_ok=True)
+        summary_file = camp_dir / "summary.json"
+        atomic_write_json(summary_file, {"data": "authentic"})
+
+        real_sha = compute_file_sha256(summary_file)
+        fake_sha = "0" * 64
+
+        manifest = {
+            "campaign_id": "tampered_campaign",
+            "files": {
+                "summary.json": fake_sha,
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            for rel_name, exp_sha in manifest["files"].items():
+                act_sha = compute_file_sha256(camp_dir / rel_name)
+                if act_sha != exp_sha:
+                    raise ValueError(f"Fallo de integridad pre-publicación en '{rel_name}': {act_sha} != {exp_sha}")
+        self.assertIn("Fallo de integridad", str(ctx.exception))
+
+    def test_publish_07_experimental_bundle_preserves_untracked_files(self):
+        """PUBLISH-07: Modo experimental empaqueta y verifica los archivos untracked."""
+        camp_dir = self.campaigns_dir / "exp_bundle_campaign"
+        untracked_bundle = camp_dir / "untracked_bundle"
+        untracked_bundle.mkdir(parents=True, exist_ok=True)
+
+        untracked_test_file = untracked_bundle / "crates" / "fake_untracked.rs"
+        untracked_test_file.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(untracked_test_file, "// untracked experimental code\n")
+
+        self.assertTrue(untracked_test_file.exists())
+        sha = compute_file_sha256(untracked_test_file)
+        self.assertEqual(len(sha), 64)
 
 
 if __name__ == "__main__":

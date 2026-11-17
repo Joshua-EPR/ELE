@@ -223,6 +223,39 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
         rust_stats = self.run_rust_stats(f_path)
         self.assert_stats_equal(py_stats, rust_stats)
 
+    def test_compute_stats_rejects_malformed_and_non_finite_fixtures(self):
+        """Valida rechazo fail-closed de fixtures inválidos, vacíos, NaN o con comas erróneas."""
+        import tempfile
+        test_cases = [
+            ("empty_array", "[]"),
+            ("empty_content", "   "),
+            ("trailing_comma", "[1.0, 2.0,]"),
+            ("leading_comma", "[, 1.0, 2.0]"),
+            ("nan_value", "[1.0, NaN, 2.0]"),
+            ("infinity_value", "[1.0, Infinity, 2.0]"),
+            ("string_token", "[1.0, \"corrupt\", 2.0]"),
+            ("missing_bracket", "1.0, 2.0, 3.0"),
+        ]
+        for name, content in test_cases:
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as tmp:
+                tmp.write(content)
+                tmp_path = Path(tmp.name)
+            try:
+                cmd = [str(self.bin_path), "--compute-stats", str(tmp_path)]
+                res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+                self.assertNotEqual(
+                    res.returncode,
+                    0,
+                    f"El binario debía rechazar el caso '{name}' con contenido '{content}', pero retornó 0"
+                )
+                self.assertIn(
+                    "Error",
+                    res.stderr,
+                    f"El binario no reportó error en stderr para el caso '{name}'"
+                )
+            finally:
+                tmp_path.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
