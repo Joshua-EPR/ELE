@@ -1609,38 +1609,278 @@ mod tests {
 
     #[test]
     fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
-        let registry = CompactPoolRegistryInstance::new();
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        use std::time::Duration;
 
-        // Inyectar OOM de forma determinista intercalada: fallan impares
-        let mut tokens = Vec::new();
-        let mut pool_id = 1u64;
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let num_workers = 8;
+        let barrier = Arc::new(Barrier::new(num_workers + 1));
+        let next_pool_id = Arc::new(AtomicU64::new(1));
+        let stop_injector = Arc::new(AtomicBool::new(false));
 
-        while tokens.len() < MAX_COMPACT_POOLS as usize {
-            if pool_id % 2 == 1 {
-                registry.inject_reserve_failure(true);
-                assert_eq!(
-                    registry.register(pool_id).unwrap_err(),
-                    CompactPoolError::OutOfMemory
-                );
-                registry.inject_reserve_failure(false);
+        // Injector thread: repeatedly toggles reserve failure (OOM-CONC-03)
+        let reg_inj = registry.clone();
+        let barrier_inj = barrier.clone();
+        let stop_inj = stop_injector.clone();
+        let injector_handle = thread::spawn(move || {
+            barrier_inj.wait();
+            let mut state = false;
+            while !stop_inj.load(Ordering::Relaxed) {
+                state = !state;
+                reg_inj.inject_reserve_failure(state);
+                thread::sleep(Duration::from_micros(100));
             }
-            // Registro con inyección inactiva
-            let tok = registry.register(pool_id).unwrap();
-            tokens.push(tok);
-            pool_id += 1;
+            reg_inj.inject_reserve_failure(false);
+        });
+
+        // Worker threads: compete for pool IDs until 8-bit space (255) is exhausted (OOM-CONC-01, OOM-CONC-04)
+        let mut worker_handles = Vec::new();
+        for _ in 0..num_workers {
+            let reg = registry.clone();
+            let barrier_worker = barrier.clone();
+            let next_pool = next_pool_id.clone();
+
+            worker_handles.push(thread::spawn(move || {
+                barrier_worker.wait();
+                let mut my_tokens = Vec::new();
+
+                loop {
+                    if reg.allocated_count() == MAX_COMPACT_POOLS {
+                        break;
+                    }
+                    let pool_id = next_pool.fetch_add(1, Ordering::SeqCst);
+
+                    // Attempt registration with retry on OutOfMemory (OOM-CONC-06 recovery)
+                    loop {
+                        if reg.allocated_count() == MAX_COMPACT_POOLS {
+                            break;
+                        }
+                        match reg.register(pool_id) {
+                            Ok(token) => {
+                                my_tokens.push(token);
+                                break;
+                            }
+                            Err(CompactPoolError::OutOfMemory) => {
+                                thread::yield_now();
+                            }
+                            Err(CompactPoolError::PoolIdExhausted) => {
+                                break;
+                            }
+                            Err(other) => {
+                                panic!("Unexpected error in worker: {other:?}");
+                            }
+                        }
+                    }
+                }
+                my_tokens
+            }));
         }
 
-        assert_eq!(registry.allocated_count(), MAX_COMPACT_POOLS);
-        // Al intentar uno más, se obtiene PoolIdExhausted sin importar si hay OOM o no
-        registry.inject_reserve_failure(true);
-        assert_eq!(
-            registry.register(pool_id).unwrap_err(),
-            CompactPoolError::OutOfMemory
-        );
+        // Wait for workers to complete
+        let mut all_tokens = Vec::new();
+        for h in worker_handles {
+            all_tokens.extend(h.join().expect("Worker thread panicked"));
+        }
+
+        // Stop injector and wait
+        stop_injector.store(true, Ordering::SeqCst);
+        injector_handle.join().expect("Injector thread panicked");
         registry.inject_reserve_failure(false);
+
+        // OOM-CONC-04: Full exhaustion to MAX_COMPACT_POOLS (255)
         assert_eq!(
-            registry.register(pool_id).unwrap_err(),
-            CompactPoolError::PoolIdExhausted
+            registry.allocated_count(),
+            MAX_COMPACT_POOLS,
+            "Registry must allocate exactly MAX_COMPACT_POOLS"
+        );
+        assert_eq!(
+            all_tokens.len(),
+            MAX_COMPACT_POOLS as usize,
+            "Total issued tokens must equal MAX_COMPACT_POOLS"
+        );
+
+        // OOM-CONC-07: Zero duplicate compact IDs across all issued tokens
+        let mut compact_ids: Vec<u8> = all_tokens.iter().map(|t| t.compact_id()).collect();
+        compact_ids.sort_unstable();
+        let count_before = compact_ids.len();
+        compact_ids.dedup();
+        assert_eq!(
+            compact_ids.len(),
+            count_before,
+            "All compact IDs must be strictly unique"
+        );
+        assert_eq!(compact_ids.first(), Some(&1u8));
+        assert_eq!(compact_ids.last(), Some(&MAX_COMPACT_POOLS));
+
+        // OOM-CONC-08: Strict 1:1 bijection between pool ID and compact ID
+        let mut pool_ids: Vec<u64> = all_tokens.iter().map(|t| t.physical_pool_id()).collect();
+        pool_ids.sort_unstable();
+        let pool_count_before = pool_ids.len();
+        pool_ids.dedup();
+        assert_eq!(
+            pool_ids.len(),
+            pool_count_before,
+            "All physical pool IDs must be strictly unique"
+        );
+
+        // OOM-CONC-09: allocated_count equals exact number of successes, immune to OOM errors
+        assert_eq!(registry.allocated_count() as usize, all_tokens.len());
+        assert!(!registry.corrupted.load(Ordering::SeqCst));
+
+        // OOM-CONC-05: Post-exhaustion attempts across threads return PoolIdExhausted
+        for extra_id in 1000..1010 {
+            assert_eq!(
+                registry.register(extra_id).unwrap_err(),
+                CompactPoolError::PoolIdExhausted
+            );
+        }
+    }
+
+    #[test]
+    fn test_oom_conc_02_same_pool_id_multithreaded_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let num_threads = 16;
+        let barrier = Arc::new(Barrier::new(num_threads));
+        let contested_pool_id = 42u64;
+
+        let mut handles = Vec::new();
+        for _ in 0..num_threads {
+            let reg = registry.clone();
+            let bar = barrier.clone();
+            handles.push(thread::spawn(move || {
+                bar.wait();
+                reg.register(contested_pool_id)
+            }));
+        }
+
+        let mut success_count = 0;
+        let mut already_registered_count = 0;
+
+        for h in handles {
+            match h.join().expect("Thread panicked") {
+                Ok(tok) => {
+                    success_count += 1;
+                    assert_eq!(tok.physical_pool_id(), contested_pool_id);
+                    assert_eq!(tok.compact_id(), 1);
+                }
+                Err(CompactPoolError::AlreadyRegistered { physical_pool_id }) => {
+                    already_registered_count += 1;
+                    assert_eq!(physical_pool_id, contested_pool_id);
+                }
+                Err(other) => panic!("Unexpected error: {other:?}"),
+            }
+        }
+
+        // OOM-CONC-02: Exactly 1 succeeds, all others receive AlreadyRegistered
+        assert_eq!(
+            success_count, 1,
+            "Exactly one thread must succeed in registering the pool"
+        );
+        assert_eq!(
+            already_registered_count,
+            num_threads - 1,
+            "All other threads must receive AlreadyRegistered"
+        );
+        assert_eq!(registry.allocated_count(), 1);
+    }
+
+    #[test]
+    fn test_oom_conc_10_registry16_multithreaded_contention_and_recovery() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        use std::time::Duration;
+
+        let registry = Arc::new(CompactPoolRegistryInstance16::new());
+        let num_workers = 8;
+        let target_allocations = 1000u64;
+        let barrier = Arc::new(Barrier::new(num_workers + 1));
+        let next_pool_id = Arc::new(AtomicU64::new(1));
+        let stop_injector = Arc::new(AtomicBool::new(false));
+
+        let reg_inj = registry.clone();
+        let barrier_inj = barrier.clone();
+        let stop_inj = stop_injector.clone();
+        let injector_handle = thread::spawn(move || {
+            barrier_inj.wait();
+            let mut state = false;
+            while !stop_inj.load(Ordering::Relaxed) {
+                state = !state;
+                reg_inj.inject_reserve_failure(state);
+                thread::sleep(Duration::from_micros(100));
+            }
+            reg_inj.inject_reserve_failure(false);
+        });
+
+        let mut worker_handles = Vec::new();
+        for _ in 0..num_workers {
+            let reg = registry.clone();
+            let bar = barrier.clone();
+            let next_pool = next_pool_id.clone();
+
+            worker_handles.push(thread::spawn(move || {
+                bar.wait();
+                let mut my_tokens = Vec::new();
+                loop {
+                    let pool_id = next_pool.fetch_add(1, Ordering::SeqCst);
+                    if pool_id > target_allocations {
+                        break;
+                    }
+                    loop {
+                        match reg.register(pool_id) {
+                            Ok(token) => {
+                                my_tokens.push(token);
+                                break;
+                            }
+                            Err(CompactPoolError::OutOfMemory) => {
+                                thread::yield_now();
+                            }
+                            Err(other) => {
+                                panic!("Unexpected error in 16-bit worker: {other:?}");
+                            }
+                        }
+                    }
+                }
+                my_tokens
+            }));
+        }
+
+        let mut all_tokens = Vec::new();
+        for h in worker_handles {
+            all_tokens.extend(h.join().expect("Worker thread panicked"));
+        }
+
+        stop_injector.store(true, Ordering::SeqCst);
+        injector_handle.join().expect("Injector thread panicked");
+        registry.inject_reserve_failure(false);
+
+        // OOM-CONC-10: Repeated verification on 16-bit registry
+        assert_eq!(all_tokens.len(), target_allocations as usize);
+        assert_eq!(registry.allocated_count() as u64, target_allocations);
+
+        let mut compact_ids: Vec<u16> = all_tokens.iter().map(|t| t.compact_id()).collect();
+        compact_ids.sort_unstable();
+        let count_before = compact_ids.len();
+        compact_ids.dedup();
+        assert_eq!(
+            compact_ids.len(),
+            count_before,
+            "All 16-bit compact IDs must be strictly unique"
+        );
+
+        let mut pool_ids: Vec<u64> = all_tokens.iter().map(|t| t.physical_pool_id()).collect();
+        pool_ids.sort_unstable();
+        let pool_count_before = pool_ids.len();
+        pool_ids.dedup();
+        assert_eq!(
+            pool_ids.len(),
+            pool_count_before,
+            "All physical pool IDs must be strictly unique"
         );
     }
 
