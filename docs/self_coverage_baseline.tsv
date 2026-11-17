@@ -47,11 +47,11 @@ lir_module.l	parser
 lir_verify.l	semantica
 lir_verify_core.l	lir
 lir_verify_helpers.l	semantica
-lir_write.l	parser
+lir_write.l	semantica
 loans_check.l	semantica
 loans_l.l	semantica
 main.l	semantica
-main_parser.l	parser
+main_parser.l	semantica
 main_sema.l	parser
 module_graph_l.l	lir
 modules_l.l	parser
@@ -84,7 +84,7 @@ sema_expr.l	parser
 sema_expr_temp.l	parser
 sema_loop_jump.l	semantica
 sema_lower.l	semantica
-sema_match_coverage.l	parser
+sema_match_coverage.l	semantica
 sema_ops.l	parser
 sema_stmt.l	parser
 sema_stmt_values.l	parser
