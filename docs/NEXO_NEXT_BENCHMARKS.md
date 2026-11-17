@@ -323,4 +323,48 @@ En la consolidación final de la rama `fix/nexo-v04-release-stabilization` se ce
    - Commit + reclaim diferido (`keep=1`): **438.9 ns/op** ($s_{\text{proc}} = 30.04$ ns, CV = 6.8%, 0.000 llamadas al SO/op)
    - Box global asignar + liberar: **147.1 ns/op** ($s_{\text{proc}} = 14.36$ ns, CV = 9.8%)
 
+---
+
+### 4.10 Release Candidate 0.1: Cierre Definitivo de Bloqueos y Validación de Campaña Oficial
+
+En la fase final de estabilización para el Release Candidate 0.1 sobre la rama `fix/nexo-v04-release-stabilization` se implementaron y verificaron de forma exhaustiva las soluciones de causa raíz para los 6 defectos de estabilización:
+
+1. **Clasificación Fail-Closed de Ejecuciones por Fallo de Git (P1)**:
+   - Implementación de `determine_execution_mode(git_info, force_official, force_experimental)` con verificación de HEAD SHA-256 de 40 dígitos hexadecimales, ausencia total de errores de inspección, ausencia de modificaciones locales y cero archivos untracked.
+   - Verificado con la suite completa de 10 pruebas unitarias `OFFICIAL-01` a `OFFICIAL-10` en `scripts/test_benchmark_isolation.py`.
+
+2. **Terminación Controlada y Supervisada de Hilos en Pruebas OOM (P2)**:
+   - Se introdujeron las estructuras `WorkerTracker` y `WorkerGuard` en `crates/nexo/src/next/compact.rs`, proveyendo cancelación cooperativa (`cancelled`), detección de pánicos en trabajadores (`worker_panicked`), conteo atómico de hilos vivos (`active_workers`) y un límite determinista acotado de espera activa (`MAX_INJECTOR_YIELDS = 200_000`).
+   - Verificado mediante pruebas adversariales unitarias específicas de cancelación y pánico.
+
+3. **Parser Numérico JSON Conforme a Gramática Estricta RFC 8259 (P2)**:
+   - Validador `validate_rfc8259_number()` en `nexo-physical-bench.rs` que rechaza estrictamente signos más iniciales (`+1`), ceros a la izquierda no permitidos (`01`, `007`), puntos flotantes sin dígitos iniciales (`.5`), decimales incompletos (`1.`), exponentes sin dígito (`1e`), `NaN`, `Infinity` y números fuera de rango (`1e309`).
+   - Verificado con 6 pruebas unitarias específicas y suites cruzadas.
+
+4. **Recompilación Release Obligatoria y Registro de Metadatos en Pruebas Estadísticas (P2)**:
+   - `get_nexo_bench_bin(force_rebuild=True)` en `scripts/test_stats_cross.py` recompila el binario release con `-p ele-nexo --bin nexo-physical-bench --release`, comprueba el código de retorno estricto de cargo, y extrae tamaño, marca de tiempo y SHA-256.
+   - Verificado mediante la suite `TestBinaryFreshnessAndRebuild` (STAT-FRESH-01..03).
+
+5. **Exclusividad Transaccional y Prevención de Carreras en Creación de Campañas (P2)**:
+   - Función `create_exclusive_campaign_dir()` en `scripts/run_benchmarks.py` que emplea creación exclusiva a nivel de directorio de campaña, elevando `FileExistsError` fail-closed ante cualquier colisión concurrente previa a la creación de subcarpetas.
+   - Verificado mediante la suite de aislamiento concurrente `TestCampaignRaceExclusivity`.
+
+6. **Inyección de Fallos Determinista y Verificación de Rollback en Windows (P2)**:
+   - Variable de entorno de prueba interna `NEXO_TEST_FAULT_ATOMIC_STAGE` (`FAIL_PUBLISH`, `FAIL_RESTORE`) en `nexo-physical-bench.rs`.
+   - Pruebas de integración `test_json_io_12` y `test_json_io_13` en `crates/nexo/tests/test_bench_io.rs` que demuestran que ante fallos en publicación el archivo original es restaurado sin artefactos temporales, y ante fallos en restauración se preserva intacto el archivo `<path>.bak.<pid>` emitiendo alarma crítica en stderr.
+
+7. **Resultados de la Campaña Oficial Release Candidate (`campaign_20261117_034851_1634f3ec`)**:
+   - **Git HEAD**: `6fb21a06e669a0a635dda8019f0927c760f80073` (árbol limpio, modo `official`)
+   - **Binario release SHA-256**: `847259cf54fc7b271545dbe9bbb2b8af9f24dafa5cf9ae8ba5dfd247a240be0c`
+   - **Revalidación estándar puro**: **19.9 ns/op** ($s_{\text{proc}} = 1.49$ ns, CV = 7.5%)
+   - **Revalidación compacta 32b**: **34.1 ns/op** ($s_{\text{proc}} = 13.42$ ns, CV = 39.4%)
+   - **Revalidación compacta 64b**: **42.1 ns/op** ($s_{\text{proc}} = 29.12$ ns, CV = 69.1%)
+   - **Revalidar estándar + leer int**: **71.2 ns/op** ($s_{\text{proc}} = 11.30$ ns, CV = 15.9%)
+   - **Hole destroy + reuse**: **602.9 ns/op** ($s_{\text{proc}} = 255.67$ ns, 0.000 llamadas al SO/op)
+   - **Commit + reclaim diferido (`keep=1`)**: **695.2 ns/op** ($s_{\text{proc}} = 434.87$ ns, CV = 62.6%, 0.000 llamadas al SO/op)
+   - **Hot allocate + free**: **773.9 ns/op** ($s_{\text{proc}} = 454.32$ ns)
+   - **Ráfaga 960 ops (por op)**: **373.6 ns/op** ($s_{\text{proc}} = 238.69$ ns)
+   - **Box global asignar + liberar**: **160.8 ns/op** ($s_{\text{proc}} = 39.63$ ns, CV = 24.6%)
+
+
 

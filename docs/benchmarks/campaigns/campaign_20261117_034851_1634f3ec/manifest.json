@@ -1,0 +1,30 @@
+{
+  "campaign_id": "campaign_20261117_034851_1634f3ec",
+  "mode": "official",
+  "schema_version": "v0.4.1",
+  "stats_spec_version": "1.1.0",
+  "timestamp": "2026-11-17T03:48:51.553030+00:00",
+  "binary_sha256": "847259cf54fc7b271545dbe9bbb2b8af9f24dafa5cf9ae8ba5dfd247a240be0c",
+  "git": {
+    "head": "6fb21a06e669a0a635dda8019f0927c760f80073",
+    "branch": "fix/nexo-v04-release-stabilization",
+    "dirty": false,
+    "diff_sha256": null
+  },
+  "reproducibility": {
+    "status": "official_clean",
+    "reproducible_from_artifacts": true,
+    "dirty": false,
+    "has_diff": false,
+    "untracked_count": 0,
+    "untracked_bundled_count": 0
+  },
+  "files": {
+    "summary.json": "b46b9704f16fccd4ceec9e6001a8b2505cf45891180cb23f0b2582de9523aa55",
+    "raw/process_1.json": "4099e1027a7cc7a478a8f5f9d4c15b582ba17063c6661c1688f1f74f6f98a5a5",
+    "raw/process_2.json": "28c1d901d936a80f7b9cd6f4b0a30f85586acfd8a3c81c64443ab5c9f4649157",
+    "raw/process_3.json": "2a9aa34b3943359e20959fa2db43c007568985ed0a9acfccecb39ff533937f8a",
+    "raw/process_4.json": "b12b83e20404b31ccb0468c5c9968933bd0dace012efa681837ca996e9401d5a",
+    "raw/process_5.json": "365a7c0fa1dfdbd69fe9341e2a6d751f6190ec70ded18208d24a3239f4a5c874"
+  }
+}

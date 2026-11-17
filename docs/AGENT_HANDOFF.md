@@ -1,6 +1,63 @@
 # Traspaso de agente — ELE
 
-## Actualización 2026-11-17 (Operación Zero Regression — Consolidación Definitiva y Estabilización de NEXO Prototype 0.1 — fix/nexo-v04-release-stabilization)
+## Actualización 2026-11-17 (Operación Release Candidate 0.1 — Cierre Definitivo de Bloqueos, Validación Adversarial y Preparación de Integración — fix/nexo-v04-release-stabilization)
+
+Ramas y estado de Git:
+- `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
+- `feat/nexo-v0.3-physical-memory` (PR #69 en borrador, sin merge, HEAD `4cb044e`, verificado limpio).
+- `feat/nexo-v0.4-next-memory` (Base experimental v0.4 en `18ddcfc7e728516e2d051d5f13e2ed8d9c755ae0`).
+- `fix/nexo-v04-evidence-final-hardening`: Rama base del PR (`edad487a559b4adfe60241e377ff1d32694e5698`).
+- `fix/nexo-v04-release-stabilization`: **Rama activa consolidada de Release Candidate 0.1 (HEAD: `6fb21a0`)**.
+
+### 1. Defectos de Estabilización Cerrados por Causa Raíz
+
+1. **P1 — Clasificación Errónea de Ejecuciones por Fallo de Git (OFFICIAL-01..10)**:
+   - *Causa raíz*: Si la invocación a `git` fallaba (`git_error = True`) o el repositorio no era un clon Git válido, la lógica clasificaba por defecto la ejecución como `"official"`, violando el principio fail-closed.
+   - *Solución*: Implementación de `determine_execution_mode(git_info, force_official, force_experimental)` con verificación de HEAD commit SHA real (40 caracteres hexadecimales), ausencia de excepciones en Git, ausencia de modificaciones locales y cero archivos untracked. Si cualquier condición falla y se requirió `--official`, aborta inmediatamente con `ValueError`. Sin flags, clasifica como `"experimental"`.
+   - *Verificación*: 10 pruebas unitarias `OFFICIAL-01` a `OFFICIAL-10` en `scripts/test_benchmark_isolation.py`.
+
+2. **P2 — Terminación Controlada y Detección de Pánico/Cancelación en Pruebas OOM (OOM-GUARD-01..04)**:
+   - *Causa raíz*: El hilo inyector de fallos OOM en `test_reg_oom_09` y `test_oom_conc_10` esperaba en un bucle `while tracker.oom_count < target { thread::yield_now(); }` sin condición de parada si los hilos trabajadores entraban en pánico o terminaban prematuramente.
+   - *Solución*: Creación de las estructuras `WorkerTracker` y `WorkerGuard` implementando el patrón RAII. Se monitorean `cancelled`, `worker_panicked`, y `active_workers`. Si todos los trabajadores finalizan o entran en pánico, o si se excede el límite estricto de yields (`MAX_INJECTOR_YIELDS = 200_000`), el inyector aborta limpiamente restaurando el flag `fail_reserve(false)`.
+   - *Verificación*: Pruebas unitarias de cancelación, salida de trabajadores y pánico en `crates/nexo/src/next/compact.rs`.
+
+3. **P2 — Inconsistencias Numéricas y Parser JSON Permisivo (RFC 8259)**:
+   - *Causa raíz*: El analizador de muestras numéricas permitía sintaxis no estándar (signos más iniciales `+1`, ceros a la izquierda `01`, números sin entero `.5` o sin fracción `1.`, exponentes incompletos `1e`, `NaN` e `Infinity`).
+   - *Solución*: Analizador léxico y sintáctico estricto `validate_rfc8259_number(token)` en `crates/nexo/src/bin/nexo-physical-bench.rs` que cumple la gramática formal de la RFC 8259, rechazando extensiones, desbordamientos a infinito (`1e309`) y arrays no planos.
+   - *Verificación*: 6 pruebas unitarias en `nexo-physical-bench.rs` y suite cruzada con Python en `scripts/test_stats_cross.py`.
+
+4. **P2 — Ejecución de Binario Obsoleto en Pruebas Estadísticas Cruzadas (STAT-FRESH-01..03)**:
+   - *Causa raíz*: `test_stats_cross.py` verificaba si existía un ejecutable en `target/release/` y lo utilizaba directamente sin forzar su recompilación, arriesgando ejecutar binarios desactualizados respecto al código fuente.
+   - *Solución*: `get_nexo_bench_bin(force_rebuild=True)` ejecuta de forma obligatoria `cargo build -p ele-nexo --bin nexo-physical-bench --release`, comprueba código de salida 0, valida la existencia del binario y extrae ruta, tamaño, marca de tiempo mtime y hash SHA-256 criptográfico.
+   - *Verificación*: Suite `TestBinaryFreshnessAndRebuild` en `scripts/test_stats_cross.py`.
+
+5. **P2 — Condición de Carrera en Creación de Carpetas de Campaña (CAMPAIGN-RACE-01..03)**:
+   - *Causa raíz*: Uso de `mkdir(parents=True, exist_ok=True)` sobre la carpeta raíz de la campaña permitía que dos ejecuciones concurrentes compartieran o sobreescribieran la misma carpeta.
+   - *Solución*: Función `create_exclusive_campaign_dir(campaigns_dir, campaign_id)` que invoca `os.mkdir()` exclusivo a nivel de carpeta de campaña, fallando con `FileExistsError` fail-closed si la carpeta ya existe. Las subcarpetas internas (`raw/`) se crean una vez garantizada la exclusividad.
+   - *Verificación*: Suite `TestCampaignRaceExclusivity` en `scripts/test_benchmark_isolation.py`.
+
+6. **P2 — Inyección de Fallos Determinista y Verificación de Rollback en Windows**:
+   - *Causa raíz*: No existían pruebas de integración que inyectaran fallos en etapas intermedias del protocolo de rollback atómico en Windows (renombrado de temporal a destino o restauración de respaldo).
+   - *Solución*: Hook interno de prueba `NEXO_TEST_FAULT_ATOMIC_STAGE` (`FAIL_PUBLISH`, `FAIL_RESTORE`) en `nexo-physical-bench.rs`. Pruebas `test_json_io_12` y `test_json_io_13` en `crates/nexo/tests/test_bench_io.rs` que verifican que ante fallo de publicación se restaura la versión previa original eliminando temporales, y ante fallo de restauración se preserva intacto el backup `<path>.bak.<pid>` emitiendo alerta crítica.
+
+### 2. Campaña Oficial de Benchmarks Consolidada (Release Candidate 0.1)
+
+- **Campaña ID**: `campaign_20261117_034851_1634f3ec`
+- **Modo**: `OFFICIAL` (Worktree limpio, sin modificaciones locales)
+- **Git HEAD**: `6fb21a06e669a0a635dda8019f0927c760f80073`
+- **Binario release SHA-256**: `847259cf54fc7b271545dbe9bbb2b8af9f24dafa5cf9ae8ba5dfd247a240be0c`
+- **Integridad**: Manifiesto `manifest.json`, checksums SHA-256 completos y confirmación atómica en `docs/benchmarks/LATEST_CAMPAIGN`.
+
+### 3. Matriz de Validación Dual-OS (Windows MSVC + Linux WSL2 glibc)
+
+- Windows MSVC: 279 pruebas Rust aprobadas (0 fallos).
+- Linux WSL2 glibc: 280 pruebas Rust aprobadas (0 fallos).
+- Pruebas Python (`test_benchmark_isolation.py`, `test_stats_cross.py`, `test_stats_integrity.py`): 62 pruebas aprobadas (0 fallos).
+- Prototype 0.1 E2E y Example: Ejecutados con éxito en ambos sistemas operativos.
+
+---
+
+## Actualización previa 2026-11-17 (Operación Zero Regression — Consolidación Definitiva y Estabilización de NEXO Prototype 0.1 — fix/nexo-v04-release-stabilization)
 
 Ramas y estado de Git:
 - `main`: `2712a1b7e17a3733b98b4de82db9583446aee34f` (estrictamente inalterada).
