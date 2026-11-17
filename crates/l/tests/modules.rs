@@ -411,10 +411,7 @@ fn homonymous_generic_declaration_in_one_module_still_fails() {
 fn public_symbol_from_unrelated_sibling_is_not_visible() {
     // main's import of b must never make b's exports visible inside a.
     let fix = ModuleFixture::new("sibling_public_not_imported");
-    fix.write_file(
-        "a.l",
-        "expose flow from_a() => Int { give only_b() }\n",
-    );
+    fix.write_file("a.l", "expose flow from_a() => Int { give only_b() }\n");
     fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
     fix.write_file(
         "main.l",
@@ -424,7 +421,10 @@ fn public_symbol_from_unrelated_sibling_is_not_visible() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("función no definida: only_b"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
         assert!(stderr.contains("a.l"), "{backend}: {stderr}");
     }
 }
@@ -443,7 +443,10 @@ fn transitive_public_symbol_requires_direct_import() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("función no definida: only_b"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
         assert!(stderr.contains("main.l"), "{backend}: {stderr}");
     }
 }
@@ -479,7 +482,10 @@ fn public_generic_from_sibling_is_not_visible() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("función no definida: only_b"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
         assert!(stderr.contains("a.l"), "{backend}: {stderr}");
     }
 }
@@ -530,7 +536,10 @@ fn two_direct_public_imports_with_same_name_are_ambiguous() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("función ambigua: shared"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función ambigua: shared"),
+            "{backend}: {stderr}"
+        );
         assert!(stderr.contains("main.l"), "{backend}: {stderr}");
     }
 }
@@ -554,7 +563,10 @@ fn two_direct_public_generic_imports_are_ambiguous() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("función genérica ambigua: shared"), "{backend}: {stderr}");
+        assert!(
+            stderr.contains("función genérica ambigua: shared"),
+            "{backend}: {stderr}"
+        );
         assert!(stderr.contains("main.l"), "{backend}: {stderr}");
     }
 }
