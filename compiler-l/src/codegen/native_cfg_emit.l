@@ -7,6 +7,8 @@ take native_rt
 take native_cfg_text
 take native_cfg_arith
 take native_cfg_list_emit
+take native_cfg_fields
+take native_cfg_ir
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results

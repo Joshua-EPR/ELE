@@ -472,6 +472,9 @@ fn two_distinct_public_names_reachable_only_transitively_are_ambiguous() {
 
 #[test]
 fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
+    // Stage 0 requires a direct import for unqualified public calls.
+    // Explicitly importing common does not load it a second time even
+    // though left and right also import it through the diamond.
     compare_multi(
         "diamond_direct_export",
         "main.l",
@@ -487,7 +490,7 @@ fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
             ),
             (
                 "main.l",
-                "import left\nimport right\nfn main() -> Int { return answer() }\n",
+                "import left\nimport right\nimport common\nfn main() -> Int { return answer() }\n",
             ),
         ],
     );
