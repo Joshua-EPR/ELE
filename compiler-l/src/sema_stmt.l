@@ -333,7 +333,9 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
             }
             let loop_path = ctx.symbols.symbols[sym_id].move_path
             lirLetBind(&mut ctx, loop_path, bind_t, by_ref && loop_loan >= 0)
-            if loop_loan >= 0 { loanBind(&mut ctx.flow, loop_path, loop_loan) }
+            if loop_loan >= 0 && !loanBindReferenceRoot(&mut ctx.flow, loop_path, loop_loan) {
+                semaAddError(&mut ctx, "L0012", "vínculo de préstamo del bucle inválido", stmt.start, stmt.end)
+            }
             let body_stmt = stmt.d
             if body_stmt >= 0 {
                 semaCheckStmt(&mut ctx, source, tree, body_stmt)
