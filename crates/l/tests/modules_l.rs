@@ -742,5 +742,9 @@ fn public_borrow_site_constants_are_imported_without_exposing_private_constants(
     );
     assert_eq!(private.code, Some(1), "{}", private.stderr);
     assert!(private.stderr.contains("main.l:"), "{}", private.stderr);
-    assert!(private.stderr.contains("error[L0001]"), "{}", private.stderr);
+    assert!(
+        private.stderr.contains("error[L0001]"),
+        "{}",
+        private.stderr
+    );
 }
