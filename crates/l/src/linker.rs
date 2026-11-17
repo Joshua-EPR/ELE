@@ -92,7 +92,9 @@ fn find_link_exe() -> Result<PathBuf, String> {
             tools.display()
         ));
     }
-    Err("no se encontraron herramientas C++ de Visual Studio estables ni Insiders (link.exe); instale Build Tools o defina L_LINKER".into())
+    Err(
+        "no se encontraron herramientas C++ de Visual Studio estables ni Insiders (link.exe); instale Build Tools o defina L_LINKER".into(),
+    )
 }
 
 fn find_kernel32() -> Result<Vec<PathBuf>, String> {
@@ -179,7 +181,7 @@ mod tests {
         let with_insiders = vswhere_arguments(true);
         assert_eq!(stable[0], "-latest");
         assert!(!stable.contains(&"-prerelease"));
-        assert_eq!(with_insiders[0..2], ["-latest", "-prerelease"]);
+        assert_eq!(&with_insiders[..2], &["-latest", "-prerelease"]);
         assert_eq!(with_insiders.len(), stable.len() + 1);
         for args in [&stable, &with_insiders] {
             assert!(args.contains(&"Microsoft.VisualStudio.Component.VC.Tools.x86.x64"));
