@@ -51,12 +51,23 @@ pub fn loanOfPath(graph: &FlowGraph, path: Int) -> Int {
     return graph.binding_loans[root]
 }
 
-pub fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
+fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
     if path < 0 { return }
     while graph.binding_loans.length < graph.paths.length {
         graph.binding_loans.push(-1)
     }
     graph.binding_loans[path] = loan
+}
+
+// Exported binding boundary for semantic lowering: only a real root path
+// may receive an existing loan. The unvalidated loanBind primitive stays
+// module-private and is used internally by loanBindParam.
+pub fn loanBindReferenceRoot(graph: &mut FlowGraph, path: Int, loan: Int) -> Bool {
+    if path < 0 || path >= graph.paths.length { return false }
+    if graph.paths[path].parent >= 0 { return false }
+    if loan < 0 || loan >= graph.loans.length { return false }
+    loanBind(&mut graph, path, loan)
+    return true
 }
 
 // A reference parameter carries a loan on its own place. The loan has no
@@ -114,7 +125,7 @@ pub fn loanDescendsFrom(graph: &FlowGraph, loan: Int, ancestor: Int) -> Bool {
 // of a borrowed call result). Both always point to a smaller id, so walks
 // terminate. True when every root reachable from `loan` is a reference
 // parameter: the value cannot outlive the call that received it.
-pub fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
+fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
     var stack: List<Int> = List[]
     stack.push(loan)
     while stack.length > 0 {
@@ -134,6 +145,16 @@ pub fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
         }
     }
     return true
+}
+
+// Validates a borrowed return across the module boundary without exposing
+// the provenance walker itself. Status: 0 allowed, 1 missing/invalid loan,
+// 2 mutable mode mismatch, 3 loan origin not rooted in a parameter.
+pub fn loanBorrowedReturnStatus(graph: &FlowGraph, loan: Int, requires_mut: Bool) -> Int {
+    if loan < 0 || loan >= graph.loans.length { return 1 }
+    if requires_mut && !loanIsMut(graph, loan) { return 2 }
+    if !loanRootedAtParams(graph, loan) { return 3 }
+    return 0
 }
 
 // Result loan of a call to a borrowing function: one node per origin
