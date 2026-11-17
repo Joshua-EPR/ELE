@@ -164,7 +164,10 @@ de Rust, de modo que el mensaje lo define L y ambos backends son comparables.
 
 Enlazado (`linker.rs`): `link.exe /NODEFAULTLIB /ENTRY:l_start /SUBSYSTEM:CONSOLE
 objeto kernel32.lib`. `link.exe` se localiza con `vswhere` (componente VC Tools x64) y
-`kernel32.lib` en el Windows SDK; se pueden forzar con `L_LINKER` y `L_LIBPATH`. Un
+`kernel32.lib` en el Windows SDK. Se busca primero una instalación estable de
+Visual Studio con MSVC x64 y, si no existe un enlazador utilizable, se vuelve a
+consultar `vswhere -prerelease` para admitir Visual Studio Insiders/Preview.
+Las rutas pueden forzarse con `L_LINKER` y `L_LIBPATH`, sin depender de `PATH`. Un
 ejecutable típico ocupa 3,5 KB e importa solo esas tres funciones (verificado con
 `dumpbin /imports`).
 
