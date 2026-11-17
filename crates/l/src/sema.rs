@@ -5790,10 +5790,19 @@ pub fn check(program: parser::Program) -> Result<Program, Diagnostic> {
     let (mut env, decls) = declare(&program, &prelude)?;
     let globals = global_constants(&program.constants, &env)?;
     check_defaults(&mut env, &program, &globals)?;
+    // The loader assigns file 1 to the entry source, even though imported
+    // declarations are merged first. A dependency's public or private main
+    // must never become the program's entry point through the global table.
+    // Standalone (non-modular) parsing uses file 0.
+    let entry_file = if program.functions.iter().any(|f| f.span.file != 0) {
+        1
+    } else {
+        0
+    };
     let main = *env
-        .functions
+        .module_functions
         .borrow()
-        .get("main")
+        .get(&(entry_file, "main".to_owned()))
         .ok_or_else(|| err(Span::at(1, 1), "falta fn main()"))?;
 
     let mut lowered: Vec<Option<Function>> = Vec::new();
@@ -5835,7 +5844,10 @@ pub fn check(program: parser::Program) -> Result<Program, Diagnostic> {
     }
     let functions: Vec<Function> = lowered.into_iter().flatten().collect();
     let entry = &functions[main];
-    let main_decl = decls.iter().find(|d| d.0.name == "main").map(|d| d.0);
+    let main_decl = decls
+        .iter()
+        .find(|d| d.0.name == "main" && d.0.span.file == entry_file)
+        .map(|d| d.0);
     let has_exit_code = entry.result == Type::Int
         && !entry.is_async
         && entry.borrow_return.is_none()
