@@ -809,7 +809,11 @@ fn verify_fanout_graph(program: &project_l::parser::Program, files: &[String], l
         .filter(|import| import.path == "shared")
         .collect();
     assert_eq!(shared_edges.len(), leaves);
-    assert!(shared_edges.iter().all(|edge| edge.target_file == Some(shared_id)));
+    assert!(
+        shared_edges
+            .iter()
+            .all(|edge| edge.target_file == Some(shared_id))
+    );
     for import in &program.imports {
         assert_eq!(
             import.target_file,
