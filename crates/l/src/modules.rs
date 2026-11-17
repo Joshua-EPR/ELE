@@ -153,14 +153,14 @@ fn load_module_recursive(
     // Check the metadata first to avoid loading a known oversized file.
     // Still bound the actual read: metadata is not reliable for every file
     // type and the file can grow between this check and the read.
-    let file = fs::File::open(canonical_path).map_err(&io_error)?;
-    if file.metadata().map_err(&io_error)?.len() > MAX_MODULE_BYTES as u64 {
+    let file = fs::File::open(canonical_path).map_err(io_error)?;
+    if file.metadata().map_err(io_error)?.len() > MAX_MODULE_BYTES as u64 {
         return Err(oversized());
     }
     let mut bytes = Vec::new();
     file.take(MAX_MODULE_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(&io_error)?;
+        .map_err(io_error)?;
     if bytes.len() > MAX_MODULE_BYTES {
         return Err(oversized());
     }
