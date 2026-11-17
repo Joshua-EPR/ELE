@@ -763,3 +763,109 @@ fn diamond_imports_reuse_canonical_module_file_ids() {
     // Verify the unchanged semantics across both native backends as well.
     fix.check("main.l", "83\n");
 }
+
+fn write_fanout_module_graph(fix: &ModuleFixture, leaves: usize) {
+    // Shallow graph with many direct imports and a shared dependency:
+    // exercises canonical path lookup without making the test depend on
+    // the compiler's recursive nesting limits.
+    fix.write_file("shared.l", "expose flow value() => Int { give 42 }\n");
+    let mut entry = String::new();
+    for i in 0..leaves {
+        let name = format!("leaf{i:04}");
+        fix.write_file(
+            &format!("{name}.l"),
+            &format!("take shared\nexpose flow {name}() => Int {{ give value() }}\n"),
+        );
+        entry.push_str(&format!("take {name}\n"));
+    }
+    entry.push_str("flow main() {}\n");
+    fix.write_file("main.l", &entry);
+}
+
+fn verify_fanout_graph(program: &project_l::parser::Program, files: &[String], leaves: usize) {
+    use std::collections::HashMap;
+    assert_eq!(files.len(), leaves + 2);
+    assert_eq!(program.imports.len(), leaves * 2);
+    assert!(files[0].ends_with("main.l"));
+    let file_ids: HashMap<_, _> = files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| {
+            (
+                std::path::Path::new(file)
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                u32::try_from(index + 1).unwrap(),
+            )
+        })
+        .collect();
+    let shared_id = file_ids["shared"];
+    let shared_edges: Vec<_> = program
+        .imports
+        .iter()
+        .filter(|import| import.path == "shared")
+        .collect();
+    assert_eq!(shared_edges.len(), leaves);
+    assert!(
+        shared_edges
+            .iter()
+            .all(|edge| edge.target_file == Some(shared_id))
+    );
+    for import in &program.imports {
+        assert_eq!(
+            import.target_file,
+            Some(file_ids[import.path.as_str()]),
+            "incorrect target_file for {}",
+            import.path
+        );
+        assert!(
+            import.span.file >= 1 && import.span.file <= files.len() as u32,
+            "invalid importing source ID for {}",
+            import.path
+        );
+    }
+}
+
+#[test]
+fn fanout_module_graph_preserves_source_and_import_ids() {
+    let fix = ModuleFixture::new("fanout_graph_ids_48");
+    write_fanout_module_graph(&fix, 48);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    verify_fanout_graph(&program, &files, 48);
+}
+
+#[test]
+#[ignore = "manual benchmark; use --ignored --nocapture and compare runs on the same machine"]
+fn benchmark_fanout_module_loader() {
+    // Keep file generation and assertions outside the timed section.
+    // This times Stage 0 module loading only, not compilation or a backend.
+    // Deliberately do not assert wall-clock thresholds in CI.
+    for leaves in [32, 128, 512] {
+        let fix = ModuleFixture::new(&format!("fanout_benchmark_{leaves}"));
+        write_fanout_module_graph(&fix, leaves);
+        let entry = fix.dir.join("main.l");
+        let (program, files) = project_l::modules::load_program_files(&entry).unwrap();
+        verify_fanout_graph(&program, &files, leaves);
+
+        let mut nanos = Vec::new();
+        for _ in 0..7 {
+            let start = std::time::Instant::now();
+            let (program, files) = project_l::modules::load_program_files(&entry).unwrap();
+            let elapsed = start.elapsed();
+            verify_fanout_graph(&program, &files, leaves);
+            nanos.push(elapsed.as_nanos());
+        }
+        nanos.sort_unstable();
+        println!(
+            "stage0 module_loader leaves={leaves} files={} imports={} median_ns={} min_ns={} max_ns={}",
+            files.len(),
+            program.imports.len(),
+            nanos[nanos.len() / 2],
+            nanos[0],
+            nanos[nanos.len() - 1],
+        );
+    }
+}
