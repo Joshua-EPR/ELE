@@ -158,11 +158,11 @@ fn load_module_recursive(
     })?;
     let tokens =
         lexer::lex_file(&source, file_id).map_err(|d| d.with_file(shown(canonical_path)))?;
-    let prog = parser::parse(tokens).map_err(|d| d.with_file(shown(canonical_path)))?;
+    let mut prog = parser::parse(tokens).map_err(|d| d.with_file(shown(canonical_path)))?;
 
     // Resolve dependencies relative to current module's directory
     let dir = canonical_path.parent().unwrap_or(Path::new("."));
-    for imp in &prog.imports {
+    for imp in &mut prog.imports {
         if imp.path == "std.io.print" {
             continue;
         }
@@ -196,6 +196,21 @@ fn load_module_recursive(
             loading_stack,
             files,
         )?;
+        // Keep the canonical identity of the directly imported module.
+        // The merged AST otherwise loses the link between import and file ID.
+        let target = files
+            .iter()
+            .position(|path| path == &shown(&canonical_candidate))
+            .ok_or_else(|| {
+                Diagnostic::new(imp.span, "módulo cargado sin identificador de archivo")
+                    .with_file(shown(canonical_path))
+                    .classify("L0014", "módulos")
+            })?;
+        imp.target_file = Some(u32::try_from(target + 1).map_err(|_| {
+            Diagnostic::new(imp.span, "demasiados módulos en el programa")
+                .with_file(shown(canonical_path))
+                .classify("L0014", "módulos")
+        })?);
     }
 
     loading_stack.pop();
