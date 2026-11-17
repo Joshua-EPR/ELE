@@ -548,7 +548,45 @@ impl PhysicalPool {
         self.id
     }
 
+    /// Comprueba si el pool físico ha sido cerrado y su reserva de páginas liberada.
+    pub fn is_closed(&self) -> bool {
+        self.space.is_none()
+    }
+
+    /// Comprueba si el pool físico se encuentra abierto (su reserva no ha sido liberada).
+    pub fn is_open(&self) -> bool {
+        self.space.is_some()
+    }
+
+    /// Comprueba si el pool físico se encuentra en estado ambiguo de liberación (`ReleaseUncertain`).
+    pub fn is_release_uncertain(&self) -> bool {
+        self.space
+            .as_ref()
+            .is_some_and(|s| s.is_release_uncertain())
+    }
+
+    /// Comprueba si el pool físico se encuentra completamente operativo (abierto y sin incertidumbre de liberación).
+    pub fn is_operational(&self) -> bool {
+        self.space
+            .as_ref()
+            .is_some_and(|s| !s.is_release_uncertain() && !s.is_released())
+    }
+
+    /// Garantiza que el pool físico se encuentra en estado plenamente operativo.
+    ///
+    /// # Errores
+    /// - [`PoolError::Closed`]: Si el pool ha sido cerrado y su reserva liberada.
+    /// - [`PoolError::Physical(PhysicalError::ReleaseUncertain)`]: Si un intento de cierre previo
+    ///   dejó la reserva en estado ambiguo (`ReleaseUncertain`).
+    /// - [`PoolError::Physical(PhysicalError::Released)`]: Si la reserva subyacente fue liberada.
+    pub fn ensure_operational(&self) -> Result<(), PoolError> {
+        let space = self.space.as_ref().ok_or(PoolError::Closed)?;
+        space.ensure_operational()?;
+        Ok(())
+    }
+
     pub fn base_addr(&self) -> Result<usize, PoolError> {
+        self.ensure_operational()?;
         Ok(self.space()?.base_addr())
     }
 
@@ -1057,12 +1095,14 @@ impl PhysicalPool {
     }
 
     pub fn generation(&self, slot: u32) -> Result<u32, PoolError> {
+        self.ensure_operational()?;
         let (sp, sub, bit) = self.locate(slot)?;
         let meta = self.superpages[sp].as_ref().ok_or(PoolError::OutOfBounds)?;
         Ok(meta.generations[sub * self.slots_per_subpage as usize + bit])
     }
 
     pub fn page_state(&self, slot: u32) -> Result<PageState, PoolError> {
+        self.ensure_operational()?;
         let (sp, sub, _) = self.locate(slot)?;
         Ok(self.superpages[sp]
             .as_ref()
@@ -1072,6 +1112,7 @@ impl PhysicalPool {
 
     /// Estado físico (según el SO) de la subpágina que contiene `slot`.
     pub fn physical_access(&self, slot: u32) -> Result<PageAccess, PoolError> {
+        self.ensure_operational()?;
         let (sp, sub, _) = self.locate(slot)?;
         Ok(self.space()?.page_access(self.data_offset(sp, sub))?)
     }
@@ -1122,6 +1163,7 @@ impl PhysicalPool {
     }
 
     pub fn check_invariants(&self) -> Result<(), PoolError> {
+        self.ensure_operational()?;
         let inv = |m: String| Err(PoolError::Invariant(m));
         let space = self.space()?;
         let mask = self.full_mask();
@@ -1260,7 +1302,15 @@ impl PhysicalPool {
     }
 
     /// Valida que el ordinal `sp` corresponde a una superpágina inicializada en este pool.
+    ///
+    /// # Errores
+    /// - [`PoolError::Closed`]: Si el pool físico está cerrado.
+    /// - [`PoolError::Physical(PhysicalError::ReleaseUncertain)`]: Si el pool está en estado
+    ///   físico ambiguo de liberación.
+    /// - [`PoolError::OutOfBounds`]: Si `sp` está fuera del rango de superpáginas de la reserva.
+    /// - [`PoolError::Invariant`]: Si la superpágina dentro del rango aún no ha sido inicializada.
     pub fn validate_superpage(&self, sp: usize) -> Result<SuperpageIndex, PoolError> {
+        self.ensure_operational()?;
         if sp >= self.superpages.len() {
             return Err(PoolError::OutOfBounds);
         }
@@ -1303,11 +1353,6 @@ impl PhysicalPool {
 
     fn space_mut(&mut self) -> Result<&mut AddressSpace, PoolError> {
         self.space.as_mut().ok_or(PoolError::Closed)
-    }
-
-    fn ensure_operational(&self) -> Result<(), PoolError> {
-        self.space()?.ensure_operational()?;
-        Ok(())
     }
 
     fn initialize_superpage(&mut self, sp: usize) -> Result<(), PoolError> {
@@ -1549,7 +1594,7 @@ impl PhysicalPool {
         if pool != self.id {
             return Err(PoolError::ForeignHandle);
         }
-        self.space()?;
+        self.ensure_operational()?;
         let (sp, sub, bit) = self.locate(slot)?;
         let meta = self.superpages[sp]
             .as_ref()
@@ -1566,7 +1611,7 @@ impl PhysicalPool {
         if token.pool != self.id {
             return Err(PoolError::ForeignHandle);
         }
-        self.space()?;
+        self.ensure_operational()?;
         let (sp, sub, bit) = self.locate(token.slot)?;
         let meta = self.superpages[sp]
             .as_ref()
