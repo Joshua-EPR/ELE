@@ -241,7 +241,10 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     assert!(!first.contains("main.l"), "{err}");
 
     // The same program with the error moved to the entry file names it.
-    fix.write_file("sub/ayudante.l", "pub fn ayuda() -> Int {\n    return 1\n}\n");
+    fix.write_file(
+        "sub/ayudante.l",
+        "pub fn ayuda() -> Int {\n    return 1\n}\n",
+    );
     fix.write_file(
         "main.l",
         "import intermedio\n\nfn main() {\n    print(doble())\n    print(nada)\n}\n",
@@ -278,7 +281,10 @@ fn unambiguous_private_function_stays_in_its_module() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("función no definida: secret"), "{backend}: {err}");
+        assert!(
+            err.contains("función no definida: secret"),
+            "{backend}: {err}"
+        );
         assert!(err.contains("main.l"), "{backend}: {err}");
     }
 }
@@ -286,10 +292,7 @@ fn unambiguous_private_function_stays_in_its_module() {
 #[test]
 fn unambiguous_private_generic_stays_in_its_module() {
     let fix = ModuleFixture::new("private_generic_nonexported");
-    fix.write_file(
-        "lib.l",
-        "flow secret of[T](value: T) => Int { give 42 }\n",
-    );
+    fix.write_file("lib.l", "flow secret of[T](value: T) => Int { give 42 }\n");
     fix.write_file(
         "main.l",
         "take lib\nflow main() { print(secret of[Int](0)) }\n",
@@ -298,7 +301,10 @@ fn unambiguous_private_generic_stays_in_its_module() {
         let out = fix.build("main.l", backend, false);
         assert!(!out.status.success(), "{backend}");
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("función no definida: secret"), "{backend}: {err}");
+        assert!(
+            err.contains("función no definida: secret"),
+            "{backend}: {err}"
+        );
         assert!(err.contains("main.l"), "{backend}: {err}");
     }
 }
