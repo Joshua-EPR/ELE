@@ -10,6 +10,9 @@ use std::{
 };
 
 pub const MAX_MODULE_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum number of simultaneously active modules in an import chain.
+/// This limits recursive stack use, not the total number of modules in a build.
+pub const MAX_IMPORT_DEPTH: usize = 128;
 
 /// Loads an entry source file and all of its imported dependencies transitively,
 /// detecting cycles and resolving duplicate imports in deterministic topological order.
@@ -134,6 +137,22 @@ fn load_module_recursive(
     // Deduplication check
     if file_ids.contains_key(canonical_path) {
         return Ok(());
+    }
+
+    // Every new import adds a stack frame. Reject deep acyclic chains before
+    // recursing further; a wide graph with many modules remains supported.
+    // Prefer the importing source as the diagnostic file because import_span
+    // refers to the 'take' declaration there, not the target module.
+    if loading_stack.len() >= MAX_IMPORT_DEPTH {
+        let importer = loading_stack
+            .last()
+            .map_or(canonical_path, PathBuf::as_path);
+        return Err(Diagnostic::new(
+            import_span,
+            format!("profundidad de imports excede el límite de {MAX_IMPORT_DEPTH} módulos"),
+        )
+        .with_file(shown(importer))
+        .classify("L0014", "módulos"));
     }
 
     loading_stack.push(canonical_path.to_path_buf());

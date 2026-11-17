@@ -869,3 +869,85 @@ fn benchmark_fanout_module_loader() {
         );
     }
 }
+
+fn write_import_chain(fix: &ModuleFixture, count: usize) {
+    assert!(count >= 1);
+    for index in 0..count {
+        let name = if index == 0 {
+            "main.l".to_owned()
+        } else {
+            format!("m{index:03}.l")
+        };
+        let mut source = String::new();
+        if index + 1 < count {
+            source.push_str(&format!("take m{:03}\n", index + 1));
+        }
+        if index == 0 {
+            source.push_str("flow main() {}\n");
+        } else {
+            source.push_str(&format!("flow item{index:03}() {{}}\n"));
+        }
+        fix.write_file(&name, &source);
+    }
+}
+
+#[test]
+fn module_import_chain_at_depth_limit_is_accepted() {
+    let fix = ModuleFixture::new("module_import_chain_at_limit");
+    let depth = project_l::modules::MAX_IMPORT_DEPTH;
+    write_import_chain(&fix, depth);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    assert_eq!(files.len(), depth);
+    assert_eq!(program.imports.len(), depth - 1);
+    assert!(files[0].ends_with("main.l"));
+    assert!(
+        program
+            .imports
+            .iter()
+            .all(|import| import.target_file == import.span.file.checked_add(1))
+    );
+}
+
+#[test]
+fn module_import_chain_above_limit_has_a_precise_diagnostic() {
+    let fix = ModuleFixture::new("module_import_chain_above_limit");
+    let depth = project_l::modules::MAX_IMPORT_DEPTH;
+    write_import_chain(&fix, depth + 1);
+    let diagnostic = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
+    assert_eq!(diagnostic.code, "L0014");
+    assert_eq!(diagnostic.category, "módulos");
+    // Import spans point at the module name after the "take " keyword.
+    assert_eq!((diagnostic.span.line, diagnostic.span.column), (1, 6));
+    assert!(
+        diagnostic
+            .message
+            .contains("profundidad de imports excede el límite"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        diagnostic
+            .file
+            .as_deref()
+            .is_some_and(|file| file.ends_with(&format!("m{:03}.l", depth - 1))),
+        "{diagnostic:?}"
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("L0014"), "{backend}: {error}");
+        assert!(
+            error.contains("profundidad de imports excede el límite"),
+            "{backend}: {error}"
+        );
+    }
+}
+
+#[test]
+fn wide_module_graph_is_not_subject_to_import_depth_limit() {
+    let fix = ModuleFixture::new("module_import_wide_beyond_depth_limit");
+    let leaves = project_l::modules::MAX_IMPORT_DEPTH + 8;
+    write_fanout_module_graph(&fix, leaves);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    verify_fanout_graph(&program, &files, leaves);
+}
