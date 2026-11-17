@@ -74,7 +74,7 @@ impl ModuleFixture {
 #[test]
 fn import_local_single_module() {
     let fix = ModuleFixture::new("single");
-    fix.write_file("helper.l", "fn sumar(a: Int, b: Int) -> Int = a + b\n");
+    fix.write_file("helper.l", "pub fn sumar(a: Int, b: Int) -> Int = a + b\n");
     fix.write_file(
         "main.l",
         "import helper\n\nfn main() {\n    print(sumar(15, 27))\n}\n",
@@ -85,10 +85,10 @@ fn import_local_single_module() {
 #[test]
 fn import_multiple_modules() {
     let fix = ModuleFixture::new("multiple");
-    fix.write_file("calc.l", "fn cuadrado(x: Int) -> Int = x * x\n");
+    fix.write_file("calc.l", "pub fn cuadrado(x: Int) -> Int = x * x\n");
     fix.write_file(
         "saludo.l",
-        "fn saludar(nombre: Text) -> Text = \"Hola {nombre}!\"\n",
+        "pub fn saludar(nombre: Text) -> Text = \"Hola {nombre}!\"\n",
     );
     fix.write_file(
         "main.l",
@@ -100,10 +100,10 @@ fn import_multiple_modules() {
 #[test]
 fn import_transitive_dependencies() {
     let fix = ModuleFixture::new("transitive");
-    fix.write_file("datos.l", "fn base() -> Int = 100\n");
+    fix.write_file("datos.l", "pub fn base() -> Int = 100\n");
     fix.write_file(
         "logica.l",
-        "import datos\n\nfn calcular() -> Int = base() + 25\n",
+        "import datos\n\npub fn calcular() -> Int = base() + 25\n",
     );
     fix.write_file(
         "main.l",
@@ -117,15 +117,15 @@ fn import_diamond_dependency_deduplication() {
     let fix = ModuleFixture::new("diamond");
     fix.write_file(
         "comun.l",
-        "struct Ajustes {\n    puerto: Int\n}\n\nfn obtenerAjustes() -> Ajustes = Ajustes(puerto: 8080)\n",
+        "struct Ajustes {\n    puerto: Int\n}\n\npub fn obtenerAjustes() -> Ajustes = Ajustes(puerto: 8080)\n",
     );
     fix.write_file(
         "servicio_a.l",
-        "import comun\n\nfn puertoA() -> Int = obtenerAjustes().puerto\n",
+        "import comun\n\npub fn puertoA() -> Int = obtenerAjustes().puerto\n",
     );
     fix.write_file(
         "servicio_b.l",
-        "import comun\n\nfn puertoB() -> Int = obtenerAjustes().puerto + 1\n",
+        "import comun\n\npub fn puertoB() -> Int = obtenerAjustes().puerto + 1\n",
     );
     fix.write_file(
         "main.l",
@@ -171,7 +171,7 @@ fn import_cycle_detection() {
 #[test]
 fn import_submodule_with_dots() {
     let fix = ModuleFixture::new("submodule");
-    fix.write_file("sub/motor.l", "fn potencia() -> Int = 750\n");
+    fix.write_file("sub/motor.l", "pub fn potencia() -> Int = 750\n");
     fix.write_file(
         "main.l",
         "import sub.motor\n\nfn main() {\n    print(potencia())\n}\n",
@@ -182,8 +182,8 @@ fn import_submodule_with_dots() {
 #[test]
 fn import_semicolon_and_newlines() {
     let fix = ModuleFixture::new("semicolon");
-    fix.write_file("mod1.l", "fn f1() -> Int = 10\n");
-    fix.write_file("mod2.l", "fn f2() -> Int = 20\n");
+    fix.write_file("mod1.l", "pub fn f1() -> Int = 10\n");
+    fix.write_file("mod2.l", "pub fn f2() -> Int = 20\n");
     fix.write_file(
         "main.l",
         "import mod1; import mod2;\r\n\r\nfn main() {\n    print(f1() + f2())\n}\n",
@@ -196,7 +196,7 @@ fn import_unicode_directory_and_spaces() {
     let fix = ModuleFixture::new("unicode_dir");
     fix.write_file(
         "directorio café 👋/util.l",
-        "fn saludo() -> Text = \"éxito en carpeta unicode\"\n",
+        "pub fn saludo() -> Text = \"éxito en carpeta unicode\"\n",
     );
     fix.write_file(
         "directorio café 👋/main.l",
@@ -212,11 +212,11 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     let fix = ModuleFixture::new("diagnostic-file");
     fix.write_file(
         "sub/ayudante.l",
-        "fn ayuda() -> Int {\n    return 1\n}\n\nfn rota() -> Int {\n    return verdadero\n}\n",
+        "pub fn ayuda() -> Int {\n    return 1\n}\n\nfn rota() -> Int {\n    return verdadero\n}\n",
     );
     fix.write_file(
         "intermedio.l",
-        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * 2\n",
+        "import sub.ayudante\n\npub fn doble() -> Int = ayuda() * 2\n",
     );
     fix.write_file(
         "main.l",
@@ -241,7 +241,7 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     assert!(!first.contains("main.l"), "{err}");
 
     // The same program with the error moved to the entry file names it.
-    fix.write_file("sub/ayudante.l", "fn ayuda() -> Int {\n    return 1\n}\n");
+    fix.write_file("sub/ayudante.l", "pub fn ayuda() -> Int {\n    return 1\n}\n");
     fix.write_file(
         "main.l",
         "import intermedio\n\nfn main() {\n    print(doble())\n    print(nada)\n}\n",
@@ -257,7 +257,7 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     );
     fix.write_file(
         "intermedio.l",
-        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * verdad\n",
+        "import sub.ayudante\n\npub fn doble() -> Int = ayuda() * verdad\n",
     );
     fix.write_file(
         "main.l",
@@ -266,7 +266,41 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     let error = project_l::check_file(&fix.dir.join("main.l")).unwrap_err();
     let file = error.file.expect("file of an imported module");
     assert!(file.ends_with("intermedio.l"), "{file}");
-    assert_eq!((error.span.line, error.span.column), (3, 31));
+    assert_eq!((error.span.line, error.span.column), (3, 35));
+}
+
+#[test]
+fn unambiguous_private_function_stays_in_its_module() {
+    let fix = ModuleFixture::new("private_single_nonexported");
+    fix.write_file("lib.l", "flow secret() => Int { give 42 }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(secret()) }\n");
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("función no definida: secret"), "{backend}: {err}");
+        assert!(err.contains("main.l"), "{backend}: {err}");
+    }
+}
+
+#[test]
+fn unambiguous_private_generic_stays_in_its_module() {
+    let fix = ModuleFixture::new("private_generic_nonexported");
+    fix.write_file(
+        "lib.l",
+        "flow secret of[T](value: T) => Int { give 42 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take lib\nflow main() { print(secret of[Int](0)) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("función no definida: secret"), "{backend}: {err}");
+        assert!(err.contains("main.l"), "{backend}: {err}");
+    }
 }
 
 #[test]
