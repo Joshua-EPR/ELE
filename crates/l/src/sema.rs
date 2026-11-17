@@ -283,11 +283,11 @@ impl Env {
         for &file in imports {
             if let Some(&id) = definitions.get(&(file, key.clone()))
                 && exported.contains(&id)
+                && found.replace(id).is_some()
             {
-                if found.replace(id).is_some() {
-                    return Err(err(span, format!("función ambigua: {name}"))
-                        .classify("L0014", "módulos"));
-                }
+                return Err(
+                    err(span, format!("función ambigua: {name}")).classify("L0014", "módulos")
+                );
             }
         }
         Ok(found)
@@ -318,11 +318,10 @@ impl Env {
         for &file in imports {
             if let Some(&id) = self.module_fn_templates.get(&(file, key.clone()))
                 && self.public_fn_templates.contains(&id)
+                && found.replace(id).is_some()
             {
-                if found.replace(id).is_some() {
-                    return Err(err(span, format!("función genérica ambigua: {name}"))
-                        .classify("L0014", "módulos"));
-                }
+                return Err(err(span, format!("función genérica ambigua: {name}"))
+                    .classify("L0014", "módulos"));
             }
         }
         Ok(found)
@@ -5012,8 +5011,7 @@ fn declare<'a>(
             }
             let previous = env.fn_template_ids.get(&f.name).copied();
             if f.public || f.span.file == 0 {
-                if f.span.file == 0 && previous.is_some()
-                {
+                if f.span.file == 0 && previous.is_some() {
                     return Err(err(
                         f.span,
                         format!("función duplicada o reservada: {}", f.name),
@@ -5079,8 +5077,7 @@ fn declare<'a>(
             }
             let previous = env.functions.borrow().get(&f.name).copied();
             if f.public || f.span.file == 0 {
-                if f.span.file == 0 && previous.is_some()
-                {
+                if f.span.file == 0 && previous.is_some() {
                     return Err(err(
                         f.span,
                         format!("función duplicada o reservada: {}", f.name),
