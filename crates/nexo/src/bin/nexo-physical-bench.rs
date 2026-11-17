@@ -53,21 +53,27 @@ unsafe impl GlobalAlloc for Contador {
 static GLOBAL: Contador = Contador;
 
 fn main() {
-    let completo = std::env::args().any(|a| a == "--completo");
-    let json_flag = std::env::args().any(|a| a == "--json");
-    let json_out_path = {
-        let args: Vec<String> = std::env::args().collect();
-        let mut path = None;
-        let mut i = 0;
-        while i < args.len() {
-            if args[i] == "--json-out" && i + 1 < args.len() {
-                path = Some(args[i + 1].clone());
-                break;
-            }
+    let args: Vec<String> = std::env::args().collect();
+    let completo = args.iter().any(|a| a == "--completo");
+    let json_flag = args.iter().any(|a| a == "--json");
+    let mut json_out_path = None;
+    let mut campaign_id = None;
+    let mut process_id = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--json-out" && i + 1 < args.len() {
+            json_out_path = Some(args[i + 1].clone());
+            i += 1;
+        } else if args[i] == "--campaign-id" && i + 1 < args.len() {
+            campaign_id = Some(args[i + 1].clone());
+            i += 1;
+        } else if args[i] == "--process-id" && i + 1 < args.len() {
+            process_id = Some(args[i + 1].clone());
             i += 1;
         }
-        path
-    };
+        i += 1;
+    }
 
     println!(
         "nexo-physical-bench os={} arch={} warmup={} iterations={} profile={}",
@@ -99,7 +105,12 @@ fn main() {
     );
     pool.destroy(handle, false).unwrap();
     if completo || json_flag || json_out_path.is_some() {
-        ampliado(json_flag, json_out_path.as_deref());
+        ampliado(
+            json_flag,
+            json_out_path.as_deref(),
+            campaign_id.as_deref(),
+            process_id.as_deref(),
+        );
     }
 }
 
@@ -234,10 +245,81 @@ struct EscenarioResult {
     hole_reuses_per_op: f64,
 }
 
-fn serialize_json_results(results: &[EscenarioResult], warmup: usize, iterations: usize) -> String {
+fn serialize_json_results(
+    results: &[EscenarioResult],
+    warmup: usize,
+    iterations: usize,
+    campaign_id: &str,
+    process_id: &str,
+) -> Result<String, String> {
+    // 1. Validar exhaustivamente que ningún valor de métrica o muestra sea no finito
+    for r in results {
+        let stats_vals = [
+            r.batch_stats.mean,
+            r.batch_stats.variance_sample,
+            r.batch_stats.variance_pop,
+            r.batch_stats.std_dev_sample,
+            r.batch_stats.std_dev_pop,
+            r.batch_stats.cv_sample,
+            r.batch_stats.cv_pop,
+            r.batch_stats.min,
+            r.batch_stats.max,
+            r.batch_stats.median,
+            r.batch_stats.p95,
+            r.batch_stats.p99,
+            r.run_stats.mean,
+            r.run_stats.variance_sample,
+            r.run_stats.variance_pop,
+            r.run_stats.std_dev_sample,
+            r.run_stats.std_dev_pop,
+            r.run_stats.cv_sample,
+            r.run_stats.cv_pop,
+            r.run_stats.min,
+            r.run_stats.max,
+            r.run_stats.median,
+            r.run_stats.p95,
+            r.run_stats.p99,
+            r.allocs_per_op,
+            r.os_calls_per_op,
+            r.header_bytes_per_op,
+            r.commits_per_op,
+            r.returns_per_op,
+            r.hole_reuses_per_op,
+        ];
+        for &v in &stats_vals {
+            if !v.is_finite() {
+                return Err(format!(
+                    "Error de serialización: valor no finito detectado en escenario '{}': {v}",
+                    r.nombre
+                ));
+            }
+        }
+        for &s in &r.batch_samples {
+            if !s.is_finite() {
+                return Err(format!(
+                    "Error de serialización: muestra no finita en escenario '{}': {s}",
+                    r.nombre
+                ));
+            }
+        }
+    }
+
     let mut out = String::new();
     out.push_str("{\n");
     out.push_str("  \"version\": \"v0.4\",\n");
+    out.push_str("  \"schema_version\": \"v0.4.1\",\n");
+    out.push_str(&format!(
+        "  \"stats_spec_version\": \"{}\",\n",
+        nexo::stats::STATS_SPEC_VERSION
+    ));
+    out.push_str(&format!(
+        "  \"campaign_id\": \"{}\",\n",
+        campaign_id.replace('\"', "\\\"")
+    ));
+    out.push_str(&format!(
+        "  \"process_id\": \"{}\",\n",
+        process_id.replace('\"', "\\\"")
+    ));
     out.push_str(&format!("  \"os\": \"{}\",\n", std::env::consts::OS));
     out.push_str(&format!("  \"arch\": \"{}\",\n", std::env::consts::ARCH));
     out.push_str(&format!(
@@ -387,10 +469,60 @@ fn serialize_json_results(results: &[EscenarioResult], warmup: usize, iterations
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
-    out
+    Ok(out)
 }
 
-fn ampliado(json_flag: bool, json_out_path: Option<&str>) {
+fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
+    let path = std::path::Path::new(target_path);
+    if path.is_dir() {
+        return Err(format!(
+            "Error: la ruta destino '{target_path}' es un directorio existente"
+        ));
+    }
+
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Error al crear directorio para '{target_path}': {e}"))?;
+    }
+
+    let pid = std::process::id();
+    let tmp_path = format!("{target_path}.tmp.{pid}");
+    let tmp = std::path::Path::new(&tmp_path);
+
+    if let Err(e) = std::fs::write(tmp, content) {
+        let _ = std::fs::remove_file(tmp);
+        return Err(format!(
+            "Error al escribir en archivo temporal '{tmp_path}': {e}"
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        let remove_res = std::fs::remove_file(path);
+        if let Err(e) = remove_res {
+            let _ = std::fs::remove_file(tmp);
+            return Err(format!(
+                "Error al reemplazar archivo previo '{target_path}': {e}"
+            ));
+        }
+    }
+
+    if let Err(e) = std::fs::rename(tmp, path) {
+        let _ = std::fs::remove_file(tmp);
+        return Err(format!(
+            "Error al renombrar archivo temporal a '{target_path}': {e}"
+        ));
+    }
+
+    Ok(())
+}
+
+fn ampliado(
+    json_flag: bool,
+    json_out_path: Option<&str>,
+    campaign_id: Option<&str>,
+    process_id: Option<&str>,
+) {
     let escenarios = [
         Escenario {
             nombre: "hot allocate+free (pool con ancla)",
@@ -574,18 +706,29 @@ fn ampliado(json_flag: bool, json_out_path: Option<&str>) {
     memoria();
 
     if json_flag || json_out_path.is_some() {
-        let json_content = serialize_json_results(&results, WARMUP, ITERATIONS);
+        let cid = campaign_id.unwrap_or("standalone");
+        let pid_str = process_id.unwrap_or("0");
+        let json_content = match serialize_json_results(&results, WARMUP, ITERATIONS, cid, pid_str)
+        {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        };
+
         if json_flag {
             println!("\n== json output ==");
             println!("{json_content}");
         }
+
         if let Some(path) = json_out_path {
-            if let Some(parent) = std::path::Path::new(path).parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            match std::fs::write(path, &json_content) {
-                Ok(_) => println!("JSON escrito exitosamente en: {path}"),
-                Err(e) => eprintln!("Error al escribir JSON en {path}: {e}"),
+            match write_atomic_json(path, &json_content) {
+                Ok(()) => println!("JSON escrito exitosamente en: {path}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
             }
         }
     }

@@ -1,0 +1,185 @@
+//! Pruebas de integración de propagación de errores de E/S y escritura atómica (JSON-IO-01..10).
+//!
+//! Verifica que cualquier fallo en la creación de directorios, permisos o escritura
+//! de resultados JSON resulte en un código de salida distinto de cero, reporte el error
+//! a stderr, no emita mensajes espurios de éxito y no corrompa archivos existentes.
+
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+fn get_bench_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_nexo-physical-bench"))
+}
+
+fn create_temp_test_dir(name: &str) -> PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("nexo_bench_test_{}_{}", name, std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("Creación de directorio temporal de prueba");
+    dir
+}
+
+#[test]
+fn test_json_io_01_nonexistent_directory_created() {
+    let base = create_temp_test_dir("io_01");
+    let target = base.join("sub").join("nested").join("out.json");
+
+    let status = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&target)
+        .arg("--campaign-id")
+        .arg("test_camp_01")
+        .arg("--process-id")
+        .arg("1")
+        .status()
+        .expect("Ejecución del binario");
+
+    assert!(status.success(), "La ejecución debe tener éxito");
+    assert!(target.exists(), "El archivo destino debió ser creado");
+    let content = fs::read_to_string(&target).unwrap();
+    assert!(content.contains("\"campaign_id\": \"test_camp_01\""));
+    assert!(content.contains("\"process_id\": \"1\""));
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn test_json_io_02_and_04_invalid_path_fails_closed() {
+    // Caracteres ilegales en Windows para forzar error determinista de ruta/creación
+    #[cfg(target_os = "windows")]
+    let invalid_target = "C:\\invalid_path_with_illegal_char_<>:\"|?*\\out.json";
+    #[cfg(not(target_os = "windows"))]
+    let invalid_target = "/proc/sys/fs/protected_nexo_invalid/out.json";
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(invalid_target)
+        .output()
+        .expect("Ejecución de binario");
+
+    assert!(
+        !output.status.success(),
+        "Debe retornar código de salida distinto de cero"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.is_empty(), "Debe informar la causa en stderr");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("JSON escrito exitosamente"),
+        "No debe imprimir mensaje de éxito ante fallo"
+    );
+}
+
+#[test]
+fn test_json_io_03_path_is_existing_directory_fails() {
+    let base = create_temp_test_dir("io_03");
+    let dir_target = base.join("is_a_directory");
+    fs::create_dir_all(&dir_target).unwrap();
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&dir_target)
+        .output()
+        .expect("Ejecución de binario");
+
+    assert!(
+        !output.status.success(),
+        "Debe fallar al intentar escribir en un directorio existente"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("directorio existente") || stderr.contains("Error"),
+        "Stderr debe detallar que la ruta es un directorio: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("JSON escrito exitosamente"));
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn test_json_io_06_preexisting_file_replaced_atomically() {
+    let base = create_temp_test_dir("io_06");
+    let target = base.join("existing.json");
+    fs::write(&target, "OLD_CONTENT_PRIOR_TO_RUN").unwrap();
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&target)
+        .arg("--campaign-id")
+        .arg("camp_replace")
+        .arg("--process-id")
+        .arg("2")
+        .output()
+        .expect("Ejecución de binario");
+
+    assert!(output.status.success());
+    let new_content = fs::read_to_string(&target).unwrap();
+    assert!(!new_content.contains("OLD_CONTENT_PRIOR_TO_RUN"));
+    assert!(new_content.contains("\"campaign_id\": \"camp_replace\""));
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn test_json_io_07_and_08_no_abandoned_tmp_and_no_truncated_file() {
+    let base = create_temp_test_dir("io_07_08");
+    // Crear un archivo previo válido
+    let target = base.join("prev_valid.json");
+    let original_valid = "{\"intact\": true}";
+    fs::write(&target, original_valid).unwrap();
+
+    // Ahora pasamos una ruta que colisiona con un directorio para forzar error
+    let dir_collision = base.join("collision_dir");
+    fs::create_dir_all(&dir_collision).unwrap();
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&dir_collision)
+        .output()
+        .expect("Ejecución");
+
+    assert!(!output.status.success());
+
+    // Verificar que no quedan archivos temporales .tmp en el directorio base
+    for entry in fs::read_dir(&base).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        assert!(
+            !name.contains(".tmp."),
+            "No debe quedar archivo temporal abandonado: {name}"
+        );
+    }
+
+    // El archivo previo no fue afectado
+    assert_eq!(fs::read_to_string(&target).unwrap(), original_valid);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn test_json_io_09_and_10_nonzero_exit_code_and_subsequent_recovery() {
+    let base = create_temp_test_dir("io_09_10");
+    let dir_fail = base.join("dir_error");
+    fs::create_dir_all(&dir_fail).unwrap();
+
+    // 1. Ejecución fallida con código de salida distinto de cero
+    let fail_output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&dir_fail)
+        .output()
+        .expect("Ejecución");
+    assert_eq!(fail_output.status.code(), Some(1));
+
+    // 2. Ejecución recuperada con ruta de archivo válida
+    let valid_target = base.join("recovered.json");
+    let ok_output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&valid_target)
+        .arg("--campaign-id")
+        .arg("recovered_campaign")
+        .output()
+        .expect("Ejecución");
+    assert!(ok_output.status.success());
+    assert!(valid_target.exists());
+    let content = fs::read_to_string(&valid_target).unwrap();
+    assert!(content.contains("\"campaign_id\": \"recovered_campaign\""));
+    let _ = fs::remove_dir_all(&base);
+}
