@@ -180,6 +180,32 @@ fn import_submodule_with_dots() {
 }
 
 #[test]
+fn import_relative_file_path_to_parent_directory() {
+    let fix = ModuleFixture::new("parent_path");
+    fix.write_file("src/math.l", "expose flow answer() => Int { give 42 }\n");
+    fix.write_file(
+        "experiments/main.l",
+        "take \"../src/math\"\nflow main() { print(answer()) }\n",
+    );
+    fix.check("experiments/main.l", "42\n");
+}
+
+#[test]
+fn import_relative_file_path_cannot_escape_project_root() {
+    let fix = ModuleFixture::new("parent_path_escape");
+    fix.write_file("main.l", "take \"../outside\"\nflow main() {}\n");
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("módulo fuera del árbol del proyecto"),
+            "{backend}: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn import_semicolon_and_newlines() {
     let fix = ModuleFixture::new("semicolon");
     fix.write_file("mod1.l", "fn f1() -> Int = 10\n");

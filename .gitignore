@@ -1,2 +1,57 @@
-/target/
 
+# ============================================
+# ELE — Git Ignore
+# ============================================
+
+# Compilación de Rust / ELE
+/target/
+**/*.rs.bk
+*.pdb
+*.ilk
+*.obj
+*.o
+*.exe
+*.dll
+
+# ============================================
+# ENCA — PROYECTO PRIVADO INDEPENDIENTE
+# ============================================
+
+# Excluir completamente ENCA de ELE
+/ENCA/
+
+# ============================================
+# Archivos temporales
+# ============================================
+
+*.tmp
+*.temp
+*.log
+*.bak
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Configuraciones locales
+.env
+.env.local
+.env.*.local
+
+# Python / herramientas auxiliares
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Archivos de cobertura
+coverage/
+htmlcov/
+*.profraw
+*.profdata

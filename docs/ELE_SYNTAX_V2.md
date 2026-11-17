@@ -43,6 +43,12 @@ El dialecto antiguo queda admitido **temporalmente** por los parsers durante el 
 | Préstamo compartido | `&T` / `&valor` | `view T` / `view valor` |
 | Préstamo exclusivo | `&mut T` / `&mut valor` | `edit T` / `edit valor` |
 
+Los imports conservan la forma de módulo con puntos (`take src.math.rng`).
+También pueden expresarse como rutas de archivo relativas entre carpetas:
+`take "../src/math/rng"`. Las rutas se resuelven desde el archivo importador,
+aceptan `..` dentro del árbol del proyecto y no pueden escapar de él; la
+extensión `.l` se agrega cuando se omite.
+
 **Estado real por frontend:**
 - **Stage 0 (Rust/bootstrap):** implementadas las palabras clave v2, `=>`, `@metodo(...)`, `choose` con separador `:`, y `view`/`edit` para tipos/expresiones, reutilizando las mismas comprobaciones semánticas. Se admiten alias anteriores para la migración.
 - **Stage 1 (escrito en ELE):** implementado el reconocimiento de las palabras v2 allí donde **ya existen** las construcciones correspondientes; `=>`, `@metodo(...)`, `choose` con `:`. Los métodos/contratos genéricos y las expresiones `view`/`edit` aún no están integrados de extremo a extremo en Stage 1; **no se debe afirmar soporte Stage 1 por leer esta tabla**.

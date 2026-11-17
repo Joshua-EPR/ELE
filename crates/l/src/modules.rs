@@ -5,7 +5,7 @@ use crate::{
 use std::{
     collections::HashSet,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 pub const MAX_MODULE_BYTES: usize = 16 * 1024 * 1024;
@@ -25,6 +25,20 @@ pub fn load_program_files(entry_path: &Path) -> Result<(Program, Vec<String>), D
             .with_file(entry_path.display().to_string())
             .classify("L0014", "módulos")
     })?;
+    let working_dir = std::env::current_dir()
+        .and_then(fs::canonicalize)
+        .map_err(|e| {
+            Diagnostic::new(Span::default(), format!("directorio de trabajo: {e}"))
+                .classify("L0014", "módulos")
+        })?;
+    let module_root = if canonical_entry.starts_with(&working_dir) {
+        working_dir
+    } else {
+        canonical_entry
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    };
 
     let mut loaded_modules = Vec::new();
     let mut loaded_paths = HashSet::new();
@@ -38,6 +52,7 @@ pub fn load_program_files(entry_path: &Path) -> Result<(Program, Vec<String>), D
         &mut loaded_paths,
         &mut loading_stack,
         &mut files,
+        &module_root,
     )
     .map_err(|mut d| {
         // Errors of the entry file itself name it as the caller did.
@@ -98,6 +113,7 @@ fn load_module_recursive(
     loaded_paths: &mut HashSet<PathBuf>,
     loading_stack: &mut Vec<PathBuf>,
     files: &mut Vec<String>,
+    module_root: &Path,
 ) -> Result<(), Diagnostic> {
     // Cycle detection
     if loading_stack.contains(&canonical_path.to_path_buf()) {
@@ -167,26 +183,60 @@ fn load_module_recursive(
             continue;
         }
 
-        let rel_parts = imp.path.replace('.', "/") + ".l";
-        let candidate = dir.join(&rel_parts);
-        if !candidate.exists() {
-            return Err(Diagnostic::new(
+        let rel_path = if imp.is_file_path {
+            let mut path = PathBuf::from(&imp.path);
+            if path.extension().is_none() {
+                path.set_extension("l");
+            }
+            path
+        } else {
+            PathBuf::from(imp.path.replace('.', "/") + ".l")
+        };
+        if rel_path.is_absolute()
+            || rel_path
+                .components()
+                .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+        {
+            return Err(import_error(
                 imp.span,
+                canonical_path,
+                format!("la ruta de módulo debe ser relativa: {}", imp.path),
+            ));
+        }
+        let candidate = dir.join(&rel_path);
+        if !is_within_root(&candidate, module_root) {
+            return Err(import_error(
+                imp.span,
+                canonical_path,
+                format!("módulo fuera del árbol del proyecto: {}", imp.path),
+            ));
+        }
+        if !candidate.exists() {
+            return Err(import_error(
+                imp.span,
+                canonical_path,
                 format!(
                     "módulo no encontrado: {} (buscado en '{}')",
                     imp.path,
                     candidate.display()
                 ),
-            )
-            .with_file(shown(canonical_path))
-            .classify("L0014", "módulos"));
+            ));
         }
 
         let canonical_candidate = fs::canonicalize(&candidate).map_err(|e| {
-            Diagnostic::new(imp.span, format!("{}: {e}", candidate.display()))
-                .with_file(shown(canonical_path))
-                .classify("L0014", "módulos")
+            import_error(
+                imp.span,
+                canonical_path,
+                format!("{}: {e}", candidate.display()),
+            )
         })?;
+        if !canonical_candidate.starts_with(module_root) {
+            return Err(import_error(
+                imp.span,
+                canonical_path,
+                format!("módulo fuera del árbol del proyecto: {}", imp.path),
+            ));
+        }
 
         load_module_recursive(
             &canonical_candidate,
@@ -195,6 +245,7 @@ fn load_module_recursive(
             loaded_paths,
             loading_stack,
             files,
+            module_root,
         )?;
     }
 
@@ -203,6 +254,28 @@ fn load_module_recursive(
     loaded_modules.push((canonical_path.to_path_buf(), prog));
 
     Ok(())
+}
+
+fn import_error(span: Span, file: &Path, message: String) -> Diagnostic {
+    Diagnostic::new(span, message)
+        .with_file(shown(file))
+        .classify("L0014", "módulos")
+}
+
+fn is_within_root(candidate: &Path, root: &Path) -> bool {
+    let Ok(relative) = candidate.strip_prefix(root) else {
+        return false;
+    };
+    let mut depth = 0usize;
+    for component in relative.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    true
 }
 
 /// How a module path appears in diagnostics: the canonical path without the
