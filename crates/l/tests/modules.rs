@@ -634,7 +634,10 @@ fn oversized_entry_source_is_rejected_before_parsing() {
         let output = fix.build("main.l", backend, false);
         assert!(!output.status.success(), "{backend}");
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("archivo excede límite de 16 MiB"), "{backend}: {error}");
+        assert!(
+            error.contains("archivo excede límite de 16 MiB"),
+            "{backend}: {error}"
+        );
     }
 }
 
@@ -648,8 +651,7 @@ fn oversized_import_is_attributed_to_the_dependency() {
         .set_len(project_l::modules::MAX_MODULE_BYTES as u64 + 1)
         .unwrap();
 
-    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l"))
-        .unwrap_err();
+    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
     assert_eq!(diag.code, "L0014");
     assert!(diag.message.contains("archivo excede límite de 16 MiB"));
     assert!(
@@ -661,7 +663,10 @@ fn oversized_import_is_attributed_to_the_dependency() {
         assert!(!output.status.success(), "{backend}");
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("huge.l"), "{backend}: {error}");
-        assert!(error.contains("archivo excede límite de 16 MiB"), "{backend}: {error}");
+        assert!(
+            error.contains("archivo excede límite de 16 MiB"),
+            "{backend}: {error}"
+        );
     }
 }
 
@@ -671,8 +676,7 @@ fn invalid_utf8_in_small_module_has_a_file_diagnostic() {
     // parser or change the file attribution of input errors.
     let fix = ModuleFixture::new("source_invalid_utf8");
     fs::write(fix.dir.join("main.l"), b"flow main() {}\n\xff").unwrap();
-    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l"))
-        .unwrap_err();
+    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
     assert_eq!(diag.code, "L0014");
     assert!(
         diag.file.as_deref().is_some_and(|p| p.ends_with("main.l")),
