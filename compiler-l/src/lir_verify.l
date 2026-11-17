@@ -248,7 +248,7 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
     return lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
 }
 
-fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
+pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
     let blocks = body.term.length
     let vars = l.vars.length
     if fn_index < 0 || fn_index >= lm.fn_first.length || blocks == 0 { return LirCheck(status: 1, block: -1, inst: -1) }

@@ -36,7 +36,7 @@ fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
     semaConstructorFinish(&mut ctx, tree, expr, decl_id, struct_t, &seen, &slots)
 }
 
-fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
+pub fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
     return semaExprMode(&mut ctx, source, tree, expr_id, ACCESS_READ)
 }
 
@@ -121,7 +121,7 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
 
 // A value read by print or an interpolation that is not a place and not a
 // literal is an owned temporary of the enclosing statement.
-fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
+pub fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
     ctx.expression_path = -1
     if expr_id < 0 || expr_id >= tree.expressions.length {
         return 7

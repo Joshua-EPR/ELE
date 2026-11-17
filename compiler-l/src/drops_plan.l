@@ -119,7 +119,7 @@ fn dropFindFlags(graph: &FlowGraph, plan: &mut DropPlan, state: &mut List<Int>, 
     }
 }
 
-fn dropElaborate(graph: &FlowGraph) -> DropPlan {
+pub fn dropElaborate(graph: &FlowGraph) -> DropPlan {
     var plan = DropPlan(ops: List[], flag_of: List[], flag_paths: List[], block_first: List[], block_count: List[], drops: 0)
     let blocks = graph.blocks.length
     for i in 0..graph.paths.length { plan.flag_of.push(-1) }

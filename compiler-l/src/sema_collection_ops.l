@@ -9,7 +9,7 @@ import lir_build
 import sema_context
 import sema_lower
 
-fn semaExpectedListElem(ctx: &SemaContext) -> Int {
+pub fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     let expected = ctx.expected_list_type
     if expected >= 0 && expected < ctx.types.types.length {
         match ctx.types.types[expected].kind {
@@ -20,7 +20,7 @@ fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     return 0
 }
 
-fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool, elem_t: Int, elements: &List<Int>) -> Int {
+pub fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool, elem_t: Int, elements: &List<Int>) -> Int {
     if is_array {
         lirMarkUnsupported(&mut ctx.lir, expr.start)
         return semTypeMakeArray(&mut ctx.types, elem_t)
@@ -59,7 +59,7 @@ fn semaMethodMutable(ctx: &mut SemaContext, base_t: Int, base_path: Int, start: 
     return true
 }
 
-fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, base_t: Int, bp: Int, base_path: Int, count: Int, arg_t: Int, arg_op: Int) -> Int {
+pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, base_t: Int, bp: Int, base_path: Int, count: Int, arg_t: Int, arg_op: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     var base_place = bp
     if base_place < 0 {
@@ -144,7 +144,7 @@ fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
     return 7
 }
 
-fn semaIndexFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_t: Int, bp: Int, parent_path: Int, idx_t: Int, idx_op: Int) -> Int {
+pub fn semaIndexFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_t: Int, bp: Int, parent_path: Int, idx_t: Int, idx_op: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     if idx_t != 1 {
         semaAddError(&mut ctx, "L0003", "el índice debe ser Int", expr.start, expr.end)

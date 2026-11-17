@@ -238,7 +238,7 @@ fn loadModuleRecursive(
     }
 }
 
-fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     var loading_stack: List<Text> = List[]
     var loaded_paths: List<Text> = List[]
     var combined_source = ""

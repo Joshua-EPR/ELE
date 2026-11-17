@@ -110,7 +110,7 @@ pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, ve
     return true
 }
 
-fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
+pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
     let paths = graph.paths.length
     let blocks = graph.blocks.length
     if paths > 2000000 / blocks {

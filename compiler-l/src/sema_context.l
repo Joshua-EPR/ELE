@@ -146,13 +146,13 @@ pub fn semaContextNew() -> SemaContext {
     )
 }
 
-fn semaInitPath(ctx: &mut SemaContext, symbol: Int, start: Int, end: Int) {
+pub fn semaInitPath(ctx: &mut SemaContext, symbol: Int, start: Int, end: Int) {
     let path = flowRoot(&mut ctx.flow, symbol)
     ctx.symbols.symbols[symbol].move_path = path
     flowEvent(&mut ctx.flow, FLOW_INIT, path, start, end)
 }
 
-fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
+pub fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
     ctx.expression_path = path
     if path < 0 || mode == ACCESS_PLACE { return }
     if ty < 0 || ty >= ctx.types.types.length { return }
@@ -169,7 +169,7 @@ fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, 
 }
 
 // Referent of a reference type, or -1 when `ty` is not a reference.
-fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
+pub fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
     if ty < 8 || ty >= ctx.types.types.length { return -1 }
     let t = &ctx.types.types[ty]
     match t.kind {
@@ -179,7 +179,7 @@ fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
     }
 }
 
-fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
+pub fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
     if ty < 8 || ty >= ctx.types.types.length { return false }
     match ctx.types.types[ty].kind {
         SemTypeKind.MutRef => { return true }
@@ -187,7 +187,7 @@ fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
     }
 }
 
-fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, end: Int) -> Int {
+pub fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, end: Int) -> Int {
     let decl = &tree.declarations[declaration]
     for i in decl.c..(decl.c + decl.d) {
         let field = &tree.fields[i]
@@ -196,7 +196,7 @@ fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, en
     return -1
 }
 
-fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr) -> Int {
+pub fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr) -> Int {
     match arg.kind {
         AstExprKind.Named => { return semaFindField(source, tree, declaration, arg.a, arg.b) }
         _ => { return -1 }
@@ -207,7 +207,7 @@ pub fn semaAddError(ctx: &mut SemaContext, code: Text, message: Text, start: Int
     ctx.errors.push(SemaError(code: code, message: message, start: start, end: end))
 }
 
-fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
+pub fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
     if decl < 0 || decl >= ctx.decl_module.length { return 0 }
     return ctx.decl_module[decl]
 }
@@ -223,7 +223,7 @@ pub fn semaSetModuleAccess(ctx: &mut SemaContext, access: &List<Int>, module_cou
     for i in 0..access.length { ctx.module_access.push(access[i]) }
 }
 
-fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) -> Int {
+pub fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) -> Int {
     let found = scopeLookupAllVisible(&ctx.scopes, &ctx.symbols, source, start, end, ctx.current_module, &ctx.module_access, ctx.module_count)
     if found == -2 {
         semaAddError(&mut ctx, "L0014", "nombre ambiguo: varias declaraciones públicas importadas", start, end)

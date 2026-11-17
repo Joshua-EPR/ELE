@@ -244,7 +244,7 @@ fn semaCheckLoans(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) {
     }
 }
 
-fn semaAnalyze(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
+pub fn semaAnalyze(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     semaCheckRefTypes(&mut ctx, tree)
     semaCollectDeclarations(&mut ctx, source, tree)
     semaLirSetup(&mut ctx, source, tree)

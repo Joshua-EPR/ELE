@@ -33,7 +33,7 @@ pub fn loanColAt(source: &Text, offset: Int) -> Int {
     return col
 }
 
-fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) -> Int {
+pub fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) -> Int {
     let id = graph.loans.length
     graph.loans.push(Loan(kind: kind, place: place, parent: parent, alt: -1, param: -1, start: start, end: end))
     return id
@@ -59,9 +59,20 @@ fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
     graph.binding_loans[path] = loan
 }
 
+// Exported binding boundary for semantic lowering: only a real root path
+// may receive an existing loan. The unvalidated loanBind primitive stays
+// module-private and is used internally by loanBindParam.
+pub fn loanBindReferenceRoot(graph: &mut FlowGraph, path: Int, loan: Int) -> Bool {
+    if path < 0 || path >= graph.paths.length { return false }
+    if graph.paths[path].parent >= 0 { return false }
+    if loan < 0 || loan >= graph.loans.length { return false }
+    loanBind(&mut graph, path, loan)
+    return true
+}
+
 // A reference parameter carries a loan on its own place. The loan has no
 // creation event: it is live from entry and roots parameter provenance.
-fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
+pub fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
     var kind = LOAN_SHARED
     if is_mut { kind = LOAN_MUT }
     let loan = loanNew(&mut graph, kind, path, -1, start, end)
@@ -136,10 +147,20 @@ fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
     return true
 }
 
+// Validates a borrowed return across the module boundary without exposing
+// the provenance walker itself. Status: 0 allowed, 1 missing/invalid loan,
+// 2 mutable mode mismatch, 3 loan origin not rooted in a parameter.
+pub fn loanBorrowedReturnStatus(graph: &FlowGraph, loan: Int, requires_mut: Bool) -> Int {
+    if loan < 0 || loan >= graph.loans.length { return 1 }
+    if requires_mut && !loanIsMut(graph, loan) { return 2 }
+    if !loanRootedAtParams(graph, loan) { return 3 }
+    return 0
+}
+
 // Result loan of a call to a borrowing function: one node per origin
 // argument, chained through `alt`. Each node reborrows its origin so a use
 // of the result keeps every possible owner borrowed.
-fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int, end: Int) -> Int {
+pub fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int, end: Int) -> Int {
     var head = -1
     var i = origins.length - 1
     while i >= 0 {

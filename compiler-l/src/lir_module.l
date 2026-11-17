@@ -17,7 +17,7 @@ import sema_drop
 // the protocol header, and the per-function finish (splice the drop plan,
 // verify, serialize). Only `sema-l --emit-lir` finishes and writes LIR.
 
-fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
+pub fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     for f in 0..tree.fields.length { ctx.lir_field_local.push(-1) }
     var functions = 0
     var structs = 0
@@ -96,7 +96,7 @@ fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     }
 }
 
-fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
+pub fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     if !ctx.emit_lir || ctx.errors.length > 0 { return }
     semaLirHeader(&mut ctx, source, tree, ctx.lir_module.fn_first.length)
     if ctx.errors.length > 0 { return }
@@ -203,7 +203,7 @@ fn semaLirTypesOk(ctx: &SemaContext, fn_index: Int) -> Bool {
     return true
 }
 
-fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &DropPlan, d: Int) {
+pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &DropPlan, d: Int) {
     if !ctx.emit_lir { return }
     let decl = &tree.declarations[d]
     let fn_index = ctx.lir_func_index[d]
