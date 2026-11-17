@@ -725,9 +725,16 @@ fn diamond_imports_reuse_canonical_module_file_ids() {
         .filter(|import| import.path == "shared")
         .collect();
     assert_eq!(shared_imports.len(), 3);
-    assert!(shared_imports.iter().all(|import| import.target_file == Some(shared_id)));
+    assert!(
+        shared_imports
+            .iter()
+            .all(|import| import.target_file == Some(shared_id))
+    );
 
-    let mut importing_files: Vec<_> = shared_imports.iter().map(|import| import.span.file).collect();
+    let mut importing_files: Vec<_> = shared_imports
+        .iter()
+        .map(|import| import.span.file)
+        .collect();
     importing_files.sort_unstable();
     importing_files.dedup();
     assert_eq!(importing_files.len(), 3);
@@ -735,11 +742,21 @@ fn diamond_imports_reuse_canonical_module_file_ids() {
     assert!(importing_files.contains(&left_id));
     assert!(importing_files.contains(&right_id));
     assert_eq!(
-        program.imports.iter().find(|import| import.path == "left").unwrap().target_file,
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "left")
+            .unwrap()
+            .target_file,
         Some(left_id)
     );
     assert_eq!(
-        program.imports.iter().find(|import| import.path == "right").unwrap().target_file,
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "right")
+            .unwrap()
+            .target_file,
         Some(right_id)
     );
 
