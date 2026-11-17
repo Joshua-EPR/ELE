@@ -5,6 +5,7 @@ use crate::{
 use std::{
     collections::HashSet,
     fs,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
@@ -132,14 +133,13 @@ fn load_module_recursive(
 
     loading_stack.push(canonical_path.to_path_buf());
 
-    let source = fs::read_to_string(canonical_path).map_err(|e| {
+    let io_error = |e: io::Error| {
         Diagnostic::new(import_span, format!("{}: {e}", canonical_path.display()))
             .with_file(shown(canonical_path))
             .classify("L0014", "módulos")
-    })?;
-
-    if source.len() > MAX_MODULE_BYTES {
-        return Err(Diagnostic::new(
+    };
+    let oversized = || {
+        Diagnostic::new(
             import_span,
             format!(
                 "{}: archivo excede límite de 16 MiB",
@@ -147,8 +147,27 @@ fn load_module_recursive(
             ),
         )
         .with_file(shown(canonical_path))
-        .classify("L0014", "módulos"));
+        .classify("L0014", "módulos")
+    };
+
+    // Check the metadata first to avoid loading a known oversized file.
+    // Still bound the actual read: metadata is not reliable for every file
+    // type and the file can grow between this check and the read.
+    let file = fs::File::open(canonical_path).map_err(&io_error)?;
+    if file.metadata().map_err(&io_error)?.len() > MAX_MODULE_BYTES as u64 {
+        return Err(oversized());
     }
+    let mut bytes = Vec::new();
+    file.take(MAX_MODULE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(&io_error)?;
+    if bytes.len() > MAX_MODULE_BYTES {
+        return Err(oversized());
+    }
+    // Validate UTF-8 only after checking the byte limit; a truncated
+    // multibyte sequence in an oversized file must not mask the size error.
+    let source = String::from_utf8(bytes)
+        .map_err(|e| io_error(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
     files.push(shown(canonical_path));
     let file_id = u32::try_from(files.len()).map_err(|_| {
