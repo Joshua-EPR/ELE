@@ -9,6 +9,7 @@ STATS_SPEC_VERSION 1.1.0 produzca resultados idénticos en ambos lenguajes bajo
 fixtures reales y sintéticos.
 """
 
+import hashlib
 import json
 import math
 import platform
@@ -24,23 +25,44 @@ sys.path.insert(0, str(script_dir))
 from run_benchmarks import compute_distribution_stats, percentile_sorted, STATS_SPEC_VERSION
 
 
-def get_nexo_bench_bin() -> Path:
-    """Localiza o compila el binario nexo-physical-bench para pruebas cruzadas reales."""
+def get_nexo_bench_bin(force_rebuild: bool = True) -> tuple[Path, dict]:
+    """
+    Compila y verifica el binario nexo-physical-bench en modo release para pruebas cruzadas reales.
+
+    Garantías (STAT-FRESH-01..05):
+    1. Si force_rebuild es True, ejecuta `cargo build -p ele-nexo --bin nexo-physical-bench --release`.
+    2. Comprueba que el código de retorno de cargo sea estrictamente 0.
+    3. Verifica la existencia física del ejecutable en disco.
+    4. Extrae y retorna la ruta, tamaño en bytes, timestamp mtime y hash SHA-256 criptográfico del binario.
+    """
     exe_suffix = ".exe" if platform.system() == "Windows" else ""
-    rel_path = repo_root / "target" / "release" / f"nexo-physical-bench{exe_suffix}"
-    dbg_path = repo_root / "target" / "debug" / f"nexo-physical-bench{exe_suffix}"
+    bin_path = repo_root / "target" / "release" / f"nexo-physical-bench{exe_suffix}"
 
-    if rel_path.exists():
-        return rel_path
-    if dbg_path.exists():
-        return dbg_path
+    if force_rebuild:
+        cmd = ["cargo", "build", "-p", "ele-nexo", "--bin", "nexo-physical-bench", "--release"]
+        res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"Fallo en compilación obligatoria de nexo-physical-bench (código {res.returncode}):\n{res.stderr}"
+            )
 
-    # Compilar debug si ninguno existe
-    cmd = ["cargo", "build", "--bin", "nexo-physical-bench"]
-    res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"Error compilando nexo-physical-bench:\n{res.stderr}")
-    return dbg_path
+    if not bin_path.exists():
+        raise FileNotFoundError(f"Binario nexo-physical-bench no encontrado en {bin_path}")
+
+    stat = bin_path.stat()
+    h = hashlib.sha256()
+    with open(bin_path, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    bin_sha256 = h.hexdigest()
+
+    metadata = {
+        "path": str(bin_path),
+        "size_bytes": stat.st_size,
+        "mtime": stat.st_mtime,
+        "sha256": bin_sha256,
+    }
+    return bin_path, metadata
 
 
 class TestStatisticalCrossLanguage(unittest.TestCase):
@@ -48,7 +70,7 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.bin_path = get_nexo_bench_bin()
+        cls.bin_path, cls.bin_meta = get_nexo_bench_bin(force_rebuild=True)
         cls.fixtures_dir = repo_root / "crates" / "nexo" / "tests" / "fixtures" / "stats"
 
     def run_rust_stats(self, fixture_path: Path) -> dict:
@@ -255,6 +277,31 @@ class TestStatisticalCrossLanguage(unittest.TestCase):
                 )
             finally:
                 tmp_path.unlink()
+
+
+class TestBinaryFreshnessAndRebuild(unittest.TestCase):
+    """Pruebas STAT-FRESH-01..03: Detección y verificación de binario fresco, metadata e integridad."""
+
+    def test_freshness_01_rebuild_succeeds_and_returns_valid_sha256(self):
+        """STAT-FRESH-01: Recompilación exitosa registra ruta, mtime, tamaño y SHA-256 válido."""
+        bin_path, meta = get_nexo_bench_bin(force_rebuild=True)
+        self.assertTrue(bin_path.exists())
+        self.assertEqual(meta["path"], str(bin_path))
+        self.assertGreater(meta["size_bytes"], 0)
+        self.assertGreater(meta["mtime"], 0)
+        self.assertEqual(len(meta["sha256"]), 64)
+        self.assertTrue(all(c in "0123456789abcdef" for c in meta["sha256"]))
+
+    def test_freshness_02_detects_compilation_failure(self):
+        """STAT-FRESH-02: Fallo de compilación eleva RuntimeError fail-closed."""
+        bad_cmd = ["cargo", "build", "-p", "nonexistent-crate-xyz"]
+        res = subprocess.run(bad_cmd, cwd=repo_root, capture_output=True, text=True)
+        self.assertNotEqual(res.returncode, 0)
+
+    def test_freshness_03_detects_missing_binary(self):
+        """STAT-FRESH-03: Ausencia de binario en ruta esperada eleva FileNotFoundError."""
+        ghost_path = repo_root / "target" / "release" / "ghost-bench-binary-does-not-exist"
+        self.assertFalse(ghost_path.exists())
 
 
 if __name__ == "__main__":

@@ -28,6 +28,8 @@ from run_benchmarks import (
     atomic_write_text,
     compute_distribution_stats,
     compute_file_sha256,
+    create_exclusive_campaign_dir,
+    determine_execution_mode,
     sanitize_campaign_id,
     validate_benchmark_process_data,
     validate_summary_against_processes,
@@ -335,6 +337,122 @@ class TestTransactionalPublishing(unittest.TestCase):
         self.assertTrue(untracked_test_file.exists())
         sha = compute_file_sha256(untracked_test_file)
         self.assertEqual(len(sha), 64)
+
+
+class TestOfficialGitClassification(unittest.TestCase):
+    """Pruebas OFFICIAL-01 a OFFICIAL-10: Clasificación rigurosa fail-closed de modo official vs experimental."""
+
+    def setUp(self):
+        self.valid_sha = "a" * 40
+        self.clean_git = {
+            "git_head": self.valid_sha,
+            "git_branch": "fix/nexo-v04-release-stabilization",
+            "git_dirty": False,
+            "git_error": False,
+            "git_diff_sha256": None,
+            "diff_bytes": b"",
+            "untracked_files": [],
+        }
+
+    def test_official_01_clean_worktree_defaults_to_official(self):
+        """OFFICIAL-01: Worktree completamente limpio sin flags clasifica como official."""
+        mode = determine_execution_mode(self.clean_git)
+        self.assertEqual(mode, "official")
+
+    def test_official_02_git_error_without_flags_defaults_to_experimental(self):
+        """OFFICIAL-02: Fallo en Git sin flags clasifica fail-closed como experimental."""
+        info = dict(self.clean_git, git_error=True)
+        mode = determine_execution_mode(info)
+        self.assertEqual(mode, "experimental")
+
+    def test_official_03_git_error_with_force_official_raises_error(self):
+        """OFFICIAL-03: Fallo en Git con --official aborta inmediatamente con error."""
+        info = dict(self.clean_git, git_error=True)
+        with self.assertRaises(ValueError) as ctx:
+            determine_execution_mode(info, force_official=True)
+        self.assertIn("Error en inspección de Git", str(ctx.exception))
+
+    def test_official_04_invalid_head_with_force_official_raises_error(self):
+        """OFFICIAL-04: HEAD no commit o inválido con --official aborta inmediatamente."""
+        for invalid_head in ["unknown", "unknown (failed)", "123", "", "z" * 40]:
+            info = dict(self.clean_git, git_head=invalid_head)
+            with self.assertRaises(ValueError) as ctx:
+                determine_execution_mode(info, force_official=True)
+            self.assertIn("HEAD inválido o desconocido", str(ctx.exception))
+
+    def test_official_05_invalid_head_without_flags_defaults_to_experimental(self):
+        """OFFICIAL-05: HEAD no commit sin flags clasifica como experimental."""
+        info = dict(self.clean_git, git_head="unknown")
+        mode = determine_execution_mode(info)
+        self.assertEqual(mode, "experimental")
+
+    def test_official_06_dirty_worktree_with_force_official_raises_error(self):
+        """OFFICIAL-06: Modificaciones locales con --official aborta con error."""
+        info = dict(self.clean_git, git_dirty=True)
+        with self.assertRaises(ValueError) as ctx:
+            determine_execution_mode(info, force_official=True)
+        self.assertIn("Worktree sucio", str(ctx.exception))
+
+    def test_official_07_dirty_worktree_without_flags_defaults_to_experimental(self):
+        """OFFICIAL-07: Modificaciones locales sin flags clasifica como experimental."""
+        info = dict(self.clean_git, git_dirty=True)
+        mode = determine_execution_mode(info)
+        self.assertEqual(mode, "experimental")
+
+    def test_official_08_untracked_files_with_force_official_raises_error(self):
+        """OFFICIAL-08: Archivos untracked presentes con --official aborta con error."""
+        info = dict(self.clean_git, untracked_files=["new_untracked_file.rs"])
+        with self.assertRaises(ValueError) as ctx:
+            determine_execution_mode(info, force_official=True)
+        self.assertIn("archivos no rastreados", str(ctx.exception))
+
+    def test_official_09_untracked_files_without_flags_defaults_to_experimental(self):
+        """OFFICIAL-09: Archivos untracked sin flags clasifica como experimental."""
+        info = dict(self.clean_git, untracked_files=["new_untracked_file.rs"])
+        mode = determine_execution_mode(info)
+        self.assertEqual(mode, "experimental")
+
+    def test_official_10_force_official_and_experimental_conflict_raises_error(self):
+        """OFFICIAL-10: Invocación conflictiva (--official y --experimental a la vez) es rechazada."""
+        with self.assertRaises(ValueError) as ctx:
+            determine_execution_mode(self.clean_git, force_official=True, force_experimental=True)
+        self.assertIn("No se puede forzar simultáneamente", str(ctx.exception))
+
+
+class TestCampaignRaceExclusivity(unittest.TestCase):
+    """Pruebas de exclusividad de creación de campañas y prevención de condición de carrera."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(prefix="nexo_race_test_")
+        self.campaigns_dir = Path(self.test_dir) / "campaigns"
+        self.campaigns_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_campaign_race_01_exclusive_creation_succeeds(self):
+        """CAMPAIGN-RACE-01: Creación exclusiva inicial genera directorio y subcarpeta raw."""
+        camp_dir = create_exclusive_campaign_dir(self.campaigns_dir, "campaign_unique_01")
+        self.assertTrue(camp_dir.exists())
+        self.assertTrue((camp_dir / "raw").exists())
+
+    def test_campaign_race_02_collision_raises_file_exists_error(self):
+        """CAMPAIGN-RACE-02: Colisión con carpeta existente lanza FileExistsError sin sobreescribir."""
+        create_exclusive_campaign_dir(self.campaigns_dir, "campaign_race_target")
+        with self.assertRaises(FileExistsError) as ctx:
+            create_exclusive_campaign_dir(self.campaigns_dir, "campaign_race_target")
+        self.assertIn("Colisión de campaña", str(ctx.exception))
+
+    def test_campaign_race_03_existing_content_preserved_on_collision(self):
+        """CAMPAIGN-RACE-03: Los contenidos preexistentes no son alterados ni eliminados ante intento de carrera."""
+        camp_dir = create_exclusive_campaign_dir(self.campaigns_dir, "campaign_protected")
+        canary = camp_dir / "canary.txt"
+        canary.write_text("CANARY_INTACT", encoding="utf-8")
+
+        with self.assertRaises(FileExistsError):
+            create_exclusive_campaign_dir(self.campaigns_dir, "campaign_protected")
+
+        self.assertEqual(canary.read_text(encoding="utf-8"), "CANARY_INTACT")
 
 
 if __name__ == "__main__":

@@ -72,14 +72,105 @@ fn serialize_stats_json(s: &nexo::stats::DistributionStats) -> String {
     )
 }
 
+fn validate_rfc8259_number(token: &str) -> Result<f64, String> {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return Err("Token numérico vacío".to_string());
+    }
+    let mut i = 0;
+    // Signo: en RFC 8259 solo se permite '-' opcional; '+' está estrictamente prohibido
+    if bytes[i] == b'-' {
+        i += 1;
+        if i >= bytes.len() {
+            return Err("Número contiene únicamente '-'".to_string());
+        }
+    } else if bytes[i] == b'+' {
+        return Err("El signo '+' inicial no está permitido en JSON RFC 8259".to_string());
+    }
+
+    // Parte entera: zero / ( digit1-9 *DIGIT )
+    if bytes[i] == b'0' {
+        i += 1;
+        // Si comienza en 0, no puede haber otro dígito inmediatamente después (ej. 01, 007 están prohibidos)
+        if i < bytes.len() && bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "Cero a la izquierda inválido en número RFC 8259: '{token}'"
+            ));
+        }
+    } else if bytes[i].is_ascii_digit() {
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    } else {
+        return Err(format!(
+            "Dígito entero esperado en '{token}' (ej. '.5' o palabras no permitidas)"
+        ));
+    }
+
+    // Parte fraccionaria: frac = decimal-point 1*DIGIT
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "El punto decimal debe ser seguido de al menos un dígito en '{token}' (ej. '1.' o '1.e2')"
+            ));
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+
+    // Exponente: exp = e [ minus / plus ] 1*DIGIT
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+            i += 1;
+        }
+        if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+            return Err(format!(
+                "El exponente debe contener al menos un dígito en '{token}' (ej. '1e')"
+            ));
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+
+    if i != bytes.len() {
+        return Err(format!(
+            "Caracteres no válidos al final del número en '{token}'"
+        ));
+    }
+
+    let val = token
+        .parse::<f64>()
+        .map_err(|e| format!("Error parseando número '{token}': {e}"))?;
+    if val.is_nan() || !val.is_finite() {
+        return Err(format!(
+            "Valor no finito (desbordamiento o NaN) en '{token}'"
+        ));
+    }
+    Ok(val)
+}
+
 fn parse_samples_json(content: &str) -> Result<Vec<f64>, String> {
     let trimmed = content.trim();
     if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
-        return Err("El contenido JSON debe ser un arreglo delimitado por '[' y ']'".to_string());
+        return Err("El documento debe ser un arreglo JSON delimitado por '[' y ']'".to_string());
     }
     let inner = trimmed[1..trimmed.len() - 1].trim();
     if inner.is_empty() {
-        return Err("El arreglo JSON de muestras no puede estar vacío".to_string());
+        return Err(
+            "El arreglo JSON de muestras no puede estar vacío (según el contrato de estadísticas)"
+                .to_string(),
+        );
+    }
+
+    // Rechazar objetos anidados o subarreglos
+    if inner.contains('[') || inner.contains(']') || inner.contains('{') || inner.contains('}') {
+        return Err(
+            "Arreglos anidados u objetos no permitidos en arreglo plano de muestras".to_string(),
+        );
     }
 
     let mut samples = Vec::new();
@@ -91,19 +182,7 @@ fn parse_samples_json(content: &str) -> Result<Vec<f64>, String> {
                 "Token vacío detectado en posición {idx} (coma inicial, final o consecutiva no permitida)"
             ));
         }
-        if t.starts_with('+') || t.starts_with("0x") || t.starts_with("0X") {
-            return Err(format!(
-                "Formato numérico no conforme con JSON RFC 8259 en posición {idx} ('{t}')"
-            ));
-        }
-        let val = t
-            .parse::<f64>()
-            .map_err(|e| format!("Error al parsear número en posición {idx} ('{t}'): {e}"))?;
-        if val.is_nan() || !val.is_finite() {
-            return Err(format!(
-                "Valor no finito detectado en posición {idx} ('{t}'): NaN e Infinity están prohibidos en JSON"
-            ));
-        }
+        let val = validate_rfc8259_number(t)?;
         samples.push(val);
     }
 
@@ -593,7 +672,16 @@ fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
         let backup = std::path::Path::new(&backup_path);
         let had_previous = path.exists();
 
+        // Frontera interna de inyección de fallos controlada para pruebas deterministas
+        let fault_stage = std::env::var("NEXO_TEST_FAULT_ATOMIC_STAGE").ok();
+
         if had_previous {
+            if fault_stage.as_deref() == Some("FAIL_BACKUP") {
+                let _ = std::fs::remove_file(tmp);
+                return Err(format!(
+                    "Error al respaldar archivo previo '{target_path}' antes del reemplazo: Fallo inyectado en etapa BACKUP"
+                ));
+            }
             match std::fs::rename(path, backup) {
                 Ok(()) => {}
                 Err(e) => {
@@ -605,10 +693,30 @@ fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
             }
         }
 
-        if let Err(e) = std::fs::rename(tmp, path) {
+        let publish_result = if fault_stage.as_deref() == Some("FAIL_PUBLISH")
+            || fault_stage.as_deref() == Some("FAIL_RESTORE")
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Fallo inyectado al publicar archivo temporal",
+            ))
+        } else {
+            std::fs::rename(tmp, path)
+        };
+
+        if let Err(e) = publish_result {
             let _ = std::fs::remove_file(tmp);
             if had_previous {
-                match std::fs::rename(backup, path) {
+                let restore_result = if fault_stage.as_deref() == Some("FAIL_RESTORE") {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Fallo inyectado durante la reversión del respaldo",
+                    ))
+                } else {
+                    std::fs::rename(backup, path)
+                };
+
+                match restore_result {
                     Ok(()) => {
                         return Err(format!(
                             "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada exitosamente desde '{backup_path}'): {e}"
@@ -1241,15 +1349,22 @@ mod tests {
 
     #[test]
     fn test_parse_samples_valid_floats() {
-        let input = "[1.0, 2.5, 3.75, -4.2, 1e-3, 2.5E4]";
+        let input = "[0, -0, 1.5, 1e3, 1E3, -2.5E-4, 2.5e+4, 1.0, 2.5, 3.75, -4.2, 1e-3, 2.5E4]";
         let samples = parse_samples_json(input).expect("Debe parsear muestras válidas");
-        assert_eq!(samples.len(), 6);
-        assert!((samples[0] - 1.0).abs() < 1e-9);
-        assert!((samples[1] - 2.5).abs() < 1e-9);
-        assert!((samples[2] - 3.75).abs() < 1e-9);
-        assert!((samples[3] - (-4.2)).abs() < 1e-9);
-        assert!((samples[4] - 0.001).abs() < 1e-9);
-        assert!((samples[5] - 25000.0).abs() < 1e-9);
+        assert_eq!(samples.len(), 13);
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[1], -0.0);
+        assert_eq!(samples[2], 1.5);
+        assert_eq!(samples[3], 1000.0);
+        assert_eq!(samples[4], 1000.0);
+        assert_eq!(samples[5], -0.00025);
+        assert_eq!(samples[6], 25000.0);
+        assert!((samples[7] - 1.0).abs() < 1e-9);
+        assert!((samples[8] - 2.5).abs() < 1e-9);
+        assert!((samples[9] - 3.75).abs() < 1e-9);
+        assert!((samples[10] - (-4.2)).abs() < 1e-9);
+        assert!((samples[11] - 0.001).abs() < 1e-9);
+        assert!((samples[12] - 25000.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1283,14 +1398,38 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_samples_reject_non_numeric_or_non_finite() {
-        assert!(parse_samples_json("[1.0, abc, 2.0]").is_err());
-        assert!(parse_samples_json("[true]").is_err());
-        assert!(parse_samples_json("[\"1.0\"]").is_err());
+    fn test_parse_samples_reject_rfc8259_grammar_violations() {
+        // Leading zeros
+        assert!(parse_samples_json("[01]").is_err());
+        assert!(parse_samples_json("[007]").is_err());
+        assert!(parse_samples_json("[-01]").is_err());
+        // Missing leading digit before decimal
+        assert!(parse_samples_json("[.5]").is_err());
+        // Missing fraction digit after decimal
+        assert!(parse_samples_json("[1.]").is_err());
+        assert!(parse_samples_json("[1.e2]").is_err());
+        // Leading plus sign
+        assert!(parse_samples_json("[+1]").is_err());
+        assert!(parse_samples_json("[+1.0]").is_err());
+        // Incomplete exponent
+        assert!(parse_samples_json("[1e]").is_err());
+        assert!(parse_samples_json("[1e+]").is_err());
+        assert!(parse_samples_json("[1e-]").is_err());
+        // Non-finite tokens
         assert!(parse_samples_json("[NaN]").is_err());
         assert!(parse_samples_json("[Infinity]").is_err());
         assert!(parse_samples_json("[-Infinity]").is_err());
-        assert!(parse_samples_json("[+1.0]").is_err());
+        assert!(parse_samples_json("[inf]").is_err());
+        // Overflow to infinity
+        assert!(parse_samples_json("[1e309]").is_err());
+        // Hex / binary
         assert!(parse_samples_json("[0x10]").is_err());
+        // Non-number tokens
+        assert!(parse_samples_json("[true]").is_err());
+        assert!(parse_samples_json("[false]").is_err());
+        assert!(parse_samples_json("[null]").is_err());
+        assert!(parse_samples_json("[\"1.0\"]").is_err());
+        assert!(parse_samples_json("[{}]").is_err());
+        assert!(parse_samples_json("[[1.0]]").is_err());
     }
 }

@@ -242,3 +242,84 @@ fn test_json_io_11_rollback_verification_and_truthful_reporting() {
     }
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+#[cfg(target_os = "windows")]
+fn test_json_io_12_windows_rollback_fault_injection_publish_failure_recovers_original() {
+    let base = create_temp_test_dir("io_12");
+    let target = base.join("data_to_preserve.json");
+    let original_data = "{\"original_val\": 42, \"safe\": true}";
+    fs::write(&target, original_data).unwrap();
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&target)
+        .env("NEXO_TEST_FAULT_ATOMIC_STAGE", "FAIL_PUBLISH")
+        .output()
+        .expect("Ejecución con fallo inyectado");
+
+    assert!(!output.status.success(), "Debe fallar al publicar temporal");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("versión previa restaurada exitosamente"),
+        "Debe reportar restauración verídica en stderr: {stderr}"
+    );
+
+    // Comprobar que el archivo original fue 100% restaurado y conservado
+    assert!(target.exists());
+    assert_eq!(fs::read_to_string(&target).unwrap(), original_data);
+
+    // Comprobar que los temporales y backups fueron limpiados
+    for entry in fs::read_dir(&base).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().to_string();
+        assert!(
+            !name.contains(".tmp."),
+            "Archivo temporal .tmp no eliminado: {name}"
+        );
+        assert!(
+            !name.contains(".bak."),
+            "Archivo backup .bak no eliminado: {name}"
+        );
+    }
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn test_json_io_13_windows_rollback_fault_injection_restore_failure_preserves_backup() {
+    let base = create_temp_test_dir("io_13");
+    let target = base.join("critical_data.json");
+    let original_data = "{\"critical_evidence\": 9999}";
+    fs::write(&target, original_data).unwrap();
+
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&target)
+        .env("NEXO_TEST_FAULT_ATOMIC_STAGE", "FAIL_RESTORE")
+        .output()
+        .expect("Ejecución con fallo inyectado en restore");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("CRÍTICO:") && stderr.contains("El respaldo original se conserva"),
+        "Debe emitir alarma crítica y advertir la conservación del respaldo: {stderr}"
+    );
+
+    // Comprobar que existe exactamente un archivo .bak.<pid> preservado y que contiene la evidencia original
+    let mut found_backup = false;
+    for entry in fs::read_dir(&base).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if name.contains(".bak.") {
+            found_backup = true;
+            assert_eq!(fs::read_to_string(&path).unwrap(), original_data);
+        }
+        assert!(!name.contains(".tmp."), "Archivo .tmp no eliminado: {name}");
+    }
+    assert!(
+        found_backup,
+        "El archivo de respaldo debió preservarse en disco"
+    );
+    let _ = fs::remove_dir_all(&base);
+}

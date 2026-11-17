@@ -159,6 +159,74 @@ def sanitize_campaign_id(raw_id: str, campaigns_dir: Path) -> str:
     return raw_id
 
 
+def determine_execution_mode(
+    git_info: dict, force_official: bool = False, force_experimental: bool = False
+) -> str:
+    """
+    Determina de forma fail-closed el modo de ejecución ('official' o 'experimental').
+
+    Condiciones estrictas para 'official' (OFFICIAL-01..10):
+    1. Ausencia de errores de Git (git_error == False).
+    2. Commit HEAD válido (cadena hexadecimal de 40 caracteres correspondiente a un commit real).
+    3. Worktree completamente limpio (git_dirty == False).
+    4. Cero archivos sin seguimiento (untracked_files == []).
+
+    Si force_official es True y alguna condición no se cumple, lanza ValueError.
+    Si force_experimental es True, retorna 'experimental'.
+    Por defecto, si todas las condiciones se cumplen retorna 'official', de lo contrario 'experimental'.
+    """
+    if force_official and force_experimental:
+        raise ValueError("No se puede forzar simultáneamente el modo official y experimental.")
+
+    reasons = []
+    if git_info.get("git_error", False):
+        reasons.append("Error en inspección de Git")
+
+    git_head = git_info.get("git_head", "")
+    if not isinstance(git_head, str) or not re.match(r"^[0-9a-f]{40}$", git_head):
+        reasons.append(f"HEAD inválido o desconocido: '{git_head}'")
+
+    if git_info.get("git_dirty", False):
+        reasons.append("Worktree sucio (modificaciones locales detectadas)")
+
+    untracked = git_info.get("untracked_files", [])
+    if untracked:
+        reasons.append(f"{len(untracked)} archivos no rastreados (untracked) presentes")
+
+    is_clean = len(reasons) == 0
+
+    if force_official:
+        if not is_clean:
+            raise ValueError(f"Fallo de requisitos para modo oficial: {'; '.join(reasons)}")
+        return "official"
+
+    if force_experimental:
+        return "experimental"
+
+    return "official" if is_clean else "experimental"
+
+
+def create_exclusive_campaign_dir(campaigns_dir: Path, campaign_id: str) -> Path:
+    """
+    Crea de forma atómica y exclusiva el directorio de una campaña.
+
+    Si el directorio ya existe, falla inmediatamente con FileExistsError,
+    impidiendo cualquier sobreescritura accidental o colisión concurrente (CAMPAIGN-RACE).
+    Una vez asegurada la exclusividad del directorio de la campaña, crea
+    idempotentemente las subcarpetas requeridas (p. ej. 'raw').
+    """
+    campaign_dir = campaigns_dir / campaign_id
+    try:
+        os.mkdir(campaign_dir)
+    except FileExistsError:
+        raise FileExistsError(
+            f"Colisión de campaña: el directorio '{campaign_dir}' ya existe. "
+            "La creación de campañas debe ser estrictamente exclusiva."
+        )
+    (campaign_dir / "raw").mkdir(parents=True, exist_ok=True)
+    return campaign_dir
+
+
 def get_rustc_info() -> dict:
     """Obtiene versión de rustc, cargo y arquitectura target host."""
     rustc_ver = "unknown"
@@ -639,17 +707,16 @@ def main():
     # Git metadata
     git_info = get_git_info(repo_root)
 
-    # Verificación de modo oficial vs experimental (SOURCE-01..10)
-    if args.official:
-        if git_info.get("git_error"):
-            print("ERROR CRÍTICO (SOURCE-01): Falló la inspección de Git. El modo '--official' exige verificación estricta.")
-            sys.exit(1)
-        if git_info["git_dirty"] or len(git_info.get("untracked_files", [])) > 0:
-            print("ERROR CRÍTICO (SOURCE-01): El modo '--official' exige un worktree limpio.")
-            print(f"Modificaciones detectadas: dirty={git_info['git_dirty']}, untracked={len(git_info.get('untracked_files', []))}")
-            sys.exit(1)
-
-    execution_mode = "experimental" if (git_info["git_dirty"] or args.experimental) else "official"
+    # Verificación de modo oficial vs experimental con clasificación fail-closed (OFFICIAL-01..10)
+    try:
+        execution_mode = determine_execution_mode(
+            git_info,
+            force_official=args.official,
+            force_experimental=args.experimental,
+        )
+    except ValueError as e:
+        print(f"ERROR CRÍTICO (OFFICIAL-VERIFY): {e}")
+        sys.exit(1)
 
     campaigns_dir = benchmarks_dir / "campaigns"
     campaigns_dir.mkdir(parents=True, exist_ok=True)
@@ -676,9 +743,12 @@ def main():
     # FASE A: Preparación y Aislamiento Transaccional
     # -------------------------------------------------------------
     print("\n[FASE A] Preparando aislamiento transaccional en carpeta de campaña...")
-    campaign_dir = campaigns_dir / campaign_id
+    try:
+        campaign_dir = create_exclusive_campaign_dir(campaigns_dir, campaign_id)
+    except FileExistsError as e:
+        print(f"ERROR CRÍTICO (CAMPAIGN-RACE): {e}")
+        sys.exit(1)
     campaign_raw_dir = campaign_dir / "raw"
-    campaign_raw_dir.mkdir(parents=True, exist_ok=True)
 
     # En modo experimental con cambios, guardar patch.diff y respaldar archivos untracked
     untracked_backed_up = []

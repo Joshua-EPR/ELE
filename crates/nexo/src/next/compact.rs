@@ -1098,6 +1098,9 @@ pub trait CompactPoolAuthority64: private::Sealed {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     struct MockCompactPool {
         pub id: u8,
@@ -1616,6 +1619,26 @@ mod tests {
         assert!(!registry.corrupted.load(Ordering::SeqCst));
     }
 
+    struct WorkerTracker {
+        active_workers: AtomicUsize,
+        worker_panicked: AtomicBool,
+        cancelled: AtomicBool,
+        oom_count: AtomicUsize,
+    }
+
+    struct WorkerGuard {
+        tracker: Arc<WorkerTracker>,
+    }
+
+    impl Drop for WorkerGuard {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                self.tracker.worker_panicked.store(true, Ordering::SeqCst);
+            }
+            self.tracker.active_workers.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     #[test]
     fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
         use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -1627,22 +1650,50 @@ mod tests {
         let barrier = Arc::new(Barrier::new(num_workers + 1));
         let next_pool_id = Arc::new(AtomicU64::new(1));
 
-        let oom_observed = Arc::new(AtomicUsize::new(0));
+        let tracker = Arc::new(WorkerTracker {
+            active_workers: AtomicUsize::new(num_workers),
+            worker_panicked: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            oom_count: AtomicUsize::new(0),
+        });
         let attempts_total = Arc::new(AtomicUsize::new(0));
         let exhaustion_observed = Arc::new(AtomicUsize::new(0));
 
-        // Injector thread: activates failure deterministically and clears it once OOM events are observed (no sleep!)
+        // Injector thread: supervisión y terminación controlada (cancela, detecta pánicos y evita esperas infinitas)
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
-        let oom_inj = oom_observed.clone();
-        let injector_handle = thread::spawn(move || {
+        let tracker_inj = tracker.clone();
+        let injector_handle = thread::spawn(move || -> Result<(), &'static str> {
             reg_inj.inject_reserve_failure(true);
             barrier_inj.wait();
-            // Deterministic synchronization: wait until workers observe real OOM events
-            while oom_inj.load(Ordering::SeqCst) < 5 {
+
+            let target_oom = 5;
+            let mut iterations = 0usize;
+            const MAX_INJECTOR_YIELDS: usize = 200_000;
+
+            while tracker_inj.oom_count.load(Ordering::SeqCst) < target_oom {
+                if tracker_inj.cancelled.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM cancelado explícitamente");
+                }
+                if tracker_inj.worker_panicked.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM abortado: pánico detectado en trabajador");
+                }
+                if tracker_inj.active_workers.load(Ordering::SeqCst) == 0 {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM abortado: trabajadores cerraron prematuramente");
+                }
+                iterations += 1;
+                if iterations > MAX_INJECTOR_YIELDS {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM excedió el límite acotado de espera activa");
+                }
                 thread::yield_now();
             }
+
             reg_inj.inject_reserve_failure(false);
+            Ok(())
         });
 
         // Worker threads: compete for pool IDs until 8-bit space (255) is exhausted (OOM-CONC-01, OOM-CONC-04)
@@ -1651,11 +1702,14 @@ mod tests {
             let reg = registry.clone();
             let barrier_worker = barrier.clone();
             let next_pool = next_pool_id.clone();
-            let oom_worker = oom_observed.clone();
+            let tracker_worker = tracker.clone();
             let attempts_worker = attempts_total.clone();
             let exhaustion_worker = exhaustion_observed.clone();
 
             worker_handles.push(thread::spawn(move || {
+                let _guard = WorkerGuard {
+                    tracker: tracker_worker.clone(),
+                };
                 barrier_worker.wait();
                 let mut my_tokens = Vec::new();
 
@@ -1677,7 +1731,7 @@ mod tests {
                                 break;
                             }
                             Err(CompactPoolError::OutOfMemory) => {
-                                oom_worker.fetch_add(1, Ordering::SeqCst);
+                                tracker_worker.oom_count.fetch_add(1, Ordering::SeqCst);
                                 thread::yield_now();
                             }
                             Err(CompactPoolError::PoolIdExhausted) => {
@@ -1700,11 +1754,12 @@ mod tests {
             all_tokens.extend(h.join().expect("Worker thread panicked"));
         }
 
-        injector_handle.join().expect("Injector thread panicked");
+        let inj_res = injector_handle.join().expect("Injector thread panicked");
+        assert!(inj_res.is_ok(), "Injector terminó con error: {inj_res:?}");
         registry.inject_reserve_failure(false);
 
         // Verification of deterministic observation of concurrent OOM events
-        let total_oom = oom_observed.load(Ordering::SeqCst);
+        let total_oom = tracker.oom_count.load(Ordering::SeqCst);
         let total_attempts = attempts_total.load(Ordering::SeqCst);
         let total_exhaustion = exhaustion_observed.load(Ordering::SeqCst);
 
@@ -1829,18 +1884,49 @@ mod tests {
         let target_allocations = 1000u64;
         let barrier = Arc::new(Barrier::new(num_workers + 1));
         let next_pool_id = Arc::new(AtomicU64::new(1));
-        let oom_observed = Arc::new(AtomicUsize::new(0));
+        let tracker = Arc::new(WorkerTracker {
+            active_workers: AtomicUsize::new(num_workers),
+            worker_panicked: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            oom_count: AtomicUsize::new(0),
+        });
 
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
-        let oom_inj = oom_observed.clone();
-        let injector_handle = thread::spawn(move || {
+        let tracker_inj = tracker.clone();
+        let injector_handle = thread::spawn(move || -> Result<(), &'static str> {
             reg_inj.inject_reserve_failure(true);
             barrier_inj.wait();
-            while oom_inj.load(Ordering::SeqCst) < 5 {
+
+            let target_oom = 5;
+            let mut iterations = 0usize;
+            const MAX_INJECTOR_YIELDS: usize = 200_000;
+
+            while tracker_inj.oom_count.load(Ordering::SeqCst) < target_oom {
+                if tracker_inj.cancelled.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM 16-bit cancelado explícitamente");
+                }
+                if tracker_inj.worker_panicked.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM 16-bit abortado: pánico detectado en trabajador");
+                }
+                if tracker_inj.active_workers.load(Ordering::SeqCst) == 0 {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err(
+                        "Inyector OOM 16-bit abortado: trabajadores cerraron prematuramente",
+                    );
+                }
+                iterations += 1;
+                if iterations > MAX_INJECTOR_YIELDS {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM 16-bit excedió el límite acotado de espera activa");
+                }
                 thread::yield_now();
             }
+
             reg_inj.inject_reserve_failure(false);
+            Ok(())
         });
 
         let mut worker_handles = Vec::new();
@@ -1848,9 +1934,12 @@ mod tests {
             let reg = registry.clone();
             let bar = barrier.clone();
             let next_pool = next_pool_id.clone();
-            let oom_worker = oom_observed.clone();
+            let tracker_worker = tracker.clone();
 
             worker_handles.push(thread::spawn(move || {
+                let _guard = WorkerGuard {
+                    tracker: tracker_worker.clone(),
+                };
                 bar.wait();
                 let mut my_tokens = Vec::new();
                 loop {
@@ -1865,7 +1954,7 @@ mod tests {
                                 break;
                             }
                             Err(CompactPoolError::OutOfMemory) => {
-                                oom_worker.fetch_add(1, Ordering::SeqCst);
+                                tracker_worker.oom_count.fetch_add(1, Ordering::SeqCst);
                                 thread::yield_now();
                             }
                             Err(other) => {
@@ -1883,11 +1972,15 @@ mod tests {
             all_tokens.extend(h.join().expect("Worker thread panicked"));
         }
 
-        injector_handle.join().expect("Injector thread panicked");
+        let inj_res = injector_handle.join().expect("Injector thread panicked");
+        assert!(
+            inj_res.is_ok(),
+            "Injector 16-bit terminó con error: {inj_res:?}"
+        );
         registry.inject_reserve_failure(false);
 
         // OOM-CONC-10: Repeated verification on 16-bit registry with deterministic OOM observation
-        let total_oom = oom_observed.load(Ordering::SeqCst);
+        let total_oom = tracker.oom_count.load(Ordering::SeqCst);
         assert!(
             total_oom > 0,
             "CRITICAL: 16-bit test failed to observe real OutOfMemory events! (total_oom = 0)"
@@ -1915,6 +2008,124 @@ mod tests {
             pool_count_before,
             "All physical pool IDs must be strictly unique"
         );
+    }
+
+    #[test]
+    fn test_oom_protocol_cancellation_unblocks_injector() {
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let barrier = Arc::new(Barrier::new(2));
+        let tracker = Arc::new(WorkerTracker {
+            active_workers: AtomicUsize::new(1),
+            worker_panicked: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            oom_count: AtomicUsize::new(0),
+        });
+
+        let reg_inj = registry.clone();
+        let bar_inj = barrier.clone();
+        let tracker_inj = tracker.clone();
+        let injector = thread::spawn(move || -> Result<(), &'static str> {
+            reg_inj.inject_reserve_failure(true);
+            bar_inj.wait();
+
+            while tracker_inj.oom_count.load(Ordering::SeqCst) < 100 {
+                if tracker_inj.cancelled.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM cancelado explícitamente");
+                }
+                if tracker_inj.active_workers.load(Ordering::SeqCst) == 0 {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector abortado por cierre de trabajadores");
+                }
+                thread::yield_now();
+            }
+            reg_inj.inject_reserve_failure(false);
+            Ok(())
+        });
+
+        barrier.wait();
+        tracker.cancelled.store(true, Ordering::SeqCst);
+        let res = injector.join().unwrap();
+        assert_eq!(res, Err("Inyector OOM cancelado explícitamente"));
+        assert!(!registry.fail_reserve.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_oom_protocol_workers_exit_unblocks_injector() {
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let barrier = Arc::new(Barrier::new(2));
+        let tracker = Arc::new(WorkerTracker {
+            active_workers: AtomicUsize::new(1),
+            worker_panicked: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            oom_count: AtomicUsize::new(0),
+        });
+
+        let reg_inj = registry.clone();
+        let bar_inj = barrier.clone();
+        let tracker_inj = tracker.clone();
+        let injector = thread::spawn(move || -> Result<(), &'static str> {
+            reg_inj.inject_reserve_failure(true);
+            bar_inj.wait();
+
+            while tracker_inj.oom_count.load(Ordering::SeqCst) < 100 {
+                if tracker_inj.active_workers.load(Ordering::SeqCst) == 0 {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector abortado: trabajadores cerraron prematuramente");
+                }
+                thread::yield_now();
+            }
+            reg_inj.inject_reserve_failure(false);
+            Ok(())
+        });
+
+        barrier.wait();
+        tracker.active_workers.store(0, Ordering::SeqCst);
+        let res = injector.join().unwrap();
+        assert_eq!(
+            res,
+            Err("Inyector abortado: trabajadores cerraron prematuramente")
+        );
+        assert!(!registry.fail_reserve.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_oom_protocol_worker_panic_unblocks_injector() {
+        let registry = Arc::new(CompactPoolRegistryInstance::new());
+        let barrier = Arc::new(Barrier::new(2));
+        let tracker = Arc::new(WorkerTracker {
+            active_workers: AtomicUsize::new(1),
+            worker_panicked: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            oom_count: AtomicUsize::new(0),
+        });
+
+        let reg_inj = registry.clone();
+        let bar_inj = barrier.clone();
+        let tracker_inj = tracker.clone();
+        let injector = thread::spawn(move || -> Result<(), &'static str> {
+            reg_inj.inject_reserve_failure(true);
+            bar_inj.wait();
+
+            while tracker_inj.oom_count.load(Ordering::SeqCst) < 100 {
+                if tracker_inj.worker_panicked.load(Ordering::SeqCst) {
+                    reg_inj.inject_reserve_failure(false);
+                    return Err("Inyector OOM abortado: pánico detectado en trabajador");
+                }
+                thread::yield_now();
+            }
+            reg_inj.inject_reserve_failure(false);
+            Ok(())
+        });
+
+        barrier.wait();
+        tracker.worker_panicked.store(true, Ordering::SeqCst);
+        let res = injector.join().unwrap();
+        assert_eq!(
+            res,
+            Err("Inyector OOM abortado: pánico detectado en trabajador")
+        );
+        assert!(!registry.fail_reserve.load(Ordering::SeqCst));
     }
 
     #[test]
