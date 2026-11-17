@@ -103,7 +103,10 @@ fn load_module_recursive(
     files: &mut Vec<String>,
 ) -> Result<(), Diagnostic> {
     // Cycle detection
-    if loading_stack.iter().any(|path| path.as_path() == canonical_path) {
+    if loading_stack
+        .iter()
+        .any(|path| path.as_path() == canonical_path)
+    {
         let mut chain: Vec<String> = loading_stack
             .iter()
             .map(|p| {
