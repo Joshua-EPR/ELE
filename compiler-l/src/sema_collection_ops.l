@@ -32,7 +32,9 @@ pub fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: 
     }
     let list_index = lirListRegister(&mut ctx.lir_module, elem_t)
     let first = lirSequence(&mut ctx, elements)
-    lirSetVal(&mut ctx, lirNew(&mut ctx, list_t, false, LIR_LIST_LIT, list_index, first, elements.length))
+    // Preserve literal element order while ending the nested mutable borrow.
+    let value = lirNew(&mut ctx, list_t, false, LIR_LIST_LIT, list_index, first, elements.length)
+    lirSetVal(&mut ctx, value)
     return list_t
 }
 
