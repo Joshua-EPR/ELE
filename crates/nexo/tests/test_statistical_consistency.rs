@@ -103,3 +103,120 @@ fn test_non_finite_rejection_at_boundaries() {
     );
     assert_eq!(compute_stats(&[]).unwrap_err(), StatsError::Empty);
 }
+
+// ---------------------------------------------------------------------------
+// Suite de paridad cruzada Rust / Python (STAT-CROSS-01..10)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_stat_cross_01_identical_mean() {
+    let v1 = [10.0, 20.0, 30.0, 40.0, 50.0];
+    let stats1 = compute_stats(&v1).expect("v1 stats");
+    assert!((stats1.mean - 30.0).abs() < 1e-4);
+
+    let v2 = [100.5, 200.25, 300.75];
+    let stats2 = compute_stats(&v2).expect("v2 stats");
+    assert!((stats2.mean - 200.5).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_02_identical_median_odd_and_even() {
+    let v_odd = [5.0, 1.0, 9.0, 3.0, 7.0];
+    let stats_odd = compute_stats(&v_odd).expect("odd stats");
+    assert!((stats_odd.median - 5.0).abs() < 1e-4);
+
+    let v_even = [10.0, 20.0, 30.0, 40.0];
+    let stats_even = compute_stats(&v_even).expect("even stats");
+    assert!((stats_even.median - 25.0).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_03_sample_and_population_variance() {
+    let v = [10.0, 20.0, 30.0, 40.0, 50.0];
+    let stats = compute_stats(&v).expect("v stats");
+    assert!((stats.variance_sample - 250.0).abs() < 1e-4);
+    assert!((stats.variance_pop - 200.0).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_04_sample_and_population_stddev() {
+    let v = [10.0, 20.0, 30.0, 40.0, 50.0];
+    let stats = compute_stats(&v).expect("v stats");
+    assert!((stats.std_dev_sample - 250.0f64.sqrt()).abs() < 1e-4);
+    assert!((stats.std_dev_pop - 200.0f64.sqrt()).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_05_coefficient_of_variation() {
+    let v = [10.0, 20.0, 30.0, 40.0, 50.0];
+    let stats = compute_stats(&v).expect("v stats");
+    let exp_cv_sample = (250.0f64.sqrt() / 30.0) * 100.0;
+    let exp_cv_pop = (200.0f64.sqrt() / 30.0) * 100.0;
+    assert!((stats.cv_sample - exp_cv_sample).abs() < 1e-4);
+    assert!((stats.cv_pop - exp_cv_pop).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_06_percentiles_linear_interpolation() {
+    let v = [10.0, 20.0, 30.0, 40.0, 50.0];
+    let mut sorted = v.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let p95 = nexo::stats::percentile_sorted(&sorted, 0.95);
+    assert!((p95 - 48.0).abs() < 1e-4);
+
+    let p99 = nexo::stats::percentile_sorted(&sorted, 0.99);
+    assert!((p99 - 49.6).abs() < 1e-4);
+}
+
+#[test]
+fn test_stat_cross_07_empty_dataset_rejection() {
+    assert_eq!(compute_stats(&[]).unwrap_err(), StatsError::Empty);
+}
+
+#[test]
+fn test_stat_cross_08_non_finite_rejection() {
+    assert_eq!(
+        compute_stats(&[1.0, 2.0, f64::NAN]).unwrap_err(),
+        StatsError::NonFiniteValue
+    );
+    assert_eq!(
+        compute_stats(&[1.0, f64::INFINITY, 3.0]).unwrap_err(),
+        StatsError::NonFiniteValue
+    );
+    assert_eq!(
+        compute_stats(&[f64::NEG_INFINITY, 2.0, 3.0]).unwrap_err(),
+        StatsError::NonFiniteValue
+    );
+}
+
+#[test]
+fn test_stat_cross_09_samuelson_bounds_enforced() {
+    let v_valid = [100.0, 100.0, 100.0, 100.0, 200.0];
+    let stats = compute_stats(&v_valid).expect("Valid Samuelson bound");
+    assert!(verify_samuelson_bounds(&stats).is_ok());
+
+    let mut v_batches = Vec::with_capacity(700);
+    v_batches.push(2969.5);
+    v_batches.extend(vec![93.75; 699]);
+    let stats_batches = compute_stats(&v_batches).expect("700 batches");
+    assert_eq!(stats_batches.count, 700);
+    assert!(stats_batches.std_dev_sample > 108.0);
+    assert!(verify_samuelson_bounds(&stats_batches).is_ok());
+}
+
+#[test]
+fn test_stat_cross_10_numerical_stability_large_offset() {
+    let offset = 1_000_000_000.0;
+    let v_shifted = [
+        offset + 10.0,
+        offset + 20.0,
+        offset + 30.0,
+        offset + 40.0,
+        offset + 50.0,
+    ];
+    let stats = compute_stats(&v_shifted).expect("Shifted stats");
+    assert!((stats.mean - (offset + 30.0)).abs() < 1e-4);
+    assert!((stats.variance_sample - 250.0).abs() < 1e-4);
+    assert!((stats.variance_pop - 200.0).abs() < 1e-4);
+}

@@ -220,20 +220,38 @@ pub fn compute_stats(samples: &[f64]) -> Result<DistributionStats, StatsError> {
     Ok(stats)
 }
 
-/// Calcula el percentil $p \in [0.0, 1.0]$ sobre un slice previamente ordenado.
+/// Versión de la especificación estadística unificada entre Rust y Python.
+pub const STATS_SPEC_VERSION: &str = "1.1.0";
+
+/// Calcula el percentil $p \in [0.0, 1.0]$ sobre un slice previamente ordenado
+/// mediante interpolación lineal uniforme.
+///
+/// Especificación estándar (idéntica entre Rust y Python):
+/// Sea $N = \text{sorted.len()}$, $r = (N - 1) \times p$.
+/// Sean $i = \lfloor r \rfloor$, $j = \lceil r \rceil$, y peso $w = r - i$.
+/// $\text{percentil}(p) = x_i \times (1 - w) + x_j \times w$.
 pub fn percentile_sorted(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() {
+    let n = sorted.len();
+    if n == 0 {
         return 0.0;
     }
-    if sorted.len() == 1 || p <= 0.0 {
+    if n == 1 || p <= 0.0 {
         return sorted[0];
     }
     if p >= 1.0 {
-        return sorted[sorted.len() - 1];
+        return sorted[n - 1];
     }
 
-    let idx = ((sorted.len() as f64 - 1.0) * p).round() as usize;
-    sorted[idx.min(sorted.len() - 1)]
+    let r = (n as f64 - 1.0) * p;
+    let lower = r.floor() as usize;
+    let upper = r.ceil() as usize;
+    let weight = r - lower as f64;
+
+    if lower == upper || upper >= n {
+        sorted[lower.min(n - 1)]
+    } else {
+        sorted[lower] * (1.0 - weight) + sorted[upper] * weight
+    }
 }
 
 /// Comprueba la desigualdad de Samuelson: para cualquier distribución de tamaño $N$,
