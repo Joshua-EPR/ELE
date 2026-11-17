@@ -12,11 +12,11 @@ const ACCESS_MOVE = 1
 const ACCESS_PLACE = 2
 
 // Syntactic positions where a borrow or a borrowed call result may appear.
-const SITE_NONE = 0
-const SITE_LET = 1
-const SITE_VAR = 2
-const SITE_ARG = 3
-const SITE_RETURN = 4
+pub const SITE_NONE = 0
+pub const SITE_LET = 1
+pub const SITE_VAR = 2
+pub const SITE_ARG = 3
+pub const SITE_RETURN = 4
 
 pub struct SemaError {
     code: Text
