@@ -1,5 +1,239 @@
 # Traspaso de agente — ELE
 
+## Actualización 2026-11-15 — Cierre de P0: encapsulación de API pública y aislamiento de instrumentación (PR #69)
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
+
+### 1. Resolución de exposición de helpers adversariales
+- Se eliminó completamente la feature `test-internals` y los métodos `__test_*` de la API del crate.
+- Los métodos de instrumentación adversarial (`craft_handle_for_test`, `craft_hole_token_for_test`, `corrupt_live_for_test`, `corrupt_holes_for_test`, `corrupt_generation_for_test`, `corrupt_occupied_for_test`, `corrupt_free_bit_for_test`, `corrupt_hole_bit_for_test`) quedaron restringidos estrictamente a `#[cfg(test)]` con visibilidad `pub(crate)` dentro de `crates/nexo/src/physical/pool.rs`.
+- La suite adversarial A01–A12 se migró a un módulo interno de pruebas unitarias (`crates/nexo/src/physical/adversarial_tests.rs`).
+- Se implementaron pruebas negativas de compilación externa (`crates/nexo/tests/api_security.rs` y fixture `crates/nexo/tests/fixtures/external_consumer/`) que verifican que un consumidor normal o con `--all-features` no puede invocar dichos métodos (`error[E0599]`) ni construir instancias directas de `Handle` o `HoleToken` (`error[E0451]`).
+- Se añadieron doctests `compile_fail` demostrando la no clonabilidad de `Handle` y `HoleToken` (`error[E0599]`).
+- Validación: 216 pruebas aprobadas en Windows MSVC, 214 pruebas aprobadas en Linux WSL2 glibc.
+
+---
+
+## Actualización 2026-11-14 — Auditoría final de seguridad: atomicidad en dos fases (Fase A / Fase B), separación de contadores y casos adversariales A01–A12 (PR #69)
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree `target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`. No se modificaron workflows de CI, no se forzó push y no se realizó merge sin autorización.
+
+### 1. Auditoría de atomicidad de capacidades lineales y corrección arquitectónica
+
+Se rediseñaron integralmente las operaciones propietarias del allocator físico (`crates/nexo/src/physical/pool.rs`) bajo una arquitectura formal en dos fases:
+- **Fase A (Prevalidación y preparación sin mutaciones lógicas)**:
+  - Todo chequeo de identidad, generación, inicialización de metadatos (`meta()`), límites de capacidad, comprobaciones de subpágina no ocupada y cálculo exacto de contadores (`checked_add`, `checked_sub`) se realiza antes de aplicar cualquier mutación lógica.
+  - En `reuse_hole`, la puesta a cero física del slot (`space_mut()?.fill(...)`) se ejecuta en Fase A.
+  - Si cualquier precondición, comprobación o efecto físico preliminar falla, la función retorna `Err((capacidad, error))` con el `Handle` o `HoleToken` exactamente intacto y sin que el pool haya alterado ninguna generación, bitmap o contador.
+- **Fase B (Commit lógico irrevocable)**:
+  - Una vez superada la Fase A, la transición de estado es infalible e irreversible: se invalida o avanza la generación del slot, se actualizan bitmaps de ocupados/libres, y se sincronizan los contadores `live` y `holes`.
+  - La capacidad queda consumida de manera permanente y jamás es devuelta dentro de un `Err`.
+  - Los efectos secundarios físicos post-commit (escritura del espejo de cabecera y descarte/reclaim físico por página) se aíslan completamente: si el kernel o el backend físico fallan, el error se reporta de forma estructurada en `DestroyReport` (`HeaderStatus::Stale`, páginas en `ReclaimPending`), conservando la destrucción irrevocable de la capacidad lineal sin comprometer la coherencia interna.
+
+### 2. Separación de contadores de seguridad y métricas de telemetría
+
+- Se eliminaron todos los `saturating_sub` sobre contadores de estado de seguridad:
+  - `self.live` y `self.holes` usan `checked_sub(1)` en Fase A; un subdesbordamiento es rechazado explícitamente con `PoolError::Invariant`.
+  - `self.live.checked_add(1)` en `allocate` y `reuse_hole` previene cualquier desbordamiento de capacidad o colisión de índices (`PoolError::OutOfSpace`).
+  - `self.holes.checked_add(1)` en `destroy` con creación de hueco valida límites de espacio antes de invalidar el objeto.
+- Los contadores de telemetría y diagnóstico (`alloc_count`, `destroy_count`, `bytes_allocated`, `reclaim_cycles`, etc.) se mantienen aislados y protegidos mediante `saturating_add`, garantizando que métricas acumulativas no provoquen desbordamiento ni afecten la corrección de seguridad.
+
+### 3. Batería de pruebas adversariales A01–A12 (`crates/nexo/tests/adversarial_atomicity.rs`)
+
+Se implementó una suite exhaustiva de 12 pruebas adversariales para auditar y verificar empíricamente los límites y la atomicidad:
+- **A01**: Underflow simulado de `live` en `destroy` es interceptado en Fase A; el `Handle` es devuelto intacto y la generación no sufre alteración.
+- **A02**: Underflow simulado de `holes` en `reuse_hole` o `release_hole` es interceptado en Fase A; el `HoleToken` es devuelto intacto.
+- **A03**: Overflow simulado de `live` en `allocate` es rechazado antes de publicar cualquier slot o alterar páginas físicas.
+- **A04**: Overflow simulado de `holes` en `destroy` con hueco rechaza la operación sin consumir ni invalidar el `Handle`.
+- **A05**: Error de metadatos ante superpágina desinicializada devuelve la capacidad intacta en Fase A.
+- **A06**: Reutilización exitosa garantizada de una capacidad `HoleToken` tras un fallo previo en Fase A.
+- **A07**: Degradación segura ante fallo forzado de sincronización de cabecera post-commit; retorna `Ok(DestroyReport)` con `HeaderStatus::Stale` y el handle consumido irreversiblemente.
+- **A08**: Generación destruida es permanentemente rechazada por `validate()`, impidiendo revalidaciones stale o ataques ABA.
+- **A09**: Consistencia estricta del `DensityIndex` respecto a los bitmaps de superpáginas a lo largo de ciclos de reserva, huecos y liberación.
+- **A10**: Fallo en espejo no revierte metadatos lógicos.
+- **A11**: Reclamación física pendiente preserva la destrucción lógica del handle.
+- **A12**: Campaña diferencial pseudo-adversarial de 300 operaciones con verificación continua de invariantes de pool.
+
+### 4. Estado de validación dual (Windows y Linux WSL2)
+
+- `cargo fmt --all --check`: aprobado (código 0).
+- `cargo clippy --workspace --all-targets -- -D warnings`: aprobado (código 0).
+- `cargo test -p ele-nexo --test adversarial_atomicity`: 12/12 aprobadas en Windows y Linux.
+- `cargo test -p ele-nexo`: suite completa de NEXO aprobada (203 pruebas en Windows, 204 en Linux).
+- `cargo test --test child_isolation`: 5/5 pruebas de protección física en proceso hijo aisladas y aprobadas en Windows (`0xC0000005`) y Linux (`SIGSEGV`).
+- `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+- Suite completa del workspace validada.
+
+---
+
+## Actualización 2026-11-14 — Cierre de bloqueos P0 (overflow, tipado meta y probe físico) y validación PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, PR #69 en borrador. Base `origin/main @ 2712a1b`.
+No se modificaron workflows de CI ni se forzó push.
+
+### Bloqueos P0 resueltos
+
+1. **P0.1 — Overflow de contadores y ordinales**:
+   - `FaultPlan`: saturación controlada de `counts` en `u64::MAX` con retorno `FaultOutcome::Completed` en saturación para evitar fallos anómalos o desbordamientos; comprobación `checked_add` en `fail_nth` y `schedule` con guardia `n > 0`.
+   - `OsCalls`: suma saturante en `total()`; incremento con `saturating_add(1)` en todas las transiciones reales y adversariales.
+   - `NEXT_POOL_ID`: reserva atómica con `try_update` que comprueba el límite `u64::MAX`, fallando controladamente con `PoolError::InvalidConfig("pool ID counter exhausted")` en lugar de reiniciar IDs en 0.
+   - `AddressSpaceMetrics`: multiplicaciones de conteos de páginas por tamaño de página protegidas con `saturating_mul`.
+   - `DensityIndex`: guardias estrictas contra `free == 0`, `free > 64`, `free > buckets.len()` y desbordamiento de bits en `summary` o fuera de palabras.
+   - `epoca_destruccion`: avance mediante `saturating_add(1)` y `saturating_add(a.epoca)`. En saturación a `u64::MAX`, la validación de sellos rechaza enlaces obsoletos de forma segura en lugar de permitir colisiones por wraparound.
+   - Métricas de runtime (`rt/metricas.rs` y `rt/maquina.rs`): todas las estadísticas de accesos, revalidaciones, ausencias, lecturas y drop-flags migradas a `saturating_add`.
+   - `platform/linux.rs`: aritmética de alineación y recorte de prefijo/sufijo protegida con `checked_add` y manejo seguro de memoria antes de abortar.
+
+2. **P0.2 — Tipado seguro de `meta()` y `meta_mut()`**:
+   - Eliminados todos los `expect("superpágina inicializada")` de `PhysicalPool`.
+   - Definido el tipo testigo `SuperpageIndex(usize)` para ordinales de superpágina dentro del límite y con inicialización confirmada.
+   - `meta(sp)` y `meta_mut(sp)` retornan ahora `Result<&SuperpageMeta, PoolError>` y `Result<&mut SuperpageMeta, PoolError>`, mapeando accesos fuera de rango o superpáginas no inicializadas a `Err(PoolError::Invariant(...))` sin entrar en pánico.
+   - Incorporados los métodos de inspección y validación `is_superpage_initialized(sp)` y `validate_superpage(sp) -> Result<SuperpageIndex, PoolError>`.
+   - Propagación y preservación segura de capacidades (`Handle`, `HoleToken`) en caso de inconsistencia interna en `destroy`, `reuse_hole`, `release_hole`, `allocate` y las rutinas de reclaim/espejo.
+
+3. **P0.3 — Prueba física en proceso hijo aislado**:
+   - Implementada suite integral en `crates/nexo/tests/child_isolation.rs` (5 pruebas).
+   - Comprobación en proceso hijo: reserva -> confirmación -> escritura/lectura -> desconfirmación/protección -> intento de acceso volátil.
+   - Verificado el comportamiento del hardware/SO ante el fallo de página real:
+     - **Windows/MSVC**: terminación con código `STATUS_ACCESS_VIOLATION` (`0xC0000005`) tanto en lectura como en escritura sobre páginas protegidas.
+     - **Linux (WSL2/glibc)**: terminación por señal `SIGSEGV` (señal 11) capturada mediante `ExitStatusExt::signal()`.
+   - El proceso padre de pruebas permanece completamente aislado e inmune a las excepciones/señales de fallo del hijo.
+   - Ciclo de reconfirmación verificado con éxito (recommit restaura acceso físico).
+   - Capa segura (`AddressSpace::read`, `write`) comprobada rechazando accesos desconfirmados antes de cualquier desreferenciación.
+
+### Validación real ejecutada
+
+- **Windows/MSVC**:
+  - `cargo fmt --all --check`: limpio.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: limpio (0 advertencias).
+  - `cargo test -p ele-nexo -- --test-threads=1`: 191 aprobadas (190 unitarias/integración + 1 doctest), 0 fallidas, 0 ignoradas.
+  - `cargo test --workspace --no-fail-fast -- --test-threads=1`: **779 aprobadas**, 0 fallidas, 3 ignoradas (microbenchmarks de préstamos).
+  - `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+  - `tests/child_isolation.rs`: 5/5 aprobadas con verificación de `0xC0000005`.
+- **Linux (WSL2 / glibc)**:
+  - `cargo test -p ele-nexo -- --test-threads=1`: 192 aprobadas (191 unitarias/integración + 1 doctest, incluyendo prueba específica de Linux), 0 fallidas, 0 ignoradas.
+  - `cargo run --bin nexo-physical-fuzz -- --fallos 256 16`: 4.096 comandos, 192 resultados PFS, 32 recuperaciones sin divergencias.
+  - `tests/child_isolation.rs`: 5/5 aprobadas con verificación de `SIGSEGV` (señal 11).
+- **GitHub Actions**:
+  - Permanece bloqueado por cuota agotada de la cuenta. No se modificaron workflows de CI.
+
+### Worktrees e integridad del repositorio
+
+- 23 worktrees inventariados y respetados; no se modificó, limpió ni descartó ningún árbol ajeno.
+- El worktree principal `ELE` conserva intacto su estado previo.
+- El trabajo de este incremento queda confinado exclusivamente a `target/nexo-v0.3-physical-memory` sobre `feat/nexo-v0.3-physical-memory`.
+
+---
+
+## Actualización 2026-11-14 — PFS, cierre propietario y gate de PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, PR #69 en borrador. HEAD documental:
+`23488b8c879fa511bbbdf309c62a3398ce53c3e3`; implementación P0:
+`fb0c58b60cf8ab70377d9305965e5cc6179b297b`. No se fusionó nada y no se
+modificaron workflows.
+
+Implementado: resultados adversariales `Rejected`, `Partial`,
+`CompletedWithError` y `Unknown`; cuarentena de rango completo; reconciliación
+por página; `PageState::Quarantined` fuera del índice de densidad; cuarentena
+también ante errores reales de commit/protect/discard; `ReleaseUncertain` que
+bloquea toda operación salvo reintentar cierre; `try_close` propietario que
+devuelve el único dueño; tres intentos acotados en `Drop` y diagnóstico agregado
+de fallos terminales. El fuzzer físico cubre una matriz determinista 4×3 y
+preserva la clase del fallo durante reducción. PFS es simulación adversarial:
+no se afirma haber provocado un fallo parcial real del kernel.
+
+Validación real:
+
+- Windows/MSVC: `cargo fmt --all --check` y
+  `cargo clippy --workspace --all-targets -- -D warnings` aprobados;
+  `ele-nexo` 185/185; PFS 16/16; cierre 7/7; workspace 769 aprobadas,
+  0 fallidas, 3 ignoradas. El log final contiene 85 líneas
+  `test result: ok` y cero marcadores de fallo.
+- Windows/MSVC fuzzer: `--fallos 256 16`, 4.096 comandos, 192 resultados PFS,
+  32 recuperaciones de pool, sin divergencias.
+- Ubuntu WSL2/glibc: `ele-nexo` 185/185; mismo fuzzer 4.096/192/32 sin
+  divergencias. No se validó un host Linux externo.
+- GitHub Actions sigue bloqueado por cuota. Un job con cero pasos no se trató
+  como fallo de compilación.
+
+Revisión independiente: no quedan bloqueos P0 conocidos en este delta. Deuda
+explícita: `FaultPlan` aún necesita política de overflow; `meta`/`meta_mut` y el
+índice de densidad conservan invariantes no expresadas por tipos; falta probe
+físico aislado en proceso hijo; `Drop` no puede garantizar release frente a un
+rechazo persistente. L03/L04/L06/L07/L09 siguen sin implementarse; no se
+declaran T1–T4/I11 demostrados, concurrencia nativa, integración ELE, Stage 2 ni
+self-hosting.
+
+Inventario real de 23 worktrees, inspeccionado sin descartar nada:
+
+- `ELE`: `main @ 2712a1b`, solo `.claude/` no rastreado.
+- `.claude/worktrees`: `agent-a05...` limpio (behind 4); WIP preservado en
+  `agent-a1d...` (PE64, cuatro archivos nuevos), `agent-a211...` (seis archivos
+  sema), `agent-a47...` (dos archivos de tipos entre módulos), `agent-a582...`
+  (ocho archivos de préstamos/retornos) y `agent-ab759...`
+  (`examples_ele_v2.rs`).
+- `target/handoff-2026-11-12` limpio; `target/nexo-enca-audit-20261113`,
+  `target/p0-lir-interfaces-20261113` y `target/verify-pr63-pr64-20261113`
+  conservan únicamente cachés `__pycache__` no rastreadas; el worktree NEXO es
+  el de este incremento.
+- `ELE-baseline` limpio, behind 1.
+- `ELE-wt/agent-exports` conserva `stmt.l` modificado y dos rutas no
+  rastreadas; `agent-owned` conserva dos archivos modificados. `agent-builtins`,
+  `agent-listlit`, `agent-result`, `cycle2`, `fable-b2` y `fable-main` solo
+  muestran cachés no rastreadas. `fable-append @ eb436c5` está limpio;
+  `integration` y `nexo` están limpios. No se tocó ninguno.
+
+Próximo paso inmediato: publicar `fb0c58b`, `23488b8` y este handoff; actualizar
+la descripción del PR #69 con comandos, SHAs, cuota y limitaciones; mantenerlo
+en borrador. Después, cerrar L05 localmente antes de abrir ramas arquitectónicas
+independientes para metadatos/cabeceras, concurrencia, formalización e
+integración experimental.
+
+---
+
+## Actualización 2026-11-13 — NEXO v0.3 físico / PR #69
+
+Rama `feat/nexo-v0.3-physical-memory`, worktree
+`target/nexo-v0.3-physical-memory`, basada en `main @ 2712a1b`. El PR #69 está
+abierto como borrador y no debe fusionarse sin autorización. La rama publicada
+llegaba a `9cb8622`; el commit local nuevo `e5a1ad3` alinea los casos de
+seguridad ante fallos físicos como S01–S12 y registra validación Linux/glibc.
+
+Estado implementado: reserva/commit/protección/decommit reales para Windows y
+Linux, allocator Bi-Slab físico, generaciones y huecos lineales, recuperación
+reintentable, espejo físico de cabecera, F01–F20, S01–S12, adaptador y fuzzer
+diferencial, benchmarks, especificación formal y plan de port a ELE. No está
+integrado en Stage 0, Stage 1, ELE-LIR ni ABI; no implica Stage 2 ni
+self-hosting.
+
+Validación real sobre `e5a1ad3`: Windows/MSVC fmt y Clippy workspace limpios;
+`ele-nexo` 160/160; workspace 744 aprobadas, 0 fallidas, 3 ignoradas;
+S01–S12 13/13 contando S02b específico de Windows; fuzzer con fallos 256 ×
+5.000 = 1.280.000 comandos, 127.546 inyecciones, sin divergencias. Ubuntu
+WSL2/glibc: `ele-nexo` 160/160, S01–S12 12/12 y otros 1.280.000 comandos de
+fuzzing con fallos sin divergencias. El kernel WSL2 es 5.10.16 con páginas de
+4 KiB. Falta validación en un host Linux fuera de WSL2 y fallos reales del SO
+dentro de una syscall; la inyección ocurre antes de llamadas nativas.
+
+GitHub Actions está bloqueado por cuota agotada. Los jobs con cero pasos no
+son evidencia de fallo de compilación. No se investigaron ni modificaron
+workflows. El PR debe documentar este bloqueo y permanecer en borrador.
+
+Inventario de 23 worktrees inspeccionado sin modificar árboles ajenos. WIP de
+código que debe conservarse: cinco worktrees `.claude` (PE64, gaps LIR, tipos
+intermódulo, préstamos/retornos y fuentes v2), `ELE-wt/agent-exports` y
+`ELE-wt/agent-owned`. `ELE-wt/fable-append` está limpio en
+`eb436c5` sobre `fix/native-append-text-by-value`; no se perdió el test de
+`native_print_l.rs`. Hay cachés `__pycache__` no rastreadas en varios árboles;
+no se borraron. El worktree principal solo tiene `.claude/` no rastreado.
+
+Siguiente paso: publicar `e5a1ad3` y el commit de este registro, actualizar la
+descripción del PR #69 con los comandos/SHAs finales y la cuota, mantenerlo en
+borrador, y revisar los riesgos pendientes antes de cualquier merge.
+
+---
+
 ## Actualización 2026-11-13 — interfaces LIR de Stage 1
 
 `origin/main` verificado tras `git fetch origin --prune`: `ebec0847e938b98f0cc6fea9da5943e66e4e4b04`.

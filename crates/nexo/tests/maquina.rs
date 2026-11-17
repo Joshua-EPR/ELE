@@ -129,6 +129,25 @@ fn bislab_doble_liberacion_y_generacion_obsoleta() {
     );
 }
 
+#[test]
+fn destruir_pool_con_fuga_no_retira_el_pool() {
+    let f = fx();
+    let mut m = Maquina::nueva(&f.p, Config::default());
+    let p = m.crear_pool(f.nodo).unwrap();
+    let mut ev = Eventos::default();
+    let (slot, generation) = m.pool_mut(p).unwrap().asignar(0, &mut ev).unwrap();
+
+    assert_eq!(m.destruir_pool(p).unwrap_err().violacion, Violacion::Fuga);
+    assert!(m.pool(p).is_some(), "el rechazo debe ser transaccional");
+
+    m.pool_mut(p)
+        .unwrap()
+        .destruir(slot, generation, false, &mut ev)
+        .unwrap();
+    m.destruir_pool(p).unwrap();
+    assert!(m.pool(p).is_none());
+}
+
 // ------------------------------------------------------------------ oráculo
 
 /// main: crea `a` (y `vecino` para que la subpágina siga confirmada), la

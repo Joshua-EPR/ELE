@@ -250,18 +250,20 @@ impl<'p> Maquina<'p> {
 
     /// Destruye un pool comprobando que no queden objetos ni huecos.
     pub fn destruir_pool(&mut self, p: usize) -> R<()> {
-        let pool = self.pools.get_mut(p).and_then(|x| x.take());
-        match pool {
-            None => abortar(Violacion::PoolInexistente, format!("pool {p} inexistente")),
-            Some(x) if x.vivos > 0 || x.huecos > 0 => abortar(
+        let Some(pool) = self.pools.get(p).and_then(|x| x.as_ref()) else {
+            return abortar(Violacion::PoolInexistente, format!("pool {p} inexistente"));
+        };
+        if pool.vivos > 0 || pool.huecos > 0 {
+            return abortar(
                 Violacion::Fuga,
                 format!(
                     "el pool {p} se destruye con {} objetos y {} huecos vivos",
-                    x.vivos, x.huecos
+                    pool.vivos, pool.huecos
                 ),
-            ),
-            Some(_) => Ok(()),
+            );
         }
+        self.pools[p] = None;
+        Ok(())
     }
 
     /// Ejecuta `f` con los pools y argumentos dados. Los pools se ven con el
@@ -606,7 +608,7 @@ impl<'p> Maquina<'p> {
                 None => return abortar(Violacion::PoolInexistente, format!("pool {p}")),
             }
         };
-        self.met.slots_asignados += 1;
+        self.met.slots_asignados = self.met.slots_asignados.saturating_add(1);
         self.inicializar(p, slot, gener, campos, invalida)
     }
 
@@ -659,7 +661,7 @@ impl<'p> Maquina<'p> {
                 None => return abortar(Violacion::PoolInexistente, format!("pool {p}")),
             }
         };
-        self.met.slots_liberados += 1;
+        self.met.slots_liberados = self.met.slots_liberados.saturating_add(1);
         self.bump_epoca(p)?;
         Ok(r)
     }
@@ -808,7 +810,8 @@ impl<'p> Maquina<'p> {
                     match m.vars.get_mut(src.0 as usize).and_then(|x| x.take()) {
                         Some(x) => x,
                         None => {
-                            self.met.drop_flags_saltados += 1;
+                            self.met.drop_flags_saltados =
+                                self.met.drop_flags_saltados.saturating_add(1);
                             return Ok(Flujo::Normal);
                         }
                     }
@@ -851,7 +854,8 @@ impl<'p> Maquina<'p> {
                                 );
                             }
                             self.diferidos[i].1.push((slot, gener));
-                            self.met.destrucciones_diferidas += 1;
+                            self.met.destrucciones_diferidas =
+                                self.met.destrucciones_diferidas.saturating_add(1);
                             if let Some(h) = hueco {
                                 Self::set(
                                     m,
@@ -902,7 +906,7 @@ impl<'p> Maquina<'p> {
                     self.no_congelado(pool, "reusar_hueco")?;
                     self.registrar(Granulo::Gen(pool, slot), true)?;
                     let gener = self.pm(pool)?.reusar_hueco(slot)?;
-                    self.met.reusos_hueco += 1;
+                    self.met.reusos_hueco = self.met.reusos_hueco.saturating_add(1);
                     self.inicializar(pool, slot, gener, &ws, inv)?
                 } else {
                     self.crear_en_pool(pool, &ws, inv)?
@@ -922,7 +926,7 @@ impl<'p> Maquina<'p> {
                     if let Some(p) = self.pools.get_mut(pool).and_then(|x| x.as_mut()) {
                         p.liberar_hueco(slot, ev)?;
                     }
-                    self.met.huecos_liberados += 1;
+                    self.met.huecos_liberados = self.met.huecos_liberados.saturating_add(1);
                 }
                 Valor::Hueco { valido: false, .. } => {}
                 x => {
@@ -1035,7 +1039,7 @@ impl<'p> Maquina<'p> {
                 self.pre_revalidar(m, pool, *modo)?;
                 let nivel = nivel.unwrap_or(Nivel::Comprobado);
                 if !self.validar(pool, slot, gener, nivel)? {
-                    self.met.ausentes += 1;
+                    self.met.ausentes = self.met.ausentes.saturating_add(1);
                     return self.bloque(m, ausente);
                 }
                 let x = Valor::Prest {
@@ -1083,7 +1087,7 @@ impl<'p> Maquina<'p> {
                     if !self.validar(pool, slot, gener, n)? {
                         // Salta a `Ausente` sin comprobar el resto ni exponer
                         // ningún ligado.
-                        self.met.ausentes += 1;
+                        self.met.ausentes = self.met.ausentes.saturating_add(1);
                         return self.bloque(m, ausente);
                     }
                     refs.push((RefObj::Pool { pool, slot, gener }, n));
@@ -1091,8 +1095,8 @@ impl<'p> Maquina<'p> {
                 if *modo == Modo::Edit {
                     for i in 0..refs.len() {
                         if refs[..i].iter().any(|(r, _)| *r == refs[i].0) {
-                            self.met.alias_en_lote += 1;
-                            self.met.ausentes += 1;
+                            self.met.alias_en_lote = self.met.alias_en_lote.saturating_add(1);
+                            self.met.ausentes = self.met.ausentes.saturating_add(1);
                             return self.bloque(m, ausente);
                         }
                     }
@@ -1127,7 +1131,8 @@ impl<'p> Maquina<'p> {
                             && gener != 0
                         {
                             self.registrar(Granulo::Gen(p, slot), false)?;
-                            self.met.lecturas_gen_sellado += 1;
+                            self.met.lecturas_gen_sellado =
+                                self.met.lecturas_gen_sellado.saturating_add(1);
                             if self.p(p)?.gen_de(slot)? != gener {
                                 ok = false;
                             }
@@ -1450,7 +1455,7 @@ impl<'p> Maquina<'p> {
         match nivel {
             Nivel::Comprobado => {
                 self.registrar(Granulo::Gen(pool, slot), false)?;
-                self.met.lecturas_gen += 1;
+                self.met.lecturas_gen = self.met.lecturas_gen.saturating_add(1);
                 Ok(actual == gener && gener & 1 == 1)
             }
             Nivel::Estatico | Nivel::Congelado => {

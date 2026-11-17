@@ -1,0 +1,211 @@
+# NEXO: registro de limitaciones L01--L09
+
+Este documento convierte las limitaciones conocidas de NEXO v0.3 en trabajo
+auditable. No es una demostración de seguridad ni una hoja de ruta para cambiar
+la sintaxis pública de ELE. El corte publicado usado como base es
+`d6b03289edf9d0888fa11d81c70b7f574de49969` de
+`feat/nexo-v0.3-physical-memory`; los cambios posteriores que aún no estén
+publicados o validados se consideran **trabajo en curso**, no evidencia.
+
+Fuentes revisadas: `NEXO_v0.3_FORMAL.md`, `NEXO_v0.3_VALIDACION.md`,
+`NEXO_v0.3_BENCHMARKS.md`, `NEXO_v0.3_ELE_PORT.md`, el allocator físico y sus
+pruebas, y los contratos actuales de ownership, préstamos y drops de Stage 1 y
+ELE-LIR. Esta revisión documental no ejecutó una campaña nueva; los resultados
+citados son los que esos documentos registran con sus comandos y commits.
+
+## Vocabulario de estado y clasificación
+
+- **Corregida**: implementación y prueba de aceptación presentes y validadas.
+- **Parcial**: existe una mitigación o evidencia útil, pero queda al menos una
+  obligación explícita sin cerrar.
+- **Pendiente**: no hay todavía implementación aceptable.
+- **Bloqueada externamente**: requiere una capacidad ajena al repositorio.
+- **Decisión requerida**: hay alternativas incompatibles y falta medir o fijar
+  el contrato antes de implementar.
+
+Una limitación puede tener más de una clasificación. Las usadas aquí son:
+**defecto corregible**, **restricción deliberada**, **limitación de plataforma**,
+**obligación de demostración**, **funcionalidad nueva** y **dependencia del
+compilador ELE**.
+
+## Matriz maestra
+
+| ID | Limitación y riesgo | Clasificación | Dependencias | Solución / criterio de cierre | Evidencia disponible | Estado | Destino | Bloqueadores |
+|---|---|---|---|---|---|---|---|---|
+| L01 | Un backend puede aplicar solo parte de una operación física y devolver error o estado ambiguo. Con el inyector anterior al syscall no se cubría ese intervalo. | Defecto corregible; limitación de plataforma | Estado físico por página, cuarentena, reconciliación, PFS01--PFS12, contrato Windows/Linux | Un backend adversarial acotado debe poder producir aplicación parcial; toda página de resultado desconocido queda inaccesible para la API hasta reconciliarse; invariantes y modelo diferencial deben concordar después de éxito, fallo y reparación. | `fb0c58b`: PFS01--PFS12 (16 casos), cuarentena del pool y fuzzer 4×3 outcomes: 185/185 en Windows y WSL2; 4.096 comandos y 192 outcomes PFS por plataforma. Los errores reales del backend también cuarentenan antes de retornar. | Parcial | PR #69 | Falta provocar/observar un fallo parcial real, probe aislado por señal y Linux externo; PFS sigue siendo simulación adversarial. |
+| L02 | `Drop` no puede devolver un error persistente de liberación; perder el último dueño podría ocultar una reserva no liberada. | Restricción deliberada de Rust; defecto corregible en la API explícita | `AddressSpace::release`, `PhysicalPool::close`, ownership lineal, registro/diagnóstico final | `close` debe ser reintentable y conservar el dueño y el estado si falla; `Drop` queda como último esfuerzo acotado y nunca sustituye a `close` en rutas comprobables. Pruebas: fallo, reintento, doble cierre y rechazo de fuga. | `fb0c58b`: `try_close` devuelve el único dueño; `ReleaseUncertain` bloquea toda operación salvo retry; 7/7 casos de cierre. `Drop` reintenta tres veces y contabiliza fallos terminales/bytes posibles. | Parcial | PR #69 | Rust no permite devolver el error desde `Drop`; un rechazo persistente todavía puede filtrar la reserva y el diagnóstico agregado no permite recuperarla. |
+| L03 | La página de encabezado de cada superpágina inicializada permanece comprometida aunque no haya objetos vivos. Retiene memoria física y escala con el máximo histórico. | Restricción deliberada; decisión arquitectónica | L04, contrato de recuperación, benchmarks de RSS/commit, layout de 64 KiB | Para v0.3 se conserva el encabezado residente: prioriza autoridad verificable y reparación. El cierre exige una comparación medida de las alternativas y una prueba de reconstrucción antes de cambiarlo. | Layout actual: 4095 bytes usados en una página de 4096. Benchmark de 50 000 objetos: ~3,26 MiB comprometidos para ~3,05 MiB útiles; tras vaciar, ~0,21 MiB de encabezados para 53 superpáginas usadas. | Decisión requerida | Rama posterior propuesta `feat/nexo-header-lifecycle` | Elegir junto con L04 dónde vive la autoridad; medir ahorro, coste de reactivación y comportamiento bajo fallo parcial. |
+| L04 | Generaciones, mapas y estados existen en metadatos Rust; el encabezado físico es un espejo comprobado. La duplicación consume memoria y crea una transición de sincronización que puede fallar. | Restricción deliberada; funcionalidad arquitectónica nueva | L01, L03, I11, formato físico, reparación | No eliminar una copia por intuición. Prototipar autoridad única o representación compacta y demostrar reconstrucción, rechazo de referencias obsoletas y reparación tras fallo de escritura. El espejo solo puede desaparecer si ninguna obligación depende de él. | `SuperpageMeta` mantiene generaciones, libres, huecos, ocupación y estado; `check_invariants` compara el encabezado cuando no está sucio. Las escrituras incrementales redujeron el coste a 42 bytes por ciclo, pero no eliminan la duplicación. | Pendiente | Rama posterior propuesta `feat/nexo-metadata-authority` (coordinada con L03) | El port ELE todavía presupone primitivas nativas y un layout; falta decidir persistencia, autoridad y recuperación. |
+| L05 | `expect`/pánicos internos pueden convertir una inconsistencia o entrada adversarial en aborto del proceso, contradiciendo progreso seguro. | Defecto corregible; obligación de demostración | Tipos de error, IDs validados, auditoría de todos los caminos, fuzz | Ningún dato público o estado reparable debe alcanzar `expect`, `unwrap`, indexación fuera de rango o aritmética no comprobada. Cada eliminación requiere un negativo dirigido; los asserts puramente estáticos deben justificarse. | Tipos testigo `SuperpageIndex`, `Result<&SuperpageMeta, PoolError>` en `meta`/`meta_mut`, disciplina Fase A/B sin desincronización de capacidades y suite adversarial A01–A12 eliminaron todos los `expect` de `pool.rs` y previenen desbordamientos o consumos indebidos. | Corregida (allocator físico) | PR #69 para el allocator físico; auditorías posteriores para máquina/verificador | Distinguir invariantes de construcción de supuestos dependientes de entrada en máquina/verificador. |
+| L06 | El pool físico no es `Send` ni `Sync`; no existe seguridad nativa demostrada para acceso concurrente. | Restricción deliberada segura; funcionalidad nueva | C1--C6 del modelo, L01/L02, ownership de particiones, contadores e índices por partición, pruebas de intercalado | Fase 1: permitir, si se demuestra seguro, transferir entre hilos la propiedad exclusiva de un pool sin préstamos activos (`Send`, no `Sync`). Fase 2: paralelismo por particiones disjuntas con coordinador explícito. `Sync` compartido no es criterio obligatorio. Nunca añadir `unsafe impl` sin argumento y pruebas. | T3 solo está enunciado para el modelo abstracto; el pool físico serializa mediante `&mut self` y no promete concurrencia. Esta restricción evita hoy carreras nativas. | Pendiente | Ramas posteriores propuestas `feat/nexo-pool-transfer` y, después, `feat/nexo-partition-parallel` | Alias/revocación, reparación y cierre global; herramientas de detección de carreras disponibles por plataforma; L04 puede cambiar la sincronización necesaria. |
+| L07 | T1--T4 e I11 están enunciados o probados por casos, no demostrados universalmente ni mecanizados. | Obligación de demostración | Semántica congelada, O1--O18, L01/L02/L04/L06 según alcance, herramienta formal | Cerrar primero una derivación revisable del núcleo secuencial; luego mecanizar un subconjunto explícito. Cada teorema debe declarar supuestos de plataforma. Fuzz, tests y ausencia observada de fallos siguen siendo evidencia empírica, no prueba. | FORMAL marca T1--T4 “enunciado, no demostrado” e I11 “probado por casos, no demostrado”; el arnés diferencial y las campañas cubren casos finitos. | Pendiente | Rama posterior propuesta `formal/nexo-core-safety`; no dentro de #69 salvo correcciones de especificación | Elegir herramienta y representación sin crear una segunda semántica divergente; L01 debe estabilizar sus transiciones antes de probarlas. |
+| L08 | La validación Linux solo cubre WSL2; no hay evidencia en un host Linux externo, kernels/allocators distintos ni presión real del SO. | Limitación de plataforma; dependencia externa | Host autorizado, glibc/musl, comandos reproducibles, matriz de kernel | Repetir suite, PFS y benchmarks en al menos un host Linux no WSL; registrar kernel, libc, arquitectura, commit y comandos. Un fallo real se reduce a prueba. No modificar workflows para sortear la cuota. | Windows/MSVC y WSL2 Linux glibc están documentados; también hay mediciones musl. GitHub Actions está bloqueado por cuota y los trabajos de cero pasos no son fallos de compilación. | Bloqueada externamente | Evidencia en #69 cuando exista; no requiere rama de código si no hay corrección | Acceso autorizado y sin coste a un host externo; cuota de Actions. |
+| L09 | NEXO no está integrado en Stage 1 ni ELE-LIR; exponer un modo de memoria antes de que el verificador represente capacidades, revocación y cleanup degradaría seguridad. | Dependencia del compilador ELE; funcionalidad nueva | Contrato estable de L01--L07, intrínsecos OS, direcciones/aritmética comprobada, capacidades lineales, drops en todas las salidas, selección de plataforma, verificador LIR y harness diferencial | Integración experimental y opt-in: primero tipos/capacidades y operaciones LIR verificables, luego lowering y backend, finalmente programas `.l` reales. No añadir `--memory-model=nexo` nominal que redirija al allocator sin verificación de punta a punta. | `NEXO_v0.3_ELE_PORT.md` enumera las primitivas ausentes. Stage 1 ya modela ownership/préstamos/drops para sus tipos actuales, pero no tiene objetos, reservas o tokens NEXO. No hay integración demostrada. | Pendiente | Rama posterior propuesta `feat/experimental-nexo-memory-model` | Diseño LIR y ABI, diagnósticos, backend Windows/Linux y negativos de seguridad; no cambiar sintaxis v2 ni declarar Stage 2/self-hosting. |
+
+## Decisiones y alternativas por limitación
+
+### L01 — fallo físico parcial
+
+Alternativas consideradas:
+
+1. **Inyectar solo antes de cada syscall.** Es simple y determinista, pero no
+   cubre que el sistema haya cambiado un subconjunto del rango antes del error;
+   por tanto no cierra L01.
+2. **Backend adversarial por página con estado conocido/desconocido.** Permite
+   PFS determinista, minimizable y acotado. Es la opción apropiada para #69,
+   siempre que la API ponga en cuarentena el resultado ambiguo y no “adivine” el
+   estado del kernel.
+3. **Provocar fallos reales del kernel.** Aporta evidencia de plataforma, pero
+   no es reproducible ni exhaustiva y puede necesitar privilegios. Complementa,
+   no sustituye, al backend adversarial.
+
+Tradeoff aceptado: una cuarentena puede retener páginas o impedir operaciones
+que físicamente habrían sido seguras, pero falla de forma conservadora. Liberar
+o reutilizar una página ambigua para mejorar disponibilidad no es aceptable.
+
+### L02 — cierre explícito frente a `Drop`
+
+Alternativas consideradas:
+
+1. **Confiar solo en `Drop`.** Rechazada: no comunica el fallo al llamador.
+2. **Hacer pánico en `Drop`.** Rechazada: puede abortar durante otro unwind y no
+   recupera la reserva.
+3. **`close` reintentable más `Drop` de último esfuerzo.** Es el contrato de
+   v0.3. Conserva al dueño si el cierre explícito falla y mantiene `Drop` como
+   red de seguridad sin prometer observabilidad que Rust no ofrece.
+4. **Registro global de liberaciones fallidas.** Puede mejorar diagnóstico, pero
+   añade estado global, sincronización y problemas de cierre del proceso. Solo
+   debe añadirse con un consumidor y pruebas claras; no cierra por sí solo L02.
+
+### L03/L04 — encabezado residente y autoridad duplicada
+
+Estas dos limitaciones no deben resolverse en PR separados que elijan contratos
+incompatibles. Alternativas:
+
+| Alternativa | Memoria en vacío | Recuperación/verificación | Coste y riesgo |
+|---|---:|---|---|
+| Mantener encabezado residente y metadatos Rust | Mayor | Fuerte y ya implementada | Duplicación y máximo histórico residente; menor cambio para v0.3. |
+| Descomprometer encabezado al vaciar y reconstruirlo | Menor | Requiere autoridad externa completa y transición crash/fault-safe | Más syscalls y una nueva ruta crítica de reactivación. |
+| Encabezado como autoridad única | Menos duplicación Rust | Lectura física en el camino caliente; el encabezado no puede desaparecer | Acopla allocator y formato, y complica errores de acceso físico. |
+| Metadatos Rust como autoridad única | Permite descartar encabezados | Pierde el espejo físico que hoy sostiene I11 y el port | Hay que redefinir layout, reparación y persistencia observada. |
+| Resumen compacto externo + encabezado reconstruible | Potencialmente el mejor equilibrio | Necesita protocolo explícito de versión/commit | Mayor complejidad; debe vencer al diseño actual en benchmark y prueba. |
+
+Decisión conservadora para #69: mantener el diseño actual y documentar el coste.
+La rama posterior debe medir al menos commit/RSS vacío, coste de asignación tras
+reactivar, bytes de header escritos, syscalls y campañas de fallo parcial. No se
+acepta ahorrar una página sacrificando detección de referencias obsoletas,
+inaccesibilidad tras reclaim o capacidad de reparación.
+
+### L05 — pánicos internos
+
+La sustitución mecánica de `expect` por `Result` no basta. Una ruta que recibe
+un estado imposible debe impedir que el pool continúe como si fuera válido. El
+orden de trabajo es: identificar el origen del índice/estado, hacerlo validable
+por tipo cuando sea posible, devolver un error de invariantes cuando no, y
+añadir un test que alcance el borde sin corromper el proceso. Los `unwrap` de
+tests no son parte de la API, pero pueden ocultar que un negativo comprueba el
+error equivocado; deben revisarse al tocar ese test.
+
+### L06 — concurrencia
+
+La opción de menor riesgo no es un pool global con mutex y `unsafe impl Sync`.
+Primero debe separarse **transferencia de ownership** de **acceso compartido**:
+
+- `Send` solo sería aceptable si todos los recursos de plataforma y los estados
+  pendientes pueden destruirse/repararse en el hilo receptor.
+- Paralelismo por particiones disjuntas preserva mejor el modelo NEXO; índices,
+  métricas y cierre global necesitan un coordinador con protocolo probado.
+- `Sync` compartido añade aliasing y revocación simultánea. Puede permanecer
+  deliberadamente fuera del alcance si la API por particiones cubre el caso de
+  uso.
+
+### L07 — demostración
+
+Antes de elegir una herramienta hay que congelar el núcleo a demostrar. Un
+spike de Lean 4, Coq u otra herramienta es válido, pero no debe contarse como
+cierre si solo reexpresa tipos. El primer hito útil es T2 para un núcleo
+secuencial y finito, seguido por T1/T4 y una relación I11 que modele éxito,
+fallo, cuarentena y reparación. T3 nativo pertenece a la rama de concurrencia;
+el teorema abstracto no prueba ausencia de data races en Rust.
+
+### L08 — Linux externo
+
+WSL2 aporta una segunda implementación de plataforma, pero comparte host y no
+equivale a diversidad de kernel/entorno. La evidencia externa debe conservar
+salidas y datos de entorno, no solo decir “pasó”. No se abrirá un cambio de CI
+para resolver la cuota: cuando Actions ejecuta cero pasos, no existe resultado
+de compilación que interpretar.
+
+### L09 — port a ELE
+
+Un cambio léxico no implementa NEXO. El orden mínimo de integración es:
+
+1. especificar tipos lineales (`Handle`, `HoleToken`) y referencias revocables
+   sin debilitar los préstamos existentes;
+2. representar sus efectos, cleanup y errores en ELE-LIR y hacer que el
+   verificador rechace uso después de move/reclaim, doble liberación y escape;
+3. bajar a primitivas nativas comprobadas en Windows y Linux;
+4. contrastar programas `.l` con el modelo y el allocator Rust.
+
+Hasta entonces, NEXO sigue siendo un experimento aislado. No se declara Stage 2,
+self-hosting, un ABI nuevo ni soporte de lenguaje por añadir un flag o ejemplo.
+
+## Dependencias y orden de apertura
+
+```text
+L01 ─┬─> L04 ─┬─> L03
+     │        ├─> L07
+L02 ─┤        └─> L09
+     ├─> L07
+     └─> L06 ───> L07
+L05 ───> L07
+L08  (validación externa de L01/L02 y de futuras L06/L09)
+L01..L07 ───────> L09
+```
+
+El grafo indica precedencia de contratos, no que toda demostración formal deba
+terminar antes de empezar un prototipo aislado. Sí impide presentar como segura
+una integración que omita obligaciones conocidas.
+
+## División de alcance
+
+### PR #69 — alcance que puede cerrarse ahora
+
+- L01: backend adversarial determinista y acotado, cuarentena/reconciliación,
+  PFS01--PFS12 y evidencia local Windows/Linux.
+- L02: contrato y pruebas de `close`/`release` reintentables; límites honestos
+  de `Drop`.
+- L05: eliminar o justificar pánicos alcanzables del allocator físico, con
+  negativos dirigidos.
+- L03/L04: solo métricas, invariantes y decisión documentada; **no** rediseñar
+  autoridad/layout en este PR.
+- L08: adjuntar evidencia externa si aparece, sin convertirla en requisito para
+  corregir el código local ni tocar `.github/workflows/` por la cuota.
+- Mantener el PR en borrador mientras cualquiera de las pruebas de aceptación
+  anterior no esté validada en Windows y Linux.
+
+### Ramas/PR posteriores e independientes
+
+1. `feat/nexo-metadata-authority` + `feat/nexo-header-lifecycle`: L04 y L03;
+   pueden comenzar como un único spike comparativo y separarse solo después de
+   fijar la autoridad.
+2. `feat/nexo-pool-transfer`: primera fase de L06 (`Send` si procede, no
+   `Sync`).
+3. `feat/nexo-partition-parallel`: segunda fase de L06 con propiedad disjunta.
+4. `formal/nexo-core-safety`: L07, aislada del producto y sin reescribir la
+   implementación para hacer trivial la prueba.
+5. `feat/experimental-nexo-memory-model`: L09, opt-in y posterior a un contrato
+   físico/LIR estable.
+
+Los nombres son propuestas de planificación, no ramas ni PR que este documento
+afirme haber creado. L08 es una tarea de validación externa; solo necesita una
+rama si produce scripts o correcciones reales.
+
+## Criterio de mantenimiento del tracker
+
+Una fila solo pasa a **Corregida** al enlazar un commit publicado, una prueba de
+aceptación y la plataforma en la que se ejecutó. Una obligación formal solo
+pasa a **Demostrada** bajo la definición de `NEXO_v0.3_FORMAL.md`; una campaña
+de fuzz, por grande que sea, no cambia esa palabra. Si cambia el layout, la
+autoridad de metadatos, el modelo de concurrencia o el contrato LIR, deben
+reevaluarse todas las filas dependientes y no limitarse a actualizar su texto.

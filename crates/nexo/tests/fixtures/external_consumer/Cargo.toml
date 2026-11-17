@@ -1,0 +1,22 @@
+[package]
+name = "external-consumer-fixture"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+ele-nexo = { path = "../../..", default-features = false }
+
+[features]
+default = []
+call-test-craft-handle = []
+call-craft-handle-for-test = []
+construct-handle-struct = []
+construct-hole-token = []
+construct-link-struct = []
+construct-objref-struct = []
+clone-handle = []
+clone-hole-token = []
+call-test-corrupt-live = []
+call-corrupt-live-for-test = []
