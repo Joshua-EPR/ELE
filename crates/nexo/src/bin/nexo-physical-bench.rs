@@ -72,18 +72,45 @@ fn serialize_stats_json(s: &nexo::stats::DistributionStats) -> String {
     )
 }
 
-fn parse_samples_json(content: &str) -> Vec<f64> {
-    let mut samples = Vec::new();
-    if let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) {
-        let slice = &content[start + 1..end];
-        for token in slice.split(',') {
-            let trimmed = token.trim();
-            if let Ok(val) = trimmed.parse::<f64>() {
-                samples.push(val);
-            }
-        }
+fn parse_samples_json(content: &str) -> Result<Vec<f64>, String> {
+    let trimmed = content.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return Err("El contenido JSON debe ser un arreglo delimitado por '[' y ']'".to_string());
     }
-    samples
+    let inner = trimmed[1..trimmed.len() - 1].trim();
+    if inner.is_empty() {
+        return Err("El arreglo JSON de muestras no puede estar vacío".to_string());
+    }
+
+    let mut samples = Vec::new();
+    let tokens: Vec<&str> = inner.split(',').collect();
+    for (idx, token) in tokens.iter().enumerate() {
+        let t = token.trim();
+        if t.is_empty() {
+            return Err(format!(
+                "Token vacío detectado en posición {idx} (coma inicial, final o consecutiva no permitida)"
+            ));
+        }
+        if t.starts_with('+') || t.starts_with("0x") || t.starts_with("0X") {
+            return Err(format!(
+                "Formato numérico no conforme con JSON RFC 8259 en posición {idx} ('{t}')"
+            ));
+        }
+        let val = t
+            .parse::<f64>()
+            .map_err(|e| format!("Error al parsear número en posición {idx} ('{t}'): {e}"))?;
+        if val.is_nan() || !val.is_finite() {
+            return Err(format!(
+                "Valor no finito detectado en posición {idx} ('{t}'): NaN e Infinity están prohibidos en JSON"
+            ));
+        }
+        samples.push(val);
+    }
+
+    if samples.is_empty() {
+        return Err("No se encontraron muestras válidas en el arreglo JSON".to_string());
+    }
+    Ok(samples)
 }
 
 fn main() {
@@ -98,7 +125,13 @@ fn main() {
                 std::process::exit(1);
             }
         };
-        let samples = parse_samples_json(&content);
+        let samples = match parse_samples_json(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error de formato JSON en fixture '{fixture_path}': {e}");
+                std::process::exit(1);
+            }
+        };
         match nexo::stats::compute_stats(&samples) {
             Ok(stats) => {
                 println!("{}", serialize_stats_json(&stats));
@@ -573,12 +606,23 @@ fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
         }
 
         if let Err(e) = std::fs::rename(tmp, path) {
-            if had_previous {
-                let _ = std::fs::rename(backup, path);
-            }
             let _ = std::fs::remove_file(tmp);
+            if had_previous {
+                match std::fs::rename(backup, path) {
+                    Ok(()) => {
+                        return Err(format!(
+                            "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada exitosamente desde '{backup_path}'): {e}"
+                        ));
+                    }
+                    Err(restore_err) => {
+                        return Err(format!(
+                            "CRÍTICO: Error al renombrar archivo temporal a '{target_path}': {e}. Además, falló la restauración del respaldo desde '{backup_path}': {restore_err}. El respaldo original se conserva en '{backup_path}'."
+                        ));
+                    }
+                }
+            }
             return Err(format!(
-                "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada): {e}"
+                "Error al renombrar archivo temporal a '{target_path}': {e}"
             ));
         }
 
@@ -1189,4 +1233,64 @@ fn memoria() {
         "PhysicalPool: {} B inmediatos (cota inferior: los vectores de páginas, superpáginas e índice van aparte)",
         std::mem::size_of_val(&pool)
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_samples_valid_floats() {
+        let input = "[1.0, 2.5, 3.75, -4.2, 1e-3, 2.5E4]";
+        let samples = parse_samples_json(input).expect("Debe parsear muestras válidas");
+        assert_eq!(samples.len(), 6);
+        assert!((samples[0] - 1.0).abs() < 1e-9);
+        assert!((samples[1] - 2.5).abs() < 1e-9);
+        assert!((samples[2] - 3.75).abs() < 1e-9);
+        assert!((samples[3] - (-4.2)).abs() < 1e-9);
+        assert!((samples[4] - 0.001).abs() < 1e-9);
+        assert!((samples[5] - 25000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_parse_samples_whitespace_tolerance() {
+        let input = "  \n\t [  10.0  ,   20.5   ] \r\n ";
+        let samples = parse_samples_json(input).expect("Debe tolerar espacios válidos");
+        assert_eq!(samples, vec![10.0, 20.5]);
+    }
+
+    #[test]
+    fn test_parse_samples_reject_empty_or_no_brackets() {
+        assert!(parse_samples_json("").is_err());
+        assert!(parse_samples_json("   ").is_err());
+        assert!(parse_samples_json("1.0, 2.0").is_err());
+        assert!(parse_samples_json("[1.0, 2.0").is_err());
+        assert!(parse_samples_json("1.0, 2.0]").is_err());
+        assert!(parse_samples_json("prefix [1.0] suffix").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_empty_array() {
+        assert!(parse_samples_json("[]").is_err());
+        assert!(parse_samples_json("[   ]").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_commas_misplaced() {
+        assert!(parse_samples_json("[1.0,]").is_err());
+        assert!(parse_samples_json("[,1.0]").is_err());
+        assert!(parse_samples_json("[1.0,,2.0]").is_err());
+    }
+
+    #[test]
+    fn test_parse_samples_reject_non_numeric_or_non_finite() {
+        assert!(parse_samples_json("[1.0, abc, 2.0]").is_err());
+        assert!(parse_samples_json("[true]").is_err());
+        assert!(parse_samples_json("[\"1.0\"]").is_err());
+        assert!(parse_samples_json("[NaN]").is_err());
+        assert!(parse_samples_json("[Infinity]").is_err());
+        assert!(parse_samples_json("[-Infinity]").is_err());
+        assert!(parse_samples_json("[+1.0]").is_err());
+        assert!(parse_samples_json("[0x10]").is_err());
+    }
 }

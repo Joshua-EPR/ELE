@@ -214,3 +214,31 @@ fn test_json_io_09_and_10_nonzero_exit_code_and_subsequent_recovery() {
     assert!(content.contains("\"campaign_id\": \"recovered_campaign\""));
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn test_json_io_11_rollback_verification_and_truthful_reporting() {
+    let base = create_temp_test_dir("io_11");
+    let target = base.join("prev_version.json");
+    let initial_content = "{\"version\": \"initial_preserved_content\"}";
+    fs::write(&target, initial_content).unwrap();
+
+    // Invocar apuntando a un directorio para forzar fallo
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&base)
+        .output()
+        .expect("Ejecución");
+
+    assert!(!output.status.success());
+    // El archivo previo no fue corrompido
+    assert_eq!(fs::read_to_string(&target).unwrap(), initial_content);
+
+    // No quedaron archivos .bak ni .tmp
+    for entry in fs::read_dir(&base).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        assert!(!name.contains(".bak."));
+        assert!(!name.contains(".tmp."));
+    }
+    let _ = fs::remove_dir_all(&base);
+}
