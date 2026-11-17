@@ -114,11 +114,12 @@ pub fn semaReturnBorrow(ctx: &mut SemaContext, value_t: Int, loan: Int, start: I
         semaAddError(&mut ctx, "L0013", "un retorno de referencia necesita un parámetro prestado compatible con su modo; los propietarios locales se destruyen al retornar", start, end)
         return
     }
-    if semaIsMutRef(ctx, ret_t) && !loanIsMut(&ctx.flow, loan) {
+    let origin_status = loanBorrowedReturnStatus(&ctx.flow, loan, semaIsMutRef(ctx, ret_t))
+    if origin_status == 2 {
         semaAddError(&mut ctx, "L0013", "el modo del préstamo no coincide con el retorno", start, end)
         return
     }
-    if !loanRootedAtParams(&ctx.flow, loan) {
+    if origin_status != 0 {
         semaAddError(&mut ctx, "L0013", "un retorno de referencia necesita un parámetro prestado compatible con su modo; los propietarios locales se destruyen al retornar", start, end)
         return
     }
