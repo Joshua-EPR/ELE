@@ -1557,35 +1557,44 @@ mod tests {
 
     #[test]
     fn test_reg_oom_08_multithreaded_contention_and_failure_injection() {
-        use std::sync::Arc;
+        use std::sync::{Arc, Barrier};
         let registry = Arc::new(CompactPoolRegistryInstance::new());
         let mut handles = Vec::new();
+        let num_workers = 8;
+        let rounds = 5;
+        let barrier = Arc::new(Barrier::new(num_workers + 1));
 
-        // Lanzar 8 hilos que intentan registrar concurrentemente mientras se conmuta la inyección
-        for thread_idx in 0..8 {
+        for thread_idx in 0..num_workers {
             let reg = registry.clone();
+            let bar = barrier.clone();
             handles.push(std::thread::spawn(move || {
                 let mut successes = Vec::new();
-                for i in 0..20 {
-                    let pool_id = (thread_idx as u64) * 1000 + i;
-                    match reg.register(pool_id) {
-                        Ok(tok) => successes.push(tok.compact_id()),
-                        Err(CompactPoolError::OutOfMemory) => {
-                            // Esperado bajo inyección
+                for r in 0..rounds {
+                    bar.wait();
+                    for i in 0..4 {
+                        let pool_id = (thread_idx as u64) * 1000 + (r as u64) * 4 + i;
+                        match reg.register(pool_id) {
+                            Ok(tok) => successes.push(tok.compact_id()),
+                            Err(CompactPoolError::OutOfMemory) => {
+                                // Esperado bajo inyección
+                            }
+                            Err(other) => panic!("Error inesperado en concurrencia: {other:?}"),
                         }
-                        Err(other) => panic!("Error inesperado en concurrencia: {other:?}"),
                     }
+                    bar.wait();
                 }
                 successes
             }));
         }
 
-        // Hilo controlador que conmuta la inyección
+        // Hilo controlador que conmuta la inyección coordinado por barrera (sin sleeps)
         let reg_ctrl = registry.clone();
+        let bar_ctrl = barrier.clone();
         let ctrl_handle = std::thread::spawn(move || {
-            for i in 0..10 {
-                reg_ctrl.inject_reserve_failure(i % 2 == 0);
-                std::thread::sleep(std::time::Duration::from_millis(1));
+            for r in 0..rounds {
+                reg_ctrl.inject_reserve_failure(r % 2 == 0);
+                bar_ctrl.wait();
+                bar_ctrl.wait();
             }
             reg_ctrl.inject_reserve_failure(false);
         });
@@ -1609,40 +1618,29 @@ mod tests {
 
     #[test]
     fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
-        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
         use std::sync::{Arc, Barrier};
         use std::thread;
-        use std::time::Duration;
 
         let registry = Arc::new(CompactPoolRegistryInstance::new());
         let num_workers = 8;
         let barrier = Arc::new(Barrier::new(num_workers + 1));
         let next_pool_id = Arc::new(AtomicU64::new(1));
-        let stop_injector = Arc::new(AtomicBool::new(false));
 
         let oom_observed = Arc::new(AtomicUsize::new(0));
         let attempts_total = Arc::new(AtomicUsize::new(0));
         let exhaustion_observed = Arc::new(AtomicUsize::new(0));
 
-        // Injector thread: repeatedly toggles reserve failure (OOM-CONC-03)
+        // Injector thread: activates failure deterministically and clears it once OOM events are observed (no sleep!)
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
-        let stop_inj = stop_injector.clone();
         let oom_inj = oom_observed.clone();
         let injector_handle = thread::spawn(move || {
-            barrier_inj.wait();
-            let mut state = true;
             reg_inj.inject_reserve_failure(true);
-            while !stop_inj.load(Ordering::Relaxed) {
-                // Ensure at least 5 OOM events are observed by keeping failure active initially
-                let oom_now = oom_inj.load(Ordering::SeqCst);
-                if oom_now < 5 {
-                    state = true;
-                } else {
-                    state = !state;
-                }
-                reg_inj.inject_reserve_failure(state);
-                thread::sleep(Duration::from_micros(100));
+            barrier_inj.wait();
+            // Deterministic synchronization: wait until workers observe real OOM events
+            while oom_inj.load(Ordering::SeqCst) < 5 {
+                thread::yield_now();
             }
             reg_inj.inject_reserve_failure(false);
         });
@@ -1702,8 +1700,6 @@ mod tests {
             all_tokens.extend(h.join().expect("Worker thread panicked"));
         }
 
-        // Stop injector and wait
-        stop_injector.store(true, Ordering::SeqCst);
         injector_handle.join().expect("Injector thread panicked");
         registry.inject_reserve_failure(false);
 
@@ -1824,36 +1820,25 @@ mod tests {
 
     #[test]
     fn test_oom_conc_10_registry16_multithreaded_contention_and_recovery() {
-        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
         use std::sync::{Arc, Barrier};
         use std::thread;
-        use std::time::Duration;
 
         let registry = Arc::new(CompactPoolRegistryInstance16::new());
         let num_workers = 8;
         let target_allocations = 1000u64;
         let barrier = Arc::new(Barrier::new(num_workers + 1));
         let next_pool_id = Arc::new(AtomicU64::new(1));
-        let stop_injector = Arc::new(AtomicBool::new(false));
         let oom_observed = Arc::new(AtomicUsize::new(0));
 
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
-        let stop_inj = stop_injector.clone();
         let oom_inj = oom_observed.clone();
         let injector_handle = thread::spawn(move || {
-            barrier_inj.wait();
-            let mut state = true;
             reg_inj.inject_reserve_failure(true);
-            while !stop_inj.load(Ordering::Relaxed) {
-                let oom_now = oom_inj.load(Ordering::SeqCst);
-                if oom_now < 5 {
-                    state = true;
-                } else {
-                    state = !state;
-                }
-                reg_inj.inject_reserve_failure(state);
-                thread::sleep(Duration::from_micros(100));
+            barrier_inj.wait();
+            while oom_inj.load(Ordering::SeqCst) < 5 {
+                thread::yield_now();
             }
             reg_inj.inject_reserve_failure(false);
         });
@@ -1898,7 +1883,6 @@ mod tests {
             all_tokens.extend(h.join().expect("Worker thread panicked"));
         }
 
-        stop_injector.store(true, Ordering::SeqCst);
         injector_handle.join().expect("Injector thread panicked");
         registry.inject_reserve_failure(false);
 
