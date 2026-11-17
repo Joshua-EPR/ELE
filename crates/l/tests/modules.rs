@@ -916,7 +916,8 @@ fn module_import_chain_above_limit_has_a_precise_diagnostic() {
     let diagnostic = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
     assert_eq!(diagnostic.code, "L0014");
     assert_eq!(diagnostic.category, "módulos");
-    assert_eq!((diagnostic.span.line, diagnostic.span.column), (1, 1));
+    // Import spans point at the module name after the "take " keyword.
+    assert_eq!((diagnostic.span.line, diagnostic.span.column), (1, 6));
     assert!(
         diagnostic
             .message
