@@ -250,24 +250,42 @@ type BorrowSigResult = (
 );
 
 impl Env {
-    /// Resolve a function in its defining source module first. The fallback
-    /// preserves unambiguous historical imports during the bootstrap migration;
-    /// homonymous private functions must never resolve to an arbitrary module.
+    /// Resolve local declarations first. Another module's private functions
+    /// must never be visible through the legacy unqualified function table.
+    /// Source file 0 is the standalone (non-modular) compilation path.
     fn free_function(&self, name: &str, source_file: u32) -> Option<usize> {
-        self.module_functions
+        if let Some(id) = self
+            .module_functions
             .borrow()
             .get(&(source_file, name.to_owned()))
             .copied()
-            .or_else(|| self.functions.borrow().get(name).copied())
+        {
+            return Some(id);
+        }
+        let id = self.functions.borrow().get(name).copied()?;
+        if source_file == 0 || self.public_functions.borrow().contains(&id) {
+            Some(id)
+        } else {
+            None
+        }
     }
 
-    /// Stage 0 compatibility: a private generic is always resolved locally;
-    /// an unambiguous legacy import is retained until full module visibility.
+    /// Generic templates obey the same visibility boundary as free functions.
+    /// Full direct-import tracking is a separate obligation of issue #72.
     fn free_template(&self, name: &str, source_file: u32) -> Option<usize> {
-        self.module_fn_templates
+        if let Some(id) = self
+            .module_fn_templates
             .get(&(source_file, name.to_owned()))
             .copied()
-            .or_else(|| self.fn_template_ids.get(name).copied())
+        {
+            return Some(id);
+        }
+        let id = self.fn_template_ids.get(name).copied()?;
+        if source_file == 0 || self.public_fn_templates.contains(&id) {
+            Some(id)
+        } else {
+            None
+        }
     }
 
     fn region_name(&self, r: usize) -> String {
