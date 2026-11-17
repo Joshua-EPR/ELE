@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn test_reg_oom_09_concurrent_exhaustion_interleaved_oom() {
-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
         use std::sync::{Arc, Barrier};
         use std::thread;
         use std::time::Duration;
@@ -1620,15 +1620,27 @@ mod tests {
         let next_pool_id = Arc::new(AtomicU64::new(1));
         let stop_injector = Arc::new(AtomicBool::new(false));
 
+        let oom_observed = Arc::new(AtomicUsize::new(0));
+        let attempts_total = Arc::new(AtomicUsize::new(0));
+        let exhaustion_observed = Arc::new(AtomicUsize::new(0));
+
         // Injector thread: repeatedly toggles reserve failure (OOM-CONC-03)
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
         let stop_inj = stop_injector.clone();
+        let oom_inj = oom_observed.clone();
         let injector_handle = thread::spawn(move || {
             barrier_inj.wait();
-            let mut state = false;
+            let mut state = true;
+            reg_inj.inject_reserve_failure(true);
             while !stop_inj.load(Ordering::Relaxed) {
-                state = !state;
+                // Ensure at least 5 OOM events are observed by keeping failure active initially
+                let oom_now = oom_inj.load(Ordering::SeqCst);
+                if oom_now < 5 {
+                    state = true;
+                } else {
+                    state = !state;
+                }
                 reg_inj.inject_reserve_failure(state);
                 thread::sleep(Duration::from_micros(100));
             }
@@ -1641,6 +1653,9 @@ mod tests {
             let reg = registry.clone();
             let barrier_worker = barrier.clone();
             let next_pool = next_pool_id.clone();
+            let oom_worker = oom_observed.clone();
+            let attempts_worker = attempts_total.clone();
+            let exhaustion_worker = exhaustion_observed.clone();
 
             worker_handles.push(thread::spawn(move || {
                 barrier_worker.wait();
@@ -1657,15 +1672,18 @@ mod tests {
                         if reg.allocated_count() == MAX_COMPACT_POOLS {
                             break;
                         }
+                        attempts_worker.fetch_add(1, Ordering::SeqCst);
                         match reg.register(pool_id) {
                             Ok(token) => {
                                 my_tokens.push(token);
                                 break;
                             }
                             Err(CompactPoolError::OutOfMemory) => {
+                                oom_worker.fetch_add(1, Ordering::SeqCst);
                                 thread::yield_now();
                             }
                             Err(CompactPoolError::PoolIdExhausted) => {
+                                exhaustion_worker.fetch_add(1, Ordering::SeqCst);
                                 break;
                             }
                             Err(other) => {
@@ -1688,6 +1706,21 @@ mod tests {
         stop_injector.store(true, Ordering::SeqCst);
         injector_handle.join().expect("Injector thread panicked");
         registry.inject_reserve_failure(false);
+
+        // Verification of deterministic observation of concurrent OOM events
+        let total_oom = oom_observed.load(Ordering::SeqCst);
+        let total_attempts = attempts_total.load(Ordering::SeqCst);
+        let total_exhaustion = exhaustion_observed.load(Ordering::SeqCst);
+
+        assert!(
+            total_attempts >= MAX_COMPACT_POOLS as usize,
+            "Total attempts must be at least MAX_COMPACT_POOLS"
+        );
+        assert!(
+            total_oom > 0,
+            "CRITICAL: Deterministic test failed to observe real OutOfMemory events under contention! (total_oom = 0)"
+        );
+        let _ = total_exhaustion;
 
         // OOM-CONC-04: Full exhaustion to MAX_COMPACT_POOLS (255)
         assert_eq!(
@@ -1791,7 +1824,7 @@ mod tests {
 
     #[test]
     fn test_oom_conc_10_registry16_multithreaded_contention_and_recovery() {
-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
         use std::sync::{Arc, Barrier};
         use std::thread;
         use std::time::Duration;
@@ -1802,15 +1835,23 @@ mod tests {
         let barrier = Arc::new(Barrier::new(num_workers + 1));
         let next_pool_id = Arc::new(AtomicU64::new(1));
         let stop_injector = Arc::new(AtomicBool::new(false));
+        let oom_observed = Arc::new(AtomicUsize::new(0));
 
         let reg_inj = registry.clone();
         let barrier_inj = barrier.clone();
         let stop_inj = stop_injector.clone();
+        let oom_inj = oom_observed.clone();
         let injector_handle = thread::spawn(move || {
             barrier_inj.wait();
-            let mut state = false;
+            let mut state = true;
+            reg_inj.inject_reserve_failure(true);
             while !stop_inj.load(Ordering::Relaxed) {
-                state = !state;
+                let oom_now = oom_inj.load(Ordering::SeqCst);
+                if oom_now < 5 {
+                    state = true;
+                } else {
+                    state = !state;
+                }
                 reg_inj.inject_reserve_failure(state);
                 thread::sleep(Duration::from_micros(100));
             }
@@ -1822,6 +1863,7 @@ mod tests {
             let reg = registry.clone();
             let bar = barrier.clone();
             let next_pool = next_pool_id.clone();
+            let oom_worker = oom_observed.clone();
 
             worker_handles.push(thread::spawn(move || {
                 bar.wait();
@@ -1838,6 +1880,7 @@ mod tests {
                                 break;
                             }
                             Err(CompactPoolError::OutOfMemory) => {
+                                oom_worker.fetch_add(1, Ordering::SeqCst);
                                 thread::yield_now();
                             }
                             Err(other) => {
@@ -1859,7 +1902,13 @@ mod tests {
         injector_handle.join().expect("Injector thread panicked");
         registry.inject_reserve_failure(false);
 
-        // OOM-CONC-10: Repeated verification on 16-bit registry
+        // OOM-CONC-10: Repeated verification on 16-bit registry with deterministic OOM observation
+        let total_oom = oom_observed.load(Ordering::SeqCst);
+        assert!(
+            total_oom > 0,
+            "CRITICAL: 16-bit test failed to observe real OutOfMemory events! (total_oom = 0)"
+        );
+
         assert_eq!(all_tokens.len(), target_allocations as usize);
         assert_eq!(registry.allocated_count() as u64, target_allocations);
 

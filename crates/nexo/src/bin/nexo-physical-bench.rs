@@ -52,8 +52,64 @@ unsafe impl GlobalAlloc for Contador {
 #[global_allocator]
 static GLOBAL: Contador = Contador;
 
+fn serialize_stats_json(s: &nexo::stats::DistributionStats) -> String {
+    format!(
+        "{{\n  \"count\": {},\n  \"mean\": {:.4},\n  \"median\": {:.4},\n  \"min\": {:.4},\n  \"max\": {:.4},\n  \"variance_sample\": {:.4},\n  \"variance_pop\": {:.4},\n  \"stddev_sample\": {:.4},\n  \"stddev_pop\": {:.4},\n  \"cv_sample\": {:.4},\n  \"cv_pop\": {:.4},\n  \"p50\": {:.4},\n  \"p95\": {:.4},\n  \"p99\": {:.4}\n}}",
+        s.count,
+        s.mean,
+        s.median,
+        s.min,
+        s.max,
+        s.variance_sample,
+        s.variance_pop,
+        s.std_dev_sample,
+        s.std_dev_pop,
+        s.cv_sample,
+        s.cv_pop,
+        s.p50,
+        s.p95,
+        s.p99
+    )
+}
+
+fn parse_samples_json(content: &str) -> Vec<f64> {
+    let mut samples = Vec::new();
+    if let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) {
+        let slice = &content[start + 1..end];
+        for token in slice.split(',') {
+            let trimmed = token.trim();
+            if let Ok(val) = trimmed.parse::<f64>() {
+                samples.push(val);
+            }
+        }
+    }
+    samples
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    if args.len() >= 3 && args[1] == "--compute-stats" {
+        let fixture_path = &args[2];
+        let content = match std::fs::read_to_string(fixture_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error leyendo fixture '{fixture_path}': {e}");
+                std::process::exit(1);
+            }
+        };
+        let samples = parse_samples_json(&content);
+        match nexo::stats::compute_stats(&samples) {
+            Ok(stats) => {
+                println!("{}", serialize_stats_json(&stats));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("Error calculando estadísticas: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let completo = args.iter().any(|a| a == "--completo");
     let json_flag = args.iter().any(|a| a == "--json");
     let mut json_out_path = None;
@@ -376,6 +432,7 @@ fn serialize_json_results(
             "        \"median\": {:.4},\n",
             r.batch_stats.median
         ));
+        out.push_str(&format!("        \"p50\": {:.4},\n", r.batch_stats.p50));
         out.push_str(&format!("        \"p95\": {:.4},\n", r.batch_stats.p95));
         out.push_str(&format!("        \"p99\": {:.4}\n", r.batch_stats.p99));
         out.push_str("      },\n");
@@ -408,6 +465,7 @@ fn serialize_json_results(
         out.push_str(&format!("        \"min\": {:.4},\n", r.run_stats.min));
         out.push_str(&format!("        \"max\": {:.4},\n", r.run_stats.max));
         out.push_str(&format!("        \"median\": {:.4},\n", r.run_stats.median));
+        out.push_str(&format!("        \"p50\": {:.4},\n", r.run_stats.p50));
         out.push_str(&format!("        \"p95\": {:.4},\n", r.run_stats.p95));
         out.push_str(&format!("        \"p99\": {:.4}\n", r.run_stats.p99));
         out.push_str("      },\n");
@@ -497,21 +555,46 @@ fn write_atomic_json(target_path: &str, content: &str) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    if path.exists() {
-        let remove_res = std::fs::remove_file(path);
-        if let Err(e) = remove_res {
+    {
+        let backup_path = format!("{target_path}.bak.{pid}");
+        let backup = std::path::Path::new(&backup_path);
+        let had_previous = path.exists();
+
+        if had_previous {
+            match std::fs::rename(path, backup) {
+                Ok(()) => {}
+                Err(e) => {
+                    let _ = std::fs::remove_file(tmp);
+                    return Err(format!(
+                        "Error al respaldar archivo previo '{target_path}' antes del reemplazo: {e}"
+                    ));
+                }
+            }
+        }
+
+        if let Err(e) = std::fs::rename(tmp, path) {
+            if had_previous {
+                let _ = std::fs::rename(backup, path);
+            }
             let _ = std::fs::remove_file(tmp);
             return Err(format!(
-                "Error al reemplazar archivo previo '{target_path}': {e}"
+                "Error al renombrar archivo temporal a '{target_path}' (versión previa restaurada): {e}"
             ));
+        }
+
+        if had_previous {
+            let _ = std::fs::remove_file(backup);
         }
     }
 
-    if let Err(e) = std::fs::rename(tmp, path) {
-        let _ = std::fs::remove_file(tmp);
-        return Err(format!(
-            "Error al renombrar archivo temporal a '{target_path}': {e}"
-        ));
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Err(e) = std::fs::rename(tmp, path) {
+            let _ = std::fs::remove_file(tmp);
+            return Err(format!(
+                "Error al renombrar archivo temporal a '{target_path}': {e}"
+            ));
+        }
     }
 
     Ok(())

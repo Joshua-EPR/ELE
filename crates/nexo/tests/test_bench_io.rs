@@ -155,6 +155,37 @@ fn test_json_io_07_and_08_no_abandoned_tmp_and_no_truncated_file() {
 }
 
 #[test]
+fn test_atomic_05_and_06_previous_file_preserved_on_failure_and_no_tmp_bak() {
+    let base = create_temp_test_dir("atomic_05_06");
+    let target = base.join("important_report.json");
+    let original_valid = "{\"intact_previous_evidence\": true, \"data\": 12345}";
+    fs::write(&target, original_valid).unwrap();
+
+    // Invocar binario con parámetros contradictorios o destino que no pueda completarse
+    // si target es bloqueado o si se intenta escribir sobre una ruta que falla
+    let output = Command::new(get_bench_bin())
+        .arg("--json-out")
+        .arg(&base) // Pasar el directorio base para forzar error en write_atomic_json
+        .output()
+        .expect("Ejecución");
+
+    assert!(!output.status.success());
+
+    // El archivo previo debe permanecer intacto
+    assert!(target.exists());
+    assert_eq!(fs::read_to_string(&target).unwrap(), original_valid);
+
+    // No debe existir ningún archivo .tmp.* ni .bak.* abandonado en el directorio
+    for entry in fs::read_dir(&base).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        assert!(!name.contains(".tmp."), "Archivo .tmp abandonado: {name}");
+        assert!(!name.contains(".bak."), "Archivo .bak abandonado: {name}");
+    }
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
 fn test_json_io_09_and_10_nonzero_exit_code_and_subsequent_recovery() {
     let base = create_temp_test_dir("io_09_10");
     let dir_fail = base.join("dir_error");
