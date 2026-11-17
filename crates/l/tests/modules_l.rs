@@ -707,3 +707,40 @@ fn stage1_accepts_wide_graph_with_more_than_128_modules() {
     assert_eq!(result.code, Some(0), "{}", result.stderr);
     assert!(!result.stderr.contains("error[L0014]"), "{}", result.stderr);
 }
+
+#[test]
+fn public_borrow_site_constants_are_imported_without_exposing_private_constants() {
+    // The real Stage 1 sema_context declares SITE_* values as constants.
+    // Sibling semantic modules must import their exported values, but an
+    // unrelated private constant must remain inaccessible.
+    let shared = (
+        "positions.l",
+        "pub const SITE_NONE = 0\npub const SITE_ARG = 3\nconst PRIVATE_SITE = 9\n",
+    );
+    let valid = check_modules_with_stage1(
+        "stage1_b1_public_site_constants",
+        &[
+            shared,
+            (
+                "main.l",
+                "take positions\nflow main() => Int { give SITE_ARG + SITE_NONE }\n",
+            ),
+        ],
+    );
+    assert_eq!(valid.code, Some(0), "{}", valid.stderr);
+    assert!(!valid.stderr.contains("error["), "{}", valid.stderr);
+
+    let private = check_modules_with_stage1(
+        "stage1_b1_private_site_constant",
+        &[
+            shared,
+            (
+                "main.l",
+                "take positions\nflow main() => Int { give PRIVATE_SITE }\n",
+            ),
+        ],
+    );
+    assert_eq!(private.code, Some(1), "{}", private.stderr);
+    assert!(private.stderr.contains("main.l:"), "{}", private.stderr);
+    assert!(private.stderr.contains("error[L0001]"), "{}", private.stderr);
+}
