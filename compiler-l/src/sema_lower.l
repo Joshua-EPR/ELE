@@ -14,29 +14,29 @@ import sema_context
 // - an operand reads a Copy place (`Read`) and moves an owned variable;
 // - print and interpolation take Text places by reference (no move).
 
-fn lirAt(ctx: &mut SemaContext, kind: Int, dst: Int, a: Int, b: Int, c: Int) {
+pub fn lirAt(ctx: &mut SemaContext, kind: Int, dst: Int, a: Int, b: Int, c: Int) {
     lirEmit(&mut ctx.lir, kind, dst, a, b, c, ctx.flow.current, ctx.flow.events.length)
 }
 
 // New variable assigned by one instruction; returns it as an operand.
-fn lirNew(ctx: &mut SemaContext, ty: Int, is_ref: Bool, kind: Int, a: Int, b: Int, c: Int) -> Int {
+pub fn lirNew(ctx: &mut SemaContext, ty: Int, is_ref: Bool, kind: Int, a: Int, b: Int, c: Int) -> Int {
     let slot = lirVar(&mut ctx.lir, ty, is_ref)
     lirAt(&mut ctx, kind, slot, a, b, c)
     return slot
 }
 
-fn lirSetVal(ctx: &mut SemaContext, operand: Int) {
+pub fn lirSetVal(ctx: &mut SemaContext, operand: Int) {
     ctx.lir.val = operand
     ctx.lir.place = -1
 }
 
-fn lirSetPlace(ctx: &mut SemaContext, place: Int) {
+pub fn lirSetPlace(ctx: &mut SemaContext, place: Int) {
     ctx.lir.place = place
     ctx.lir.val = LIR_NONE
 }
 
 // Consume the value channel as an operand of type `ty`.
-fn lirTakeOperand(ctx: &mut SemaContext, ty: Int) -> Int {
+pub fn lirTakeOperand(ctx: &mut SemaContext, ty: Int) -> Int {
     let place = ctx.lir.place
     if place >= 0 {
         ctx.lir.place = -1
@@ -50,7 +50,7 @@ fn lirTakeOperand(ctx: &mut SemaContext, ty: Int) -> Int {
 }
 
 // Consume the channel as a print/append argument.
-fn lirTakeArg(ctx: &mut SemaContext, ty: Int) -> Int {
+pub fn lirTakeArg(ctx: &mut SemaContext, ty: Int) -> Int {
     if ctx.lir.place >= 0 && ty == 5 {
         let place = ctx.lir.place
         ctx.lir.place = -1
@@ -62,7 +62,7 @@ fn lirTakeArg(ctx: &mut SemaContext, ty: Int) -> Int {
 
 // The channel as a variable (constants are materialized). Used to give an
 // owned temporary a variable the drop plan can name.
-fn lirValueVar(ctx: &mut SemaContext, ty: Int) -> Int {
+pub fn lirValueVar(ctx: &mut SemaContext, ty: Int) -> Int {
     if ctx.lir.place >= 0 { return -1 }
     var operand = ctx.lir.val
     if operand == LIR_NONE { return -1 }
@@ -74,7 +74,7 @@ fn lirValueVar(ctx: &mut SemaContext, ty: Int) -> Int {
 }
 
 // Constant operand of a literal expression, or LIR_NONE.
-fn lirLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
+pub fn lirLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
     if expr_id < 0 || expr_id >= tree.expressions.length { return LIR_NONE }
     let expr = &tree.expressions[expr_id]
     match expr.kind {
@@ -108,7 +108,7 @@ fn lirLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int
 }
 
 // LIR place of a move path: its root variable and field chain.
-fn lirPathPlace(ctx: &mut SemaContext, path: Int) -> Int {
+pub fn lirPathPlace(ctx: &mut SemaContext, path: Int) -> Int {
     if path < 0 || path >= ctx.flow.paths.length { return -1 }
     let parent = ctx.flow.paths[path].parent
     if parent < 0 {
@@ -123,7 +123,7 @@ fn lirPathPlace(ctx: &mut SemaContext, path: Int) -> Int {
 
 // Store `operand` into `place`: plain variables are assigned, projections
 // and referents are stored through.
-fn lirWrite(ctx: &mut SemaContext, place: Int, operand: Int) {
+pub fn lirWrite(ctx: &mut SemaContext, place: Int, operand: Int) {
     if place < 0 { return }
     let slot = ctx.lir.places[place].root
     if ctx.lir.places[place].parent < 0 && !ctx.lir.vars[slot].is_ref {
@@ -134,7 +134,7 @@ fn lirWrite(ctx: &mut SemaContext, place: Int, operand: Int) {
 }
 
 // Binary operator encoded by the source bytes of an operator token.
-fn lirBinaryOp(source: &Text, start: Int, end: Int) -> Int {
+pub fn lirBinaryOp(source: &Text, start: Int, end: Int) -> Int {
     let b0 = source.byteAt(start)
     let two = end - start >= 2
     if b0 == 43 { return LIR_ADD }
@@ -151,7 +151,7 @@ fn lirBinaryOp(source: &Text, start: Int, end: Int) -> Int {
 }
 
 // Copy a list of argument or operand ids contiguously; returns the first.
-fn lirSequence(ctx: &mut SemaContext, items: &List<Int>) -> Int {
+pub fn lirSequence(ctx: &mut SemaContext, items: &List<Int>) -> Int {
     let first = ctx.lir.operands.length
     for i in 0..items.length { ctx.lir.operands.push(items[i]) }
     return first
