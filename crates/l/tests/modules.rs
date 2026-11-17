@@ -406,3 +406,167 @@ fn homonymous_generic_declaration_in_one_module_still_fails() {
         );
     }
 }
+
+#[test]
+fn public_symbol_from_unrelated_sibling_is_not_visible() {
+    // main's import of b must never make b's exports visible inside a.
+    let fix = ModuleFixture::new("sibling_public_not_imported");
+    fix.write_file("a.l", "expose flow from_a() => Int { give only_b() }\n");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("a.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn transitive_public_symbol_requires_direct_import() {
+    // a may call b after take b, but main may not call b without take b.
+    let fix = ModuleFixture::new("transitive_public_not_imported");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b() }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(only_b()) }\n");
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn direct_import_in_dependency_still_resolves() {
+    let fix = ModuleFixture::new("nested_direct_import_valid");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b() }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(from_a()) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn public_generic_from_sibling_is_not_visible() {
+    let fix = ModuleFixture::new("sibling_generic_not_imported");
+    fix.write_file(
+        "a.l",
+        "expose flow from_a() => Int { give only_b of[Int](0) }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow only_b of[T](value: T) => Int { give 42 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("a.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn direct_generic_import_in_dependency_still_resolves() {
+    let fix = ModuleFixture::new("nested_generic_direct_valid");
+    fix.write_file(
+        "b.l",
+        "expose flow only_b of[T](value: T) => Int { give 42 }\n",
+    );
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b of[Int](0) }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(from_a()) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn identical_public_names_in_unrelated_modules_keep_identity() {
+    let fix = ModuleFixture::new("public_same_name_per_module");
+    fix.write_file(
+        "a.l",
+        "expose flow shared() => Int { give 1 }\nexpose flow from_a() => Int { give shared() }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow shared() => Int { give 41 }\nexpose flow from_b() => Int { give shared() }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a() + from_b()) }\n",
+    );
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn two_direct_public_imports_with_same_name_are_ambiguous() {
+    let fix = ModuleFixture::new("ambiguous_direct_public");
+    fix.write_file("a.l", "expose flow shared() => Int { give 1 }\n");
+    fix.write_file("b.l", "expose flow shared() => Int { give 41 }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(shared()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función ambigua: shared"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn two_direct_public_generic_imports_are_ambiguous() {
+    let fix = ModuleFixture::new("ambiguous_direct_generic");
+    fix.write_file(
+        "a.l",
+        "expose flow shared of[T](value: T) => Int { give 1 }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow shared of[T](value: T) => Int { give 41 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(shared of[Int](0)) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función genérica ambigua: shared"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}

@@ -431,3 +431,62 @@ fn semaCollectionLit(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr:
     }
     return semaFinishCollectionLit(&mut ctx, expr, is_array, elem_t, &elements)
 }
+
+// A qualified enum variant constructor is parsed as a MethodCall on an
+// enum name. Never type-check the enum name as a runtime object.
+// Return -1 when this is an ordinary method call.
+fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+    if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
+    let base = &tree.expressions[expr.a]
+    match base.kind {
+        AstExprKind.Name => {}
+        _ => { return -1 }
+    }
+    let sym_id = semaLookupVisible(&mut ctx, source, base.start, base.end)
+    if sym_id < 0 { return -1 }
+    match ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Enum => {}
+        _ => { return -1 }
+    }
+    let decl_id = ctx.symbols.symbols[sym_id].decl_id
+    let enum_ty = ctx.symbols.symbols[sym_id].type_id
+    if decl_id < 0 || decl_id >= tree.declarations.length { return 7 }
+    let decl = &tree.declarations[decl_id]
+    let first = expr.d
+    let argc = tree.extra[first]
+    for v in 0..decl.d {
+        let variant = &tree.variants[decl.c + v]
+        if !symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) { continue }
+        if argc != variant.payload_count {
+            semaAddError(&mut ctx, "L0004", "cantidad de argumentos incorrecta para la variante", expr.start, expr.end)
+            return 7
+        }
+        if argc > 1 {
+            semaAddError(&mut ctx, "L0016", "Stage 1 solo admite un payload primitivo por variante", expr.start, expr.end)
+            return 7
+        }
+        var payload = LIR_NONE
+        if argc == 1 {
+            let expected = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index])
+            let actual = semaExprMode(&mut ctx, source, tree, tree.extra[first + 1], ACCESS_MOVE)
+            if expected != actual {
+                semaAddError(&mut ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
+                return 7
+            }
+            if expected != 1 && expected != 4 {
+                semaAddError(&mut ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
+                return 7
+            }
+            payload = lirTakeOperand(&mut ctx, actual)
+        }
+        var enum_id = -1
+        for k in 0..ctx.lir_module.en_decl.length {
+            if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+        }
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start); return 7 }
+        lirSetVal(&mut ctx, lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload))
+        return enum_ty
+    }
+    semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
+    return 7
+}

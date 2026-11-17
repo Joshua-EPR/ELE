@@ -26,9 +26,13 @@ class EnumPayloadBridgeContract(unittest.TestCase):
         lower = read('compiler-l/src/stmt_lower.l')
         front = read('compiler-l/src/sema_expr.l')
         self.assertIn('semaEnumVariantCall(&mut ctx, source, tree, expr)', front)
-        self.assertIn('if argc != variant.payload_count', lower)
-        self.assertIn('if expected != 1 && expected != 4', lower)
-        self.assertIn('LIR_VARIANT, enum_id, v, payload', lower)
+        # The enum expression stays in sema_expr: importing sema_expr from
+        # stmt_lower would create a circular dependency.
+        self.assertIn('fn semaEnumVariantCall(', front)
+        self.assertIn('if argc != variant.payload_count', front)
+        self.assertIn('if expected != 1 && expected != 4', front)
+        self.assertIn('LIR_VARIANT, enum_id, v, payload', front)
+        self.assertNotIn('semaExprMode(', lower)
 
     def test_match_bindings_are_guarded_and_scoped(self):
         lower = read('compiler-l/src/stmt_lower.l')

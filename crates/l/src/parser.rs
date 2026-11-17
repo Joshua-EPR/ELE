@@ -196,6 +196,9 @@ pub struct Constant {
 pub struct ImportDecl {
     pub path: String,
     pub span: Span,
+    /// Resolved direct dependency's source file ID, set by the module loader.
+    /// None for standalone parsing or prelude-only imports.
+    pub target_file: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -1649,7 +1652,11 @@ fn parse_inner(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
                 return Err(p.error("se esperaba terminador de módulo/import"));
             }
             p.sep();
-            imports.push(ImportDecl { path, span });
+            imports.push(ImportDecl {
+                path,
+                span,
+                target_file: None,
+            });
             continue;
         }
         if p.at("module") {
