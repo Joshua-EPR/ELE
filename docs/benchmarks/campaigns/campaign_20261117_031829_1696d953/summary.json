@@ -1,0 +1,899 @@
+{
+  "schema_version": "v0.4.1",
+  "stats_spec_version": "1.1.0",
+  "campaign_id": "campaign_20261117_031829_1696d953",
+  "mode": "official",
+  "metadata": {
+    "timestamp": "2026-11-17T03:18:30.266677+00:00",
+    "campaign_id": "campaign_20261117_031829_1696d953",
+    "mode": "official",
+    "schema_version": "v0.4.1",
+    "stats_spec_version": "1.1.0",
+    "profile": "release",
+    "git_head": "39e5ff3025e339c07b2fc72b36454319f9fe1499",
+    "git_branch": "fix/nexo-v04-release-stabilization",
+    "git_dirty": false,
+    "git_diff_sha256": null,
+    "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "target_triple": "x86_64-pc-windows-gnu",
+    "os_name": "Windows",
+    "os_release": "10",
+    "os_version": "10.0.19044",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 142 Stepping 9, GenuineIntel",
+    "cpu_logical_cores": 4,
+    "binary_sha256": "f4738f5d00e4ce453cd27af937e38e5acece83546cbd1a9516c06be2ad2a2213"
+  },
+  "processes": [
+    {
+      "process_id": 1,
+      "exit_code": 0,
+      "wall_duration_seconds": 2.368,
+      "output_json": "docs/benchmarks/campaigns/campaign_20261117_031829_1696d953/raw/process_1.json",
+      "sha256": "4c6230985911ddd30fe48eb5bfe98daa941c73ff2fd33f59609e874b8e0a217e"
+    },
+    {
+      "process_id": 2,
+      "exit_code": 0,
+      "wall_duration_seconds": 2.438,
+      "output_json": "docs/benchmarks/campaigns/campaign_20261117_031829_1696d953/raw/process_2.json",
+      "sha256": "53f03a1529c04180a81e4f23edd3fdfebe8011f3d51d3452c995e64fdb3e64e1"
+    },
+    {
+      "process_id": 3,
+      "exit_code": 0,
+      "wall_duration_seconds": 2.27,
+      "output_json": "docs/benchmarks/campaigns/campaign_20261117_031829_1696d953/raw/process_3.json",
+      "sha256": "6ba3fa3aea4dcd7a33d9b94ea87d9ea5ce4b807ac7ccdfc2eceaf47acca729d0"
+    },
+    {
+      "process_id": 4,
+      "exit_code": 0,
+      "wall_duration_seconds": 2.36,
+      "output_json": "docs/benchmarks/campaigns/campaign_20261117_031829_1696d953/raw/process_4.json",
+      "sha256": "4290b467028a8182eb28b874691773baf54f8c588c5af73bc551cb9d4eadf3c5"
+    },
+    {
+      "process_id": 5,
+      "exit_code": 0,
+      "wall_duration_seconds": 2.748,
+      "output_json": "docs/benchmarks/campaigns/campaign_20261117_031829_1696d953/raw/process_5.json",
+      "sha256": "80db8981b17d21d39f87722c79bd3423e2ce5dee8dedfda98671cde800535f97"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "hot allocate+free (pool con ancla)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 444.973,
+        "median": 431.6764,
+        "min": 383.2707,
+        "max": 550.1971,
+        "p50": 431.6764,
+        "p95": 532.9337,
+        "p99": 546.7444,
+        "variance_sample": 4456.8855,
+        "variance_pop": 3565.5084,
+        "stddev_sample": 66.7599,
+        "stddev_pop": 59.7119,
+        "cv_sample": 15.0031,
+        "cv_pop": 13.4192
+      },
+      "proc_means": [
+        463.88,
+        383.2707,
+        431.6764,
+        395.8407,
+        550.1971
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 444.973,
+        "median": 367.25,
+        "min": 299.5,
+        "max": 25865.5,
+        "p50": 367.25,
+        "p95": 601.025,
+        "p99": 998.125,
+        "variance_sample": 601672.26,
+        "variance_pop": 601500.3536,
+        "stddev_sample": 775.6754,
+        "stddev_pop": 775.5645,
+        "cv_sample": 174.3196,
+        "cv_pop": 174.2947
+      },
+      "avg_run_stddev": 87.1741,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0039,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "hole destroy+reuse",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 397.9496,
+        "median": 371.0879,
+        "min": 343.4414,
+        "max": 480.4436,
+        "p50": 371.0879,
+        "p95": 471.1553,
+        "p99": 478.5859,
+        "variance_sample": 3294.9612,
+        "variance_pop": 2635.9689,
+        "stddev_sample": 57.4018,
+        "stddev_pop": 51.3417,
+        "cv_sample": 14.4244,
+        "cv_pop": 12.9016
+      },
+      "proc_means": [
+        343.4414,
+        360.7729,
+        480.4436,
+        434.0021,
+        371.0879
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 397.9496,
+        "median": 333.5,
+        "min": 272.0,
+        "max": 31407.0,
+        "p50": 333.5,
+        "p95": 563.5,
+        "p99": 894.115,
+        "variance_sample": 571086.8025,
+        "variance_pop": 570923.6348,
+        "stddev_sample": 755.7029,
+        "stddev_pop": 755.5949,
+        "cv_sample": 189.8991,
+        "cv_pop": 189.872
+      },
+      "avg_run_stddev": 83.8291,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 1.0
+      }
+    },
+    {
+      "name": "commit+reclaim agresivo",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 4031.0857,
+        "median": 3936.8707,
+        "min": 3586.7371,
+        "max": 4696.5279,
+        "p50": 3936.8707,
+        "p95": 4568.7883,
+        "p99": 4670.98,
+        "variance_sample": 168362.6721,
+        "variance_pop": 134690.1377,
+        "stddev_sample": 410.3202,
+        "stddev_pop": 367.0015,
+        "cv_sample": 10.1789,
+        "cv_pop": 9.1043
+      },
+      "proc_means": [
+        3586.7371,
+        3936.8707,
+        4057.83,
+        3877.4629,
+        4696.5279
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 4031.0857,
+        "median": 3336.0,
+        "min": 2750.0,
+        "max": 38167.5,
+        "p50": 3336.0,
+        "p95": 6154.5,
+        "p99": 17047.295,
+        "variance_sample": 6068923.5308,
+        "variance_pop": 6067189.5527,
+        "stddev_sample": 2463.5185,
+        "stddev_pop": 2463.1666,
+        "cv_sample": 61.113,
+        "cv_pop": 61.1043
+      },
+      "avg_run_stddev": 377.4192,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 2.0,
+        "header_bytes_per_op": 42.2047,
+        "commits_per_op": 1.0,
+        "returns_per_op": 1.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "commit+reclaim agresivo, protecci\u00f3n previa",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 5083.1783,
+        "median": 5163.5671,
+        "min": 4756.3436,
+        "max": 5273.8114,
+        "p50": 5163.5671,
+        "p95": 5265.6168,
+        "p99": 5272.1725,
+        "variance_sample": 45207.4591,
+        "variance_pop": 36165.9673,
+        "stddev_sample": 212.6205,
+        "stddev_pop": 190.1735,
+        "cv_sample": 4.1828,
+        "cv_pop": 3.7412
+      },
+      "proc_means": [
+        4989.3307,
+        5232.8386,
+        4756.3436,
+        5163.5671,
+        5273.8114
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 5083.1783,
+        "median": 4195.75,
+        "min": 3616.0,
+        "max": 67728.0,
+        "p50": 4195.75,
+        "p95": 7975.525,
+        "p99": 19393.725,
+        "variance_sample": 9741472.7587,
+        "variance_pop": 9738689.4808,
+        "stddev_sample": 3121.1332,
+        "stddev_pop": 3120.6873,
+        "cv_sample": 61.4012,
+        "cv_pop": 61.3924
+      },
+      "avg_run_stddev": 448.8105,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 3.0,
+        "header_bytes_per_op": 42.2047,
+        "commits_per_op": 1.0,
+        "returns_per_op": 1.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "commit+reclaim diferido keep=1",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 438.9314,
+        "median": 443.7407,
+        "min": 403.9336,
+        "max": 474.805,
+        "p50": 443.7407,
+        "p95": 471.6621,
+        "p99": 474.1764,
+        "variance_sample": 902.3039,
+        "variance_pop": 721.8432,
+        "stddev_sample": 30.0384,
+        "stddev_pop": 26.8671,
+        "cv_sample": 6.8435,
+        "cv_pop": 6.121
+      },
+      "proc_means": [
+        443.7407,
+        459.0907,
+        474.805,
+        413.0871,
+        403.9336
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 438.9314,
+        "median": 361.0,
+        "min": 343.5,
+        "max": 26597.5,
+        "p50": 361.0,
+        "p95": 654.5,
+        "p99": 899.125,
+        "variance_sample": 514183.6035,
+        "variance_pop": 514036.6939,
+        "stddev_sample": 717.066,
+        "stddev_pop": 716.9635,
+        "cv_sample": 163.3663,
+        "cv_pop": 163.3429
+      },
+      "avg_run_stddev": 96.6524,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0039,
+        "os_calls_per_op": 0.0001,
+        "header_bytes_per_op": 42.2047,
+        "commits_per_op": 0.0001,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "r\u00e1faga 960 asignar + 960 liberar (por op)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 228.8613,
+        "median": 227.0119,
+        "min": 216.9807,
+        "max": 252.6964,
+        "p50": 227.0119,
+        "p95": 248.0098,
+        "p99": 251.7591,
+        "variance_sample": 205.8104,
+        "variance_pop": 164.6484,
+        "stddev_sample": 14.3461,
+        "stddev_pop": 12.8315,
+        "cv_sample": 6.2685,
+        "cv_pop": 5.6067
+      },
+      "proc_means": [
+        216.9807,
+        227.0119,
+        252.6964,
+        218.3542,
+        229.2634
+      ],
+      "pooled_batch_stats": {
+        "count": 1680,
+        "mean": 228.8613,
+        "median": 218.0,
+        "min": 175.5,
+        "max": 12649.0,
+        "p50": 218.0,
+        "p95": 323.025,
+        "p99": 518.025,
+        "variance_sample": 97424.4784,
+        "variance_pop": 97366.4876,
+        "stddev_sample": 312.1289,
+        "stddev_pop": 312.036,
+        "cv_sample": 136.3834,
+        "cv_pop": 136.3429
+      },
+      "avg_run_stddev": 42.9189,
+      "counters": {
+        "total_ops": 67200.0,
+        "alloc_per_op": 0.0079,
+        "os_calls_per_op": 0.0157,
+        "header_bytes_per_op": 21.4266,
+        "commits_per_op": 0.0078,
+        "returns_per_op": 0.0078,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "larga duraci\u00f3n: 900 vivos + churn",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 485.7773,
+        "median": 395.0543,
+        "min": 385.9793,
+        "max": 745.8479,
+        "p50": 395.0543,
+        "p95": 698.2877,
+        "p99": 736.3359,
+        "variance_sample": 23688.4417,
+        "variance_pop": 18950.7533,
+        "stddev_sample": 153.9105,
+        "stddev_pop": 137.6617,
+        "cv_sample": 31.6833,
+        "cv_pop": 28.3384
+      },
+      "proc_means": [
+        395.0543,
+        745.8479,
+        393.9579,
+        385.9793,
+        508.0471
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 485.7773,
+        "median": 356.0,
+        "min": 349.5,
+        "max": 33260.0,
+        "p50": 356.0,
+        "p95": 667.05,
+        "p99": 1506.98,
+        "variance_sample": 993123.6887,
+        "variance_pop": 992839.939,
+        "stddev_sample": 996.5559,
+        "stddev_pop": 996.4135,
+        "cv_sample": 205.1467,
+        "cv_pop": 205.1174
+      },
+      "avg_run_stddev": 108.5553,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0039,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "fragmentado: 450 subp\u00e1ginas a medias",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 481.8131,
+        "median": 451.9543,
+        "min": 377.3071,
+        "max": 641.2179,
+        "p50": 451.9543,
+        "p95": 621.5687,
+        "p99": 637.2881,
+        "variance_sample": 12098.3997,
+        "variance_pop": 9678.7197,
+        "stddev_sample": 109.9927,
+        "stddev_pop": 98.3805,
+        "cv_sample": 22.8289,
+        "cv_pop": 20.4188
+      },
+      "proc_means": [
+        395.6143,
+        451.9543,
+        377.3071,
+        542.9721,
+        641.2179
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 481.8131,
+        "median": 379.5,
+        "min": 337.5,
+        "max": 22474.0,
+        "p50": 379.5,
+        "p95": 655.5,
+        "p99": 924.545,
+        "variance_sample": 530420.7777,
+        "variance_pop": 530269.2289,
+        "stddev_sample": 728.2999,
+        "stddev_pop": 728.1959,
+        "cv_sample": 151.1582,
+        "cv_pop": 151.1366
+      },
+      "avg_run_stddev": 77.985,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0053,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "pool peque\u00f1o (1 superp\u00e1gina)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 516.7071,
+        "median": 536.315,
+        "min": 441.2314,
+        "max": 580.6379,
+        "p50": 536.315,
+        "p95": 574.0486,
+        "p99": 579.32,
+        "variance_sample": 3163.2253,
+        "variance_pop": 2530.5802,
+        "stddev_sample": 56.2426,
+        "stddev_pop": 50.3049,
+        "cv_sample": 10.8848,
+        "cv_pop": 9.7357
+      },
+      "proc_means": [
+        536.315,
+        547.6914,
+        477.66,
+        441.2314,
+        580.6379
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 516.7071,
+        "median": 380.0,
+        "min": 338.5,
+        "max": 51498.5,
+        "p50": 380.0,
+        "p95": 663.5,
+        "p99": 1225.655,
+        "variance_sample": 1333588.319,
+        "variance_pop": 1333207.2938,
+        "stddev_sample": 1154.8109,
+        "stddev_pop": 1154.646,
+        "cv_sample": 223.4943,
+        "cv_pop": 223.4624
+      },
+      "avg_run_stddev": 110.8863,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0039,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "pool grande (64 superp\u00e1ginas, 50.000 vivos)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 473.7996,
+        "median": 427.6221,
+        "min": 403.4986,
+        "max": 565.1829,
+        "p50": 427.6221,
+        "p95": 561.2507,
+        "p99": 564.3965,
+        "variance_sample": 5685.9351,
+        "variance_pop": 4548.7481,
+        "stddev_sample": 75.4051,
+        "stddev_pop": 67.4444,
+        "cv_sample": 15.915,
+        "cv_pop": 14.2348
+      },
+      "proc_means": [
+        403.4986,
+        545.5221,
+        427.6221,
+        427.1721,
+        565.1829
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 473.7996,
+        "median": 402.0,
+        "min": 359.5,
+        "max": 17377.0,
+        "p50": 402.0,
+        "p95": 684.025,
+        "p99": 1095.23,
+        "variance_sample": 337307.2104,
+        "variance_pop": 337210.8369,
+        "stddev_sample": 580.7816,
+        "stddev_pop": 580.6986,
+        "cv_sample": 122.5796,
+        "cv_pop": 122.5621
+      },
+      "avg_run_stddev": 92.1445,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0065,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 42.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "revalidar est\u00e1ndar + leer (PhysicalPool)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 65.6869,
+        "median": 62.2793,
+        "min": 57.3621,
+        "max": 81.8857,
+        "p50": 62.2793,
+        "p95": 78.8031,
+        "p99": 81.2692,
+        "variance_sample": 92.8807,
+        "variance_pop": 74.3046,
+        "stddev_sample": 9.6375,
+        "stddev_pop": 8.62,
+        "cv_sample": 14.6718,
+        "cv_pop": 13.1229
+      },
+      "proc_means": [
+        57.3621,
+        81.8857,
+        60.4343,
+        62.2793,
+        66.4729
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 65.6869,
+        "median": 58.5,
+        "min": 54.5,
+        "max": 10531.5,
+        "p50": 58.5,
+        "p95": 72.0,
+        "p99": 95.5,
+        "variance_sample": 33820.0815,
+        "variance_pop": 33810.4187,
+        "stddev_sample": 183.9024,
+        "stddev_pop": 183.8761,
+        "cv_sample": 279.9683,
+        "cv_pop": 279.9283
+      },
+      "avg_run_stddev": 15.5564,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "revalidar est\u00e1ndar puro (PhysicalPool)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 18.3916,
+        "median": 15.6579,
+        "min": 14.6564,
+        "max": 27.3529,
+        "p50": 15.6579,
+        "p95": 25.6429,
+        "p99": 27.0109,
+        "variance_sample": 27.5826,
+        "variance_pop": 22.0661,
+        "stddev_sample": 5.2519,
+        "stddev_pop": 4.6975,
+        "cv_sample": 28.556,
+        "cv_pop": 25.5413
+      },
+      "proc_means": [
+        18.8029,
+        15.4879,
+        14.6564,
+        15.6579,
+        27.3529
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 18.3916,
+        "median": 15.5,
+        "min": 14.0,
+        "max": 210.5,
+        "p50": 15.5,
+        "p95": 28.0,
+        "p99": 29.0,
+        "variance_sample": 46.5353,
+        "variance_pop": 46.522,
+        "stddev_sample": 6.8217,
+        "stddev_pop": 6.8207,
+        "cv_sample": 37.0913,
+        "cv_pop": 37.086
+      },
+      "avg_run_stddev": 1.0899,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "revalidar compacto 32b (CompactPhysicalPool)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 26.718,
+        "median": 25.5743,
+        "min": 24.6421,
+        "max": 32.4221,
+        "p50": 25.5743,
+        "p95": 31.1263,
+        "p99": 32.1629,
+        "variance_sample": 10.4192,
+        "variance_pop": 8.3354,
+        "stddev_sample": 3.2279,
+        "stddev_pop": 2.8871,
+        "cv_sample": 12.0813,
+        "cv_pop": 10.8059
+      },
+      "proc_means": [
+        25.5743,
+        25.9429,
+        25.0086,
+        24.6421,
+        32.4221
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 26.718,
+        "median": 24.5,
+        "min": 23.0,
+        "max": 319.0,
+        "p50": 24.5,
+        "p95": 42.0,
+        "p99": 48.5,
+        "variance_sample": 68.3107,
+        "variance_pop": 68.2912,
+        "stddev_sample": 8.265,
+        "stddev_pop": 8.2638,
+        "cv_sample": 30.9343,
+        "cv_pop": 30.9299
+      },
+      "avg_run_stddev": 2.983,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "revalidar compacto 64b (CompactPhysicalPool64)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 25.5877,
+        "median": 24.9071,
+        "min": 22.48,
+        "max": 31.6321,
+        "p50": 24.9071,
+        "p95": 30.301,
+        "p99": 31.3659,
+        "variance_sample": 12.4337,
+        "variance_pop": 9.947,
+        "stddev_sample": 3.5261,
+        "stddev_pop": 3.1539,
+        "cv_sample": 13.7806,
+        "cv_pop": 12.3258
+      },
+      "proc_means": [
+        22.48,
+        24.9071,
+        23.9429,
+        24.9764,
+        31.6321
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 25.5877,
+        "median": 23.5,
+        "min": 21.5,
+        "max": 332.0,
+        "p50": 23.5,
+        "p95": 44.5,
+        "p99": 47.0,
+        "variance_sample": 85.4747,
+        "variance_pop": 85.4503,
+        "stddev_sample": 9.2453,
+        "stddev_pop": 9.2439,
+        "cv_sample": 36.1316,
+        "cv_pop": 36.1265
+      },
+      "avg_run_stddev": 3.5147,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 0.0038,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "Box<[u8;64]> asignar+liberar",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 147.0717,
+        "median": 139.5329,
+        "min": 134.46,
+        "max": 164.3464,
+        "p50": 139.5329,
+        "p95": 163.6554,
+        "p99": 164.2082,
+        "variance_sample": 206.2637,
+        "variance_pop": 165.0109,
+        "stddev_sample": 14.3619,
+        "stddev_pop": 12.8457,
+        "cv_sample": 9.7652,
+        "cv_pop": 8.7343
+      },
+      "proc_means": [
+        139.5329,
+        164.3464,
+        134.46,
+        136.1279,
+        160.8914
+      ],
+      "pooled_batch_stats": {
+        "count": 3500,
+        "mean": 147.0717,
+        "median": 119.5,
+        "min": 100.5,
+        "max": 23107.0,
+        "p50": 119.5,
+        "p95": 183.5,
+        "p99": 274.58,
+        "variance_sample": 277088.5206,
+        "variance_pop": 277009.3524,
+        "stddev_sample": 526.392,
+        "stddev_pop": 526.3168,
+        "cv_sample": 357.9152,
+        "cv_pop": 357.864
+      },
+      "avg_run_stddev": 55.8947,
+      "counters": {
+        "total_ops": 140000.0,
+        "alloc_per_op": 1.0003,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    },
+    {
+      "name": "Box r\u00e1faga 960+960 (por op)",
+      "cross_process_stats": {
+        "count": 5,
+        "mean": 95.7506,
+        "median": 96.9033,
+        "min": 83.3616,
+        "max": 112.3214,
+        "p50": 96.9033,
+        "p95": 109.8497,
+        "p99": 111.8271,
+        "variance_sample": 134.5724,
+        "variance_pop": 107.6579,
+        "stddev_sample": 11.6005,
+        "stddev_pop": 10.3758,
+        "cv_sample": 12.1154,
+        "cv_pop": 10.8363
+      },
+      "proc_means": [
+        96.9033,
+        86.2039,
+        83.3616,
+        99.9628,
+        112.3214
+      ],
+      "pooled_batch_stats": {
+        "count": 1680,
+        "mean": 95.7506,
+        "median": 72.0,
+        "min": 45.0,
+        "max": 974.0,
+        "p50": 72.0,
+        "p95": 200.05,
+        "p99": 296.0,
+        "variance_sample": 3667.8383,
+        "variance_pop": 3665.6551,
+        "stddev_sample": 60.5627,
+        "stddev_pop": 60.5447,
+        "cv_sample": 63.2504,
+        "cv_pop": 63.2316
+      },
+      "avg_run_stddev": 11.6872,
+      "counters": {
+        "total_ops": 67200.0,
+        "alloc_per_op": 0.5006,
+        "os_calls_per_op": 0.0,
+        "header_bytes_per_op": 0.0,
+        "commits_per_op": 0.0,
+        "returns_per_op": 0.0,
+        "hole_reuses_per_op": 0.0
+      }
+    }
+  ]
+}

@@ -133,32 +133,25 @@ fn closed_pool_rejects_generation_page_state_and_physical_access() {
     pool.destroy(handle, false).unwrap();
     assert!(pool.close().is_ok());
 
-    // CLOSED-01: generation() devuelve PoolError::Closed
+    // Pool está cerrado: toda inspección de metadatos o acceso físico debe fallar cerrado
     assert_eq!(pool.generation(slot), Err(PoolError::Closed));
-
-    // CLOSED-02: page_state() rechaza el pool cerrado
     assert_eq!(pool.page_state(slot), Err(PoolError::Closed));
-
-    // CLOSED-03: physical_access() rechaza el pool cerrado
     assert_eq!(pool.physical_access(slot), Err(PoolError::Closed));
-
-    // CLOSED-04: validate_superpage() rechaza el pool cerrado
-    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
-
-    // CLOSED-05: check_invariants() rechaza la inspección física de un pool cerrado
-    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
-
-    // Acceso posterior al cierre adicional
     assert_eq!(pool.revalidate(link), Err(PoolError::Closed));
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
+    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
     assert_eq!(pool.base_addr(), Err(PoolError::Closed));
     assert_eq!(pool.allocate(), Err(PoolError::Closed));
-
-    // Doble cierre
     assert_eq!(pool.close(), Err(PoolError::Closed));
 }
 
 #[test]
 fn release_uncertain_blocks_all_authority_and_revalidations() {
+    use nexo::next::adapter::{CompactPhysicalPool, CompactPhysicalPool64};
+    use nexo::next::compact::{
+        CompactLink, CompactLink64, CompactPoolError, CompactPoolRegistry, CompactPoolRegistry16,
+    };
+
     // 1. Pool operativo antes del fallo
     let mut pool = PhysicalPool::new(PoolConfig::default()).unwrap();
     assert!(pool.is_operational());
@@ -166,9 +159,13 @@ fn release_uncertain_blocks_all_authority_and_revalidations() {
     assert!(!pool.is_release_uncertain());
     assert!(pool.ensure_operational().is_ok());
 
+    let token8 = CompactPoolRegistry::register_pool(&pool).unwrap();
+    let token16 = CompactPoolRegistry16::register_pool(&pool).unwrap();
     let handle = pool.allocate().unwrap();
     let slot = handle.slot();
     let link = handle.link();
+    let _link32 = CompactLink::new(token8.id(), slot, handle.generation() as u16).unwrap();
+    let _link64 = CompactLink64::new(token16.id(), slot, handle.generation() as u16).unwrap();
 
     // Destruimos handle para permitir close sin leak
     pool.destroy(handle, false).unwrap();
@@ -177,7 +174,7 @@ fn release_uncertain_blocks_all_authority_and_revalidations() {
     let live_before = pool.live_count();
     let holes_before = pool.hole_count();
 
-    // UNCERTAIN-01: Provocar una liberación incierta mediante el mecanismo adversarial existente
+    // 2. Inyectar fallo ambiguo en release y ejecutar try_close
     pool.set_faults(FaultPlan::new().unknown_nth(FaultOp::Release, 1))
         .unwrap();
     let failure = match pool.try_close() {
@@ -200,78 +197,92 @@ fn release_uncertain_blocks_all_authority_and_revalidations() {
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
 
-    // UNCERTAIN-02: base_addr() rechaza la solicitud
+    // 3. Bloqueo de registro compacto de 8 bits
     assert_eq!(
-        pool.base_addr(),
-        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+        CompactPoolRegistry::register_pool(&pool).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
     );
 
-    // UNCERTAIN-03: generation() rechaza la solicitud
+    // 4. Bloqueo de registro compacto de 16 bits
+    assert_eq!(
+        CompactPoolRegistry16::register_pool(&pool).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+
+    // 5. Rechazo de construcción de adaptadores de 32 y 64 bits
+    assert_eq!(
+        CompactPhysicalPool::new(&pool, &token8).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+    assert_eq!(
+        CompactPhysicalPool64::new(&pool, &token16).unwrap_err(),
+        CompactPoolError::ReleaseUncertain
+    );
+
+    // 6. Rechazo de consultas de generación
     assert_eq!(
         pool.generation(slot),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
 
-    // UNCERTAIN-04: page_state() rechaza la solicitud
+    // 7. Rechazo de consultas de estado de página
     assert_eq!(
         pool.page_state(slot),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
 
-    // UNCERTAIN-05: physical_access() rechaza la solicitud
+    // 8. Rechazo de acceso físico y dirección base
     assert_eq!(
         pool.physical_access(slot),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
-
-    // UNCERTAIN-06: validate_superpage() rechaza la solicitud
     assert_eq!(
-        pool.validate_superpage(0),
+        pool.base_addr(),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
 
-    // UNCERTAIN-07: check_invariants() no accede a memoria física ambigua
-    assert_eq!(
-        pool.check_invariants(),
-        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
-    );
-
-    // UNCERTAIN-08: revalidate() rechaza una referencia previamente válida
+    // 9. Rechazo de revalidación ordinaria
     assert_eq!(
         pool.revalidate(link),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
 
-    // UNCERTAIN-09: allocate() no publica nuevas capacidades
+    // 10. Rechazo de nuevas asignaciones o capacidades
     assert_eq!(
         pool.allocate(),
         Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
     );
+    assert_eq!(
+        pool.validate_superpage(0),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
+    assert_eq!(
+        pool.check_invariants(),
+        Err(PoolError::Physical(PhysicalError::ReleaseUncertain))
+    );
 
-    // UNCERTAIN-12: Comprobar que los contadores no cambian indebidamente ante operaciones rechazadas
+    // Las operaciones rechazadas no deben alterar contadores ni cabeceras.
     assert_eq!(pool.live_count(), live_before);
     assert_eq!(pool.hole_count(), holes_before);
     assert_eq!(pool.dirty_headers(), dirty_before);
 
-    // UNCERTAIN-10: Retirar el fallo inyectado y reintentar el cierre correctamente
+    // 11. Preservación de la capacidad de reintentar el cierre y cierre exitoso tras retirar fallo
     pool.set_faults(FaultPlan::new()).unwrap();
     assert!(pool.close().is_ok());
 
-    // Pool ahora está cerrado completamente
+    // 12. Pool ahora está cerrado completamente
     assert!(pool.is_closed());
     assert!(!pool.is_open());
     assert!(!pool.is_release_uncertain());
     assert!(!pool.is_operational());
     assert_eq!(pool.ensure_operational(), Err(PoolError::Closed));
-
-    // UNCERTAIN-11: Comprobar que ningún token o referencia obsoleta recupera autoridad después del cierre
+    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
+    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
     assert_eq!(pool.revalidate(link), Err(PoolError::Closed));
     assert_eq!(pool.base_addr(), Err(PoolError::Closed));
     assert_eq!(pool.generation(slot), Err(PoolError::Closed));
     assert_eq!(pool.page_state(slot), Err(PoolError::Closed));
     assert_eq!(pool.physical_access(slot), Err(PoolError::Closed));
-    assert_eq!(pool.validate_superpage(0), Err(PoolError::Closed));
-    assert_eq!(pool.check_invariants(), Err(PoolError::Closed));
     assert_eq!(pool.allocate(), Err(PoolError::Closed));
 }
 
