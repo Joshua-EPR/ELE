@@ -1283,6 +1283,7 @@ impl PhysicalPool {
         self.space = None;
         self.pending.clear();
         self.deferred.clear();
+        self.superpages.clear();
         Ok(())
     }
 
