@@ -665,6 +665,60 @@ fn rust_validator_rejects_mutated_owned_union_lir() {
     assert!(validate(&wrong).is_err(), "payload type confusion accepted");
 }
 
+#[test]
+fn rust_validator_rejects_forged_drop_flag_values() {
+    let lir = emit("b_wild.l", B_WILD);
+    validate(&lir).expect("clean b_wild must validate");
+
+    // Attack 1: Double free (change cb0 to cb1 after payload move-out)
+    let forged_df = lir.replacen(
+        "i payload v5 p2 e0 1 @22:9\r\ni use v32 cb0",
+        "i payload v5 p2 e0 1 @22:9\r\ni use v32 cb1",
+        1,
+    );
+    let forged_df = if forged_df == lir {
+        lir.replacen(
+            "i payload v5 p2 e0 1 @22:9\ni use v32 cb0",
+            "i payload v5 p2 e0 1 @22:9\ni use v32 cb1",
+            1,
+        )
+    } else {
+        forged_df
+    };
+    assert_ne!(forged_df, lir, "replacement for double free must succeed");
+    let err_df = validate(&forged_df).expect_err("tampered flag cb1 must be rejected");
+    assert!(
+        err_df.contains("doble liberación o fuga")
+            || err_df.contains("no coincide")
+            || err_df.contains("no refleja"),
+        "unexpected error: {err_df}"
+    );
+
+    // Attack 2: Leak (change cb1 to cb0 when value is owned)
+    let forged_leak = lir.replacen(
+        "i use v2 v1 @20:5\r\ni use v32 cb1",
+        "i use v2 v1 @20:5\r\ni use v32 cb0",
+        1,
+    );
+    let forged_leak = if forged_leak == lir {
+        lir.replacen(
+            "i use v2 v1 @20:5\ni use v32 cb1",
+            "i use v2 v1 @20:5\ni use v32 cb0",
+            1,
+        )
+    } else {
+        forged_leak
+    };
+    assert_ne!(forged_leak, lir, "replacement for leak must succeed");
+    let err_leak = validate(&forged_leak).expect_err("tampered flag cb0 must be rejected");
+    assert!(
+        err_leak.contains("doble liberación o fuga")
+            || err_leak.contains("no coincide")
+            || err_leak.contains("no refleja"),
+        "unexpected error: {err_leak}"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn reading_the_inactive_variant_traps_at_run_time() {

@@ -914,16 +914,18 @@ pub fn validate(module: &Module) -> Result<(), Diagnostic> {
         &module.lists,
     );
     for func in &module.funcs {
-        drops::verify(func, &ownership).map_err(|v| {
-            Diagnostic::new(
-                Span::at(1, 1),
-                format!(
-                    "LIR rechazada en {} (bloque {}): {}",
-                    func.name, v.block, v.message
-                ),
-            )
-            .classify("L0017", "lir-protocolo")
-        })?;
+        drops::verify(func, &ownership)
+            .and_then(|()| drops::verify_flags(func, &ownership))
+            .map_err(|v| {
+                Diagnostic::new(
+                    Span::at(1, 1),
+                    format!(
+                        "LIR rechazada en {} (bloque {}): {}",
+                        func.name, v.block, v.message
+                    ),
+                )
+                .classify("L0017", "lir-protocolo")
+            })?;
     }
     Ok(())
 }
