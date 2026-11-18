@@ -206,10 +206,17 @@ fn main() -> Int {
                 let lir_fault_flag = "--lir-fault="
                 if symbolNameEqualsText(flag, 0, flag.byteLength, lir_flag) {
                     lir = true
-                } else if flag.byteLength == 13 && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
-                    // Test hook: corrupt the LIR to exercise its verifier.
+                } else if (flag.byteLength == 13 || flag.byteLength == 14) && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
+                    // Two-digit injection ids cover platform contract faults.
+                    let digit = flag.byteAt(12)
+                    if digit < 48 || digit > 57 { printError(usage); return 2 }
+                    lir_fault = digit - 48
+                    if flag.byteLength == 14 {
+                        let second = flag.byteAt(13)
+                        if second < 48 || second > 57 { printError(usage); return 2 }
+                        lir_fault = lir_fault * 10 + second - 48
+                    }
                     lir = true
-                    lir_fault = flag.byteAt(12) - 48
                 } else if symbolNameEqualsText(flag, 0, flag.byteLength, plan) {
                     dump = true
                 } else if flag.byteLength == 14 && symbolNameEqualsText(flag, 0, 13, fault_flag) {
