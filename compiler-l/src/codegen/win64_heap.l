@@ -47,7 +47,8 @@ flow wheapAlloc(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestRax(edit code)
     hold positive = x64ConditionalPlaceholder(edit code, false)
     w64EmitExit(edit code, edit imports, 123)
-    x64PatchRelative(edit code, positive, code.bytes.length)
+    hold positive_end = code.bytes.length
+    x64PatchRelative(edit code, positive, positive_end)
     w64AlignStack(edit code, 32)
     x64MovImm64(edit code, 1, 0)
     x64MovImm64(edit code, 8, W64_MEM_COMMIT_RESERVE)
@@ -56,7 +57,8 @@ flow wheapAlloc(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestRax(edit code)
     hold mapped = x64ConditionalPlaceholder(edit code, false)
     w64EmitExit(edit code, edit imports, 123)
-    x64PatchRelative(edit code, mapped, code.bytes.length)
+    hold mapped_end = code.bytes.length
+    x64PatchRelative(edit code, mapped, mapped_end)
 }
 
 // VirtualFree(RCX, 0, MEM_RELEASE), or exit 124 when Windows refuses it
@@ -69,7 +71,8 @@ flow wheapRelease(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestEax(edit code)
     hold released = x64ConditionalPlaceholder(edit code, false)
     w64EmitExit(edit code, edit imports, 124)
-    x64PatchRelative(edit code, released, code.bytes.length)
+    hold released_end = code.bytes.length
+    x64PatchRelative(edit code, released, released_end)
 }
 
 // Leaves with 123 when the signed comparison `RAX <condition> RCX` holds
@@ -80,7 +83,8 @@ flow wheapFailIf(code: edit X64Code, imports: edit Pe64Imports, condition: Int) 
     x64TestRax(edit code)
     hold ok = x64ConditionalPlaceholder(edit code, true)
     w64EmitExit(edit code, edit imports, 123)
-    x64PatchRelative(edit code, ok, code.bytes.length)
+    hold ok_end = code.bytes.length
+    x64PatchRelative(edit code, ok, ok_end)
 }
 
 // text_new(RDI = wanted capacity) -> RAX = address, RDX = capacity.
@@ -97,7 +101,8 @@ flow wheapEmitTextNew(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestRax(edit code)
     hold sized = x64ConditionalPlaceholder(edit code, false)
     x64MovImm64(edit code, 6, 4096)
-    x64PatchRelative(edit code, sized, code.bytes.length)
+    hold sized_end = code.bytes.length
+    x64PatchRelative(edit code, sized, sized_end)
     x64StoreSlot(edit code, 0, 6)
     x64MovReg(edit code, 2, 6)
     wheapAlloc(edit code, edit imports)
@@ -129,7 +134,8 @@ flow wheapEmitTextAppend(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestRax(edit code)
     hold owned = x64ConditionalPlaceholder(edit code, false)
     w64EmitExit(edit code, edit imports, 121)
-    x64PatchRelative(edit code, owned, code.bytes.length)
+    hold owned_end = code.bytes.length
+    x64PatchRelative(edit code, owned, owned_end)
     // new capacity = pages(needed + old capacity).
     x64LoadSlot(edit code, 2, 3)
     x64AddReg(edit code, 2, 0)
@@ -155,7 +161,8 @@ flow wheapEmitTextAppend(code: edit X64Code, imports: edit Pe64Imports) {
     x64StoreMem64(edit code, 7, 0, 0)
     x64LoadSlot(edit code, 0, 4)
     x64StoreMem64(edit code, 7, 16, 0)
-    x64PatchRelative(edit code, fits, code.bytes.length)
+    hold fits_end = code.bytes.length
+    x64PatchRelative(edit code, fits, fits_end)
     // Copy to address + length, then publish the new length.
     x64LoadSlot(edit code, 0, 0)
     x64LoadMem64(edit code, 7, 0, 0)
@@ -180,7 +187,8 @@ flow wheapEmitTextDrop(code: edit X64Code, imports: edit Pe64Imports) {
     hold literal = x64ConditionalPlaceholder(edit code, true)
     x64MovReg(edit code, 1, 7)
     wheapRelease(edit code, edit imports)
-    x64PatchRelative(edit code, literal, code.bytes.length)
+    hold literal_end = code.bytes.length
+    x64PatchRelative(edit code, literal, literal_end)
     x64FrameEnd(edit code)
 }
 
@@ -213,7 +221,8 @@ flow wheapEmitListReserve(code: edit X64Code, imports: edit Pe64Imports) {
     x64TestRax(edit code)
     hold grow = x64ConditionalPlaceholder(edit code, false)
     x64FrameEnd(edit code)
-    x64PatchRelative(edit code, grow, code.bytes.length)
+    hold grow_end = code.bytes.length
+    x64PatchRelative(edit code, grow, grow_end)
     x64LoadSlot(edit code, 7, 0)
     x64LoadMem64(edit code, 0, 7, 16)
     x64AddReg(edit code, 0, 0)
@@ -245,7 +254,8 @@ flow wheapEmitListReserve(code: edit X64Code, imports: edit Pe64Imports) {
     x64LoadSlot(edit code, 7, 0)
     x64LoadMem64(edit code, 1, 7, 0)
     wheapRelease(edit code, edit imports)
-    x64PatchRelative(edit code, fresh, code.bytes.length)
+    hold fresh_end = code.bytes.length
+    x64PatchRelative(edit code, fresh, fresh_end)
     // Publish the buffer and the capacity; the length is unchanged.
     x64LoadSlot(edit code, 7, 0)
     x64LoadSlot(edit code, 0, 5)

@@ -128,7 +128,8 @@ flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit C
         // Windows: the runtime's text_drop(RDI = buffer, RSI = bytes)
         // releases it, or exits 124 (win64_heap).
         cfgRuntimeCall(edit code, edit fix, rtTextDrop())
-        x64PatchRelative(edit code, empty, code.bytes.length)
+        hold after_win_release = code.bytes.length
+        x64PatchRelative(edit code, empty, after_win_release)
         x64FrameEnd(edit code)
         give
     }
