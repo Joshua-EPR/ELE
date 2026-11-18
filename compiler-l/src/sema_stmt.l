@@ -216,7 +216,9 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
             let start_t = semaCheckExpr(&mut ctx, source, tree, stmt.c)
             let start_v = lirTakeOperand(&mut ctx, 1)
             let end_t = semaCheckExpr(&mut ctx, source, tree, stmt.d)
-            let counter = lirForInit(&mut ctx, start_v, lirTakeOperand(&mut ctx, 1))
+            // Evaluate the end operand before taking an exclusive loan for for-initialization.
+            let end_v = lirTakeOperand(&mut ctx, 1)
+            let counter = lirForInit(&mut ctx, start_v, end_v)
             if !semTypeEquals(&ctx.types, start_t, 1) || !semTypeEquals(&ctx.types, end_t, 1) {
                 semaAddError(&mut ctx, "L0003", "el rango del bucle 'for' debe ser de tipo Int", stmt.start, stmt.end)
             }
@@ -230,11 +232,13 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
             ctx.flow.continue_to = step
             scopePush(&mut ctx.scopes)
             semaScopeEnter(&mut ctx)
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, 1, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
+            let current_scope = ctx.scopes.current_scope
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, 1, current_scope, false, false, -1, stmt.a, stmt.b)
             scopeAddSymbol(&mut ctx.scopes, sym_id)
             semaInitPath(&mut ctx, sym_id, stmt.a, stmt.b)
             ctx.lir.val = counter
-            lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, 1, false)
+            let bind_path = ctx.symbols.symbols[sym_id].move_path
+            lirLetBind(&mut ctx, bind_path, 1, false)
             let body_stmt = tree.extra[stmt.e + 1]
             if body_stmt >= 0 {
                 semaCheckStmt(&mut ctx, source, tree, body_stmt)
@@ -317,14 +321,16 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
             ctx.flow.continue_to = step
             scopePush(&mut ctx.scopes)
             semaScopeEnter(&mut ctx)
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, bind_t, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
+            let current_scope = ctx.scopes.current_scope
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, bind_t, current_scope, false, false, -1, stmt.a, stmt.b)
             scopeAddSymbol(&mut ctx.scopes, sym_id)
             semaInitPath(&mut ctx, sym_id, stmt.a, stmt.b)
 
             if col_place >= 0 {
                 let elem_place = lirPlaceIndex(&mut ctx.lir, col_place, counter)
                 if by_ref {
-                    lirSetVal(&mut ctx, lirNew(&mut ctx, elem_t, true, LIR_LOAN, elem_place, 0, 0))
+                    let loan_value = lirNew(&mut ctx, elem_t, true, LIR_LOAN, elem_place, 0, 0)
+                    lirSetVal(&mut ctx, loan_value)
                 } else {
                     let elem_var = lirVar(&mut ctx.lir, elem_t, false)
                     lirAt(&mut ctx, LIR_READ, elem_var, elem_place, 0, 0)
@@ -359,12 +365,16 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
             ctx.loop_mark = outer_mark
         }
         AstStmtKind.Break => {
-            if ctx.flow.break_to >= 0 { semaDropFrom(&mut ctx, ctx.loop_mark, stmt.start, stmt.end) }
-            semaJumpLoop(&mut ctx, ctx.flow.break_to, stmt.start, stmt.end)
+            let target = ctx.flow.break_to
+            let mark = ctx.loop_mark
+            if target >= 0 { semaDropFrom(&mut ctx, mark, stmt.start, stmt.end) }
+            semaJumpLoop(&mut ctx, target, stmt.start, stmt.end)
         }
         AstStmtKind.Continue => {
-            if ctx.flow.continue_to >= 0 { semaDropFrom(&mut ctx, ctx.loop_mark, stmt.start, stmt.end) }
-            semaJumpLoop(&mut ctx, ctx.flow.continue_to, stmt.start, stmt.end)
+            let target = ctx.flow.continue_to
+            let mark = ctx.loop_mark
+            if target >= 0 { semaDropFrom(&mut ctx, mark, stmt.start, stmt.end) }
+            semaJumpLoop(&mut ctx, target, stmt.start, stmt.end)
         }
         AstStmtKind.Block => {
             scopePush(&mut ctx.scopes)
