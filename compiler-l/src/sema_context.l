@@ -62,9 +62,9 @@ pub struct SemaContext {
     scope_marks: List<Int>
     loop_mark: Int
     pending_temps: List<Int>
-    // Symbols whose value a `match` arm with a non-Copy binding examines:
+    // Symbols whose value a `choose` arm with a non-Copy binding examines:
     // assigning them inside that arm is L0005 (SEMANTICS.md, Stage 0).
-    frozen_symbols: List<Int>
+    frozen_symbols: List of[Int]
     dump_drops: Bool
     drop_fault: Int
     drop_ops: Int
@@ -97,7 +97,7 @@ pub fn semaContextNew() -> SemaContext {
     let owned_locals: List<Int> = List[]
     let scope_marks: List<Int> = List[]
     let pending_temps: List<Int> = List[]
-    let frozen_symbols: List<Int> = List[]
+    hold frozen_symbols: List of[Int] = List[]
     return SemaContext(
         types: typeTableNew(),
         symbols: symbolTableNew(),

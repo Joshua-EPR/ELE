@@ -7,22 +7,22 @@ import lir_builtin_union
 // Expected union type of a constructor's payload: the payload type of
 // `contextual` for this variant when it is itself an Option/Result, else -1.
 // The outer expected type is never inherited by the payload expression.
-pub fn semaBuiltinPayloadExpected(ctx: &SemaContext, contextual: Int, variant: Int) -> Int {
-    if contextual < 0 || contextual >= ctx.types.types.length { return -1 }
-    var inner = -1
-    match ctx.types.types[contextual].kind {
-        SemTypeKind.Option => { if variant == 2 { inner = ctx.types.types[contextual].elem_type } }
-        SemTypeKind.Result => {
-            if variant == 0 { inner = ctx.types.types[contextual].elem_type }
-            if variant == 1 { inner = ctx.types.types[contextual].nominal_id }
+expose flow semaBuiltinPayloadExpected(ctx: view SemaContext, contextual: Int, variant: Int) => Int {
+    when contextual < 0 || contextual >= ctx.types.types.length { give -1 }
+    change inner = -1
+    choose ctx.types.types[contextual].kind {
+        SemTypeKind.Option : { when variant == 2 { inner = ctx.types.types[contextual].elem_type } }
+        SemTypeKind.Result : {
+            when variant == 0 { inner = ctx.types.types[contextual].elem_type }
+            when variant == 1 { inner = ctx.types.types[contextual].nominal_id }
         }
-        _ => {}
+        _ : {}
     }
-    if inner < 0 || inner >= ctx.types.types.length { return -1 }
-    match ctx.types.types[inner].kind {
-        SemTypeKind.Option => { return inner }
-        SemTypeKind.Result => { return inner }
-        _ => { return -1 }
+    when inner < 0 || inner >= ctx.types.types.length { give -1 }
+    choose ctx.types.types[inner].kind {
+        SemTypeKind.Option : { give inner }
+        SemTypeKind.Result : { give inner }
+        _ : { give -1 }
     }
 }
 

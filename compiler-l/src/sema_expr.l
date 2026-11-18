@@ -16,7 +16,7 @@ import sema_ops
 import sema_collection_ops
 import stmt_lower
 import sema_builtin_union
-import lir_builtin_union
+take lir_builtin_union
 
 fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
     let decl = &tree.declarations[decl_id]
@@ -298,7 +298,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     let argument = lirArg(&mut ctx.lir, false, operand, false)
                     args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                    if lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, res_t) < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                    when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                     semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
                     return res_t
                 }
@@ -341,7 +341,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                 // Result<Text, Int> owns its active Text (#5): a registered
                 // builtin union with an atomic drop obligation.
-                if lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, res_t) < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                 semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
                 return res_t
             }
