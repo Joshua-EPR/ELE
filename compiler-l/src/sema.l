@@ -151,18 +151,22 @@ fn semaCheckDeclarations(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
                 for p in 0..p_count {
                     let param = &tree.params[first_p + p]
                     let p_type = semaResolveAstType(&mut ctx, source, tree, param.type_id)
-                    let p_sym = symbolAdd(&mut ctx.symbols, SymbolKind.Param, param.name_start, param.name_end, p_type, ctx.scopes.current_scope, false, false, -1, param.start, param.end)
+                    let scope_id = ctx.scopes.current_scope
+                    let p_sym = symbolAdd(&mut ctx.symbols, SymbolKind.Param, param.name_start, param.name_end, p_type, scope_id, false, false, -1, param.start, param.end)
                     scopeAddSymbol(&mut ctx.scopes, p_sym)
                     semaInitPath(&mut ctx, p_sym, param.start, param.end)
                     let p_path = ctx.symbols.symbols[p_sym].move_path
                     let p_elem = semaRefElem(ctx, p_type)
                     if p_elem >= 0 {
-                        lirBindPath(&mut ctx.lir, p_path, lirVar(&mut ctx.lir, p_elem, true))
+                        let param_var = lirVar(&mut ctx.lir, p_elem, true)
+                        lirBindPath(&mut ctx.lir, p_path, param_var)
                     } else {
-                        lirBindPath(&mut ctx.lir, p_path, lirVar(&mut ctx.lir, p_type, false))
+                        let param_var = lirVar(&mut ctx.lir, p_type, false)
+                        lirBindPath(&mut ctx.lir, p_path, param_var)
                     }
                     if p_elem >= 0 {
-                        loanBindParam(&mut ctx.flow, p_path, p, semaIsMutRef(ctx, p_type), param.start, param.end)
+                        let is_mut = semaIsMutRef(ctx, p_type)
+                        loanBindParam(&mut ctx.flow, p_path, p, is_mut, param.start, param.end)
                         semaOrigin(&mut ctx, p_path, -1 - p)
                     } else {
                         semaOwn(&mut ctx, source, tree, p_path, p_type, -1 - p)
