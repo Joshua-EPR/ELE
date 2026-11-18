@@ -269,11 +269,16 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             }
             let name_print_err = "printError"
             if symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
+                let mark = ctx.pending_temps.length
                 let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
+                semaReadTemp(&mut ctx, source, tree, tree.extra[first_arg], ty, mark)
                 if ty == 5 || semaRefElem(ctx, ty) == 5 {
-                    // Stage 1 cannot fabricate a platform &Text from a
-                    // by-value temporary. Keep ownership checking valid but
-                    // reject its unsupported LIR lowering (not an ICE).
+                    if ctx.lir.place < 0 {
+                        let temp_var = lirValueVar(&mut ctx, 5)
+                        if temp_var >= 0 {
+                            ctx.lir.place = lirPlaceVar(&mut ctx.lir, temp_var)
+                        }
+                    }
                     if ctx.lir.place < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                     var args: List<Int> = List[]
                     args.push(lirTakeArg(&mut ctx, ty))
