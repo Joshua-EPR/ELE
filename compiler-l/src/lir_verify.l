@@ -228,6 +228,8 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         result = dst_t
         if check && !v.defined[l.places[inst.a].root] { return 5 }
     } else if kind == LIR_PLATFORM {
+        let status = lirVerifyPlatform(&mut v, l, types, lm, inst.a, inst.b, inst.c, dst, check)
+        if status != 0 { return status }
         result = dst_t
     } else {
         return 1

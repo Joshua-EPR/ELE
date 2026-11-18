@@ -234,6 +234,8 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
 // function in one defined way so the tests can prove the verifier rejects
 // it. 1 variable id, 2 block id, 3 operand type, 4 use before assignment,
 // 5 call arity, 6 drop of a non-owned value, 7 return type, 8 field index.
+// 9 invalid platform opcode, 10 platform arity, 11 argument loan mode,
+// 12 platform result type, 13 invalid platform argument id.
 fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]
@@ -253,6 +255,25 @@ fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
         if fault == 6 && kind == LIR_DROP {
             l.insts[id].dst = lirVar(&mut l, 1, false)
             return
+        }
+        if kind == LIR_PLATFORM {
+            if fault == 9 { l.insts[id].a = 99; return }
+            if fault == 10 { l.insts[id].c += 1; return }
+            if fault == 11 && l.insts[id].c > 0 {
+                let first = l.insts[id].b
+                let arg = l.operands[first]
+                l.args[arg].by_ref = false
+                return
+            }
+            if fault == 12 {
+                l.vars[l.insts[id].dst].ty = 4
+                return
+            }
+            if fault == 13 && l.insts[id].c > 0 {
+                let first = l.insts[id].b
+                l.operands[first] = l.args.length + 1
+                return
+            }
         }
         if fault == 8 && (kind == LIR_READ || kind == LIR_STORE) && l.places[l.insts[id].a].parent >= 0 {
             l.places[l.insts[id].a].field = 99

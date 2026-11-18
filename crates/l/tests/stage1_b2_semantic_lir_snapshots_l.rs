@@ -182,3 +182,57 @@ fn stage1_still_rejects_same_call_mutable_borrow_and_field_read() {
     let (ok, stderr) = check(&good);
     assert!(ok, "snapshotted primitive field must be accepted: {stderr}");
 }
+
+#[test]
+fn stage1_platform_lir_verifier_rejects_injected_invalid_ops() {
+    // Mutation testing of Stage 1's *own* verifier, not only the independent
+    // Rust protocol verifier. The ordinary case is already exercised above.
+    let work = root().join("target/stage1-tests/b3-platform-verifier");
+    std::fs::create_dir_all(&work).unwrap();
+    let source = work.join("platform.l");
+    std::fs::write(
+        &source,
+        "fn main() -> Int {\n    let path = \"verify-platform.bin\"\n    var bytes: List<Int> = List[1, 2, 3]\n    return writeBytes(path, bytes)\n}\n",
+    )
+    .unwrap();
+    for (fault, rule) in [(9, 1), (10, 4), (11, 4), (12, 3), (13, 1)] {
+        let out = Command::new(sema())
+            .arg(&source)
+            .arg(format!("--lir-fault={fault}"))
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "fault {fault} escaped the verifier");
+        assert!(
+            stderr.contains("error[ICE]") && stderr.contains(&format!("regla {rule}")),
+            "fault {fault}: {stderr}"
+        );
+        assert!(out.stdout.is_empty(), "fault {fault} emitted unchecked LIR");
+    }
+}
+
+#[test]
+fn stage1_platform_argcount_and_printerror_are_protocol_verified() {
+    let work = root().join("target/stage1-tests/b3-platform-verifier");
+    std::fs::create_dir_all(&work).unwrap();
+    let file = work.join("good-platform.l");
+    std::fs::write(
+        &file,
+        "fn main() -> Int {\n    let note = \"message\"\n    printError(note)\n    return processArgCount()\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(sema())
+        .arg(&file)
+        .arg("--emit-lir")
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    assert!(lir.contains(" printerror 1 ref "), "{lir}");
+    assert!(lir.contains(" argcount 0"), "{lir}");
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+}
