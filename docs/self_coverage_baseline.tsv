@@ -76,7 +76,7 @@ scopes.l	lir
 sema.l	parser
 sema_borrow.l	parser
 sema_borrow_syntax.l	lir
-sema_builtin_union.l	parser
+sema_builtin_union.l	semantica
 sema_collection_ops.l	parser
 sema_context.l	semantica
 sema_drop.l	parser

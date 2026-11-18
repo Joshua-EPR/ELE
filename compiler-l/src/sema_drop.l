@@ -60,7 +60,9 @@ pub fn semaNeedsDrop(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: I
         let first = tree.declarations[nominal].c
         let count = tree.declarations[nominal].d
         for f in first..(first + count) {
-            if semaNeedsDrop(&mut ctx, source, tree, semaFieldType(&mut ctx, source, tree, f)) { needs = true }
+            // End the field lookup's mutable borrow before recursive drop analysis.
+            let field_t = semaFieldType(&mut ctx, source, tree, f)
+            if semaNeedsDrop(&mut ctx, source, tree, field_t) { needs = true }
         }
     }
     if shape == 4 && nominal >= 0 {

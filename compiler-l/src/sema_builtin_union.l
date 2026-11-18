@@ -15,7 +15,9 @@ pub fn semaBuiltinUnionValue(ctx: &mut SemaContext, arg_t: Int, payload: Int, va
         if index < 0 {
             lirMarkUnsupported(&mut ctx.lir, start)
         } else {
-            lirSetVal(&mut ctx, lirNew(&mut ctx, ty, false, LIR_VARIANT, index, 1, payload))
+            // LIR allocation and result registration must not overlap mutable borrows.
+            let value = lirNew(&mut ctx, ty, false, LIR_VARIANT, index, 1, payload)
+            lirSetVal(&mut ctx, value)
         }
         return ty
     }
@@ -43,7 +45,8 @@ pub fn semaBuiltinUnionValue(ctx: &mut SemaContext, arg_t: Int, payload: Int, va
     if index < 0 {
         lirMarkUnsupported(&mut ctx.lir, start)
     } else {
-        lirSetVal(&mut ctx, lirNew(&mut ctx, contextual, false, LIR_VARIANT, index, variant, payload))
+        let value = lirNew(&mut ctx, contextual, false, LIR_VARIANT, index, variant, payload)
+        lirSetVal(&mut ctx, value)
     }
     return contextual
 }
