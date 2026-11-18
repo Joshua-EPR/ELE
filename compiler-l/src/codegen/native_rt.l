@@ -164,7 +164,7 @@ flow rtEmitBoolWord(code: edit X64Code, line: Bool) {
 }
 
 // print_int(RDI = value).
-flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
+expose flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
     x64FrameBegin(edit code, 4)
     rtEmitDigits(edit code, 0, true)
     rtCall(edit code, write_all)
@@ -172,7 +172,7 @@ flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
 }
 
 // print_bool(RDI = value).
-flow rtEmitPrintBool(code: edit X64Code, write_all: Int) {
+expose flow rtEmitPrintBool(code: edit X64Code, write_all: Int) {
     x64FrameBegin(edit code, 2)
     x64MovReg(edit code, 0, 7)
     rtEmitBoolWord(edit code, true)

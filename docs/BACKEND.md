@@ -572,3 +572,77 @@ reutilizan `native::check_supported`, `native::compile` y el enlazador.
 Los drops llegan ya elaborados: el backend no ejecuta `drops::elaborate`.
 Escribir a través de una raíz `ref` suelta el referente anterior dentro
 del `Store`, como en Stage 0.
+
+## Backend escrito en ELE: imagen PE32+ para Windows x64 (issue #7)
+
+Hasta ahora el backend escrito en ELE (`compiler-l/src/codegen/*.l`) solo
+emitía ELF64 de Linux; los `.exe` salían únicamente de la ruta Rust/Cranelift
+de Stage 0. Primer incremento verificable:
+
+- `codegen/pe64.l` escribe una imagen PE32+ (AMD64, subsistema de consola)
+  sin enlazador: cabecera y stub DOS, firma PE, cabecera COFF, cabecera
+  opcional PE32+ (ImageBase `0x140000000`, SectionAlignment `0x1000`,
+  FileAlignment `0x200`), secciones `.text` (RX: código y literales) e
+  `.idata` (RW: directorio de importación, ILT, IAT y tabla hint/name de
+  `KERNEL32.dll` con `GetStdHandle`, `WriteFile` y `ExitProcess`).
+  Sin directorio de relocalizaciones: la imagen declara
+  `IMAGE_FILE_RELOCS_STRIPPED` y **no** declara `DYNAMIC_BASE` (ASLR) ni
+  `HIGH_ENTROPY_VA`; sí `NX_COMPAT` (ninguna sección es W+X). Tamaños,
+  offsets y RVAs se calculan con aritmética comprobada acotada a los campos
+  DWORD; las entradas inválidas devuelven un código determinista (1 código
+  vacío, 2 código mayor que 16 MiB, 3 byte fuera de rango, 4 alineación
+  inválida, 5 desbordamiento, 6 entrada inválida, 7 fixup de importación
+  inválido) y una imagen vacía: nunca se escribe un archivo malformado.
+  `TimeDateStamp` es 0, por lo que la imagen es reproducible.
+  La pila del hilo principal reserva y **compromete** 8 MiB desde el inicio
+  (`SizeOfStackReserve` = `SizeOfStackCommit`): el lowering no emite stack
+  probes y un marco puede llegar a 4 KiB, así que no se depende de la página
+  de guarda. Un import fixup debe seguir a `FF 15` y no solapar con otro.
+- `codegen/win64_rt.l`: runtime mínimo con la convención Windows x64 (RCX,
+  RDX, R8, R9, quinto argumento en `[RSP+32]`, 32 bytes de shadow space,
+  RSP alineado a 16 en cada `CALL`, llamadas `CALL [RIP+disp32]` a la IAT).
+  Las rutinas realinean RSP (`AND RSP,-16`) porque la convención interna
+  del lowering CFG no garantiza esa alineación. Proporciona entrada
+  (`ExitProcess(main())`), salida con estado constante y `write_all` sobre
+  `WriteFile` (como máximo 1 GiB por llamada; un fallo termina en silencio,
+  igual que en Linux). `print_int`/`print_bool` reutilizan los formateadores
+  de `native_rt.l`.
+- `codegen/x86_64.l` añade `CALL [RIP+disp32]`, `LEA r64,[RIP+disp32]`,
+  `LEA r64,[base+disp32]` y `TEST EAX,EAX`; la ruta ELF64 no los emite.
+- `native_cfg_emit.l`: `cfgBuildFor(p, target)`; el destino 0 (ELF64) es
+  idéntico byte a byte al anterior (comprobado con los 164 fixtures
+  `examples/*.lir`: 42 aceptados con imagen idéntica, 122 rechazados con el
+  mismo código y diagnóstico), el destino 1 genera PE32+. `native-cfg-demo
+  <entrada.lir> <salida.exe> --pe64` lo expone. Los programas que necesitan
+  Text propio o listas (cuyo runtime usa `mmap` de Linux) se rechazan con el
+  código 73 en lugar de emitir syscalls de Linux.
+  Si el escritor PE rechaza la imagen, su código 1..7 se informa como
+  111..117. Una opción en lugar de una ruta (`in.lir --pe64`) es un error
+  de uso (estado 2) y nunca se convierte en nombre de archivo. La salida
+  solo se escribe tras compilar con éxito; un archivo previo con ese nombre
+  no se borra si la compilación falla (ELE aún no tiene primitiva para
+  borrar archivos), así que hay que comprobar el estado de salida.
+- `native_pe_demo.l` genera un `.exe` que escribe un mensaje con `WriteFile`
+  y termina con `ExitProcess(42)`; `--self-check` imprime los códigos de
+  rechazo del escritor y `--bad-alignment` comprueba que no se escribe nada.
+
+`crates/l/tests/native_pe64_l.rs` valida la estructura de cada imagen
+(magia, máquina `0x8664`, alineaciones, secciones contiguas y alineadas,
+entrada dentro de `.text`, directorio de importación e IAT dentro de
+`.idata`, nombres importados, cada `CALL [RIP+disp32]` apunta a una ranura
+de la IAT) en todos los hosts y, en Windows x86-64, ejecuta los `.exe` y
+compara stdout y código de salida. Los 30 fixtures LIR que ELF64 y PE32+
+aceptan a la vez producen la misma salida y el mismo estado en Windows y en
+Linux (WSL).
+
+Diferencias de semántica con ELF64, documentadas y no ocultadas: Windows
+recibe los 32 bits bajos del resultado de `main` en `ExitProcess`, mientras
+que Linux `sys_exit` conserva solo 8 bits (coinciden de 0 a 255; p. ej. 256
+es 256 en Windows y 0 en Linux). La pila es de 8 MiB comprometidos en PE32+
+y la del proceso Linux depende de `ulimit -s` (normalmente 8 MiB, creciente).
+
+Pendiente: allocator de Windows (`VirtualAlloc`/`HeapAlloc`) para Text y
+listas, relocalizaciones base (`.reloc`) para poder declarar ASLR, tablas de
+unwind (`.pdata`/`.xdata`), stderr y lectura de archivos. Stage 0 sigue
+siendo necesario para compilar los componentes ELE que generan la imagen
+(`native_pe_demo`, `native_cfg_demo`, `main_sema`).
