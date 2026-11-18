@@ -8,6 +8,7 @@ import loans_l
 import lir_build
 import sema_context
 import sema_drop
+import sema_borrow
 import sema_lower
 import lir_builtin_union
 
@@ -312,6 +313,17 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     let callee = ctx.lir_func_index[decl_id]
     let emitted = lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, callee, first, args.length)
     lirSetVal(&mut ctx, emitted)
+}
+
+// Borrow a stable writeBytes argument like an ordinary &T call parameter.
+// The loan remains live through argument evaluation and is used at call close.
+pub fn semaWriteBytesLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int) -> Int {
+    let place = ctx.lir.place
+    let path = ctx.expression_path
+    ctx.lir.borrowed = -1
+    if place < 0 || path < 0 { return -1 }
+    semaBorrowPlace(&mut ctx, path, ty, false, SITE_ARG, start, end)
+    return ctx.pending_loan
 }
 
 // writeBytes borrows the two stable places for the duration of the platform

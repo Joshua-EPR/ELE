@@ -94,7 +94,7 @@ fn stage1_writebytes_borrows_text_and_list_through_verified_lir() {
     let source = work.join("valid.l");
     std::fs::write(
         &source,
-        "fn main() -> Int {\n    let path = \"borrowed_bytes.bin\"\n    var bytes: List<Int> = List[0, 127, 128, 255, 10]\n    let status = writeBytes(path, bytes)\n    if bytes.length != 5 { return 9 }\n    return status\n}\n",
+        "fn main() -> Int {\n    let path = \"borrowed_bytes.bin\"\n    var bytes: List<Int> = List[0, 127, 128, 255, 10]\n    let status = writeBytes(path, bytes)\n    if bytes.length != 5 { return 9 }\n    let again = writeBytes(path, bytes)\n    return status + again\n}\n",
     )
     .unwrap();
     let emitted = Command::new(sema())
