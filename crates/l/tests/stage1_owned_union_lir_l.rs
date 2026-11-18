@@ -719,6 +719,128 @@ fn rust_validator_rejects_forged_drop_flag_values() {
     );
 }
 
+const STRUCT_PARTIAL_MOVE_TEXT: &str = r#"struct Pair {
+    first: Text,
+    second: Text,
+}
+fn take(t: Text) {}
+fn cond_field(c: Bool) {
+    var p = Pair(first: "a", second: "b")
+    if c {
+        take(p.first)
+    }
+}
+fn main() -> Int {
+    cond_field(true)
+    return 0
+}
+"#;
+
+const STRUCT_PARTIAL_MOVE_LIST: &str = r#"struct Holder {
+    items: List<Int>,
+    name: Text,
+}
+fn take_items(l: List<Int>) {}
+fn cond_list(c: Bool) {
+    var h = Holder(items: List[1, 2, 3], name: "holder")
+    if c {
+        take_items(h.items)
+    }
+}
+fn main() -> Int {
+    cond_list(true)
+    return 0
+}
+"#;
+
+#[test]
+fn rust_validator_rejects_forged_dropfield_flags() {
+    // 1. Text field partial move in a struct
+    let lir_text = emit("struct_text.l", STRUCT_PARTIAL_MOVE_TEXT);
+    validate(&lir_text).expect("clean text struct must validate");
+    assert!(
+        lir_text.contains("i dropfield p2.0 v5"),
+        "LIR must contain flagged dropfield: {lir_text}"
+    );
+
+    // Attack 1: Double free (change cb0 to cb1 after partial move)
+    let forged_df = if lir_text.contains("val v3 @9:9\r\ni use v5 cb0") {
+        lir_text.replacen(
+            "val v3 @9:9\r\ni use v5 cb0",
+            "val v3 @9:9\r\ni use v5 cb1",
+            1,
+        )
+    } else {
+        lir_text.replacen("val v3 @9:9\ni use v5 cb0", "val v3 @9:9\ni use v5 cb1", 1)
+    };
+    assert_ne!(
+        forged_df, lir_text,
+        "replacement for double free must succeed"
+    );
+    let err_df = validate(&forged_df).expect_err("tampered dropfield flag cb1 must be rejected");
+    assert!(
+        err_df.contains("doble liberación o fuga")
+            || err_df.contains("no coincide")
+            || err_df.contains("no refleja"),
+        "unexpected error: {err_df}"
+    );
+
+    // Attack 2: Leak (change cb1 to cb0 when field is owned)
+    let forged_leak = lir_text.replacen("i use v5 cb1", "i use v5 cb0", 1);
+    assert_ne!(forged_leak, lir_text, "replacement for leak must succeed");
+    let err_leak =
+        validate(&forged_leak).expect_err("tampered dropfield flag cb0 must be rejected");
+    assert!(
+        err_leak.contains("doble liberación o fuga")
+            || err_leak.contains("no coincide")
+            || err_leak.contains("no refleja"),
+        "unexpected error: {err_leak}"
+    );
+
+    // 2. List field partial move in a struct
+    let lir_list = emit("struct_list.l", STRUCT_PARTIAL_MOVE_LIST);
+    validate(&lir_list).expect("clean list struct must validate");
+    assert!(
+        lir_list.contains("i dropfield p3.0 v6"),
+        "LIR must contain flagged dropfield: {lir_list}"
+    );
+
+    // Attack 1: Double free (change cb0 to cb1 after partial move)
+    let forged_df_l = if lir_list.contains("val v4 @9:9\r\ni use v6 cb0") {
+        lir_list.replacen(
+            "val v4 @9:9\r\ni use v6 cb0",
+            "val v4 @9:9\r\ni use v6 cb1",
+            1,
+        )
+    } else {
+        lir_list.replacen("val v4 @9:9\ni use v6 cb0", "val v4 @9:9\ni use v6 cb1", 1)
+    };
+    assert_ne!(
+        forged_df_l, lir_list,
+        "replacement for double free must succeed"
+    );
+    let err_df_l =
+        validate(&forged_df_l).expect_err("tampered dropfield list flag cb1 must be rejected");
+    assert!(
+        err_df_l.contains("doble liberación o fuga")
+            || err_df_l.contains("no coincide")
+            || err_df_l.contains("no refleja"),
+        "unexpected error: {err_df_l}"
+    );
+
+    // Attack 2: Leak (change cb1 to cb0 when field is owned)
+    let forged_leak_l = lir_list.replacen("i use v6 cb1", "i use v6 cb0", 1);
+    assert_ne!(forged_leak_l, lir_list, "replacement for leak must succeed");
+    let err_leak_l =
+        validate(&forged_leak_l).expect_err("tampered dropfield list flag cb0 must be rejected");
+    assert!(
+        err_leak_l.contains("doble liberación o fuga")
+            || err_leak_l.contains("no coincide")
+            || err_leak_l.contains("no refleja"),
+        "unexpected error: {err_leak_l}"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn reading_the_inactive_variant_traps_at_run_time() {
@@ -784,6 +906,38 @@ fn ele_verifier_rejects_owned_union_faults() {
             out.stdout.is_empty(),
             "b_wild fault {fault} emitted unchecked LIR"
         );
+    }
+}
+
+#[test]
+fn ele_verifier_rejects_dropfield_faults() {
+    for (name, source) in [
+        ("struct_text_faults.l", STRUCT_PARTIAL_MOVE_TEXT),
+        ("struct_list_faults.l", STRUCT_PARTIAL_MOVE_LIST),
+    ] {
+        let path = write(name, source);
+        let clean = stage1(&path, "--emit-lir");
+        assert!(
+            clean.status.success(),
+            "{name}: clean build failed: {}",
+            String::from_utf8_lossy(&clean.stderr)
+        );
+        for fault in [17, 18] {
+            let out = stage1(&path, &format!("--lir-fault={fault}"));
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                !out.status.success(),
+                "{name} fault {fault} escaped the verifier"
+            );
+            assert!(
+                stderr.contains("error[ICE]") && stderr.contains("(regla 6,"),
+                "{name} fault {fault}: {stderr}"
+            );
+            assert!(
+                out.stdout.is_empty(),
+                "{name} fault {fault} emitted unchecked LIR"
+            );
+        }
     }
 }
 

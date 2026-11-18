@@ -223,7 +223,7 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
     }
     var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
     if ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(&mut ctx.lir, &mut body, ctx.lir_fault) }
-    if ctx.lir_fault >= 14 { lirInjectUnionFault(&mut ctx.lir, &mut body, &ctx.types, &ctx.lir_module, ctx.lir_fault) }
+    if ctx.lir_fault >= 14 { lirInjectUnionFault(&mut ctx.lir, &mut body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, ctx.lir_fault) }
     let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
     if checked.status != 0 {
         let rule = checked.status
@@ -248,7 +248,7 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
 // 16 a use after an owned payload consumed its union (rule 5),
 // 17 drop flag forged to cb1 after move-out (double free, rule 6),
 // 18 drop flag forged to cb0 when owned (leak, rule 6).
-fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm: &LirModule, fault: Int) {
+fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]
         let kind = l.insts[id].kind
@@ -268,12 +268,14 @@ fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm:
                 }
             }
         }
-        if kind == LIR_PAYLOAD && dst >= 0 && dst < l.vars.length && lirBuiltinPayloadOwned(types, lm, l.vars[dst].ty) {
-            if fault == 14 {
+        let is_payload = kind == LIR_PAYLOAD && dst >= 0 && dst < l.vars.length && lirBuiltinPayloadOwned(types, lm, l.vars[dst].ty)
+        let is_read_field = kind == LIR_READ && dst >= 0 && dst < l.vars.length && l.vars[dst].ty >= 0 && l.vars[dst].ty < drop_memo.length && drop_memo[l.vars[dst].ty] == 2
+        if is_payload || is_read_field {
+            if fault == 14 && is_payload {
                 l.insts[id].c = 1 - l.insts[id].c
                 return
             }
-            if fault == 16 {
+            if fault == 16 && is_payload {
                 let root = l.places[l.insts[id].a].root
                 let block = l.insts[id].block
                 for m in (n + 1)..body.order.length {

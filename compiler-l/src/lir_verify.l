@@ -41,9 +41,9 @@ fn lirMoveOut(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, drop_memo: &Lis
     let ty = l.vars[operand].ty
     if lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
         v.moved[operand] = true
-        if v.has_flags && operand < v.owned.length {
-            v.owned[operand] = 0
-        }
+    }
+    if v.has_flags && operand < v.owned.length && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
+        v.owned[operand] = 0
     }
 }
 
@@ -111,14 +111,17 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         }
         if ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { return 6 }
         var flag = inst.a
-        if kind == LIR_DROPFIELD { flag = inst.b }
+        var root = dst
+        if kind == LIR_DROPFIELD {
+            flag = inst.b
+            root = l.places[inst.a].root
+        }
         if flag >= 0 {
             if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
             if check && !v.defined[flag] { return 5 }
-            if check && v.has_flags && kind == LIR_DROP {
-                if dst < v.owned.length && flag < v.flags.length {
-                    if v.flags[flag] != v.owned[dst] { return 6 }
-                }
+            if check && v.has_flags {
+                if root < 0 || root >= v.owned.length || flag >= v.flags.length { return 6 }
+                if v.flags[flag] != v.owned[root] { return 6 }
             }
         }
         if kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
@@ -270,6 +273,12 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if result == LIR_TY_ERR { return 8 }
         if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
         result_ref = kind == LIR_LOAN
+        if kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
+            let root = l.places[inst.a].root
+            if v.has_flags && root >= 0 && root < v.owned.length {
+                v.owned[root] = 0
+            }
+        }
     } else if kind == LIR_TEXTBUF {
         result = 5
     } else if kind == LIR_LEN || kind == LIR_CAP {
@@ -336,7 +345,8 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
         if term == LIR_T_JUMP || term == LIR_T_BRANCH {
             for f in 0..v.flag_root.length {
                 let root = v.flag_root[f]
-                if root >= 0 && root < v.owned.length && f < v.flags.length {
+                if root >= 0 {
+                    if root >= v.owned.length || f >= v.flags.length { return 6 }
                     if v.flags[f] != v.owned[root] { return 6 }
                 }
             }
@@ -377,13 +387,23 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     }
     for id in 0..l.insts.length {
         let kind = l.insts[id].kind
-        if kind == LIR_DROP {
-            let f = l.insts[id].a
+        if kind == LIR_DROP || kind == LIR_DROPFIELD {
+            var f = l.insts[id].a
+            var root = l.insts[id].dst
+            if kind == LIR_DROPFIELD {
+                f = l.insts[id].b
+                let place = l.insts[id].a
+                if f >= 0 {
+                    if place < 0 || place >= l.places.length {
+                        return LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                    }
+                    root = l.places[place].root
+                }
+            }
             if f >= 0 {
                 if !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
                     return LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
-                let root = l.insts[id].dst
                 if !lirVarOk(l, root) {
                     return LirCheck(status: 1, block: l.insts[id].block, inst: id)
                 }
