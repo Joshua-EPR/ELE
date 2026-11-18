@@ -98,7 +98,9 @@ pub fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
 
 pub fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     if !ctx.emit_lir || ctx.errors.length > 0 { return }
-    semaLirHeader(&mut ctx, source, tree, ctx.lir_module.fn_first.length)
+    // Determine header function count before taking a mutable loan of ctx.
+    let function_count = ctx.lir_module.fn_first.length
+    semaLirHeader(&mut ctx, source, tree, function_count)
     if ctx.errors.length > 0 { return }
     for i in 0..ctx.lir_functions.length {
         let line = &ctx.lir_functions[i]
