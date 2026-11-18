@@ -314,6 +314,20 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
                 return 7
             }
+            let name_write_bytes = "writeBytes"
+            if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", expr.start, expr.end)
+                    return 7
+                }
+                // ACCESS_READ records a read without moving either heap owner.
+                // Save the first place before evaluating the second expression.
+                let path_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                let path = ctx.lir.place
+                let bytes_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                let bytes = ctx.lir.place
+                return semaWriteBytes(&mut ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
