@@ -5,6 +5,7 @@ take x86_64
 take elf64
 take pe64
 take win64_rt
+take win64_heap
 take native_rt
 take native_cfg_text
 take native_cfg_arith
@@ -322,9 +323,11 @@ flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, sta
     x64Syscall(edit code)
 }
 
-// Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, which
-// only has the Int/Bool output runtime of win64_rt: owned Text and lists
-// are rejected with error 73 instead of emitting Linux system calls. A
+// Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, whose
+// runtime (win64_rt output, win64_heap owned Text and lists on
+// VirtualAlloc/VirtualFree) provides the same entries as native_rt and
+// native_rt_list. A call to a runtime entry the target does not have is
+// rejected with error 73 instead of emitting Linux system calls. A
 // rejection by the PE writer (pe64.l codes 1..7) is reported as 111..117.
 expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change result = CfgImage(image: List[], error: 0)
@@ -340,10 +343,6 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
     when target != 0 && target != 1 {
-        result.error = 73
-        give result
-    }
-    when target == 1 && p.decl_lists > 0 {
         result.error = 73
         give result
     }
@@ -379,12 +378,19 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change runtime_at: List of[Int] = List[]
     when cfgNeedsRuntime(p) {
         when target == 1 {
-            runtime_at = w64EmitRuntime(edit code, edit imports)
+            runtime_at = w64EmitHeapRuntime(edit code, edit imports)
         } otherwise {
             runtime_at = rtEmitAll(edit code)
         }
     }
-    when p.decl_lists > 0 { cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at) }
+    when p.decl_lists > 0 {
+        when target == 1 {
+            // list_reserve is already rtListReserve() of the Windows runtime.
+            cfgEmitDropGlue(edit code, p, edit fix, edit runtime_at, 1)
+        } otherwise {
+            cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
+        }
+    }
 
     each f among 0..p.functions.length {
         hold func = view p.functions[f]
@@ -411,7 +417,8 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 70
         give result
     }
-    // A runtime routine this target lacks (Text, lists on PE32+).
+    // A runtime routine this target lacks: a safety net, since win64_heap
+    // provides every entry of native_rt and native_rt_list.
     change missing_routine = false
     each i among 0..fix.call_at.length {
         when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length { missing_routine = true }

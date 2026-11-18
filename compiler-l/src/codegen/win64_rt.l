@@ -14,9 +14,9 @@ take native_rt
 // instead of trusting their caller, because the ELE-internal convention of
 // the CFG lowering does not promise Windows stack alignment.
 //
-// Only output of Int and Bool is provided. Owned Text (allocation, growth,
-// release) and lists are not ported yet: their runtime uses Linux mmap,
-// and the CFG lowering rejects them for this target.
+// This file provides output of Int and Bool. Owned Text (allocation,
+// growth, release) and list buffers live in win64_heap, on VirtualAlloc
+// and VirtualFree; w64EmitHeapRuntime there emits the complete runtime.
 
 // Indexes into the address list returned by w64EmitRuntime; they match the
 // first three entries of native_rt's rtEmitAll.
@@ -31,7 +31,7 @@ expose flow w64CallImport(code: edit X64Code, imports: edit Pe64Imports, slot: I
 
 // RSP = (RSP & -16) - `reserve`; `reserve` must be a multiple of 16 and
 // include the 32 bytes of shadow space. Clobbers R10.
-flow w64AlignStack(code: edit X64Code, reserve: Int) {
+expose flow w64AlignStack(code: edit X64Code, reserve: Int) {
     x64MovImm64(edit code, 10, -16)
     x64AndReg(edit code, 4, 10)
     x64MovImm64(edit code, 10, reserve)
