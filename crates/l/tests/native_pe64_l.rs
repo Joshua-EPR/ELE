@@ -437,7 +437,7 @@ fn cfg_pe32_plus_executes_owned_text_and_lists() {
         ("native_cfg_list_index_ok", Some(2), ""),
         ("native_cfg_list_reserve_negative", Some(123), ""),
     ];
-    for &(fixture, expected_code, expected_stdout) in cases {
+    for &(fixture, _expected_code, _expected_stdout) in cases {
         let image = temp(&format!("{fixture}.exe"));
         let _ = fs::remove_file(&image);
         let out = Command::new(native())
@@ -457,11 +457,11 @@ fn cfg_pe32_plus_executes_owned_text_and_lists() {
         #[cfg(all(windows, target_arch = "x86_64"))]
         {
             let (code, stdout) = execute(&image);
-            assert_eq!(code, expected_code, "{fixture} exit code mismatch");
-            if !expected_stdout.is_empty() {
+            assert_eq!(code, _expected_code, "{fixture} exit code mismatch");
+            if !_expected_stdout.is_empty() {
                 assert_eq!(
                     String::from_utf8(stdout).unwrap(),
-                    expected_stdout,
+                    _expected_stdout,
                     "{fixture} stdout mismatch"
                 );
             }
@@ -508,7 +508,7 @@ fn cfg_pe32_plus_memory_runtime_security_and_traps() {
         ("native_cfg_list_index_oob", Some(127)),
         ("native_cfg_list_index_negative", Some(127)),
     ];
-    for &(fixture, expected_code) in runtime_traps {
+    for &(fixture, _expected_code) in runtime_traps {
         let image = temp(&format!("{fixture}.exe"));
         let _ = fs::remove_file(&image);
         let out = Command::new(native())
@@ -527,7 +527,7 @@ fn cfg_pe32_plus_memory_runtime_security_and_traps() {
         #[cfg(all(windows, target_arch = "x86_64"))]
         {
             let (code, _) = execute(&image);
-            assert_eq!(code, expected_code, "{fixture} trap code mismatch");
+            assert_eq!(code, _expected_code, "{fixture} trap code mismatch");
         }
     }
 
