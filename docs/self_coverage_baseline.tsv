@@ -43,7 +43,7 @@ lir_build.l	lir
 lir_builtin_union.l	semantica
 lir_emit.l	semantica
 lir_finish.l	semantica
-lir_module.l	parser
+lir_module.l	semantica
 lir_verify.l	semantica
 lir_verify_core.l	lir
 lir_verify_helpers.l	semantica
