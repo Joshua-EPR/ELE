@@ -243,11 +243,11 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         let finish = p_end - 1
         if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
         if finish == start + 1 && source.byteAt(start) == 95 { return }
-        // Binding a non-Copy payload by value MOVES it out of the scrutinee
+        // Binding an owned payload by value MOVES it out of the scrutinee
         // (as in Stage 0): the whole union is consumed, so a later use of the
         // scrutinee is a use after move, and moving out of a borrowed
-        // scrutinee is rejected (L0005). Primitive payloads stay copies.
-        if payload_ty >= 0 && payload_ty < ctx.types.types.length && !lirBuiltinPrimitive(payload_ty) {
+        // scrutinee is rejected (L0005). Drop-free payloads stay copies/reads.
+        if payload_ty >= 0 && payload_ty < ctx.types.types.length && semaNeedsDrop(&mut ctx, source, tree, payload_ty) {
             semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)
             // The examined place stays frozen for the whole arm: assigning
             // it there is rejected like in Stage 0 (semaCheckMatch unfreezes).

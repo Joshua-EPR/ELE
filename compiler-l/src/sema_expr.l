@@ -274,7 +274,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaReadTemp(&mut ctx, source, tree, tree.extra[first_arg], ty, mark)
                 if ty == 5 || semaRefElem(ctx, ty) == 5 {
                     if ctx.lir.place < 0 {
-                        let temp_var = lirValueVar(&mut ctx, 5)
+                        if ctx.pending_temps.length == mark {
+                            semaTemp(&mut ctx, source, tree, 5, expr.start, expr.end)
+                        }
+                        let temp_var = ctx.lir.val
                         if temp_var >= 0 {
                             ctx.lir.place = lirPlaceVar(&mut ctx.lir, temp_var)
                         }
