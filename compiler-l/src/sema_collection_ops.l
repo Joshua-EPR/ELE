@@ -91,7 +91,9 @@ pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_PUSH, -1, base_place, arg_op, 0) }
-        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+        // A separate statement ends the mutable loan of ctx.lir before lirSetVal.
+        let unit_value = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+        lirSetVal(&mut ctx, unit_value)
         return 6
     }
     if symbolNameEqualsText(source, expr.b, expr.c, name_pop) {
@@ -128,7 +130,9 @@ pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_RESERVE, -1, base_place, arg_op, 0) }
-        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+        // A separate statement ends the mutable loan of ctx.lir before lirSetVal.
+        let unit_value = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+        lirSetVal(&mut ctx, unit_value)
         return 6
     }
     if symbolNameEqualsText(source, expr.b, expr.c, name_byte_at) {
