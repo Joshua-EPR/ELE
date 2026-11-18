@@ -4,6 +4,7 @@ import native_cfg_fields
 import x86_64
 import native_rt_list
 import native_cfg_text
+import native_rt
 
 // x86-64 lowering of `List of[T]` (kinds 18..21) and the drop glue of the
 // types that own heap storage. Rules and layout: native_cfg_list.
@@ -86,8 +87,9 @@ expose flow cfgEmitList(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
 
 // Drop glue of list `k`: glue(RDI = address of the header). Releases every
 // element that owns heap storage, last first, and then the buffer.
-// Slots: 0 header, 1 elements left.
-flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit CfgFix) {
+// Slots: 0 header, 1 elements left. `target` 1 (PE32+) releases through the
+// runtime instead of the Linux munmap system call.
+flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit CfgFix, target: Int) {
     hold elem = p.list_elem[k]
     hold size = cfgTypeSize(p, elem)
     x64FrameBegin(edit code, 2)
@@ -122,6 +124,15 @@ flow cfgEmitListGlue(code: edit X64Code, p: view CfgProgram, k: Int, fix: edit C
     rtListBytes(edit code)
     x64MovReg(edit code, 6, 0)
     x64LoadMem64(edit code, 7, 7, 0)
+    when target == 1 {
+        // Windows: the runtime's text_drop(RDI = buffer, RSI = bytes)
+        // releases it, or exits 124 (win64_heap).
+        cfgRuntimeCall(edit code, edit fix, rtTextDrop())
+        hold after_win_release = code.bytes.length
+        x64PatchRelative(edit code, empty, after_win_release)
+        x64FrameEnd(edit code)
+        give
+    }
     x64MovImm64(edit code, 0, 11)
     x64Syscall(edit code)
     x64TestRax(edit code)
@@ -160,6 +171,12 @@ flow cfgEmitShapeGlue(code: edit X64Code, p: view CfgProgram, s: Int, fix: edit 
 expose flow cfgEmitListRuntime(code: edit X64Code, p: view CfgProgram, fix: edit CfgFix, at: edit List of[Int]) {
     at@push(code.bytes.length)
     rtEmitListReserve(edit code)
+    cfgEmitDropGlue(edit code, p, edit fix, edit at, 0)
+}
+
+// The drop glue alone, for a target whose runtime already provides
+// list_reserve at rtListReserve() (win64_heap on PE32+, `target` 1).
+expose flow cfgEmitDropGlue(code: edit X64Code, p: view CfgProgram, fix: edit CfgFix, at: edit List of[Int], target: Int) {
     each s among 0..p.decl_structs {
         when cfgOwnsHeap(p, 2 + s) {
             at@push(code.bytes.length)
@@ -173,6 +190,6 @@ expose flow cfgEmitListRuntime(code: edit X64Code, p: view CfgProgram, fix: edit
     }
     each k among 0..p.decl_lists {
         at@push(code.bytes.length)
-        cfgEmitListGlue(edit code, p, k, edit fix)
+        cfgEmitListGlue(edit code, p, k, edit fix, target)
     }
 }

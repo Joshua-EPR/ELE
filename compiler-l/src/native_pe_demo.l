@@ -131,7 +131,7 @@ flow selfCheck() => Int {
     selfCheckLine("writer_fixup_out_of_code", pe64Executable(view short, 0, view late).error)
     change unknown = pe64NewImports()
     unknown.at@push(0)
-    unknown.index@push(3)
+    unknown.index@push(pe64ImportCount())
     selfCheckLine("writer_unknown_import", pe64Executable(view short, 0, view unknown).error)
     hold not_call: List of[Int] = List[195, 0, 0, 0, 0]
     change misplaced = pe64NewImports()

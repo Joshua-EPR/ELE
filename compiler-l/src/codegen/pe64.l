@@ -2,7 +2,8 @@
 // Produces a console image with two sections and no linker:
 //   .text   RX  machine code followed by its read-only literals
 //   .idata  RW  import directory, ILT, IAT and hint/name table of
-//               KERNEL32.dll (GetStdHandle, WriteFile, ExitProcess)
+//               KERNEL32.dll (GetStdHandle, WriteFile, ExitProcess,
+//               VirtualAlloc, VirtualFree)
 // There is no relocation directory. Code that embeds absolute addresses
 // (the CFG lowering does, for Text literals) needs the image at its
 // preferred base, so the image declares IMAGE_FILE_RELOCS_STRIPPED and does
@@ -25,13 +26,18 @@ const PE64_DWORD_MAX = 4294967295
 const PE64_DOS_SIZE = 128
 // DOS area + "PE\0\0" + COFF header + PE32+ optional header + 2 sections.
 const PE64_HEADERS_END = 472
-const PE64_IMPORT_COUNT = 3
+const PE64_IMPORT_COUNT = 5
 const PE64_STACK_SIZE = 8388608
 
 // Indexes of the imported functions (their IAT slots).
 expose flow pe64ImportGetStdHandle() => Int { give 0 }
 expose flow pe64ImportWriteFile() => Int { give 1 }
 expose flow pe64ImportExitProcess() => Int { give 2 }
+expose flow pe64ImportVirtualAlloc() => Int { give 3 }
+expose flow pe64ImportVirtualFree() => Int { give 4 }
+
+// Number of imported functions: valid import indexes are 0..count-1.
+expose flow pe64ImportCount() => Int { give PE64_IMPORT_COUNT }
 
 // Places in the code where a CALL [RIP+disp32] must reach IAT slot `index`.
 expose shape Pe64Imports {
@@ -67,10 +73,14 @@ expose flow pe64CodeAddress() => Int {
     give PE64_IMAGE_BASE + PE64_SECTION_ALIGN
 }
 
+// The import list, in IAT slot order. The ILT, the IAT, the hint/name
+// table and every bound below derive from it and from PE64_IMPORT_COUNT.
 flow peImportName(index: Int) => Text {
     when index == 0 { give "GetStdHandle" }
     when index == 1 { give "WriteFile" }
-    give "ExitProcess"
+    when index == 2 { give "ExitProcess" }
+    when index == 3 { give "VirtualAlloc" }
+    give "VirtualFree"
 }
 
 flow peDllName() => Text {

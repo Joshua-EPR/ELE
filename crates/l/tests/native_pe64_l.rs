@@ -165,14 +165,14 @@ fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
     assert!(idata.contains(name, 13));
     assert_eq!(c_string(b, idata.file_offset(name)), "KERNEL32.dll");
     let (iat_dir, iat_size) = dir(12);
-    assert_eq!((iat_dir, iat_size), (iat, 32));
+    assert_eq!((iat_dir, iat_size), (iat, 48));
     let mut names = Vec::new();
     for table in [ilt, iat] {
-        assert!(idata.contains(table, 32));
+        assert!(idata.contains(table, 48));
         let mut row = Vec::new();
-        for k in 0..4 {
+        for k in 0..6 {
             let entry = u64_at(b, idata.file_offset(table + 8 * k));
-            if k == 3 {
+            if k == 5 {
                 assert_eq!(entry, 0, "table terminator");
                 continue;
             }
@@ -183,7 +183,16 @@ fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
         }
         names.push(row);
     }
-    assert_eq!(names[0], ["GetStdHandle", "WriteFile", "ExitProcess"]);
+    assert_eq!(
+        names[0],
+        [
+            "GetStdHandle",
+            "WriteFile",
+            "ExitProcess",
+            "VirtualAlloc",
+            "VirtualFree"
+        ]
+    );
     assert_eq!(names[0], names[1], "ILT and IAT name the same imports");
 
     // Every CALL [RIP+disp32] in .text must land on an IAT slot.
@@ -195,7 +204,7 @@ fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
             let disp = i32::from_le_bytes(code[at + 2..at + 6].try_into().unwrap());
             let target = (i64::from(text.rva) + at as i64 + 6 + i64::from(disp)) as u32;
             assert!(
-                target >= iat && target < iat + 24 && (target - iat).is_multiple_of(8),
+                target >= iat && target < iat + 40 && (target - iat).is_multiple_of(8),
                 "call at {at:#x} reaches {target:#x}"
             );
             calls += 1;
@@ -371,11 +380,29 @@ fn cfg_backend_lir_fixtures_run_as_pe32_plus() {
 /// `.l` source -> Stage 1 -> ELE-LIR -> ELE CFG backend -> PE32+.
 #[test]
 fn official_examples_build_native_pe32_plus() {
+    let list_int_exp = fs::read_to_string(root().join("examples/native_list_int_stage1.expected"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let list_owned_exp =
+        fs::read_to_string(root().join("examples/native_list_owned_stage1.expected"))
+            .unwrap()
+            .replace("\r\n", "\n");
+    let list_repl_exp =
+        fs::read_to_string(root().join("examples/native_list_replace_stage1.expected"))
+            .unwrap()
+            .replace("\r\n", "\n");
+    let loans_exp = fs::read_to_string(root().join("examples/native_loans_stage1.expected"))
+        .unwrap()
+        .replace("\r\n", "\n");
     for (name, _expected) in [
         ("arithmetic", "42\n"),
         ("hello", "42\n"),
         ("control_flow", "15\n"),
         ("loops", "12\n"),
+        ("native_list_int_stage1", list_int_exp.as_str()),
+        ("native_list_owned_stage1", list_owned_exp.as_str()),
+        ("native_list_replace_stage1", list_repl_exp.as_str()),
+        ("native_loans_stage1", loans_exp.as_str()),
     ] {
         let emitted = Command::new(sema())
             .arg(root().join(format!("examples/{name}.l")))
@@ -400,17 +427,17 @@ fn official_examples_build_native_pe32_plus() {
     }
 }
 
-/// Owned Text and lists need a Windows allocator that does not exist yet:
-/// they are rejected at compile time, never emitted with Linux syscalls.
+/// Owned Text and lists execute on Windows PE32+ via VirtualAlloc and VirtualFree.
 #[test]
-fn cfg_pe32_plus_rejects_runtime_it_lacks() {
-    for fixture in [
-        "native_cfg_text_literal_ok",
-        "native_cfg_text_flagged_drop",
-        "native_cfg_text_append_by_value_ok",
-        "native_cfg_list_index_ok",
-        "native_cfg_list_reserve_negative",
-    ] {
+fn cfg_pe32_plus_executes_owned_text_and_lists() {
+    let cases: &[(&str, Option<i32>, &str)] = &[
+        ("native_cfg_text_literal_ok", Some(0), "hi\n\n"),
+        ("native_cfg_text_flagged_drop", Some(0), "false\n"),
+        ("native_cfg_text_append_by_value_ok", Some(0), "42\n"),
+        ("native_cfg_list_index_ok", Some(2), ""),
+        ("native_cfg_list_reserve_negative", Some(123), ""),
+    ];
+    for &(fixture, _expected_code, _expected_stdout) in cases {
         let image = temp(&format!("{fixture}.exe"));
         let _ = fs::remove_file(&image);
         let out = Command::new(native())
@@ -419,14 +446,32 @@ fn cfg_pe32_plus_rejects_runtime_it_lacks() {
             .arg("--pe64")
             .output()
             .unwrap();
-        assert_eq!(out.status.code(), Some(3), "{fixture}");
-        let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("rechazado (código 73)"),
-            "{fixture}: {stderr}"
+            out.status.success(),
+            "{fixture} compile failed: {}",
+            String::from_utf8_lossy(&out.stderr)
         );
-        assert!(!image.exists(), "{fixture}");
+        assert!(image.exists(), "{fixture} no image written");
+        let bytes = fs::read(&image).unwrap();
+        validate_pe(&bytes, 0);
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        {
+            let (code, stdout) = execute(&image);
+            assert_eq!(code, _expected_code, "{fixture} exit code mismatch");
+            if !_expected_stdout.is_empty() {
+                assert_eq!(
+                    String::from_utf8(stdout).unwrap(),
+                    _expected_stdout,
+                    "{fixture} stdout mismatch"
+                );
+            }
+        }
     }
+}
+
+/// Options in invalid positions or unknown targets are rejected cleanly.
+#[test]
+fn cfg_pe32_plus_rejects_runtime_it_lacks() {
     let out = Command::new(native())
         .arg(root().join("examples/native_cfg_branch.lir"))
         .arg(temp("unknown-flag.exe"))
@@ -446,4 +491,65 @@ fn cfg_pe32_plus_rejects_runtime_it_lacks() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(!dir.join("--pe64").exists());
+}
+
+/// Dynamic memory runtime on Windows: traps (121 literal append, 127 OOB/neg index),
+/// structs with owned text fields, references into lists, and fail-closed compilation
+/// rejection on malformed LIR (double drops).
+#[test]
+fn cfg_pe32_plus_memory_runtime_security_and_traps() {
+    let runtime_traps: &[(&str, Option<i32>)] = &[
+        ("native_cfg_text_append_literal", Some(121)),
+        ("native_cfg_text_in_struct", Some(0)),
+        ("native_cfg_list_elem_ref_ok", Some(42)),
+        ("native_cfg_list_elem_store_owned", Some(0)),
+        ("native_cfg_loan_ok", Some(42)),
+        ("native_cfg_loan_disjoint_fields", Some(42)),
+        ("native_cfg_list_index_oob", Some(127)),
+        ("native_cfg_list_index_negative", Some(127)),
+    ];
+    for &(fixture, _expected_code) in runtime_traps {
+        let image = temp(&format!("{fixture}.exe"));
+        let _ = fs::remove_file(&image);
+        let out = Command::new(native())
+            .arg(root().join(format!("examples/{fixture}.lir")))
+            .arg(&image)
+            .arg("--pe64")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{fixture} compile failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let bytes = fs::read(&image).unwrap();
+        validate_pe(&bytes, 0);
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        {
+            let (code, _) = execute(&image);
+            assert_eq!(code, _expected_code, "{fixture} trap code mismatch");
+        }
+    }
+
+    // Negative compile-time tests: unsound memory and drop patterns must be rejected without creating PE images
+    for fixture in [
+        "native_cfg_list_double_drop",
+        "native_cfg_text_double_drop",
+        "native_cfg_list_leak",
+        "native_cfg_list_overwrite",
+        "native_cfg_list_elem_move",
+        "native_cfg_list_shared_push",
+        "native_cfg_list_alias",
+    ] {
+        let image = temp(&format!("{fixture}.exe"));
+        let _ = fs::remove_file(&image);
+        let out = Command::new(native())
+            .arg(root().join(format!("examples/{fixture}.lir")))
+            .arg(&image)
+            .arg("--pe64")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3), "{fixture} was not rejected");
+        assert!(!image.exists(), "{fixture} emitted image on double drop");
+    }
 }
