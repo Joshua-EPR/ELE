@@ -16,7 +16,8 @@ import lir_builtin_union
 // walk already inferred and leaves the result in the LIR value channel.
 
 pub fn semaLiteral(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int) -> Int {
-    lirSetVal(&mut ctx, lirLiteral(&mut ctx, source, tree, expr_id))
+    let emitted = lirLiteral(&mut ctx, source, tree, expr_id)
+    lirSetVal(&mut ctx, emitted)
     return ty
 }
 
@@ -39,7 +40,8 @@ pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
             if enum_id < 0 {
                 lirMarkUnsupported(&mut ctx.lir, expr.start)
             } else {
-                lirSetVal(&mut ctx, lirNew(&mut ctx, opt_t, false, LIR_VARIANT, enum_id, 0, LIR_NONE))
+                let emitted = lirNew(&mut ctx, opt_t, false, LIR_VARIANT, enum_id, 0, LIR_NONE)
+                lirSetVal(&mut ctx, emitted)
             }
             return opt_t
         }
@@ -60,7 +62,8 @@ pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
     let path = ctx.symbols.symbols[sym_id].move_path
     if constant {
         let decl = ctx.symbols.symbols[sym_id].decl_id
-        lirSetVal(&mut ctx, lirLiteral(&mut ctx, source, tree, tree.declarations[decl].d))
+        let emitted = lirLiteral(&mut ctx, source, tree, tree.declarations[decl].d)
+        lirSetVal(&mut ctx, emitted)
         return ty
     }
     let holder = lirPathVar(&ctx.lir, path)
@@ -79,11 +82,15 @@ pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
         if mode == ACCESS_MOVE && semTypeIsMove(et.kind) {
             semaAddError(&mut ctx, "L0005", "no se puede mover un valor recibido por referencia", expr.start, expr.end)
         }
-        lirSetPlace(&mut ctx, lirPlaceVar(&mut ctx.lir, holder))
+        let place = lirPlaceVar(&mut ctx.lir, holder)
+        lirSetPlace(&mut ctx, place)
         return elem
     }
     semaAccess(&mut ctx, path, ty, mode, expr.start, expr.end)
-    if holder >= 0 { lirSetPlace(&mut ctx, lirPlaceVar(&mut ctx.lir, holder)) }
+    if holder >= 0 {
+        let place = lirPlaceVar(&mut ctx.lir, holder)
+        lirSetPlace(&mut ctx, place)
+    }
     return ty
 }
 
@@ -91,7 +98,8 @@ pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
 // branches on it to the block evaluating `b` (swapped for `||`).
 pub fn semaShortVar(ctx: &mut SemaContext, lhs: Int, is_or: Bool) -> Int {
     let result = lirNew(&mut ctx, 4, false, LIR_USE, lhs, 0, 0)
-    lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
+    let block_count = ctx.flow.blocks.length
+    lirBlocks(&mut ctx.lir, block_count)
     ctx.lir.cond[ctx.flow.current] = result
     ctx.lir.swap[ctx.flow.current] = is_or
     return result
@@ -112,7 +120,8 @@ pub fn semaBinaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
                 return 7
             }
             let op = lirBinaryOp(source, expr.c, expr.d)
-            lirSetVal(&mut ctx, lirNew(&mut ctx, 4, false, LIR_BINARY, op, lhs, rhs))
+            let emitted = lirNew(&mut ctx, 4, false, LIR_BINARY, op, lhs, rhs)
+            lirSetVal(&mut ctx, emitted)
             return 4
         }
         if b0 == 38 || b0 == 124 {
@@ -137,7 +146,8 @@ pub fn semaBinaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
         return 7
     }
     let op = lirBinaryOp(source, expr.c, expr.d)
-    lirSetVal(&mut ctx, lirNew(&mut ctx, lhs_t, false, LIR_BINARY, op, lhs, rhs))
+    let emitted = lirNew(&mut ctx, lhs_t, false, LIR_BINARY, op, lhs, rhs)
+    lirSetVal(&mut ctx, emitted)
     return lhs_t
 }
 
@@ -150,12 +160,14 @@ pub fn semaUnaryFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
                 semaAddError(&mut ctx, "L0003", "operador '!' requiere operando de tipo Bool", expr.start, expr.end)
                 return 7
             }
-            lirSetVal(&mut ctx, lirNew(&mut ctx, 4, false, LIR_UNARY, LIR_NOT, operand, 0))
+            let emitted = lirNew(&mut ctx, 4, false, LIR_UNARY, LIR_NOT, operand, 0)
+            lirSetVal(&mut ctx, emitted)
             return 4
         }
         let ty = &ctx.types.types[sub_t]
         if b0 == 45 && semTypeIsNumeric(ty.kind) {
-            lirSetVal(&mut ctx, lirNew(&mut ctx, sub_t, false, LIR_UNARY, LIR_NEG, operand, 0))
+            let emitted = lirNew(&mut ctx, sub_t, false, LIR_UNARY, LIR_NEG, operand, 0)
+            lirSetVal(&mut ctx, emitted)
             return sub_t
         }
     }
@@ -196,7 +208,10 @@ pub fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
                             semaAccess(&mut ctx, path, ty, mode, expr.start, expr.end)
                         }
                         if base_place >= 0 {
-                            lirSetPlace(&mut ctx, lirPlaceField(&mut ctx.lir, base_place, field - tree.declarations[decl_id].c))
+                            // Compute the field and its place before mutating the result channel.
+                            let field_offset = field - tree.declarations[decl_id].c
+                            let field_place = lirPlaceField(&mut ctx.lir, base_place, field_offset)
+                            lirSetPlace(&mut ctx, field_place)
                         }
                         return ty
                     }
@@ -207,9 +222,11 @@ pub fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
                     if parent >= 0 { flowEvent(&mut ctx.flow, FLOW_READ, parent, expr.start, expr.end) }
                     if base_place >= 0 {
                         if symbolNameEqualsText(source, expr.b, expr.c, name_cap) {
-                            lirSetVal(&mut ctx, lirNew(&mut ctx, 1, false, LIR_CAP, base_place, 0, 0))
+                            let emitted = lirNew(&mut ctx, 1, false, LIR_CAP, base_place, 0, 0)
+                            lirSetVal(&mut ctx, emitted)
                         } else {
-                            lirSetVal(&mut ctx, lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0))
+                            let emitted = lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)
+                            lirSetVal(&mut ctx, emitted)
                         }
                     }
                     return 1
@@ -218,21 +235,30 @@ pub fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
             SemTypeKind.Array => {
                 if symbolNameEqualsText(source, expr.b, expr.c, name_len) {
                     if parent >= 0 { flowEvent(&mut ctx.flow, FLOW_READ, parent, expr.start, expr.end) }
-                    if base_place >= 0 { lirSetVal(&mut ctx, lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)) }
+                    if base_place >= 0 {
+                        let emitted = lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)
+                        lirSetVal(&mut ctx, emitted)
+                    }
                     return 1
                 }
             }
             SemTypeKind.Slice => {
                 if symbolNameEqualsText(source, expr.b, expr.c, name_len) {
                     if parent >= 0 { flowEvent(&mut ctx.flow, FLOW_READ, parent, expr.start, expr.end) }
-                    if base_place >= 0 { lirSetVal(&mut ctx, lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)) }
+                    if base_place >= 0 {
+                        let emitted = lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)
+                        lirSetVal(&mut ctx, emitted)
+                    }
                     return 1
                 }
             }
             SemTypeKind.Text => {
                 if symbolNameEqualsText(source, expr.b, expr.c, name_byte_len) {
                     if parent >= 0 { flowEvent(&mut ctx.flow, FLOW_READ, parent, expr.start, expr.end) }
-                    if base_place >= 0 { lirSetVal(&mut ctx, lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)) }
+                    if base_place >= 0 {
+                        let emitted = lirNew(&mut ctx, 1, false, LIR_LEN, base_place, 0, 0)
+                        lirSetVal(&mut ctx, emitted)
+                    }
                     return 1
                 }
             }
@@ -270,7 +296,9 @@ pub fn semaAppendPart(ctx: &mut SemaContext, tree: &AstTree, buffer: Int, part: 
         }
         _ => {}
     }
-    lirAt(&mut ctx, LIR_APPEND, buffer, lirTakeArg(&mut ctx, ty), 0, 0)
+    // Consuming the argument must finish before the LIR append mutates ctx.
+    let arg = lirTakeArg(&mut ctx, ty)
+    lirAt(&mut ctx, LIR_APPEND, buffer, arg, 0, 0)
 }
 
 // Call instruction into a new variable of the result type (a reference
@@ -280,7 +308,10 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     let elem = semaRefElem(ctx, ret_t)
     var ty = ret_t
     if elem >= 0 { ty = elem }
-    lirSetVal(&mut ctx, lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, ctx.lir_func_index[decl_id], first, args.length))
+    // Snapshot callee index before creating a new instruction via &mut ctx.
+    let callee = ctx.lir_func_index[decl_id]
+    let emitted = lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, callee, first, args.length)
+    lirSetVal(&mut ctx, emitted)
 }
 
 pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {
@@ -290,6 +321,7 @@ pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t:
     if ret_val {
         lirSetVal(&mut ctx, res_var)
     } else {
-        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+        let emitted = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+        lirSetVal(&mut ctx, emitted)
     }
 }

@@ -8,8 +8,8 @@ import loans_l
 import lir_build
 
 const ACCESS_READ = 0
-const ACCESS_MOVE = 1
-const ACCESS_PLACE = 2
+pub const ACCESS_MOVE = 1
+pub const ACCESS_PLACE = 2
 
 // Syntactic positions where a borrow or a borrowed call result may appear.
 pub const SITE_NONE = 0
