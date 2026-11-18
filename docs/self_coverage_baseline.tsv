@@ -86,7 +86,7 @@ sema_loop_jump.l	semantica
 sema_lower.l	semantica
 sema_match_coverage.l	semantica
 sema_ops.l	semantica
-sema_stmt.l	parser
+sema_stmt.l	semantica
 sema_stmt_values.l	semantica
 sema_types.l	lir
 stmt.l	semantica
