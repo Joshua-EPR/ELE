@@ -66,7 +66,10 @@ fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     if site != SITE_ARG && ctx.lir.borrowed >= 0 {
         var mutable = 0
         if is_mut { mutable = 1 }
-        lirSetVal(&mut ctx, lirNew(&mut ctx, semaRefElem(ctx, ty), true, LIR_LOAN, ctx.lir.borrowed, mutable, 0))
+        let referent = semaRefElem(ctx, ty)
+        let borrowed_place = ctx.lir.borrowed
+        let value = lirNew(&mut ctx, referent, true, LIR_LOAN, borrowed_place, mutable, 0)
+        lirSetVal(&mut ctx, value)
     }
     return ty
 }
@@ -195,7 +198,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 flowLink(&mut ctx.flow, rhs_block, join)
                 ctx.flow.current = rhs_block
                 rhs_t = semaCheckExpr(&mut ctx, source, tree, expr.b)
-                lirAt(&mut ctx, LIR_USE, result, lirTakeOperand(&mut ctx, rhs_t), 0, 0)
+                let rhs_value = lirTakeOperand(&mut ctx, rhs_t)
+                lirAt(&mut ctx, LIR_USE, result, rhs_value, 0, 0)
                 flowLink(&mut ctx.flow, join, -1)
                 ctx.flow.current = join
                 rhs = result
@@ -217,7 +221,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 }
             }
             let sub_t = semaCheckExpr(&mut ctx, source, tree, expr.a)
-            return semaUnaryFinish(&mut ctx, source, tree, expr_id, sub_t, lirTakeOperand(&mut ctx, sub_t))
+            let operand = lirTakeOperand(&mut ctx, sub_t)
+            return semaUnaryFinish(&mut ctx, source, tree, expr_id, sub_t, operand)
         }
         AstExprKind.Call => {
             let name_start = expr.a
@@ -235,8 +240,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     let ty = semaCheckExpr(&mut ctx, source, tree, arg)
                     semaReadTemp(&mut ctx, source, tree, arg, ty, mark)
                     if ty >= 1 && ty <= 5 {
-                        lirAt(&mut ctx, LIR_PRINT, -1, lirTakeArg(&mut ctx, ty), 0, 0)
-                        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+                        let printed = lirTakeArg(&mut ctx, ty)
+                        lirAt(&mut ctx, LIR_PRINT, -1, printed, 0, 0)
+                        let unit = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+                        lirSetVal(&mut ctx, unit)
                         return 6
                     }
                 }
@@ -280,7 +287,9 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
                 if ty == 1 {
                     var args: List<Int> = List[]
-                    args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, 1), false))
+                    let operand = lirTakeOperand(&mut ctx, 1)
+                    let argument = lirArg(&mut ctx.lir, false, operand, false)
+                    args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                     semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
                     return res_t
@@ -295,7 +304,9 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 if (path_t == 5 || semaRefElem(ctx, path_t) == 5) && len_t == 1 {
                     var args: List<Int> = List[]
                     args.push(lirTakeArg(&mut ctx, path_t))
-                    args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, 1), false))
+                    let operand = lirTakeOperand(&mut ctx, 1)
+                    let argument = lirArg(&mut ctx.lir, false, operand, false)
+                    args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                     semaPlatformEmit(&mut ctx, 2, &args, res_t, true)
                     return res_t
@@ -334,12 +345,17 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                             let param_t = semaResolveAstType(&mut ctx, source, tree, param.type_id)
                             if semaRefElem(ctx, param_t) >= 0 {
                                 loans.push(semaRefArg(&mut ctx, source, tree, arg_eid, param_t, a))
-                                args.push(lirArg(&mut ctx.lir, true, ctx.lir.borrowed, semaIsMutRef(ctx, param_t)))
+                                let place = ctx.lir.borrowed
+                                let is_mut = semaIsMutRef(ctx, param_t)
+                                let argument = lirArg(&mut ctx.lir, true, place, is_mut)
+                                args.push(argument)
                             } else {
                                 loans.push(-1)
                                 ctx.expected_list_type = param_t
                                 let arg_t = semaExprMode(&mut ctx, source, tree, arg_eid, ACCESS_MOVE)
-                                args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, arg_t), false))
+                                let operand = lirTakeOperand(&mut ctx, arg_t)
+                                let argument = lirArg(&mut ctx.lir, false, operand, false)
+                                args.push(argument)
                                 if !semTypeEquals(&ctx.types, arg_t, param_t) {
                                     semaAddError(&mut ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
                                 }
@@ -484,7 +500,8 @@ fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
             if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
         }
         if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start); return 7 }
-        lirSetVal(&mut ctx, lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload))
+        let value = lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload)
+        lirSetVal(&mut ctx, value)
         return enum_ty
     }
     semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)

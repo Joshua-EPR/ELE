@@ -7,7 +7,7 @@ import flow_cfg
 import loans_l
 import lir_build
 
-const ACCESS_READ = 0
+pub const ACCESS_READ = 0
 pub const ACCESS_MOVE = 1
 pub const ACCESS_PLACE = 2
 

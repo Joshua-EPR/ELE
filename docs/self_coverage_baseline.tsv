@@ -80,14 +80,14 @@ sema_builtin_union.l	semantica
 sema_collection_ops.l	semantica
 sema_context.l	semantica
 sema_drop.l	semantica
-sema_expr.l	parser
+sema_expr.l	semantica
 sema_expr_temp.l	semantica
 sema_loop_jump.l	semantica
 sema_lower.l	semantica
 sema_match_coverage.l	semantica
 sema_ops.l	semantica
 sema_stmt.l	parser
-sema_stmt_values.l	parser
+sema_stmt_values.l	semantica
 sema_types.l	lir
 stmt.l	semantica
 stmt_lower.l	semantica
