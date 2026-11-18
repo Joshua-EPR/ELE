@@ -123,6 +123,30 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
                 changed = true
             }
         }
+        if v.has_flags {
+            if i < v.flag_root.length && v.flag_root[i] >= 0 {
+                let f_in = v.flags[i]
+                if cell < v.ftable.length {
+                    if first {
+                        v.ftable[cell] = f_in
+                    } else if v.ftable[cell] != f_in && v.ftable[cell] != 2 {
+                        v.ftable[cell] = 2
+                        changed = true
+                    }
+                }
+                let root = v.flag_root[i]
+                let rcell = target * vars + root
+                if root >= 0 && root < v.owned.length && rcell < v.otable.length {
+                    let o_in = v.owned[root]
+                    if first {
+                        v.otable[rcell] = o_in
+                    } else if v.otable[rcell] != o_in && v.otable[rcell] != 2 {
+                        v.otable[rcell] = 2
+                        changed = true
+                    }
+                }
+            }
+        }
     }
     v.seen[target] = true
     if changed && !v.pending[target] {

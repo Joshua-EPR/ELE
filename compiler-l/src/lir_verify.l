@@ -42,6 +42,9 @@ fn lirMoveOut(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, drop_memo: &Lis
     if lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
         v.moved[operand] = true
     }
+    if v.has_flags && operand < v.owned.length && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
+        v.owned[operand] = 0
+    }
 }
 
 // Root of a place definitely assigned and not moved.
@@ -108,12 +111,23 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         }
         if ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { return 6 }
         var flag = inst.a
-        if kind == LIR_DROPFIELD { flag = inst.b }
+        var root = dst
+        if kind == LIR_DROPFIELD {
+            flag = inst.b
+            root = l.places[inst.a].root
+        }
         if flag >= 0 {
             if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
             if check && !v.defined[flag] { return 5 }
+            if check && v.has_flags {
+                if root < 0 || root >= v.owned.length || flag >= v.flags.length { return 6 }
+                if v.flags[flag] != v.owned[root] { return 6 }
+            }
         }
         if kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
+        if v.has_flags && kind == LIR_DROP && dst < v.owned.length {
+            v.owned[dst] = 0
+        }
         return 0
     }
     if !lirVarOk(l, dst) { return 1 }
@@ -215,7 +229,12 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         }
         if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
         // An owned payload is moved out: the whole union is consumed.
-        if lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length { v.moved[root] = true }
+        if lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length {
+            v.moved[root] = true
+            if v.has_flags && root < v.owned.length {
+                v.owned[root] = 0
+            }
+        }
         result = payload_ty
     } else if kind == LIR_DISC {
         let enum_t = lirPlaceType(l, types, lm, inst.a)
@@ -254,6 +273,12 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if result == LIR_TY_ERR { return 8 }
         if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
         result_ref = kind == LIR_LOAN
+        if kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
+            let root = l.places[inst.a].root
+            if v.has_flags && root >= 0 && root < v.owned.length {
+                v.owned[root] = 0
+            }
+        }
     } else if kind == LIR_TEXTBUF {
         result = 5
     } else if kind == LIR_LEN || kind == LIR_CAP {
@@ -284,6 +309,26 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
     if result == LIR_TY_ERR || !lirTypesCompat(types, lm, result, dst_t) || result_ref != dst_ref { return 3 }
     v.defined[dst] = true
     if dst < v.moved.length { v.moved[dst] = false }
+    if v.has_flags {
+        if dst < v.flag_root.length && v.flag_root[dst] >= 0 {
+            if kind == LIR_USE && !lirIsVar(inst.a) {
+                let cid = lirConstId(inst.a)
+                if cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL {
+                    if l.consts[cid].value != 0 {
+                        v.flags[dst] = 1
+                    } else {
+                        v.flags[dst] = 0
+                    }
+                } else {
+                    v.flags[dst] = 2
+                }
+            } else {
+                v.flags[dst] = 2
+            }
+        } else if !dst_ref && dst < v.owned.length {
+            v.owned[dst] = 1
+        }
+    }
     return 0
 }
 
@@ -295,6 +340,18 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
         let status = lirVerifyInst(&mut v, l, types, lm, drop_memo, body.order[i], b, check)
         if status != 0 { return status }
     }
+    if check && v.has_flags {
+        let term = body.term[b]
+        if term == LIR_T_JUMP || term == LIR_T_BRANCH {
+            for f in 0..v.flag_root.length {
+                let root = v.flag_root[f]
+                if root >= 0 {
+                    if root >= v.owned.length || f >= v.flags.length { return 6 }
+                    if v.flags[f] != v.owned[root] { return 6 }
+                }
+            }
+        }
+    }
     return lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
 }
 
@@ -305,21 +362,74 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     if body.first.length != blocks || body.count.length != blocks || body.ta.length != blocks || body.tb.length != blocks || body.top.length != blocks {
         return LirCheck(status: 2, block: -1, inst: -1)
     }
-    var v = LirVerifier(defined: List[], table: List[], seen: List[], pending: List[], queue: List[], status: 0, moved: List[], mtable: List[])
+    var v = LirVerifier(
+        defined: List[],
+        table: List[],
+        seen: List[],
+        pending: List[],
+        queue: List[],
+        status: 0,
+        moved: List[],
+        mtable: List[],
+        flags: List[],
+        ftable: List[],
+        owned: List[],
+        otable: List[],
+        flag_root: List[],
+        has_flags: false,
+    )
     for i in 0..vars {
         v.defined.push(false)
         v.moved.push(false)
+        v.flags.push(0)
+        v.owned.push(0)
+        v.flag_root.push(-1)
+    }
+    for id in 0..l.insts.length {
+        let kind = l.insts[id].kind
+        if kind == LIR_DROP || kind == LIR_DROPFIELD {
+            var f = l.insts[id].a
+            var root = l.insts[id].dst
+            if kind == LIR_DROPFIELD {
+                f = l.insts[id].b
+                let place = l.insts[id].a
+                if f >= 0 {
+                    if place < 0 || place >= l.places.length {
+                        return LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                    }
+                    root = l.places[place].root
+                }
+            }
+            if f >= 0 {
+                if !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
+                    return LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+                if !lirVarOk(l, root) {
+                    return LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                }
+                if v.flag_root[f] >= 0 && v.flag_root[f] != root {
+                    return LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+                v.flag_root[f] = root
+                v.has_flags = true
+            }
+        }
     }
     for i in 0..(blocks * vars) {
         v.table.push(true)
         v.mtable.push(false)
+        v.ftable.push(0)
+        v.otable.push(0)
     }
     for b in 0..blocks {
         v.seen.push(b == 0)
         v.pending.push(b == 0)
     }
     // Parameters are assigned on entry.
-    for i in 0..vars { v.table[i] = i < l.params }
+    for i in 0..vars {
+        v.table[i] = i < l.params
+        if i < l.params { v.otable[i] = 1 }
+    }
     v.queue.push(0)
     var steps = 0
     while v.queue.length > 0 {
@@ -334,6 +444,10 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         for i in 0..vars {
             v.defined[i] = v.table[b * vars + i]
             v.moved[i] = v.mtable[b * vars + i]
+            if v.has_flags {
+                v.flags[i] = v.ftable[b * vars + i]
+                v.owned[i] = v.otable[b * vars + i]
+            }
         }
         let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, false)
         if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
@@ -346,9 +460,13 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     for b in 0..blocks {
         if v.seen[b] {
             for i in 0..vars {
-            v.defined[i] = v.table[b * vars + i]
-            v.moved[i] = v.mtable[b * vars + i]
-        }
+                v.defined[i] = v.table[b * vars + i]
+                v.moved[i] = v.mtable[b * vars + i]
+                if v.has_flags {
+                    v.flags[i] = v.ftable[b * vars + i]
+                    v.owned[i] = v.otable[b * vars + i]
+                }
+            }
             let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, true)
             if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
         }
