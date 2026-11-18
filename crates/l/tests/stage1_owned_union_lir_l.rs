@@ -748,14 +748,16 @@ fn reading_the_inactive_variant_traps_at_run_time() {
 fn ele_verifier_rejects_owned_union_faults() {
     // 14: owned payload read from the other variant (type, rule 3);
     // 15: flagged drop of a maybe-moved union made unconditional (rule 6);
-    // 16: use of a union after an owned payload consumed it (rule 5).
+    // 16: use of a union after an owned payload consumed it (rule 5);
+    // 17: drop flag forged to cb1 after move-out (double free, rule 6);
+    // 18: drop flag forged to cb0 when owned (leak, rule 6).
     let maybe_moved = format!(
         "{LABEL}fn main() -> Int {{\n    let o = Some(label(1))\n    match o {{\n        Some(s) => {{ print(s) }}\n        None => {{ print(\"none\") }}\n    }}\n    return 0\n}}\n"
     );
     let path = write("faults.l", &maybe_moved);
     let clean = stage1(&path, "--emit-lir");
     assert!(clean.status.success());
-    for (fault, rule) in [(14, 3), (15, 6), (16, 5)] {
+    for (fault, rule) in [(14, 3), (15, 6), (16, 5), (17, 6), (18, 6)] {
         let out = stage1(&path, &format!("--lir-fault={fault}"));
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "fault {fault} escaped the verifier");
@@ -764,6 +766,24 @@ fn ele_verifier_rejects_owned_union_faults() {
             "fault {fault}: {stderr}"
         );
         assert!(out.stdout.is_empty(), "fault {fault} emitted unchecked LIR");
+    }
+
+    let b_wild_path = write("b_wild_faults.l", B_WILD);
+    for fault in [17, 18] {
+        let out = stage1(&b_wild_path, &format!("--lir-fault={fault}"));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success(),
+            "b_wild fault {fault} escaped the verifier"
+        );
+        assert!(
+            stderr.contains("error[ICE]") && stderr.contains("(regla 6,"),
+            "b_wild fault {fault}: {stderr}"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "b_wild fault {fault} emitted unchecked LIR"
+        );
     }
 }
 

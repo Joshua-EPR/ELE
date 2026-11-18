@@ -21,6 +21,14 @@ pub struct LirVerifier {
     // borrowed or dropped without a flag until it is assigned again.
     moved: List<Bool>
     mtable: List<Bool>
+    // Drop flags (#F1): abstract values (0: Off, 1: On, 2: Unknown) and
+    // ownership states (0: Uninit, 1: Init, 2: Maybe) of guarded places.
+    flags: List<Int>
+    ftable: List<Int>
+    owned: List<Int>
+    otable: List<Int>
+    flag_root: List<Int>
+    has_flags: Bool
 }
 
 expose flow lirVarOk(l: view LirFn, slot: Int) => Bool {

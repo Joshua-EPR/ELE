@@ -245,7 +245,9 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
 // 12 platform result type, 13 invalid platform argument id.
 // Owned unions (#5): 14 owned payload read from the other variant (rule 3),
 // 15 conditional drop of a maybe-moved union made unconditional (rule 6),
-// 16 a use after an owned payload consumed its union (rule 5).
+// 16 a use after an owned payload consumed its union (rule 5),
+// 17 drop flag forged to cb1 after move-out (double free, rule 6),
+// 18 drop flag forged to cb0 when owned (leak, rule 6).
 fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm: &LirModule, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]
@@ -277,6 +279,10 @@ fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm:
                 for m in (n + 1)..body.order.length {
                     let later = body.order[m]
                     if l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        let ldst = l.insts[later].dst
+                        if ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            continue
+                        }
                         // Well-typed copy of the consumed union into a fresh variable.
                         let union_ty = l.vars[root].ty
                         let copy = lirVar(&mut l, union_ty, false)
@@ -284,6 +290,31 @@ fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm:
                         l.insts[later].a = root
                         return
                     }
+                }
+            }
+            if fault == 17 {
+                // Double free: drop flag forged to cb1 after payload move-out.
+                let block = l.insts[id].block
+                for m in (n + 1)..body.order.length {
+                    let later = body.order[m]
+                    if l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        let ldst = l.insts[later].dst
+                        if ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            l.insts[later].a = lirConst(&mut l, LIR_CONST_BOOL, 1, 0, 0)
+                            return
+                        }
+                    }
+                }
+            }
+        }
+        if fault == 18 && kind == LIR_USE && dst >= 0 && dst < l.vars.length && l.vars[dst].ty == 4 {
+            // Leak: drop flag forged to cb0 when owned.
+            let operand = l.insts[id].a
+            if !lirIsVar(operand) {
+                let cid = lirConstId(operand)
+                if cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL && l.consts[cid].value == 1 {
+                    l.insts[id].a = lirConst(&mut l, LIR_CONST_BOOL, 0, 0, 0)
+                    return
                 }
             }
         }
