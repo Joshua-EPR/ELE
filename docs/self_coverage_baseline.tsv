@@ -74,14 +74,14 @@ parse_util.l	semantica
 parser.l	semantica
 scopes.l	lir
 sema.l	parser
-sema_borrow.l	parser
+sema_borrow.l	semantica
 sema_borrow_syntax.l	lir
 sema_builtin_union.l	semantica
 sema_collection_ops.l	parser
 sema_context.l	semantica
-sema_drop.l	parser
+sema_drop.l	semantica
 sema_expr.l	parser
-sema_expr_temp.l	parser
+sema_expr_temp.l	semantica
 sema_loop_jump.l	semantica
 sema_lower.l	semantica
 sema_match_coverage.l	semantica
