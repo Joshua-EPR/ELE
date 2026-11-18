@@ -77,7 +77,7 @@ sema.l	parser
 sema_borrow.l	semantica
 sema_borrow_syntax.l	lir
 sema_builtin_union.l	semantica
-sema_collection_ops.l	parser
+sema_collection_ops.l	semantica
 sema_context.l	semantica
 sema_drop.l	semantica
 sema_expr.l	parser
@@ -85,7 +85,7 @@ sema_expr_temp.l	semantica
 sema_loop_jump.l	semantica
 sema_lower.l	semantica
 sema_match_coverage.l	semantica
-sema_ops.l	parser
+sema_ops.l	semantica
 sema_stmt.l	parser
 sema_stmt_values.l	parser
 sema_types.l	lir
