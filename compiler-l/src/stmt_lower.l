@@ -201,9 +201,11 @@ pub fn lirMatchArmTest(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
 
 // Bind a payload only in the matching arm. This produces an explicit checked
 // `payload` operation, never an unchecked `read` of the enum. Int/Bool are
-// copied; a drop-free shape/choice payload (lirBuiltinPayloadOk) is moved out
-// of the scrutinee. Owned payloads (Text, lists) need drop elaboration and
-// remain intentionally unsupported (L0016).
+// copied; any other lowerable payload (lirBuiltinPayloadOk) is moved out of
+// the scrutinee, which is consumed. An owned payload (Text, List<T>, nested
+// union, owner-bearing shape) becomes an owned binding with its own drop;
+// the scrutinee must then be a direct owned variable (semaCheckMatch gives
+// temporaries one), so the consumed union is never dropped again.
 pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, scrut_path: Int) {
     if scrut_t < 0 || scrut_t >= ctx.types.types.length { return }
     // Primitive builtin unions reuse the exact checked LIR_PAYLOAD protocol
@@ -261,6 +263,11 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         }
         let enum_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
         if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
+        let owned = lirBuiltinPayloadOwned(&ctx.types, &ctx.lir_module, payload_ty)
+        // Moving an owned payload out needs a tracked, directly owned union.
+        if owned && (scrut_path < 0 || scrut_var < 0 || scrut_var >= ctx.lir.vars.length || ctx.lir.vars[scrut_var].is_ref) {
+            lirMarkUnsupported(&mut ctx.lir, p_start)
+        }
         let place = lirPlaceVar(&mut ctx.lir, scrut_var)
         let value = lirNew(&mut ctx, payload_ty, false, LIR_PAYLOAD, place, enum_id, which)
         let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, start, finish, payload_ty, ctx.scopes.current_scope, false, false, -1, start, finish)
@@ -270,6 +277,9 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         // A move-path snapshot must precede the exclusive borrow of ctx.
         let bind_path = ctx.symbols.symbols[sym_id].move_path
         lirLetBind(&mut ctx, bind_path, payload_ty, false)
+        // The moved-out payload is an owned binding: dropped at the end of
+        // its arm unless moved on (return, call, constructor).
+        if owned { semaOwn(&mut ctx, source, tree, bind_path, payload_ty, start) }
         return
     }
     match ctx.types.types[scrut_t].kind {
