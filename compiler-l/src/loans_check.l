@@ -11,8 +11,8 @@ import loans_l
 //    live immediately after it.
 
 const LOAN_OK = 0
-const LOAN_CONFLICT = 1
-const LOAN_LIMIT = 2
+pub const LOAN_CONFLICT = 1
+pub const LOAN_LIMIT = 2
 
 struct LoanCheck {
     status: Int

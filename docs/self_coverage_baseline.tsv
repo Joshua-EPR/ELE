@@ -52,9 +52,9 @@ loans_check.l	semantica
 loans_l.l	semantica
 main.l	semantica
 main_parser.l	semantica
-main_sema.l	parser
+main_sema.l	semantica
 module_graph_l.l	lir
-modules_l.l	parser
+modules_l.l	semantica
 native_binary_io.l	parser
 native_cfg_demo.l	parser
 native_elf_demo.l	parser
@@ -73,7 +73,7 @@ ownership_l.l	semantica
 parse_util.l	semantica
 parser.l	semantica
 scopes.l	lir
-sema.l	parser
+sema.l	semantica
 sema_borrow.l	semantica
 sema_borrow_syntax.l	lir
 sema_builtin_union.l	semantica
