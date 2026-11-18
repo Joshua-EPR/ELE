@@ -380,11 +380,29 @@ fn cfg_backend_lir_fixtures_run_as_pe32_plus() {
 /// `.l` source -> Stage 1 -> ELE-LIR -> ELE CFG backend -> PE32+.
 #[test]
 fn official_examples_build_native_pe32_plus() {
+    let list_int_exp = fs::read_to_string(root().join("examples/native_list_int_stage1.expected"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let list_owned_exp =
+        fs::read_to_string(root().join("examples/native_list_owned_stage1.expected"))
+            .unwrap()
+            .replace("\r\n", "\n");
+    let list_repl_exp =
+        fs::read_to_string(root().join("examples/native_list_replace_stage1.expected"))
+            .unwrap()
+            .replace("\r\n", "\n");
+    let loans_exp = fs::read_to_string(root().join("examples/native_loans_stage1.expected"))
+        .unwrap()
+        .replace("\r\n", "\n");
     for (name, _expected) in [
         ("arithmetic", "42\n"),
         ("hello", "42\n"),
         ("control_flow", "15\n"),
         ("loops", "12\n"),
+        ("native_list_int_stage1", list_int_exp.as_str()),
+        ("native_list_owned_stage1", list_owned_exp.as_str()),
+        ("native_list_replace_stage1", list_repl_exp.as_str()),
+        ("native_loans_stage1", loans_exp.as_str()),
     ] {
         let emitted = Command::new(sema())
             .arg(root().join(format!("examples/{name}.l")))
@@ -484,6 +502,9 @@ fn cfg_pe32_plus_memory_runtime_security_and_traps() {
         ("native_cfg_text_append_literal", Some(121)),
         ("native_cfg_text_in_struct", Some(0)),
         ("native_cfg_list_elem_ref_ok", Some(42)),
+        ("native_cfg_list_elem_store_owned", Some(0)),
+        ("native_cfg_loan_ok", Some(42)),
+        ("native_cfg_loan_disjoint_fields", Some(42)),
         ("native_cfg_list_index_oob", Some(127)),
         ("native_cfg_list_index_negative", Some(127)),
     ];
@@ -510,8 +531,16 @@ fn cfg_pe32_plus_memory_runtime_security_and_traps() {
         }
     }
 
-    // Negative compile-time tests: double drops must be rejected without creating PE images
-    for fixture in ["native_cfg_list_double_drop", "native_cfg_text_double_drop"] {
+    // Negative compile-time tests: unsound memory and drop patterns must be rejected without creating PE images
+    for fixture in [
+        "native_cfg_list_double_drop",
+        "native_cfg_text_double_drop",
+        "native_cfg_list_leak",
+        "native_cfg_list_overwrite",
+        "native_cfg_list_elem_move",
+        "native_cfg_list_shared_push",
+        "native_cfg_list_alias",
+    ] {
         let image = temp(&format!("{fixture}.exe"));
         let _ = fs::remove_file(&image);
         let out = Command::new(native())
