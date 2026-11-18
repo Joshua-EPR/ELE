@@ -87,7 +87,10 @@ pub fn semaNameExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
         return elem
     }
     semaAccess(&mut ctx, path, ty, mode, expr.start, expr.end)
-    if holder >= 0 { lirSetPlace(&mut ctx, lirPlaceVar(&mut ctx.lir, holder)) }
+    if holder >= 0 {
+        let place = lirPlaceVar(&mut ctx.lir, holder)
+        lirSetPlace(&mut ctx, place)
+    }
     return ty
 }
 
