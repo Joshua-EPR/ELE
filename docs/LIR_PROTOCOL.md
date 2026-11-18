@@ -174,3 +174,25 @@ variante inactiva sigue protegida por la comprobación dinámica del
 discriminante (Cranelift: `acceso a variante enum inactiva`). El backend ELE
 nativo aún no tiene layout verificado para payloads propietarios y rechaza el
 módulo (código 82) sin escribir imagen.
+
+
+## Semántica de `i listpop` (#3)
+
+La instrucción `i listpop vD pN` recibe como origen un lugar de tipo
+`List<T>` y como destino un valor `Option<T>` con el mismo `T`;
+un desacuerdo de elemento o tipo de destino debe rechazarse antes de
+generar código nativo. La operación lee el último elemento de la lista:
+
+- Si está vacía, produce `None` y no intenta leer memoria del buffer.
+- Si contiene elementos, reduce la longitud en una unidad y produce
+  `Some(elemento)`, transfiriendo la propiedad del último elemento al
+  payload cuando `T` necesita drop.
+- El elemento movido ya no pertenece a la lista; el drop de su lista
+  original no debe liberarlo de nuevo.
+- Las variantes, el índice y la vida del origen deben seguir pasando por
+  el verificador de ELE-LIR y los controles de ownership.
+
+Las rutas de Stage 0/Cranelift y el backend nativo ELE requieren pruebas de
+conformidad, incluidos casos vacíos, elementos propietarios y LIR malformada.
+Un soporte de `listpop` no implica que el backend ELE ya sepa generar código
+nativo para **todas** las variantes propietarias de `Option/Result`.
