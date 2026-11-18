@@ -76,6 +76,15 @@ fn stage1_sema_stmt_real_source_passes_borrow_check() {
 }
 
 #[test]
+fn stage1_sema_core_real_source_passes_borrow_check() {
+    // The genuine Stage 1 semantic core used to fail on a nested mutable
+    // loan of ctx.lir during parameter registration. Do not mock this input.
+    let path = root().join("compiler-l/src/sema.l");
+    let (ok, stderr) = check(&path);
+    assert!(ok, "sema.l: {stderr}");
+}
+
+#[test]
 fn stage1_still_rejects_same_call_mutable_borrow_and_field_read() {
     let work = root().join("target/stage1-tests/b2-semantic-lir-snapshots");
     std::fs::create_dir_all(&work).unwrap();
