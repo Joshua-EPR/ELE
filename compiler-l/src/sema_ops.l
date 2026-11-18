@@ -314,6 +314,37 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     lirSetVal(&mut ctx, emitted)
 }
 
+// writeBytes borrows the two stable places for the duration of the platform
+// operation. It must never move or duplicate the List<Int> heap owner.
+// The LIR verifier independently requires two immutable ref arguments.
+pub fn semaWriteBytes(ctx: &mut SemaContext, start: Int, end: Int, path_ty: Int, path: Int, bytes_ty: Int, bytes: Int) -> Int {
+    var valid_list = false
+    if bytes_ty >= 0 && bytes_ty < ctx.types.types.length {
+        let elem = &ctx.types.types[bytes_ty]
+        match elem.kind {
+            SemTypeKind.List => { valid_list = elem.elem_type == 1 }
+            _ => {}
+        }
+    }
+    if path_ty != 5 || !valid_list {
+        semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", start, end)
+        return 7
+    }
+    if path < 0 || bytes < 0 {
+        // A temporary owner needs explicit lifetime/drop elaboration. Do not
+        // emit an unchecked by-value platform argument as an ersatz loan.
+        semaAddError(&mut ctx, "L0016", "writeBytes requiere lugares prestables para Text y List<Int>", start, end)
+        return 7
+    }
+    var args: List<Int> = List[]
+    let path_arg = lirArg(&mut ctx.lir, true, path, false)
+    args.push(path_arg)
+    let bytes_arg = lirArg(&mut ctx.lir, true, bytes, false)
+    args.push(bytes_arg)
+    semaPlatformEmit(&mut ctx, 4, &args, 1, true)
+    return 1
+}
+
 pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {
     let first = lirSequence(&mut ctx, args)
     let res_var = lirVar(&mut ctx.lir, res_t, false)
