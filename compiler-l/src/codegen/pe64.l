@@ -26,6 +26,7 @@ const PE64_DOS_SIZE = 128
 // DOS area + "PE\0\0" + COFF header + PE32+ optional header + 2 sections.
 const PE64_HEADERS_END = 472
 const PE64_IMPORT_COUNT = 3
+const PE64_STACK_SIZE = 8388608
 
 // Indexes of the imported functions (their IAT slots).
 expose flow pe64ImportGetStdHandle() => Int { give 0 }
@@ -304,8 +305,11 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
     peLittle(edit out, 0, 4)                // CheckSum (not required for EXEs)
     peLittle(edit out, 3, 2)                // Subsystem: WINDOWS_CUI
     peLittle(edit out, 256, 2)              // DllCharacteristics: NX_COMPAT only
-    peLittle(edit out, 1048576, 8)          // SizeOfStackReserve
-    peLittle(edit out, 4096, 8)             // SizeOfStackCommit
+    // The whole stack is committed up front: the lowering emits no stack
+    // probes and a frame may reach 4 KiB (x64FrameBegin), which could step
+    // over a single guard page. 8 MiB matches the usual Linux main stack.
+    peLittle(edit out, PE64_STACK_SIZE, 8)  // SizeOfStackReserve
+    peLittle(edit out, PE64_STACK_SIZE, 8)  // SizeOfStackCommit
     peLittle(edit out, 1048576, 8)          // SizeOfHeapReserve
     peLittle(edit out, 4096, 8)             // SizeOfHeapCommit
     peLittle(edit out, 0, 4)                // LoaderFlags
@@ -348,6 +352,20 @@ expose flow pe64ExecutableWith(code: view List of[Int], entry: Int, imports: vie
     each i among 0..imports.at.length {
         when imports.at[i] < 0 || imports.at[i] > code.length - 4 { valid_fixups = false }
         when imports.index[i] < 0 || imports.index[i] >= PE64_IMPORT_COUNT { valid_fixups = false }
+    }
+    when !valid_fixups { give peFail(7) }
+    // Each fixup must be the displacement of a CALL [RIP+disp32] (FF 15),
+    // and no two fixups may share bytes.
+    each i among 0..imports.at.length {
+        hold at = imports.at[i]
+        when at < 2 {
+            valid_fixups = false
+        } otherwise when code[at - 2] != 255 || code[at - 1] != 21 {
+            valid_fixups = false
+        }
+        each j among 0..imports.at.length {
+            when i != j && imports.at[j] > at - 6 && imports.at[j] < at + 6 { valid_fixups = false }
+        }
     }
     when !valid_fixups { give peFail(7) }
     hold idata_length = pe64IdataLength()

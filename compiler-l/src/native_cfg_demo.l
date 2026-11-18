@@ -6,6 +6,9 @@ import codegen.elf64
 //        native-cfg-demo <input.lir> <output.exe> --pe64
 // The third form emits a Windows x64 PE32+ image (codegen/pe64.l) instead of
 // a Linux ELF64 one; it accepts the subset documented in cfgBuildFor.
+// The output is written only after a successful compilation. A file left
+// by an earlier run is not removed on failure: ELE has no file removal
+// primitive yet, so callers must check the exit status.
 fn isPe64Flag(flag: &Text) -> Bool {
     let expected = "--pe64"
     if flag.byteLength != expected.byteLength { return false }
@@ -13,6 +16,12 @@ fn isPe64Flag(flag: &Text) -> Bool {
         if flag.byteAt(i) != expected.byteAt(i) { return false }
     }
     return true
+}
+
+// An option where a path is expected (e.g. `in.lir --pe64`) is a usage
+// error: it must never become the name of the output file.
+fn looksLikeFlag(arg: &Text) -> Bool {
+    return arg.byteLength >= 2 && arg.byteAt(0) == 45 && arg.byteAt(1) == 45
 }
 
 fn main() -> Int {
@@ -31,6 +40,19 @@ fn main() -> Int {
                 target = 1
             }
             Err(code) => { return 6 }
+        }
+    }
+    for i in 0..processArgCount() {
+        if i < 2 {
+            match processArg(i) {
+                Ok(positional) => {
+                    if looksLikeFlag(&positional) {
+                        printError("Se esperaba una ruta, no una opción, en la posición {i}")
+                        return 2
+                    }
+                }
+                Err(code) => { return 6 }
+            }
         }
     }
     match processArg(0) {

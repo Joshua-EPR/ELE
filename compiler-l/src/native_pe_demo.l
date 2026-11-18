@@ -12,6 +12,7 @@ take codegen.win64_rt
 //   native-pe-demo <out.exe>                 write the demo image
 //   native-pe-demo --bad-alignment <out.exe> must fail, writing nothing
 //   native-pe-demo --self-check              print the writer's error codes
+//   native-pe-demo --deep-frames <out.exe>   1000 nested 4 KiB frames, exit 43
 
 flow demoMessage() => Text {
     give "Hola desde ELE: PE32+ nativo para Windows x64\n"
@@ -64,6 +65,31 @@ flow sameBytes(a: view Text, b: view Text) => Bool {
     give true
 }
 
+// Recursion through the largest frame x64FrameBegin allows (512 slots,
+// 4 KiB) whose only stack writes are PUSH RBP and the return address, so
+// consecutive writes are 4112 bytes apart: with a lazily committed stack
+// they would step over the 4 KiB guard page. 1000 levels need about 4 MiB.
+flow deepFramesCode(imports: edit Pe64Imports) => X64Code {
+    change code = x64New()
+    x64MovImm64(edit code, 3, 1000)
+    hold first = x64CallPlaceholder(edit code)
+    w64EmitExit(edit code, edit imports, 43)
+    hold nested = code.bytes.length
+    x64PatchRelative(edit code, first, nested)
+    x64FrameBegin(edit code, 512)
+    x64MovReg(edit code, 0, 3)
+    x64TestRax(edit code)
+    hold done = x64ConditionalPlaceholder(edit code, true)
+    x64MovImm64(edit code, 10, -1)
+    x64AddReg(edit code, 3, 10)
+    hold again = x64CallPlaceholder(edit code)
+    x64PatchRelative(edit code, again, nested)
+    hold done_at = code.bytes.length
+    x64PatchRelative(edit code, done, done_at)
+    x64FrameEnd(edit code)
+    give code
+}
+
 flow selfCheckLine(name: Text, error: Int) {
     print("{name}={error}")
 }
@@ -107,6 +133,30 @@ flow selfCheck() => Int {
     unknown.at@push(0)
     unknown.index@push(3)
     selfCheckLine("writer_unknown_import", pe64Executable(view short, 0, view unknown).error)
+    hold not_call: List of[Int] = List[195, 0, 0, 0, 0]
+    change misplaced = pe64NewImports()
+    misplaced.at@push(1)
+    misplaced.index@push(0)
+    selfCheckLine("writer_fixup_not_call", pe64Executable(view not_call, 0, view misplaced).error)
+    hold two_calls: List of[Int] = List[255, 21, 0, 0, 0, 0, 255, 21, 0, 0, 0, 0]
+    change twice = pe64NewImports()
+    twice.at@push(2)
+    twice.index@push(0)
+    twice.at@push(2)
+    twice.index@push(1)
+    selfCheckLine("writer_fixup_duplicate", pe64Executable(view two_calls, 0, view twice).error)
+    change overlapping = pe64NewImports()
+    overlapping.at@push(2)
+    overlapping.index@push(0)
+    overlapping.at@push(4)
+    overlapping.index@push(1)
+    selfCheckLine("writer_fixup_overlap", pe64Executable(view two_calls, 0, view overlapping).error)
+    change both = pe64NewImports()
+    both.at@push(2)
+    both.index@push(0)
+    both.at@push(8)
+    both.index@push(2)
+    selfCheckLine("writer_fixups_ok", pe64Executable(view two_calls, 0, view both).error)
     selfCheckLine("writer_bad_alignment", pe64ExecutableWith(view one, 0, view none, 4096, 100).error)
     hold fine = pe64Executable(view one, 0, view none)
     selfCheckLine("writer_ok", fine.error)
@@ -143,16 +193,26 @@ flow main() => Int {
         }
     }
     when processArgCount() == 2 {
+        change mode = 0
         match processArg(0) {
             Ok(flag) => {
-                hold expected = "--bad-alignment"
-                when !sameBytes(view flag, view expected) { give 6 }
+                hold bad_alignment = "--bad-alignment"
+                hold deep_frames = "--deep-frames"
+                when sameBytes(view flag, view bad_alignment) { mode = 1 }
+                when sameBytes(view flag, view deep_frames) { mode = 2 }
             }
             Err(e) => { give 5 }
         }
+        when mode == 0 { give 6 }
         match processArg(1) {
             Ok(path) => {
                 change imports = pe64NewImports()
+                when mode == 2 {
+                    hold deep = deepFramesCode(edit imports)
+                    when deep.error != 0 { give 2 }
+                    hold deep_image = pe64Executable(view deep.bytes, 0, view imports)
+                    give writeImage(view path, view deep_image)
+                }
                 hold code = demoCode(edit imports)
                 when code.error != 0 { give 2 }
                 // File alignment 100 is not a power of two: nothing is written.
@@ -162,6 +222,6 @@ flow main() => Int {
             Err(e) => { give 5 }
         }
     }
-    printError("Uso: native-pe-demo <salida.exe> | --bad-alignment <salida.exe> | --self-check")
+    printError("Uso: native-pe-demo <salida.exe> | --bad-alignment <salida.exe> | --deep-frames <salida.exe> | --self-check")
     give 6
 }

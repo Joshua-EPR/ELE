@@ -324,7 +324,8 @@ flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, sta
 
 // Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, which
 // only has the Int/Bool output runtime of win64_rt: owned Text and lists
-// are rejected with error 73 instead of emitting Linux system calls.
+// are rejected with error 73 instead of emitting Linux system calls. A
+// rejection by the PE writer (pe64.l codes 1..7) is reported as 111..117.
 expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change result = CfgImage(image: List[], error: 0)
     hold verified = cfgVerify(p)
@@ -461,6 +462,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     }
     when target == 1 {
         hold pe = pe64Executable(view code.bytes, 0, view imports)
+        when pe.error != 0 {
+            // pe64.l writer codes 1..7 are reported as 111..117.
+            result.error = 110 + pe.error
+            give result
+        }
         result.image = pe.bytes
     } otherwise {
         result.image = elf64Executable(view code.bytes)
