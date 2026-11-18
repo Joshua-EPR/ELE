@@ -377,7 +377,7 @@ take sema_types
 flow main() => Int {
     change l: LirFn = lirFnNew()
     // Keep generic empty-list element types explicit across the module
-    // boundary. These are seven distinct owned buffers, moved into v.
+    // boundary. All twelve lists are distinct owned buffers moved into v.
     change defined: List of[Bool] = List[]
     change table: List of[Bool] = List[]
     change seen: List of[Bool] = List[]
@@ -385,6 +385,11 @@ flow main() => Int {
     change queue: List of[Int] = List[]
     change moved: List of[Bool] = List[]
     change mtable: List of[Bool] = List[]
+    change flags: List of[Int] = List[]
+    change ftable: List of[Int] = List[]
+    change owned: List of[Int] = List[]
+    change otable: List of[Int] = List[]
+    change flag_root: List of[Int] = List[]
     change v: LirVerifier = LirVerifier(
         defined: defined,
         table: table,
@@ -393,7 +398,13 @@ flow main() => Int {
         queue: queue,
         status: 0,
         moved: moved,
-        mtable: mtable
+        mtable: mtable,
+        flags: flags,
+        ftable: ftable,
+        owned: owned,
+        otable: otable,
+        flag_root: flag_root,
+        has_flags: false
     )
 
     when lirArgDefined(edit v, view l, -1, false) { give 1 }
