@@ -90,7 +90,7 @@ sema_stmt.l	parser
 sema_stmt_values.l	parser
 sema_types.l	lir
 stmt.l	semantica
-stmt_lower.l	parser
+stmt_lower.l	semantica
 symbols.l	lir
 tokens.l	semantica
 types.l	semantica

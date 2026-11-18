@@ -44,13 +44,17 @@ pub fn lirAssign(ctx: &mut SemaContext, source: &Text, place: Int, value: Int, t
 // Branch condition of the current block (if, while, for).
 pub fn lirCondition(ctx: &mut SemaContext) {
     let operand = lirTakeOperand(&mut ctx, 4)
-    lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
+    // End the block-count read before lending the LIR mutably.
+    let block_count = ctx.flow.blocks.length
+    lirBlocks(&mut ctx.lir, block_count)
     ctx.lir.cond[ctx.flow.current] = operand
 }
 
 // Return value of the current block, recorded before it is detached.
 pub fn lirReturnAt(ctx: &mut SemaContext, value: Int, reference: Bool) {
-    lirBlocks(&mut ctx.lir, ctx.flow.blocks.length)
+    // End the block-count read before lending the LIR mutably.
+    let block_count = ctx.flow.blocks.length
+    lirBlocks(&mut ctx.lir, block_count)
     var operand = value
     if operand == LIR_NONE { operand = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0) }
     ctx.lir.ret[ctx.flow.current] = operand
@@ -74,7 +78,9 @@ pub fn lirForInit(ctx: &mut SemaContext, start: Int, end: Int) -> Int {
 }
 
 pub fn lirForTest(ctx: &mut SemaContext, counter: Int) {
-    ctx.lir.val = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_LT, counter, counter + 1)
+    // Do not mutate the value channel while constructing its operand.
+    let comparison = lirNew(&mut ctx, 4, false, LIR_BINARY, LIR_LT, counter, counter + 1)
+    ctx.lir.val = comparison
     ctx.lir.place = -1
     lirCondition(&mut ctx)
 }
@@ -261,7 +267,9 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         scopeAddSymbol(&mut ctx.scopes, sym_id)
         semaInitPath(&mut ctx, sym_id, start, finish)
         lirSetVal(&mut ctx, value)
-        lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, payload_ty, false)
+        // A move-path snapshot must precede the exclusive borrow of ctx.
+        let bind_path = ctx.symbols.symbols[sym_id].move_path
+        lirLetBind(&mut ctx, bind_path, payload_ty, false)
         return
     }
     match ctx.types.types[scrut_t].kind {
@@ -314,7 +322,8 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         scopeAddSymbol(&mut ctx.scopes, sym_id)
         semaInitPath(&mut ctx, sym_id, binding_start, binding_end)
         lirSetVal(&mut ctx, value)
-        lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, ty, false)
+        let bind_path = ctx.symbols.symbols[sym_id].move_path
+        lirLetBind(&mut ctx, bind_path, ty, false)
         return
     }
     lirMarkUnsupported(&mut ctx.lir, p_start)
@@ -344,7 +353,10 @@ pub fn semaConstructorFinish(ctx: &mut SemaContext, tree: &AstTree, expr: &AstEx
         }
     }
     let first = lirSequence(&mut ctx, slots)
-    lirSetVal(&mut ctx, lirNew(&mut ctx, struct_t, false, LIR_STRUCT, ctx.lir_struct_index[decl_id], first, slots.length))
+    // Preserve slot order and register the completed struct only afterward.
+    let struct_index = ctx.lir_struct_index[decl_id]
+    let value = lirNew(&mut ctx, struct_t, false, LIR_STRUCT, struct_index, first, slots.length)
+    lirSetVal(&mut ctx, value)
 }
 
 pub fn semaEnumField(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
