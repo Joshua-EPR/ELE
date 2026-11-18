@@ -11,7 +11,7 @@ import sema_lower
 // module records, on the existing CFG, which paths own resources and where
 // their lexical lifetime ends:
 // - every owned binding materializes one move path per leaf that needs a
-//   drop (Text, List, arrays and enums owning such values; struct fields
+//   drop (Text, List, arrays, enums and Option/Result with owned payloads; struct fields
 //   recursively), so moves and drops act on the same cells;
 // - leaving a scope, `return`, `break` and `continue` emit FLOW_DROP for
 //   the owned bindings they leave, innermost scope first and in reverse
@@ -52,10 +52,20 @@ pub fn semaNeedsDrop(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: I
         SemTypeKind.Array => { shape = 2 }
         SemTypeKind.Struct => { shape = 3 }
         SemTypeKind.Enum => { shape = 4 }
+        SemTypeKind.Option => { shape = 5 }
+        SemTypeKind.Result => { shape = 6 }
         _ => {}
     }
     var needs = shape == 1
-    if shape == 2 { needs = semaNeedsDrop(&mut ctx, source, tree, elem) }
+    if shape == 2 || shape == 5 || shape == 6 {
+        needs = semaNeedsDrop(&mut ctx, source, tree, elem)
+        // Result<T,E> owns exactly the active payload, but *both* possible
+        // payload types affect whether its whole tagged value needs a drop.
+        // Do not short-circuit: either branch may contain heap ownership.
+        if shape == 6 {
+            if semaNeedsDrop(&mut ctx, source, tree, nominal) { needs = true }
+        }
+    }
     if shape == 3 && nominal >= 0 {
         let first = tree.declarations[nominal].c
         let count = tree.declarations[nominal].d
