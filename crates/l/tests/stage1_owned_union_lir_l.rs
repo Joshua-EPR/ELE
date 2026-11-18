@@ -432,6 +432,23 @@ fn main() -> Int {
 }
 "#;
 
+// These cases execute with Stage 0 parity on Windows. Independently verify
+// their Stage 1 output on Linux as well, so safety-oriented fixtures cannot
+// silently become Windows-only dead code or escape LIR validation.
+#[test]
+fn owned_review_fixtures_emit_valid_lir_on_all_hosts() {
+    for (name, source) in [
+        ("result_text_text_cross", program(RESULT_TEXT_TEXT)),
+        ("b_wild_cross", B_WILD.to_string()),
+        ("d_nested_cross", D_NESTED.to_string()),
+        ("v_read_cross", V_READ.to_string()),
+        ("x_shape_cross", X_SHAPE.to_string()),
+    ] {
+        let lir = emit(&format!("{name}.l"), &source);
+        validate(&lir).unwrap_or_else(|err| panic!("{name}: {err}"));
+    }
+}
+
 fn program(body: &str) -> String {
     format!("{LABEL}{body}")
 }
