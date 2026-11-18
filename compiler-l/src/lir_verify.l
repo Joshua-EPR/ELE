@@ -297,6 +297,19 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if check && !v.defined[l.places[inst.a].root] { return 5 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
     } else if kind == LIR_LIST_POP {
+        let list_t = lirPlaceType(l, types, lm, inst.a)
+        if list_t < 0 || list_t >= types.types.length { return 8 }
+        match types.types[list_t].kind {
+            SemTypeKind.List => {}
+            _ => { return 3 }
+        }
+        if dst_t < 0 || dst_t >= types.types.length { return 3 }
+        match types.types[dst_t].kind {
+            SemTypeKind.Option => {
+                if types.types[dst_t].elem_type != types.types[list_t].elem_type { return 3 }
+            }
+            _ => { return 3 }
+        }
         result = dst_t
         if check && !v.defined[l.places[inst.a].root] { return 5 }
     } else if kind == LIR_PLATFORM {

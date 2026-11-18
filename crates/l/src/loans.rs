@@ -322,7 +322,10 @@ fn accesses(inst: &InstKind, owned: &Owned) -> Vec<(Place, bool)> {
         accesses.push(access);
     }
     match inst {
-        InstKind::Assign(_, Rvalue::Loan(p, true, _) | Rvalue::ListTakeLast(p))
+        InstKind::Assign(
+            _,
+            Rvalue::Loan(p, true, _) | Rvalue::ListTakeLast(p) | Rvalue::ListPop(p, _),
+        )
         | InstKind::Store(p, _)
         | InstKind::Clear(p)
         | InstKind::ListPush(p, _)

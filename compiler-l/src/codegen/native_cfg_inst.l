@@ -165,7 +165,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     when inst.kind == 14 || inst.kind == 15 { p.error = cfgCheckTextQuery(p, f, view inst) }
     when inst.kind == 16 { p.error = cfgCheckUnary(p, f, view inst) }
     when inst.kind == 17 { p.error = cfgCheckDropField(p, f, view inst) }
-    when inst.kind >= 18 && inst.kind <= 21 { p.error = cfgCheckListInst(p, f, view inst) }
+    when (inst.kind >= 18 && inst.kind <= 21) || inst.kind == 23 { p.error = cfgCheckListInst(p, f, view inst) }
     when p.error != 0 { give }
     change dest_type = -1
     when has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }

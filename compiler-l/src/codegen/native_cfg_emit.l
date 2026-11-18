@@ -229,7 +229,7 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         }
     } otherwise when inst.kind == 16 {
         cfgEmitUnary(edit code, p, f, inst, edit fix)
-    } otherwise when inst.kind >= 18 && inst.kind <= 21 {
+    } otherwise when (inst.kind >= 18 && inst.kind <= 21) || inst.kind == 23 {
         cfgEmitList(edit code, p, f, inst, edit fix)
     } otherwise when inst.kind == 22 {
         // loan: the address of the place becomes the local reference.

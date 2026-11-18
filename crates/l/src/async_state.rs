@@ -96,9 +96,10 @@ impl Poll<'_> {
             | InstKind::ListPush(..)
             | InstKind::ListReserve(..)
             | InstKind::BytesSet(..)
-            | InstKind::Assign(_, Rvalue::Call(..) | Rvalue::ListTakeLast(_)) => {
-                state.variants.clear()
-            }
+            | InstKind::Assign(
+                _,
+                Rvalue::Call(..) | Rvalue::ListTakeLast(_) | Rvalue::ListPop(..),
+            ) => state.variants.clear(),
             InstKind::Assign(var, _) => state
                 .variants
                 .retain(|p, _| !p.proj.contains(&Proj::Index(*var))),
