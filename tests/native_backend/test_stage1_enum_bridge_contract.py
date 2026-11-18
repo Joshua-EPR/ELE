@@ -57,12 +57,12 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         for name in ('Option', 'Result'):
             self.assertIn(f'SemTypeKind.{name}', union)
         # Both generic arms use the bounded recursive payload classifier.
-        self.assertIn('fn lirPayloadValue(', union)
-        self.assertIn('if depth > 8 || ty < 0 || ty >= types.types.length { return false }', union)
-        self.assertIn('SemTypeKind.List => { return lirPayloadValue(types, lm, elem, depth + 1) }', union)
-        self.assertIn('return lirPayloadValue(types, lm, elem, depth + 1) && lirPayloadValue(types, lm, other, depth + 1)', union)
-        self.assertIn('return lirPayloadValue(types, lm, ty, 0)', union)
-        self.assertIn('return lirPayloadValue(types, lm, ty, 0) && !lirDropFreeValue(types, lm, ty, 0)', union)
+        self.assertIn('flow lirPayloadValue(', union)
+        self.assertIn('when depth > 8 || ty < 0 || ty >= types.types.length { give false }', union)
+        self.assertIn('SemTypeKind.List : { give lirPayloadValue(types, lm, elem, depth + 1) }', union)
+        self.assertIn('give lirPayloadValue(types, lm, elem, depth + 1) && lirPayloadValue(types, lm, other, depth + 1)', union)
+        self.assertIn('give lirPayloadValue(types, lm, ty, 0)', union)
+        self.assertIn('give lirPayloadValue(types, lm, ty, 0) && !lirDropFreeValue(types, lm, ty, 0)', union)
         # Drop-free nominal choices still cannot hide arbitrary owned payloads.
         self.assertIn('fn lirDropFreeValue(', union)
         self.assertIn('if n == 1 && !lirBuiltinPrimitive(lm.variant_type[v]) { return false }', union)

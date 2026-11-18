@@ -225,7 +225,7 @@ pub fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, s
 // a statement temporary: an arm that binds its payload moves it, and every
 // exit (arm end, give, leave, proceed) drops it otherwise. Returns its
 // move path, or -1 when it owns nothing.
-pub flow semaOwnScrutinee(ctx: edit SemaContext, source: view Text, tree: view AstTree, value: Int, ty: Int, start: Int, end: Int) => Int {
+expose flow semaOwnScrutinee(ctx: edit SemaContext, source: view Text, tree: view AstTree, value: Int, ty: Int, start: Int, end: Int) => Int {
     when value < 0 || !semaNeedsDrop(edit ctx, source, tree, ty) { give -1 }
     hold path = flowRoot(edit ctx.flow, -1)
     lirBindPath(edit ctx.lir, path, value)

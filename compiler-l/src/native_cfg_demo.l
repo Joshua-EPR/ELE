@@ -42,7 +42,7 @@ fn main() -> Int {
             Err(code) : { give 6 }
         }
     }
-    each i among 0.@processArgCount() {
+    each i among 0..processArgCount() {
         when i < 2 {
             choose processArg(i) {
                 Ok(positional) : {
