@@ -58,6 +58,15 @@ fn stage1_stmt_lower_source_passes_borrow_check() {
 }
 
 #[test]
+fn stage1_sema_expr_real_source_passes_borrow_check() {
+    // The imported expression checker requires the public ACCESS_READ mode.
+    // All nested LIR operands must be completed before mutating its context.
+    let path = root().join("compiler-l/src/sema_expr.l");
+    let (ok, stderr) = check(&path);
+    assert!(ok, "sema_expr.l: {stderr}");
+}
+
+#[test]
 fn stage1_still_rejects_same_call_mutable_borrow_and_field_read() {
     let work = root().join("target/stage1-tests/b2-semantic-lir-snapshots");
     std::fs::create_dir_all(&work).unwrap();
