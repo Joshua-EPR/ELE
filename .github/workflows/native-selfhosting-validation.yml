@@ -87,6 +87,7 @@ jobs:
           --test native_memory_l
           --test native_stack_layout_l
           --test native_list_l
+          --test native_pe64_l
           -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
@@ -140,7 +141,7 @@ jobs:
         run: >-
           cargo test -p project-l --test native_print_l --test native_refs_l
           --test native_aggregates_l --test native_text_fields_l
-          --test native_wide_struct_l -- --test-threads=1
+          --test native_wide_struct_l --test native_pe64_l -- --test-threads=1
       # Compile actual .l source and the wrong-active LIR using the ELE-written
       # backend on Windows, then execute their Linux ELF64 output on Linux.
       # Stage 0 itself is currently MSVC-only; no Linux Stage 0 is assumed.
