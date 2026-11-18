@@ -50,6 +50,7 @@ pub const LIR_PLATFORM_ARG_COUNT = 0
 pub const LIR_PLATFORM_ARG = 1
 pub const LIR_PLATFORM_READ_TEXT = 2
 pub const LIR_PLATFORM_PRINT_ERROR = 3
+pub const LIR_PLATFORM_WRITE_BYTES = 4
 
 // Terminators.
 pub const LIR_T_NONE = 0
