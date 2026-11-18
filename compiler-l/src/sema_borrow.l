@@ -79,7 +79,9 @@ pub fn semaCallLoans(ctx: &mut SemaContext, loans: &List<Int>, ret_t: Int, site:
     for a in 0..loans.length {
         let loan = loans[a]
         if loan >= 0 {
-            flowEventData(&mut ctx.flow, FLOW_LOAN_USE, ctx.flow.loans[loan].place, start, end, loan)
+            // Read the existing loan place before mutating the event graph.
+            let place = ctx.flow.loans[loan].place
+            flowEventData(&mut ctx.flow, FLOW_LOAN_USE, place, start, end, loan)
             origins.push(loan)
         }
     }
