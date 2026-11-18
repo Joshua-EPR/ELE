@@ -474,3 +474,53 @@ fn cfg_pe32_plus_rejects_runtime_it_lacks() {
     assert_eq!(out.status.code(), Some(2));
     assert!(!dir.join("--pe64").exists());
 }
+
+/// Dynamic memory runtime on Windows: traps (121 literal append, 127 OOB/neg index),
+/// structs with owned text fields, references into lists, and fail-closed compilation
+/// rejection on malformed LIR (double drops).
+#[test]
+fn cfg_pe32_plus_memory_runtime_security_and_traps() {
+    let runtime_traps: &[(&str, Option<i32>)] = &[
+        ("native_cfg_text_append_literal", Some(121)),
+        ("native_cfg_text_in_struct", Some(0)),
+        ("native_cfg_list_elem_ref_ok", Some(42)),
+        ("native_cfg_list_index_oob", Some(127)),
+        ("native_cfg_list_index_negative", Some(127)),
+    ];
+    for &(fixture, expected_code) in runtime_traps {
+        let image = temp(&format!("{fixture}.exe"));
+        let _ = fs::remove_file(&image);
+        let out = Command::new(native())
+            .arg(root().join(format!("examples/{fixture}.lir")))
+            .arg(&image)
+            .arg("--pe64")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{fixture} compile failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let bytes = fs::read(&image).unwrap();
+        validate_pe(&bytes, 0);
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        {
+            let (code, _) = execute(&image);
+            assert_eq!(code, expected_code, "{fixture} trap code mismatch");
+        }
+    }
+
+    // Negative compile-time tests: double drops must be rejected without creating PE images
+    for fixture in ["native_cfg_list_double_drop", "native_cfg_text_double_drop"] {
+        let image = temp(&format!("{fixture}.exe"));
+        let _ = fs::remove_file(&image);
+        let out = Command::new(native())
+            .arg(root().join(format!("examples/{fixture}.lir")))
+            .arg(&image)
+            .arg("--pe64")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(3), "{fixture} was not rejected");
+        assert!(!image.exists(), "{fixture} emitted image on double drop");
+    }
+}
