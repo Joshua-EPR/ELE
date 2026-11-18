@@ -20,6 +20,62 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
     return 0
 }
 
+
+// Validate every platform call independently of the semantic lowering.
+// This closes the old verifier gap where LIR_PLATFORM unconditionally
+// accepted the destination's own type and never inspected the arguments.
+// Rules: 1 invalid ids/opcode, 3 type/result, 4 arity/borrow mode,
+// 5 use-before-initialization.
+pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) -> Int {
+    if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 3 }
+    var arity = -1
+    if op == LIR_PLATFORM_ARG_COUNT { arity = 0 }
+    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR { arity = 1 }
+    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES { arity = 2 }
+    if arity < 0 { return 1 }
+    if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
+    let result = l.vars[dst].ty
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES {
+        if result != 1 { return 3 }
+    } else if op == LIR_PLATFORM_PRINT_ERROR {
+        if result != 6 { return 3 }
+    } else {
+        // processArg/readText produce Result<Text,Int>. An owned payload
+        // is still rejected by Stage 1's separate LIR support gate.
+        if result < 8 || result >= types.types.length { return 3 }
+        match types.types[result].kind {
+            SemTypeKind.Result => {
+                if types.types[result].elem_type != 5 || types.types[result].nominal_id != 1 { return 3 }
+            }
+            _ => { return 3 }
+        }
+    }
+    for i in 0..count {
+        let arg = l.operands[first + i]
+        if arg < 0 || arg >= l.args.length { return 1 }
+        var borrowed = false
+        var expected = 1
+        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES {
+            borrowed = true
+            expected = 5
+        }
+        if l.args[arg].by_ref != borrowed { return 4 }
+        if borrowed && l.args[arg].mutable { return 4 }
+        let ty = lirArgType(l, types, lm, arg)
+        if op == LIR_PLATFORM_WRITE_BYTES && i == 1 {
+            if ty < 8 || ty >= types.types.length { return 3 }
+            match types.types[ty].kind {
+                SemTypeKind.List => { if types.types[ty].elem_type != 1 { return 3 } }
+                _ => { return 3 }
+            }
+        } else if ty != expected {
+            return 3
+        }
+        if !lirArgDefined(&mut v, l, arg, check) { return 5 }
+    }
+    return 0
+}
+
 pub fn lirVerifyTerm(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, fn_index: Int, b: Int, blocks: Int, check: Bool) -> Int {
     let kind = body.term[b]
     if kind == LIR_T_JUMP {
