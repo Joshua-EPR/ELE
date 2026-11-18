@@ -8,6 +8,7 @@ import loans_l
 import lir_build
 import sema_context
 import sema_drop
+import sema_borrow
 import sema_lower
 import lir_builtin_union
 
@@ -312,6 +313,48 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     let callee = ctx.lir_func_index[decl_id]
     let emitted = lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, callee, first, args.length)
     lirSetVal(&mut ctx, emitted)
+}
+
+// Borrow a stable writeBytes argument like an ordinary &T call parameter.
+// The loan remains live through argument evaluation and is used at call close.
+pub fn semaWriteBytesLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int) -> Int {
+    let place = ctx.lir.place
+    let path = ctx.expression_path
+    ctx.lir.borrowed = -1
+    if place < 0 || path < 0 { return -1 }
+    semaBorrowPlace(&mut ctx, path, ty, false, SITE_ARG, start, end)
+    return ctx.pending_loan
+}
+
+// writeBytes borrows the two stable places for the duration of the platform
+// operation. It must never move or duplicate the List<Int> heap owner.
+// The LIR verifier independently requires two immutable ref arguments.
+pub fn semaWriteBytes(ctx: &mut SemaContext, start: Int, end: Int, path_ty: Int, path: Int, bytes_ty: Int, bytes: Int) -> Int {
+    var valid_list = false
+    if bytes_ty >= 0 && bytes_ty < ctx.types.types.length {
+        let elem = &ctx.types.types[bytes_ty]
+        match elem.kind {
+            SemTypeKind.List => { valid_list = elem.elem_type == 1 }
+            _ => {}
+        }
+    }
+    if path_ty != 5 || !valid_list {
+        semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", start, end)
+        return 7
+    }
+    if path < 0 || bytes < 0 {
+        // A temporary owner needs explicit lifetime/drop elaboration. Do not
+        // emit an unchecked by-value platform argument as an ersatz loan.
+        semaAddError(&mut ctx, "L0016", "writeBytes requiere lugares prestables para Text y List<Int>", start, end)
+        return 7
+    }
+    var args: List<Int> = List[]
+    let path_arg = lirArg(&mut ctx.lir, true, path, false)
+    args.push(path_arg)
+    let bytes_arg = lirArg(&mut ctx.lir, true, bytes, false)
+    args.push(bytes_arg)
+    semaPlatformEmit(&mut ctx, LIR_PLATFORM_WRITE_BYTES, &args, 1, true)
+    return 1
 }
 
 pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {

@@ -85,6 +85,81 @@ fn stage1_sema_core_real_source_passes_borrow_check() {
 }
 
 #[test]
+fn stage1_writebytes_borrows_text_and_list_through_verified_lir() {
+    // The platform operation must not consume the two heap owners. Validate
+    // Stage 1's actual LIR using Stage 0's *independent* parser and verifier,
+    // and execute the byte-exact write through the verified protocol.
+    let work = root().join("target/stage1-tests/b3-writebytes-platform");
+    std::fs::create_dir_all(&work).unwrap();
+    let source = work.join("valid.l");
+    std::fs::write(
+        &source,
+        "fn main() -> Int {\n    let path = \"borrowed_bytes.bin\"\n    var bytes: List<Int> = List[0, 127, 128, 255, 10]\n    let status = writeBytes(path, bytes)\n    if bytes.length != 5 { return 9 }\n    let again = writeBytes(path, bytes)\n    return status + again\n}\n",
+    )
+    .unwrap();
+    let emitted = Command::new(sema())
+        .arg(&source)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "Stage 1 LIR: {}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let lir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(lir.contains("writebytes 2 ref "), "{lir}");
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+    let file = work.join("valid.lir");
+    std::fs::write(&file, &lir).unwrap();
+    let bytes_path = work.join("borrowed_bytes.bin");
+    let _ = std::fs::remove_file(&bytes_path);
+    let ran = Command::new(env!("CARGO_BIN_EXE_l"))
+        .current_dir(&work)
+        .arg("run-lir")
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(
+        ran.status.success(),
+        "run-lir: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(std::fs::read(&bytes_path).unwrap(), [0, 127, 128, 255, 10]);
+}
+
+#[test]
+fn stage1_writebytes_rejects_wrong_types_and_unowned_temporaries() {
+    let work = root().join("target/stage1-tests/b3-writebytes-platform");
+    std::fs::create_dir_all(&work).unwrap();
+    let cases = [
+        (
+            "wrong_element.l",
+            "fn main() -> Int {\n    let path = \"out.bin\"\n    var bytes: List<Text> = List[\"wrong\"]\n    return writeBytes(path, bytes)\n}\n",
+            "error[L0004]",
+        ),
+        (
+            "wrong_arity.l",
+            "fn main() -> Int {\n    let path = \"out.bin\"\n    return writeBytes(path)\n}\n",
+            "error[L0004]",
+        ),
+        (
+            "temporary_owner.l",
+            "fn main() -> Int {\n    var bytes: List<Int> = List[1]\n    return writeBytes(\"out.bin\", bytes)\n}\n",
+            "error[L0016]",
+        ),
+    ];
+    for (name, source, code) in cases {
+        let file = work.join(name);
+        std::fs::write(&file, source).unwrap();
+        let (ok, stderr) = check(&file);
+        assert!(!ok, "{name}: unsupported call must be rejected");
+        assert!(stderr.contains(code), "{name}: {stderr}");
+    }
+}
+
+#[test]
 fn stage1_still_rejects_same_call_mutable_borrow_and_field_read() {
     let work = root().join("target/stage1-tests/b2-semantic-lir-snapshots");
     std::fs::create_dir_all(&work).unwrap();

@@ -314,6 +314,26 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
                 return 7
             }
+            let name_write_bytes = "writeBytes"
+            if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", expr.start, expr.end)
+                    return 7
+                }
+                // Materialize each shared loan before evaluating the next argument:
+                // a plain FLOW_READ does not protect a previous argument.
+                let path_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                let path_loan = semaWriteBytesLoan(&mut ctx, path_ty, expr.start, expr.end)
+                let path = ctx.lir.borrowed
+                let bytes_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                let bytes_loan = semaWriteBytesLoan(&mut ctx, bytes_ty, expr.start, expr.end)
+                let bytes = ctx.lir.borrowed
+                var loans: List<Int> = List[]
+                loans.push(path_loan)
+                loans.push(bytes_loan)
+                semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
+                return semaWriteBytes(&mut ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
