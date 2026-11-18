@@ -30,6 +30,7 @@ codegen/native_list_int.l	lir
 codegen/native_rt.l	lir
 codegen/native_rt_list.l	lir
 codegen/pe64.l	lir
+codegen/win64_heap.l	lir
 codegen/win64_rt.l	lir
 codegen/x86_64.l	lir
 cursor.l	semantica
