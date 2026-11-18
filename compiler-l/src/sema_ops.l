@@ -341,7 +341,7 @@ pub fn semaWriteBytes(ctx: &mut SemaContext, start: Int, end: Int, path_ty: Int,
     args.push(path_arg)
     let bytes_arg = lirArg(&mut ctx.lir, true, bytes, false)
     args.push(bytes_arg)
-    semaPlatformEmit(&mut ctx, 4, &args, 1, true)
+    semaPlatformEmit(&mut ctx, LIR_PLATFORM_WRITE_BYTES, &args, 1, true)
     return 1
 }
 
