@@ -79,7 +79,10 @@ fn primitive_option_result_uses_checked_variant_disc_payload_protocol() {
 }
 
 #[test]
-fn owned_union_payload_cannot_emit_native_lir_without_drop_support() {
+fn owned_union_payload_is_verified_lir_but_not_native_code() {
+    // #5: Stage 1 lowers Option<Text> (moved payload, atomic drop) and the
+    // Rust protocol validator accepts it; the ELE backend has no verified
+    // owned-payload layout yet and must reject it without writing an ELF.
     let temp = root().join("target/stage1-tests/option-result");
     fs::create_dir_all(&temp).unwrap();
     let source = temp.join("owned_not_lowerable.l");
@@ -94,8 +97,22 @@ fn owned_union_payload_cannot_emit_native_lir_without_drop_support() {
         .output()
         .unwrap();
     let err = String::from_utf8_lossy(&result.stderr);
-    assert_eq!(result.status.code(), Some(1), "{err}");
-    assert!(err.contains("L0016"), "{err}");
+    assert_eq!(result.status.code(), Some(0), "{err}");
+    let lir = String::from_utf8(result.stdout).unwrap();
+    assert!(lir.contains("variant 4:83,111,109,101 types 1 t"), "{lir}");
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+    let lir_file = temp.join("owned_not_lowerable.lir");
+    let image = temp.join("owned_not_lowerable.elf");
+    fs::write(&lir_file, &lir).unwrap();
+    let _ = fs::remove_file(&image);
+    let built = Command::new(native())
+        .arg(&lir_file)
+        .arg(&image)
+        .output()
+        .unwrap();
+    assert!(!built.status.success(), "owned payload reached native code");
+    assert!(!image.exists(), "ELF written for rejected LIR");
 }
 
 #[test]

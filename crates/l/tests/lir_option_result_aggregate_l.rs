@@ -3,7 +3,8 @@
 //! Stage 1 lowers them to checked `i variant` / `i disc` / `i payload`
 //! enums; the Stage 0 protocol reader and the ELE-written native backend
 //! accept and type-check them. Owned payloads (Text, lists, shapes owning
-//! them) stay rejected, and extracting an aggregate payload is a MOVE.
+//! them) are verified ELE-LIR since #5, but the ELE backend still rejects
+//! them without an image; extracting an aggregate payload is a MOVE.
 mod stage1_support;
 
 use std::{
@@ -140,7 +141,7 @@ fn write_case(name: &str, text: &str) -> PathBuf {
 }
 
 #[test]
-fn owned_payloads_stay_outside_the_lir_subset() {
+fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
     let cases = [
         (
             "result_text.l",
@@ -165,17 +166,28 @@ fn owned_payloads_stay_outside_the_lir_subset() {
     ];
     for (name, text) in cases {
         let path = write_case(name, text);
-        let result = Command::new(sema())
-            .arg(&path)
-            .arg("--emit-lir")
-            .output()
-            .unwrap();
-        let err = String::from_utf8_lossy(&result.stderr);
-        assert_eq!(result.status.code(), Some(1), "{name}: {err}");
-        assert!(err.contains("L0016"), "{name}: {err}");
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        assert!(!stdout.contains("ELE-LIR 1"), "{name}: {stdout}");
+        let lir = emit_lir(&path);
+        let parsed = project_l::lir_protocol::parse(&lir).unwrap();
+        project_l::lir_protocol::validate(&parsed).unwrap();
+        let file = temp().join(format!("{name}.lir"));
+        fs::write(&file, &lir).unwrap();
+        // Fail closed: no verified owned-payload layout in the ELE backend.
+        assert!(native_build(&file, name).is_none(), "{name}: ELF built");
     }
+    // A nominal choice with an owned payload stays outside ELE-LIR.
+    let path = write_case(
+        "option_choice_text.l",
+        "choice Note {\n    Said(Text),\n    Quiet,\n}\n\nflow main() => Int {\n    hold n: Option of[Note] = None\n    give 0\n}\n",
+    );
+    let result = Command::new(sema())
+        .arg(&path)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(1), "{err}");
+    assert!(err.contains("L0016"), "{err}");
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("ELE-LIR 1"));
 }
 
 const POINT: &str = "shape Point {\n    x: Int,\n    y: Int,\n}\n\nflow take(p: Point) => Int {\n    give p.x\n}\n\n";
