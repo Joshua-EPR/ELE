@@ -104,7 +104,7 @@ flow cfgTakeOperand(p: view CfgProgram, f: Int, op: view NativeOperand, live: ed
 // Validate every instruction in execution order. This rejects double moves
 // within one constructor, uses after moves, and move-out-before-return.
 flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live: edit List of[Bool]) => Int {
-    when inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
+    when inst.kind == 5 || inst.kind == 6 || inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 14 || inst.kind == 15 || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || inst.kind == 23 || ((inst.kind == 13 || inst.kind == 17) && inst.op < 0) {
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars || !live[inst.place_var] { give 57 }
     }
     // The index variables of a place are read before the instruction runs.
@@ -253,7 +253,7 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
     }
     // A place with an extension needs its whole static prefix: the list that
     // is indexed must still be there, also for a store.
-    hold reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || (inst.kind == 6 && inst.place_ext >= 0)
+    hold reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || inst.kind == 23 || (inst.kind == 6 && inst.place_ext >= 0)
     when reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { give false }
     hold whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
     when whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { give false }

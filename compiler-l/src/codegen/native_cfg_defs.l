@@ -13,7 +13,9 @@ import lir_tokens
 // Instruction kinds: 1 use, 2 binary, 3 call, 4 struct, 5 read,
 // 6 store, 7 variant, 8 discriminant, 9 checked payload,
 // 10 print, 11 textbuf, 12 append, 13 drop (runtime in native_rt),
-// 14 len (Text byte length), 15 byteat (bounds-checked Text byte).
+// 14 len (Text byte length), 15 byteat (bounds-checked Text byte),
+// 16 unary, 17 dropfield, 18 listlit, 19 listpush, 20 listreserve,
+// 21 cap, 22 loan, 23 listpop.
 // References (`var vN ref T`: parameters, and locals defined by `loan`,
 // kind 22) occupy one word: the address of the referent. `types_code` keeps the referent type and
 // `var_ref` marks them; native_cfg_ref documents their rules.

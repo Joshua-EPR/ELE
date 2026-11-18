@@ -1,6 +1,6 @@
 //! Stage 1 owned Option/Result drop classification in real .l sources.
-//! Drop plans are analyzed but owned unions remain blocked from ELE-LIR
-//! until tagged ABI, active-payload moves and recursive drops are verified.
+//! Since #5 the planned drop reaches ELE-LIR as one atomic `drop` of the
+//! union (its active payload only), checked by the Rust protocol validator.
 mod stage1_support;
 
 use std::{
@@ -35,6 +35,16 @@ fn plan(name: &str, src: &str) -> String {
     assert!(output.status.success(), "{name}: {stderr}");
     String::from_utf8(output.stdout).unwrap()
 }
+/// The owned union lowers to verified LIR that drops it.
+fn lowered(name: &str, src: &str) {
+    let output = run(name, src, "--emit-lir");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{name}: {stderr}");
+    let lir = String::from_utf8(output.stdout).unwrap();
+    assert!(lir.contains("i drop "), "{name}: {lir}");
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+}
 fn drops(dump: &str) -> usize {
     dump.lines()
         .filter(|line| line.starts_with("O drop ") || line.starts_with("O cdrop "))
@@ -49,11 +59,7 @@ fn owned_result_from_process_arg_has_drop_plan() {
         drops(&dump) >= 1,
         "Result<Text,Int> must own its active Text:\n{dump}"
     );
-    // No unchecked LIR for the owner-bearing Result.
-    let output = run("owned_result_arg", src, "--emit-lir");
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
-    assert!(output.stdout.is_empty());
+    lowered("owned_result_arg", src);
 }
 
 #[test]
@@ -64,10 +70,7 @@ fn owned_result_from_readtext_has_drop_plan() {
     // One drop for Text path; one for Result<Text,Int>, regardless of
     // whether the runtime outcome is Ok or Err.
     assert!(drops(&dump) >= 2, "path + owned result expected:\n{dump}");
-    let output = run("owned_result_readtext", src, "--emit-lir");
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
-    assert!(output.stdout.is_empty());
+    lowered("owned_result_readtext", src);
 }
 
 #[test]
@@ -83,9 +86,8 @@ fn non_owned_result_has_no_owner_drop() {
 
 #[test]
 fn nested_owned_union_is_one_atomic_drop_leaf() {
-    // A parameter uses a fully resolved nested type. Nested Ok inside Some
-    // expression constructors need separate contextual propagation (#5),
-    // so that unrelated lowering feature is deliberately not claimed here.
+    // A parameter uses a fully resolved nested type (nested constructors
+    // are covered by stage1_owned_union_lir_l).
     let src = "fn receive(x: Option<Result<Text, Int>>) {}\nfn main() {}\n";
     let dump = plan("nested_owner", src);
     assert_eq!(
@@ -93,10 +95,7 @@ fn nested_owned_union_is_one_atomic_drop_leaf() {
         1,
         "nested owned union is an atomic owner:\n{dump}"
     );
-    let output = run("nested_owner", src, "--emit-lir");
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
-    assert!(output.stdout.is_empty());
+    lowered("nested_owner", src);
 }
 
 #[test]
@@ -118,12 +117,6 @@ fn owned_error_variant_and_option_text_also_need_drops() {
             1,
             "{name} must drop its active owner:\n{dump}"
         );
-        let output = run(name, src, "--emit-lir");
-        assert!(
-            !output.status.success(),
-            "{name} must not emit owner-bearing LIR"
-        );
-        assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
-        assert!(output.stdout.is_empty());
+        lowered(name, src);
     }
 }

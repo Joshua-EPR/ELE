@@ -164,7 +164,7 @@ flow rtEmitBoolWord(code: edit X64Code, line: Bool) {
 }
 
 // print_int(RDI = value).
-flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
+expose flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
     x64FrameBegin(edit code, 4)
     rtEmitDigits(edit code, 0, true)
     rtCall(edit code, write_all)
@@ -172,7 +172,7 @@ flow rtEmitPrintInt(code: edit X64Code, write_all: Int) {
 }
 
 // print_bool(RDI = value).
-flow rtEmitPrintBool(code: edit X64Code, write_all: Int) {
+expose flow rtEmitPrintBool(code: edit X64Code, write_all: Int) {
     x64FrameBegin(edit code, 2)
     x64MovReg(edit code, 0, 7)
     rtEmitBoolWord(edit code, true)
@@ -184,7 +184,7 @@ flow rtEmitPrintBool(code: edit X64Code, write_all: Int) {
 }
 
 // print_text(RDI = bytes, RSI = count): the text, then a line feed.
-flow rtEmitPrintText(code: edit X64Code, write_all: Int) {
+expose flow rtEmitPrintText(code: edit X64Code, write_all: Int) {
     x64FrameBegin(edit code, 2)
     x64MovReg(edit code, 2, 6)
     x64MovReg(edit code, 6, 7)
@@ -286,7 +286,7 @@ flow rtEmitTextAppend(code: edit X64Code) {
 }
 
 // append_int(RDI = address of an owned Text, RSI = value).
-flow rtEmitAppendInt(code: edit X64Code, append: Int) {
+expose flow rtEmitAppendInt(code: edit X64Code, append: Int) {
     x64FrameBegin(edit code, 6)
     x64StoreSlot(edit code, 0, 7)
     x64MovReg(edit code, 7, 6)
@@ -297,7 +297,7 @@ flow rtEmitAppendInt(code: edit X64Code, append: Int) {
 }
 
 // append_bool(RDI = address of an owned Text, RSI = value).
-flow rtEmitAppendBool(code: edit X64Code, append: Int) {
+expose flow rtEmitAppendBool(code: edit X64Code, append: Int) {
     x64FrameBegin(edit code, 2)
     x64StoreSlot(edit code, 0, 7)
     x64MovReg(edit code, 0, 6)

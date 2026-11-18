@@ -436,7 +436,8 @@ impl FnCtx<'_> {
             "listpop" => {
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
-                InstKind::Assign(d, Rvalue::ListTakeLast(place))
+                let opt_ty = self.vars[d].pointee();
+                InstKind::Assign(d, Rvalue::ListPop(place, opt_ty))
             }
             "listreserve" => {
                 let place = self.place(line)?;
@@ -513,11 +514,15 @@ impl FnCtx<'_> {
             }
             "payload" => {
                 // Conservative ELE-LIR 1 extension shared with the ELE-written
-                // bootstrap backend: `i payload vD pN eE V`. Only a direct,
-                // DROP-FREE payload is exposed: Int, Bool, or a struct/enum whose
-                // parts are recursively drop-free (see `drop_free`). Text, lists,
-                // floats and anything owning a resource stay rejected. The
-                // runtime performs a discriminant check on every access.
+                // bootstrap backend: `i payload vD pN eE V`. The payload must be
+                // a lowerable value (`payload_ok`): Int, Bool, Text, a list, or
+                // a struct/enum built recursively from them. Floats, units and
+                // by-value cycles stay rejected. The runtime performs a
+                // discriminant check on every access. An OWNED payload (one
+                // that needs a drop) is moved out and consumes its whole enum:
+                // the reader appends the explicit `Moved` marker of Stage 0,
+                // so the ownership verifier sees no later use, drop or leak of
+                // the enum (it never owns the payload twice).
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
                 let enum_id = line.id('e', self.enums.len())?;
@@ -538,10 +543,14 @@ impl FnCtx<'_> {
                 }
                 let payload = &self.enums[enum_id].variants[variant_id].1;
                 if payload.len() != 1
-                    || !drop_free(payload[0], self.structs, self.enums, 0)
+                    || !payload_ok(payload[0], self.structs, self.enums, 0)
                     || self.vars[d] != VarTy::Value(payload[0])
                 {
-                    return line.fail("payload solo admite un campo Int/Bool o un agregado sin drop de tipo exacto");
+                    return line
+                        .fail("payload requiere un único campo representable del tipo exacto");
+                }
+                if place.var == d {
+                    return line.fail("payload no puede sobrescribir su propio enum");
                 }
                 InstKind::Assign(
                     d,
@@ -554,29 +563,68 @@ impl FnCtx<'_> {
             other => return line.fail(format!("instrucción desconocida: '{other}'")),
         })
     }
+    /// The enum consumed by an owned `payload` extraction, if `kind` is one.
+    /// Only the `payload` instruction produces a `Payload` projection.
+    fn consumed_enum(&self, kind: &InstKind) -> Option<usize> {
+        let InstKind::Assign(_, Rvalue::Read(place)) = kind else {
+            return None;
+        };
+        let [Proj::Payload(variant, field)] = place.proj.as_slice() else {
+            return None;
+        };
+        let VarTy::Value(Type::Enum(e)) = self.vars[place.var] else {
+            return None;
+        };
+        let t = *self.enums.get(e)?.variants.get(*variant)?.1.get(*field)?;
+        owns(t, self.structs, self.enums, 0).then_some(place.var)
+    }
 }
 
-/// Whether a value of type `t` can be a `payload` result: Int, Bool, or a
-/// struct/enum whose fields and variant payloads are recursively drop-free.
-/// Text, floats, lists and every other type are rejected. The depth bound
-/// also rejects (malformed) types that contain themselves by value.
-fn drop_free(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -> bool {
+/// Whether `t` can be the payload of `i payload`: Int, Bool, Text, a list,
+/// or a struct/enum whose parts are recursively such values. Floats, units
+/// and (malformed) types containing themselves by value are rejected.
+fn payload_ok(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -> bool {
     if depth > 8 {
         return false;
     }
     match t {
-        Type::Int | Type::Bool => true,
+        Type::Int | Type::Bool | Type::Text | Type::List(_) => true,
         Type::Struct(s) => structs.get(s).is_some_and(|def| {
             !def.fields.is_empty()
                 && def
                     .fields
                     .iter()
-                    .all(|(_, f)| drop_free(*f, structs, enums, depth + 1))
+                    .all(|(_, f)| payload_ok(*f, structs, enums, depth + 1))
         }),
         Type::Enum(e) => enums.get(e).is_some_and(|def| {
             def.variants.iter().all(|(_, payload)| {
-                payload.len() <= 1 && payload.iter().all(|p| matches!(p, Type::Int | Type::Bool))
+                payload.len() <= 1
+                    && payload
+                        .iter()
+                        .all(|p| payload_ok(*p, structs, enums, depth + 1))
             })
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a value of type `t` owns a resource (Text, a list, or an
+/// aggregate containing one). Callers bound the type by `payload_ok` first.
+fn owns(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -> bool {
+    if depth > 8 {
+        return true;
+    }
+    match t {
+        Type::Text | Type::List(_) => true,
+        Type::Struct(s) => structs.get(s).is_some_and(|def| {
+            def.fields
+                .iter()
+                .any(|(_, f)| owns(*f, structs, enums, depth + 1))
+        }),
+        Type::Enum(e) => enums.get(e).is_some_and(|def| {
+            def.variants
+                .iter()
+                .any(|(_, payload)| payload.iter().any(|p| owns(*p, structs, enums, depth + 1)))
         }),
         _ => false,
     }
@@ -671,7 +719,14 @@ fn parse_func(
             line.expect("i")?;
             let kind = ctx.inst(&mut line)?;
             line.done()?;
+            let consumed = ctx.consumed_enum(&kind);
             insts.push(Inst { kind, span: at });
+            if let Some(var) = consumed {
+                insts.push(Inst {
+                    kind: InstKind::Moved(var),
+                    span: at,
+                });
+            }
         }
         let mut line = r.line()?;
         let at = span(&mut line)?;
@@ -860,16 +915,18 @@ pub fn validate(module: &Module) -> Result<(), Diagnostic> {
         &module.lists,
     );
     for func in &module.funcs {
-        drops::verify(func, &ownership).map_err(|v| {
-            Diagnostic::new(
-                Span::at(1, 1),
-                format!(
-                    "LIR rechazada en {} (bloque {}): {}",
-                    func.name, v.block, v.message
-                ),
-            )
-            .classify("L0017", "lir-protocolo")
-        })?;
+        drops::verify(func, &ownership)
+            .and_then(|()| drops::verify_flags(func, &ownership))
+            .map_err(|v| {
+                Diagnostic::new(
+                    Span::at(1, 1),
+                    format!(
+                        "LIR rechazada en {} (bloque {}): {}",
+                        func.name, v.block, v.message
+                    ),
+                )
+                .classify("L0017", "lir-protocolo")
+            })?;
     }
     Ok(())
 }
