@@ -3,6 +3,8 @@ take native_cfg_types
 take native_cfg_verify
 take x86_64
 take elf64
+take pe64
+take win64_rt
 take native_rt
 take native_cfg_text
 take native_cfg_arith
@@ -305,6 +307,26 @@ flow cfgUsesKind(p: view CfgProgram, kind: Int) => Bool {
 }
 
 expose flow cfgBuild(p: view CfgProgram) => CfgImage {
+    give cfgBuildFor(p, 0)
+}
+
+// Process exit with a constant status: Linux sys_exit on ELF64 (target 0),
+// ExitProcess through the IAT on PE32+ (target 1).
+flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, status: Int) {
+    when target == 1 {
+        w64EmitExit(edit code, edit imports, status)
+        give
+    }
+    x64MovImm64(edit code, 7, status)
+    x64MovImm64(edit code, 0, 60)
+    x64Syscall(edit code)
+}
+
+// Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, which
+// only has the Int/Bool output runtime of win64_rt: owned Text and lists
+// are rejected with error 73 instead of emitting Linux system calls. A
+// rejection by the PE writer (pe64.l codes 1..7) is reported as 111..117.
+expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change result = CfgImage(image: List[], error: 0)
     hold verified = cfgVerify(p)
     when verified != 0 {
@@ -317,35 +339,51 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[])
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
+    when target != 0 && target != 1 {
+        result.error = 73
+        give result
+    }
+    when target == 1 && p.decl_lists > 0 {
+        result.error = 73
+        give result
+    }
+    change imports = pe64NewImports()
 
-    // ELF entry point: sys_exit(main()).
-    cfgCall(edit code, edit fix, p.main)
-    x64MovReg(edit code, 7, 0)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    when target == 1 {
+        // PE entry point: ExitProcess(main()).
+        hold main_call = w64EmitEntry(edit code, edit imports)
+        fix.call_at@push(main_call)
+        fix.call_to@push(p.main)
+    } otherwise {
+        // ELF entry point: sys_exit(main()).
+        cfgCall(edit code, edit fix, p.main)
+        x64MovReg(edit code, 7, 0)
+        x64MovImm64(edit code, 0, 60)
+        x64Syscall(edit code)
+    }
     hold overflow_handler = code.bytes.length
-    x64MovImm64(edit code, 7, 125)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    cfgEmitExit(edit code, edit imports, target, 125)
 
     hold bad_variant_handler = code.bytes.length
-    x64MovImm64(edit code, 7, 126)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    cfgEmitExit(edit code, edit imports, target, 126)
 
     // Index out of range (byteAt, list element): exit 127, emitted only when
     // used.
     change bad_index_handler = -1
     when cfgUsesKind(p, 15) || p.proj_kind.length > 0 {
         bad_index_handler = code.bytes.length
-        x64MovImm64(edit code, 7, 127)
-        x64MovImm64(edit code, 0, 60)
-        x64Syscall(edit code)
+        cfgEmitExit(edit code, edit imports, target, 127)
     }
 
     // The runtime is emitted only for programs that print or own Text.
     change runtime_at: List of[Int] = List[]
-    when cfgNeedsRuntime(p) { runtime_at = rtEmitAll(edit code) }
+    when cfgNeedsRuntime(p) {
+        when target == 1 {
+            runtime_at = w64EmitRuntime(edit code, edit imports)
+        } otherwise {
+            runtime_at = rtEmitAll(edit code)
+        }
+    }
     when p.decl_lists > 0 { cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at) }
 
     each f among 0..p.functions.length {
@@ -373,12 +411,21 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
         result.error = 70
         give result
     }
+    // A runtime routine this target lacks (Text, lists on PE32+).
+    change missing_routine = false
     each i among 0..fix.call_at.length {
-        hold target = fix.call_to[i]
-        when target >= 0 {
-            x64PatchRelative(edit code, fix.call_at[i], func_at[target])
-        } otherwise when -1 - target < runtime_at.length {
-            x64PatchRelative(edit code, fix.call_at[i], runtime_at[-1 - target])
+        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length { missing_routine = true }
+    }
+    when missing_routine {
+        result.error = 73
+        give result
+    }
+    each i among 0..fix.call_at.length {
+        hold callee = fix.call_to[i]
+        when callee >= 0 {
+            x64PatchRelative(edit code, fix.call_at[i], func_at[callee])
+        } otherwise when -1 - callee < runtime_at.length {
+            x64PatchRelative(edit code, fix.call_at[i], runtime_at[-1 - callee])
         } otherwise {
             code.error = 13
         }
@@ -404,14 +451,26 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
             code.bytes@push(p.text_bytes[p.text_start[t] + i])
         }
     }
+    change code_address = elf64CodeAddress()
+    when target == 1 { code_address = pe64CodeAddress() }
     each i among 0..fix.text_at.length {
-        x64PatchAbsolute64(edit code, fix.text_at[i], elf64CodeAddress() + literal_at[fix.text_id[i]])
+        x64PatchAbsolute64(edit code, fix.text_at[i], code_address + literal_at[fix.text_id[i]])
     }
     when code.error != 0 {
         result.error = 71
         give result
     }
-    result.image = elf64Executable(view code.bytes)
+    when target == 1 {
+        hold pe = pe64Executable(view code.bytes, 0, view imports)
+        when pe.error != 0 {
+            // pe64.l writer codes 1..7 are reported as 111..117.
+            result.error = 110 + pe.error
+            give result
+        }
+        result.image = pe.bytes
+    } otherwise {
+        result.image = elf64Executable(view code.bytes)
+    }
     when result.image.length == 0 { result.error = 72 }
     give result
 }
@@ -419,4 +478,9 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
 expose flow cfgCompile(source: view Text) => CfgImage {
     hold parsed = cfgParse(source)
     give cfgBuild(view parsed)
+}
+
+expose flow cfgCompileFor(source: view Text, target: Int) => CfgImage {
+    hold parsed = cfgParse(source)
+    give cfgBuildFor(view parsed, target)
 }
