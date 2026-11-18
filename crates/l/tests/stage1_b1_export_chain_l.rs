@@ -406,6 +406,10 @@ flow main() => Int {
         flag_root: flag_root,
         has_flags: false
     )
+    // The helper test starts with no guarded drops; new F1 dataflow
+    // tables must be empty and disabled until the verifier activates them.
+    when v.has_flags { give 29 }
+    when v.flags.length != 0 || v.ftable.length != 0 || v.owned.length != 0 || v.otable.length != 0 || v.flag_root.length != 0 { give 30 }
 
     when lirArgDefined(edit v, view l, -1, false) { give 1 }
     when lirArgDefined(edit v, view l, 0, true) { give 2 }
