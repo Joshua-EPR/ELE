@@ -155,3 +155,18 @@ de estas instrucciones en el texto LIR no prueba compilación ni ejecución nati
 ## Ampliación provisional de listas en fase 8.3
 
 `i cap vN <lugar>` baja a `Rvalue::Cap` y exige una lista. `list lN <elemento>`, `i listlit`, `i listpush`, `i listreserve` y los lugares indexados tienen pruebas verticales y de LIR malformada. Se conserva `ELE-LIR 1` provisionalmente. [Detalle](PHASE_8_3.md).
+
+## Payloads propietarios de Option/Result (#5)
+
+`i payload vD pN eE V` acepta además payloads **propietarios**: `t`, `lK`
+o un struct/enum construido recursivamente con `i`, `b`, `t` y listas
+(`payload_ok` en `lir_protocol.rs`). Si el payload necesita drop, la
+instrucción **mueve** el payload y **consume** el enum completo: el lector Rust
+añade el marcador `Moved(pN)` de Stage 0 justo después de la lectura, de modo
+que `drops::verify` rechaza cualquier uso, segunda extracción, drop o fuga
+posterior del enum. `i variant` mueve su operando propietario; `drop vN` de
+un enum libera solo el payload de la variante activa. La lectura de una
+variante inactiva sigue protegida por la comprobación dinámica del
+discriminante (Cranelift: `acceso a variante enum inactiva`). El backend ELE
+nativo aún no tiene layout verificado para payloads propietarios y rechaza el
+módulo (código 82) sin escribir imagen.

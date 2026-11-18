@@ -160,6 +160,12 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
             let first_variant = ctx.lir_module.en_first[k]
             let first_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant])
             let second_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
+            // An owned payload (e.g. a list type never registered) must have
+            // a concrete LIR type code; `?` is never serialized.
+            let unit_first = ctx.lir_module.variant_payload[first_variant] == 0
+            if (!unit_first && first_code.byteLength == 1 && first_code.byteAt(0) == 63) || (second_code.byteLength == 1 && second_code.byteAt(0) == 63) {
+                semaAddError(&mut ctx, "L0016", "payload de Option/Result no representable en ELE-LIR 1", 0, 0)
+            }
             lirBuiltinHeader(&mut ctx, k, first_code, second_code)
             continue
         }
@@ -216,7 +222,8 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
         return
     }
     var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
-    if ctx.lir_fault > 0 { lirInjectFault(&mut ctx.lir, &mut body, ctx.lir_fault) }
+    if ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(&mut ctx.lir, &mut body, ctx.lir_fault) }
+    if ctx.lir_fault >= 14 { lirInjectUnionFault(&mut ctx.lir, &mut body, &ctx.types, &ctx.lir_module, ctx.lir_fault) }
     let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
     if checked.status != 0 {
         let rule = checked.status
@@ -236,6 +243,53 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
 // 5 call arity, 6 drop of a non-owned value, 7 return type, 8 field index.
 // 9 invalid platform opcode, 10 platform arity, 11 argument loan mode,
 // 12 platform result type, 13 invalid platform argument id.
+// Owned unions (#5): 14 owned payload read from the other variant (rule 3),
+// 15 conditional drop of a maybe-moved union made unconditional (rule 6),
+// 16 a use after an owned payload consumed its union (rule 5).
+fn lirInjectUnionFault(l: &mut LirFn, body: &mut LirBody, types: &TypeTable, lm: &LirModule, fault: Int) {
+    for n in 0..body.order.length {
+        let id = body.order[n]
+        let kind = l.insts[id].kind
+        let dst = l.insts[id].dst
+        if kind == LIR_DROP && fault == 15 && l.insts[id].a >= 0 && dst >= 0 && dst < l.vars.length {
+            let ty = l.vars[dst].ty
+            if ty >= 0 && ty < types.types.length {
+                var union = false
+                match types.types[ty].kind {
+                    SemTypeKind.Option => { union = true }
+                    SemTypeKind.Result => { union = true }
+                    _ => {}
+                }
+                if union {
+                    l.insts[id].a = -1
+                    return
+                }
+            }
+        }
+        if kind == LIR_PAYLOAD && dst >= 0 && dst < l.vars.length && lirBuiltinPayloadOwned(types, lm, l.vars[dst].ty) {
+            if fault == 14 {
+                l.insts[id].c = 1 - l.insts[id].c
+                return
+            }
+            if fault == 16 {
+                let root = l.places[l.insts[id].a].root
+                let block = l.insts[id].block
+                for m in (n + 1)..body.order.length {
+                    let later = body.order[m]
+                    if l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        // Well-typed copy of the consumed union into a fresh variable.
+                        let union_ty = l.vars[root].ty
+                        let copy = lirVar(&mut l, union_ty, false)
+                        l.insts[later].dst = copy
+                        l.insts[later].a = root
+                        return
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]

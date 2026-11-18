@@ -48,17 +48,23 @@ fn readtext_borrows_stable_path_with_independent_length() {
     let (ok, stderr) = check(&valid);
     assert!(ok, "readText(path, max_len): {stderr}");
 
-    // The independent ELE-LIR protocol cannot yet verify an owned
-    // Result<Text,Int> payload. Do not fake its ABI or emit malformed LIR.
+    // #5: the owned Result<Text,Int> is a registered builtin union with an
+    // atomic drop; the independent Rust protocol validator accepts it.
     let out = Command::new(checker())
         .arg(&valid)
         .arg("--emit-lir")
         .output()
         .unwrap();
-    assert!(!out.status.success(), "owned Result must be gated");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("error[L0016]"), "{stderr}");
-    assert!(out.stdout.is_empty(), "invalid LIR must not escape");
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    assert!(lir.contains("i platform "), "{lir}");
+    assert!(
+        lir.contains("i drop "),
+        "owned result must be dropped: {lir}"
+    );
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
 }
 
 #[test]
