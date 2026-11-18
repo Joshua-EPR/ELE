@@ -436,7 +436,8 @@ impl FnCtx<'_> {
             "listpop" => {
                 let d = self.dst(line)?;
                 let place = self.place(line)?;
-                InstKind::Assign(d, Rvalue::ListTakeLast(place))
+                let opt_ty = self.vars[d].pointee();
+                InstKind::Assign(d, Rvalue::ListPop(place, opt_ty))
             }
             "listreserve" => {
                 let place = self.place(line)?;

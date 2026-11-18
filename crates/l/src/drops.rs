@@ -271,9 +271,10 @@ impl Owned<'_> {
                     }
                     // Taking the last element moves it out of the list, whose
                     // length shrinks: the list keeps owning the rest.
-                    Rvalue::Len(p) | Rvalue::Cap(p) | Rvalue::ListTakeLast(p) => {
-                        out.push(Effect::Use(p.clone()))
-                    }
+                    Rvalue::Len(p)
+                    | Rvalue::Cap(p)
+                    | Rvalue::ListTakeLast(p)
+                    | Rvalue::ListPop(p, _) => out.push(Effect::Use(p.clone())),
                 }
                 out.push(Effect::Def(root(*d)));
             }
