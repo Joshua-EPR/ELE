@@ -208,7 +208,10 @@ pub fn semaFieldFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
                             semaAccess(&mut ctx, path, ty, mode, expr.start, expr.end)
                         }
                         if base_place >= 0 {
-                            lirSetPlace(&mut ctx, lirPlaceField(&mut ctx.lir, base_place, field - tree.declarations[decl_id].c))
+                            // Compute the field and its place before mutating the result channel.
+                            let field_offset = field - tree.declarations[decl_id].c
+                            let field_place = lirPlaceField(&mut ctx.lir, base_place, field_offset)
+                            lirSetPlace(&mut ctx, field_place)
                         }
                         return ty
                     }
@@ -293,7 +296,9 @@ pub fn semaAppendPart(ctx: &mut SemaContext, tree: &AstTree, buffer: Int, part: 
         }
         _ => {}
     }
-    lirAt(&mut ctx, LIR_APPEND, buffer, lirTakeArg(&mut ctx, ty), 0, 0)
+    // Consuming the argument must finish before the LIR append mutates ctx.
+    let arg = lirTakeArg(&mut ctx, ty)
+    lirAt(&mut ctx, LIR_APPEND, buffer, arg, 0, 0)
 }
 
 // Call instruction into a new variable of the result type (a reference
@@ -303,7 +308,9 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     let elem = semaRefElem(ctx, ret_t)
     var ty = ret_t
     if elem >= 0 { ty = elem }
-    let emitted = lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, ctx.lir_func_index[decl_id], first, args.length)
+    // Snapshot callee index before creating a new instruction via &mut ctx.
+    let callee = ctx.lir_func_index[decl_id]
+    let emitted = lirNew(&mut ctx, ty, elem >= 0, LIR_CALL, callee, first, args.length)
     lirSetVal(&mut ctx, emitted)
 }
 
