@@ -331,6 +331,9 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let len_arg = lirArg(&mut ctx.lir, false, len, false)
                 args.push(len_arg)
                 let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+                // Owner payload Text in Result<Text, Int> has no verified
+                // ELE-LIR layout/ABI/drop yet. Reject emit-lir safely.
+                lirMarkUnsupported(&mut ctx.lir, expr.start)
                 semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
                 return res_t
             }
