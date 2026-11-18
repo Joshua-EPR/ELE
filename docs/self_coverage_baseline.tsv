@@ -29,6 +29,8 @@ codegen/native_layout.l	lir
 codegen/native_list_int.l	lir
 codegen/native_rt.l	lir
 codegen/native_rt_list.l	lir
+codegen/pe64.l	lir
+codegen/win64_rt.l	lir
 codegen/x86_64.l	lir
 cursor.l	semantica
 decl.l	semantica
@@ -68,6 +70,7 @@ native_layout_cases.l	backend
 native_lir_demo.l	parser
 native_list_cases.l	parser
 native_memory_cases.l	backend
+native_pe_demo.l	parser
 native_stack_aggregate_demo.l	parser
 ownership_l.l	semantica
 parse_util.l	semantica

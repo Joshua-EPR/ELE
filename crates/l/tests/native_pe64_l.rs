@@ -190,7 +190,7 @@ fn validate_pe(b: &[u8]) -> (Vec<Section>, u32) {
             let disp = i32::from_le_bytes(code[at + 2..at + 6].try_into().unwrap());
             let target = (i64::from(text.rva) + at as i64 + 6 + i64::from(disp)) as u32;
             assert!(
-                target >= iat && target < iat + 24 && (target - iat) % 8 == 0,
+                target >= iat && target < iat + 24 && (target - iat).is_multiple_of(8),
                 "call at {at:#x} reaches {target:#x}"
             );
             calls += 1;
