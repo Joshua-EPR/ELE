@@ -200,7 +200,9 @@ pub fn semaTempAt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int,
 pub fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, start: Int, end: Int) {
     if !semaNeedsDrop(&mut ctx, source, tree, ty) { return }
     let path = flowRoot(&mut ctx.flow, -1)
-    lirBindPath(&mut ctx.lir, path, lirValueVar(&mut ctx, ty))
+    // Snapshot the newly allocated value before borrowing ctx.lir exclusively.
+    let value = lirValueVar(&mut ctx, ty)
+    lirBindPath(&mut ctx.lir, path, value)
     flowPad(&mut ctx.flow)
     ctx.flow.origins[path] = start
     semaMaterialize(&mut ctx, source, tree, path, ty)
