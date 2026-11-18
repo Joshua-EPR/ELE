@@ -33,9 +33,9 @@ take native_rt_list
 // allocation failed or request out of range (negative, beyond the list
 // limit), 124 release failed.
 
-const W64_MEM_COMMIT_RESERVE = 12288
-const W64_PAGE_READWRITE = 4
-const W64_MEM_RELEASE = 32768
+fixed W64_MEM_COMMIT_RESERVE = 12288
+fixed W64_PAGE_READWRITE = 4
+fixed W64_MEM_RELEASE = 32768
 
 // RAX = VirtualAlloc(NULL, RDX, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE),
 // or exit 123 when it fails or the byte count in RDX is not positive.

@@ -18,16 +18,16 @@
 // [0,255], 4 invalid alignment, 5 size/offset overflow (does not fit a
 // 32-bit PE field), 6 invalid entry point, 7 invalid import fixup.
 
-const PE64_IMAGE_BASE = 5368709120
-const PE64_SECTION_ALIGN = 4096
-const PE64_FILE_ALIGN = 512
-const PE64_MAX_CODE = 16777216
-const PE64_DWORD_MAX = 4294967295
-const PE64_DOS_SIZE = 128
+fixed PE64_IMAGE_BASE = 5368709120
+fixed PE64_SECTION_ALIGN = 4096
+fixed PE64_FILE_ALIGN = 512
+fixed PE64_MAX_CODE = 16777216
+fixed PE64_DWORD_MAX = 4294967295
+fixed PE64_DOS_SIZE = 128
 // DOS area + "PE\0\0" + COFF header + PE32+ optional header + 2 sections.
-const PE64_HEADERS_END = 472
-const PE64_IMPORT_COUNT = 5
-const PE64_STACK_SIZE = 8388608
+fixed PE64_HEADERS_END = 472
+fixed PE64_IMPORT_COUNT = 5
+fixed PE64_STACK_SIZE = 8388608
 
 // Indexes of the imported functions (their IAT slots).
 expose flow pe64ImportGetStdHandle() => Int { give 0 }
@@ -162,7 +162,7 @@ flow peLittle(out: edit List of[Int], n: Int, width: Int) {
 
 flow peAscii(out: edit List of[Int], text: view Text) {
     each i among 0..text.byteLength {
-        pePut(edit out, text.byteAt(i))
+        pePut(edit out, text@byteAt(i))
     }
 }
 

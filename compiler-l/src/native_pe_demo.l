@@ -52,7 +52,7 @@ flow demoCode(imports: edit Pe64Imports) => X64Code {
     w64EmitExit(edit code, edit imports, 42)
     // The message lives in .text after the code (read-only data).
     hold message_at = code.bytes.length
-    each i among 0..length { code.bytes@push(message.byteAt(i)) }
+    each i among 0..length { code.bytes@push(message@byteAt(i)) }
     x64PatchRelative(edit code, text_at, message_at)
     give code
 }
@@ -60,7 +60,7 @@ flow demoCode(imports: edit Pe64Imports) => X64Code {
 flow sameBytes(a: view Text, b: view Text) => Bool {
     when a.byteLength != b.byteLength { give false }
     each i among 0..a.byteLength {
-        when a.byteAt(i) != b.byteAt(i) { give false }
+        when a@byteAt(i) != b@byteAt(i) { give false }
     }
     give true
 }
@@ -179,8 +179,8 @@ flow writeImage(path: view Text, image: view Pe64Image) => Int {
 
 flow main() => Int {
     when processArgCount() == 1 {
-        match processArg(0) {
-            Ok(arg) => {
+        choose processArg(0) {
+            Ok(arg) : {
                 hold self_check = "--self-check"
                 when sameBytes(view arg, view self_check) { give selfCheck() }
                 change imports = pe64NewImports()
@@ -189,23 +189,23 @@ flow main() => Int {
                 hold image = pe64Executable(view code.bytes, 0, view imports)
                 give writeImage(view arg, view image)
             }
-            Err(e) => { give 5 }
+            Err(e) : { give 5 }
         }
     }
     when processArgCount() == 2 {
         change mode = 0
-        match processArg(0) {
-            Ok(flag) => {
+        choose processArg(0) {
+            Ok(flag) : {
                 hold bad_alignment = "--bad-alignment"
                 hold deep_frames = "--deep-frames"
                 when sameBytes(view flag, view bad_alignment) { mode = 1 }
                 when sameBytes(view flag, view deep_frames) { mode = 2 }
             }
-            Err(e) => { give 5 }
+            Err(e) : { give 5 }
         }
         when mode == 0 { give 6 }
-        match processArg(1) {
-            Ok(path) => {
+        choose processArg(1) {
+            Ok(path) : {
                 change imports = pe64NewImports()
                 when mode == 2 {
                     hold deep = deepFramesCode(edit imports)
@@ -219,7 +219,7 @@ flow main() => Int {
                 hold image = pe64ExecutableWith(view code.bytes, 0, view imports, 4096, 100)
                 give writeImage(view path, view image)
             }
-            Err(e) => { give 5 }
+            Err(e) : { give 5 }
         }
     }
     printError("Uso: native-pe-demo <salida.exe> | --bad-alignment <salida.exe> | --deep-frames <salida.exe> | --self-check")

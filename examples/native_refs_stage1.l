@@ -54,7 +54,7 @@ flow main() {
     hold saludo = "hola ñandú"
     mostrar(view saludo)
     print(saludo.byteLength)
-    print(saludo.byteAt(5))
+    print(saludo@byteAt(5))
     hold s = Signo.Pos(41)
     print(tamano(view s) + 1)
     hold x = 20
