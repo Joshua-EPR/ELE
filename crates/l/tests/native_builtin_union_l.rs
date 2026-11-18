@@ -112,6 +112,13 @@ fn owned_union_payload_is_verified_lir_but_not_native_code() {
         .output()
         .unwrap();
     assert!(!built.status.success(), "owned payload reached native code");
+    // The specific fail-closed rejection (layout code 82), not a crash.
+    assert_eq!(built.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&built.stderr).contains("ELE-LIR/CFG rechazado (código 82)"),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     assert!(!image.exists(), "ELF written for rejected LIR");
 }
 

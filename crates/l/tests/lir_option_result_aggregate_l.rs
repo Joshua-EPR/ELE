@@ -173,6 +173,17 @@ fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
         fs::write(&file, &lir).unwrap();
         // Fail closed: no verified owned-payload layout in the ELE backend.
         assert!(native_build(&file, name).is_none(), "{name}: ELF built");
+        let rejected = Command::new(native())
+            .arg(&file)
+            .arg(temp().join(format!("{name}.rejected.elf")))
+            .output()
+            .unwrap();
+        assert_eq!(rejected.status.code(), Some(3), "{name}: not a rejection");
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains("ELE-LIR/CFG rechazado (código 82)"),
+            "{name}: {}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
     }
     // A nominal choice with an owned payload stays outside ELE-LIR.
     let path = write_case(

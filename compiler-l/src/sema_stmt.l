@@ -83,8 +83,10 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = arm_body
         scopePush(&mut ctx.scopes)
         semaScopeEnter(&mut ctx)
+        let frozen_mark = ctx.frozen_symbols.length
         lirMatchArmBind(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, scrut_path)
         if body_stmt >= 0 { semaCheckStmt(&mut ctx, source, tree, body_stmt) }
+        while ctx.frozen_symbols.length > frozen_mark { ctx.frozen_symbols.pop() }
         semaScopeExit(&mut ctx, p_end, p_end)
         scopePop(&mut ctx.scopes)
         flowLink(&mut ctx.flow, join, -1)
@@ -123,6 +125,11 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
                 semaAddError(&mut ctx, "L0016", "destino de asignación no verificado", stmt.start, stmt.end)
             } else {
                 let sym = ctx.flow.paths[target].symbol
+                for f in 0..ctx.frozen_symbols.length {
+                    if sym >= 0 && ctx.frozen_symbols[f] == sym {
+                        semaAddError(&mut ctx, "L0005", "no se puede modificar un valor mientras match examina sus datos", stmt.start, stmt.end)
+                    }
+                }
                 let loan = loanOfPath(&ctx.flow, target)
                 if loan >= 0 {
                     // Writing through a reference binding requires &mut.

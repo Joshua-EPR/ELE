@@ -249,7 +249,16 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         // scrutinee is rejected (L0005). Primitive payloads stay copies.
         if payload_ty >= 0 && payload_ty < ctx.types.types.length && !lirBuiltinPrimitive(payload_ty) {
             semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)
+            // The examined place stays frozen for the whole arm: assigning
+            // it there is rejected like in Stage 0 (semaCheckMatch unfreezes).
+            if scrut_path >= 0 && scrut_path < ctx.flow.paths.length && ctx.flow.paths[scrut_path].symbol >= 0 {
+                let frozen = ctx.flow.paths[scrut_path].symbol
+                ctx.frozen_symbols.push(frozen)
+            }
         }
+        // The binding's instructions carry the position of its pattern
+        // (the final arm emits no discriminant test of its own).
+        ctx.lir.at = p_start
         if !lirBuiltinPayloadOk(&ctx.types, &ctx.lir_module, payload_ty) || !lirBuiltinSupported(&ctx.types, &ctx.lir_module, scrut_t) {
             // Stage 1 ownership must still see the source-level pattern
             // binder for non-native unions (e.g. Result<Int, LexError>).

@@ -263,6 +263,175 @@ fn main() -> Int {
 }
 "#;
 
+/// Review regression (Agent H): wildcards, `Some(_)`, `Ok(_)`/`Err(_)`, Err arm first.
+const B_WILD: &str = r#"fn label(n: Int) -> Text {
+    return "item-{n}"
+}
+fn maybe(n: Int) -> Option<Text> {
+    if n < 0 { return None }
+    return Some(label(n))
+}
+fn res(n: Int) -> Result<Text, Text> {
+    if n > 0 { return Ok(label(n)) }
+    return Err(label(0 - n))
+}
+fn nested(n: Int) -> Option<Result<Text, Int>> {
+    if n == 0 { return None }
+    if n > 5 { return Some(Err(n)) }
+    return Some(Ok(label(n)))
+}
+
+fn main() -> Int {
+    var total = 0
+    let o = maybe(1)
+    match o {
+        Some(t) => { print(t) }
+        _ => { total += 1 }
+    }
+    let p = maybe(-1)
+    match p {
+        Some(t) => { print(t) }
+        _ => { total += 2 }
+    }
+    match maybe(3) {
+        _ => { total += 4 }
+    }
+    match res(-2) {
+        Ok(_) => { total += 8 }
+        Err(_) => { total += 16 }
+    }
+    match res(2) {
+        Err(e) => { print(e) }
+        Ok(_) => { total += 32 }
+    }
+    return total
+}
+"#;
+
+/// Review regression (Agent H): partially matched Option<Result<Text,Int>>, `continue` in a nested arm.
+const D_NESTED: &str = r#"fn label(n: Int) -> Text {
+    return "item-{n}"
+}
+fn maybe(n: Int) -> Option<Text> {
+    if n < 0 { return None }
+    return Some(label(n))
+}
+fn res(n: Int) -> Result<Text, Text> {
+    if n > 0 { return Ok(label(n)) }
+    return Err(label(0 - n))
+}
+fn nested(n: Int) -> Option<Result<Text, Int>> {
+    if n == 0 { return None }
+    if n > 5 { return Some(Err(n)) }
+    return Some(Ok(label(n)))
+}
+
+fn main() -> Int {
+    var total = 0
+    for i in 0..8 {
+        match nested(i) {
+            Some(r) => {
+                match r {
+                    Ok(_) => { total += 1 }
+                    Err(e) => { total += e }
+                }
+            }
+            None => { total += 100 }
+        }
+        match nested(i) {
+            Some(r) => { total += 1000 }
+            None => {}
+        }
+        match nested(i) {
+            Some(r) => {
+                match r {
+                    Ok(t) => {
+                        if i == 3 { continue }
+                        print(t)
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    return total % 256
+}
+"#;
+
+/// Review regression (Agent H): readText Ok/Err, unbound result, loop with continue/break.
+const V_READ: &str = r#"fn main() -> Int {
+    var total = 0
+    let path = "payload.txt"
+    match readText(path, 64) {
+        Ok(t) => { print(t) }
+        Err(e) => { total += 1 }
+    }
+    let missing = "nope.txt"
+    match readText(missing, 64) {
+        Ok(t) => { print(t) }
+        Err(e) => { total += 2 }
+    }
+    let kept = readText(path, 64)
+    match readText(path, 64) {
+        Ok(_) => { total += 4 }
+        Err(_) => { total += 8 }
+    }
+    for i in 0..3 {
+        match readText(path, 64) {
+            Ok(t) => {
+                if i == 1 { continue }
+                if i == 2 { break }
+                total += t.byteLength
+            }
+            Err(_) => { return 99 }
+        }
+    }
+    return total
+}
+"#;
+
+/// Review regression (Agent H): Result<shape{Text, List<Text>}, Text>.
+const X_SHAPE: &str = r#"fn label(n: Int) -> Text {
+    return "item-{n}"
+}
+fn maybe(n: Int) -> Option<Text> {
+    if n < 0 { return None }
+    return Some(label(n))
+}
+struct Named {
+    name: Text,
+    tags: List<Text>,
+}
+fn mk(n: Int) -> Result<Named, Text> {
+    if n < 0 { return Err(label(n)) }
+    var tags: List<Text> = List[]
+    tags.push(label(n + 1))
+    return Ok(Named(name: label(n), tags: tags))
+}
+fn main() -> Int {
+    var total = 0
+    match mk(1) {
+        Ok(v) => {
+            print(v.name)
+            total += v.tags.length
+        }
+        Err(e) => { print(e) }
+    }
+    match mk(-1) {
+        Ok(_) => { total += 10 }
+        Err(e) => { print(e) }
+    }
+    let k = mk(2)
+    match k {
+        Err(_) => { total += 100 }
+        Ok(v) => { total += v.name.byteLength }
+    }
+    let unused = mk(3)
+    return total
+}
+"#;
+
 fn program(body: &str) -> String {
     format!("{LABEL}{body}")
 }
@@ -363,6 +532,33 @@ fn owned_unions_run_from_stage1_lir_with_stage0_parity_and_balanced_heap() {
     assert_eq!(code, 2);
 }
 
+#[cfg(windows)]
+#[test]
+fn review_regressions_run_balanced_with_stage0_parity() {
+    // v_read reads this file relative to the working directory.
+    fs::write(temp().join("payload.txt"), "hello-file").unwrap();
+    for (name, source, expected) in [
+        ("b_wild", B_WILD, 54),
+        ("d_nested", D_NESTED, 206),
+        ("v_read", V_READ, 16),
+        ("x_shape", X_SHAPE, 7),
+    ] {
+        let (code, _) = run_lir_and_stage0(name, source);
+        assert_eq!(code, expected, "{name}");
+    }
+}
+
+#[test]
+fn payload_of_the_final_arm_carries_its_own_pattern_position() {
+    let source = program(
+        "fn maybe(n: Int) -> Option<Text> {\n    if n < 0 { return None }\n    return Some(label(n))\n}\nfn main() -> Int {\n    let o = maybe(1)\n    match o {\n        None => { print(\"none\") }\n        Some(t) => { print(t) }\n    }\n    return 0\n}\n",
+    );
+    let lir = emit("final_arm_span.l", &source);
+    // `Some(t)` is on line 13, column 9 (after the 4-line `label` prelude).
+    let payload = lir.lines().find(|l| l.starts_with("i payload ")).unwrap();
+    assert!(payload.ends_with("@13:9"), "{payload}");
+}
+
 #[test]
 fn lexer_return_ok_tokens_no_longer_blocks_stage1() {
     // The measured first blocker: `return Ok(tokens)` in lexSource.
@@ -393,8 +589,9 @@ fn ele_native_backend_rejects_owned_union_lir_without_an_image() {
         .output()
         .unwrap();
     assert!(!out.status.success(), "owned union LIR reached native code");
+    assert_eq!(out.status.code(), Some(3), "a crash is not a rejection");
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("rechazado"),
+        String::from_utf8_lossy(&out.stderr).contains("ELE-LIR/CFG rechazado (código 82)"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -535,6 +732,13 @@ fn unsafe_owned_union_programs_are_rejected_with_diagnostics() {
         (
             "borrowed_escape.l",
             "fn peek(o: &Option<Text>) -> Text {\n    match o {\n        Some(s) => { return s }\n        None => { return label(0) }\n    }\n}\nfn main() -> Int {\n    let o = Some(label(2))\n    let t = peek(&o)\n    return 0\n}\n",
+            "L0005",
+        ),
+        // Assigning the examined place inside an arm with a non-Copy
+        // binding (SEMANTICS.md "Enums y match"; Stage 0 rejects it too).
+        (
+            "assign_examined.l",
+            "fn maybe(n: Int) -> Option<Text> {\n    return Some(label(n))\n}\nfn main() -> Int {\n    var q = maybe(2)\n    match q {\n        Some(t) => {\n            print(t)\n            q = maybe(3)\n        }\n        None => {}\n    }\n    return 0\n}\n",
             "L0005",
         ),
         // The scrutinee was consumed by binding its payload.
