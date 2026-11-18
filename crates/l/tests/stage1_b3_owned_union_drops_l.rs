@@ -5,7 +5,7 @@ mod stage1_support;
 
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Output},
     sync::OnceLock,
 };
@@ -106,13 +106,23 @@ fn owned_error_variant_and_option_text_also_need_drops() {
             "owned_error",
             "fn main() {\n    let error: Result<Int, Text> = Err(\"problem\")\n}\n",
         ),
-        ("owned_option", "fn main() {\n    let value = Some(\"ok\")\n}\n"),
+        (
+            "owned_option",
+            "fn main() {\n    let value = Some(\"ok\")\n}\n",
+        ),
     ];
     for (name, src) in cases {
         let dump = plan(name, src);
-        assert_eq!(drops(&dump), 1, "{name} must drop its active owner:\n{dump}");
+        assert_eq!(
+            drops(&dump),
+            1,
+            "{name} must drop its active owner:\n{dump}"
+        );
         let output = run(name, src, "--emit-lir");
-        assert!(!output.status.success(), "{name} must not emit owner-bearing LIR");
+        assert!(
+            !output.status.success(),
+            "{name} must not emit owner-bearing LIR"
+        );
         assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
         assert!(output.stdout.is_empty());
     }
