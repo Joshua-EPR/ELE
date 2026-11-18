@@ -69,8 +69,9 @@ fn c_string(b: &[u8], at: usize) -> String {
 }
 
 /// Parses and validates a PE32+ image as the Windows loader would need it;
-/// returns the sections and the entry point RVA.
-fn validate_pe(b: &[u8]) -> (Vec<Section>, u32) {
+/// returns the sections and the entry point RVA. The last `data_tail` bytes
+/// of `.text` are read-only data, not code.
+fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
     assert_eq!(&b[..2], b"MZ");
     let pe = u32_at(b, 0x3c) as usize;
     assert_eq!(&b[pe..pe + 4], b"PE\0\0");
@@ -103,6 +104,9 @@ fn validate_pe(b: &[u8]) -> (Vec<Section>, u32) {
         "no DYNAMIC_BASE without relocations"
     );
     assert_eq!(dll_characteristics & 0x0020, 0, "no HIGH_ENTROPY_VA");
+    // No stack probes are emitted: the whole 8 MiB stack is committed.
+    assert_eq!(u64_at(b, opt + 72), 0x80_0000, "SizeOfStackReserve");
+    assert_eq!(u64_at(b, opt + 80), 0x80_0000, "SizeOfStackCommit");
     assert_eq!(u32_at(b, opt + 108), 16, "data directories");
     let dir = |i: usize| (u32_at(b, opt + 112 + 8 * i), u32_at(b, opt + 116 + 8 * i));
     assert_eq!(dir(5), (0, 0), "no base relocations");
@@ -183,7 +187,8 @@ fn validate_pe(b: &[u8]) -> (Vec<Section>, u32) {
     assert_eq!(names[0], names[1], "ILT and IAT name the same imports");
 
     // Every CALL [RIP+disp32] in .text must land on an IAT slot.
-    let code = &b[text.raw_offset as usize..(text.raw_offset + text.virtual_size) as usize];
+    let code_end = (text.raw_offset + text.virtual_size) as usize - data_tail;
+    let code = &b[text.raw_offset as usize..code_end];
     let mut calls = 0;
     for at in 0..code.len().saturating_sub(5) {
         if code[at] == 0xff && code[at + 1] == 0x15 {
@@ -218,7 +223,7 @@ fn demo_writes_a_valid_pe32_plus_that_runs_on_windows() {
         String::from_utf8_lossy(&out.stderr)
     );
     let bytes = fs::read(&image).unwrap();
-    let (sections, entry) = validate_pe(&bytes);
+    let (sections, entry) = validate_pe(&bytes, DEMO_MESSAGE.len());
     assert_eq!(entry, sections[0].rva);
     // The message is read-only data at the end of .text.
     let text = &sections[0];
@@ -233,6 +238,32 @@ fn demo_writes_a_valid_pe32_plus_that_runs_on_windows() {
         let (code, stdout) = execute(&image);
         assert_eq!(stdout, DEMO_MESSAGE);
         assert_eq!(code, Some(42));
+    }
+}
+
+/// The largest frame x64FrameBegin emits (4 KiB), 1000 levels deep (about
+/// 4 MiB): needs the fully committed 8 MiB stack. With the previous header
+/// (1 MiB reserve, 4 KiB commit) this image died with 0xC00000FD.
+#[test]
+fn deep_maximum_frames_run_within_the_committed_stack() {
+    let image = temp("deep-frames.exe");
+    let _ = fs::remove_file(&image);
+    let out = Command::new(demo())
+        .arg("--deep-frames")
+        .arg(&image)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    validate_pe(&fs::read(&image).unwrap(), 0);
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        let (code, stdout) = execute(&image);
+        assert!(stdout.is_empty());
+        assert_eq!(code, Some(43));
     }
 }
 
@@ -265,6 +296,10 @@ writer_bad_byte=3
 writer_bad_entry=6
 writer_fixup_out_of_code=7
 writer_unknown_import=7
+writer_fixup_not_call=7
+writer_fixup_duplicate=7
+writer_fixup_overlap=7
+writer_fixups_ok=0
 writer_bad_alignment=4
 writer_ok=0
 writer_ok.length=1536
@@ -301,7 +336,7 @@ fn cfg_pe(lir: &Path, name: &str) -> PathBuf {
         "{name}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    validate_pe(&fs::read(&image).unwrap());
+    validate_pe(&fs::read(&image).unwrap(), 0);
     image
 }
 
@@ -399,4 +434,16 @@ fn cfg_pe32_plus_rejects_runtime_it_lacks() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
+    // An option in the output slot is a usage error, never a file name.
+    let dir = temp("flag-slot");
+    fs::create_dir_all(&dir).unwrap();
+    let _ = fs::remove_file(dir.join("--pe64"));
+    let out = Command::new(native())
+        .current_dir(&dir)
+        .arg(root().join("examples/native_cfg_branch.lir"))
+        .arg("--pe64")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!dir.join("--pe64").exists());
 }

@@ -594,6 +594,10 @@ de Stage 0. Primer incremento verificable:
   inválida, 5 desbordamiento, 6 entrada inválida, 7 fixup de importación
   inválido) y una imagen vacía: nunca se escribe un archivo malformado.
   `TimeDateStamp` es 0, por lo que la imagen es reproducible.
+  La pila del hilo principal reserva y **compromete** 8 MiB desde el inicio
+  (`SizeOfStackReserve` = `SizeOfStackCommit`): el lowering no emite stack
+  probes y un marco puede llegar a 4 KiB, así que no se depende de la página
+  de guarda. Un import fixup debe seguir a `FF 15` y no solapar con otro.
 - `codegen/win64_rt.l`: runtime mínimo con la convención Windows x64 (RCX,
   RDX, R8, R9, quinto argumento en `[RSP+32]`, 32 bytes de shadow space,
   RSP alineado a 16 en cada `CALL`, llamadas `CALL [RIP+disp32]` a la IAT).
@@ -612,6 +616,12 @@ de Stage 0. Primer incremento verificable:
   <entrada.lir> <salida.exe> --pe64` lo expone. Los programas que necesitan
   Text propio o listas (cuyo runtime usa `mmap` de Linux) se rechazan con el
   código 73 en lugar de emitir syscalls de Linux.
+  Si el escritor PE rechaza la imagen, su código 1..7 se informa como
+  111..117. Una opción en lugar de una ruta (`in.lir --pe64`) es un error
+  de uso (estado 2) y nunca se convierte en nombre de archivo. La salida
+  solo se escribe tras compilar con éxito; un archivo previo con ese nombre
+  no se borra si la compilación falla (ELE aún no tiene primitiva para
+  borrar archivos), así que hay que comprobar el estado de salida.
 - `native_pe_demo.l` genera un `.exe` que escribe un mensaje con `WriteFile`
   y termina con `ExitProcess(42)`; `--self-check` imprime los códigos de
   rechazo del escritor y `--bad-alignment` comprueba que no se escribe nada.
@@ -624,6 +634,12 @@ de la IAT) en todos los hosts y, en Windows x86-64, ejecuta los `.exe` y
 compara stdout y código de salida. Los 30 fixtures LIR que ELF64 y PE32+
 aceptan a la vez producen la misma salida y el mismo estado en Windows y en
 Linux (WSL).
+
+Diferencias de semántica con ELF64, documentadas y no ocultadas: Windows
+recibe los 32 bits bajos del resultado de `main` en `ExitProcess`, mientras
+que Linux `sys_exit` conserva solo 8 bits (coinciden de 0 a 255; p. ej. 256
+es 256 en Windows y 0 en Linux). La pila es de 8 MiB comprometidos en PE32+
+y la del proceso Linux depende de `ulimit -s` (normalmente 8 MiB, creciente).
 
 Pendiente: allocator de Windows (`VirtualAlloc`/`HeapAlloc`) para Text y
 listas, relocalizaciones base (`.reloc`) para poder declarar ASLR, tablas de
