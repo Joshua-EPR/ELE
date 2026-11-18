@@ -315,9 +315,9 @@ pub fn semaCallLower(ctx: &mut SemaContext, decl_id: Int, args: &List<Int>, ret_
     lirSetVal(&mut ctx, emitted)
 }
 
-// Borrow a stable writeBytes argument like an ordinary &T call parameter.
+// Borrow a stable platform argument like an ordinary &T call parameter.
 // The loan remains live through argument evaluation and is used at call close.
-pub fn semaWriteBytesLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int) -> Int {
+pub fn semaPlatformArgLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int) -> Int {
     let place = ctx.lir.place
     let path = ctx.expression_path
     ctx.lir.borrowed = -1

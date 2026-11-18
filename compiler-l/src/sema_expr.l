@@ -298,21 +298,44 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 return 7
             }
             let name_read_text = "readText"
-            if symbolNameEqualsText(source, name_start, name_end, name_read_text) && arg_count == 2 {
-                let path_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_PLACE)
-                let len_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
-                if (path_t == 5 || semaRefElem(ctx, path_t) == 5) && len_t == 1 {
-                    var args: List<Int> = List[]
-                    args.push(lirTakeArg(&mut ctx, path_t))
-                    let operand = lirTakeOperand(&mut ctx, 1)
-                    let argument = lirArg(&mut ctx.lir, false, operand, false)
-                    args.push(argument)
-                    let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                    semaPlatformEmit(&mut ctx, 2, &args, res_t, true)
-                    return res_t
+            if symbolNameEqualsText(source, name_start, name_end, name_read_text) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
                 }
-                semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
-                return 7
+                // Do not consume ctx.lir after visiting the second argument:
+                // it replaces the expression channel used by the first.
+                let path_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                if path_t != 5 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
+                }
+                let path_loan = semaPlatformArgLoan(&mut ctx, path_t, expr.start, expr.end)
+                let path = ctx.lir.borrowed
+                let len_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+                let len = lirTakeOperand(&mut ctx, len_t)
+                if len_t != 1 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
+                }
+                if path < 0 || path_loan < 0 {
+                    semaAddError(&mut ctx, "L0016", "readText requiere un lugar Text prestable; los temporales propietarios no están soportados", expr.start, expr.end)
+                    return 7
+                }
+                var loans: List<Int> = List[]
+                loans.push(path_loan)
+                semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
+                var args: List<Int> = List[]
+                let path_arg = lirArg(&mut ctx.lir, true, path, false)
+                args.push(path_arg)
+                let len_arg = lirArg(&mut ctx.lir, false, len, false)
+                args.push(len_arg)
+                let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+                // Owner payload Text in Result<Text, Int> has no verified
+                // ELE-LIR layout/ABI/drop yet. Reject emit-lir safely.
+                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
+                return res_t
             }
             let name_write_bytes = "writeBytes"
             if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
@@ -323,10 +346,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 // Materialize each shared loan before evaluating the next argument:
                 // a plain FLOW_READ does not protect a previous argument.
                 let path_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
-                let path_loan = semaWriteBytesLoan(&mut ctx, path_ty, expr.start, expr.end)
+                let path_loan = semaPlatformArgLoan(&mut ctx, path_ty, expr.start, expr.end)
                 let path = ctx.lir.borrowed
                 let bytes_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
-                let bytes_loan = semaWriteBytesLoan(&mut ctx, bytes_ty, expr.start, expr.end)
+                let bytes_loan = semaPlatformArgLoan(&mut ctx, bytes_ty, expr.start, expr.end)
                 let bytes = ctx.lir.borrowed
                 var loans: List<Int> = List[]
                 loans.push(path_loan)
