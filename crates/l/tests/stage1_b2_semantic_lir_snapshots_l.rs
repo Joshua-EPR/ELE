@@ -48,6 +48,16 @@ fn stage1_lir_module_source_passes_borrow_check() {
 }
 
 #[test]
+fn stage1_stmt_lower_source_passes_borrow_check() {
+    // B2 first L0012 at stmt_lower.l:264 blocks the real Stage 1
+    // semantic entrypoints through transitive imports. Check the actual
+    // source, not an isolated mock or a disabled ownership verifier.
+    let path = root().join("compiler-l/src/stmt_lower.l");
+    let (ok, stderr) = check(&path);
+    assert!(ok, "stmt_lower.l: {stderr}");
+}
+
+#[test]
 fn stage1_still_rejects_same_call_mutable_borrow_and_field_read() {
     let work = root().join("target/stage1-tests/b2-semantic-lir-snapshots");
     std::fs::create_dir_all(&work).unwrap();
