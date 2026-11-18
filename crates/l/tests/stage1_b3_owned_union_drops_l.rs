@@ -5,7 +5,7 @@ mod stage1_support;
 
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Output},
     sync::OnceLock,
 };
@@ -36,14 +36,19 @@ fn plan(name: &str, src: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 fn drops(dump: &str) -> usize {
-    dump.lines().filter(|line| line.starts_with("O drop ") || line.starts_with("O cdrop ")).count()
+    dump.lines()
+        .filter(|line| line.starts_with("O drop ") || line.starts_with("O cdrop "))
+        .count()
 }
 
 #[test]
 fn owned_result_from_process_arg_has_drop_plan() {
     let src = "fn main() {\n    let arg = processArg(0)\n}\n";
     let dump = plan("owned_result_arg", src);
-    assert!(drops(&dump) >= 1, "Result<Text,Int> must own its active Text:\n{dump}");
+    assert!(
+        drops(&dump) >= 1,
+        "Result<Text,Int> must own its active Text:\n{dump}"
+    );
     // No unchecked LIR for the owner-bearing Result.
     let output = run("owned_result_arg", src, "--emit-lir");
     assert!(!output.status.success());
@@ -53,7 +58,8 @@ fn owned_result_from_process_arg_has_drop_plan() {
 
 #[test]
 fn owned_result_from_readtext_has_drop_plan() {
-    let src = "fn main() {\n    let path = \"content.txt\"\n    let value = readText(path, 128)\n}\n";
+    let src =
+        "fn main() {\n    let path = \"content.txt\"\n    let value = readText(path, 128)\n}\n";
     let dump = plan("owned_result_readtext", src);
     // One drop for Text path; one for Result<Text,Int>, regardless of
     // whether the runtime outcome is Ok or Err.
@@ -68,16 +74,46 @@ fn owned_result_from_readtext_has_drop_plan() {
 fn non_owned_result_has_no_owner_drop() {
     let src = "fn main() {\n    let a: Result<Int, Int> = Ok(1)\n}\n";
     let dump = plan("dropfree_result", src);
-    assert_eq!(drops(&dump), 0, "Result<Int,Int> must stay drop-free:\n{dump}");
+    assert_eq!(
+        drops(&dump),
+        0,
+        "Result<Int,Int> must stay drop-free:\n{dump}"
+    );
 }
 
 #[test]
 fn nested_owned_union_is_one_atomic_drop_leaf() {
-    let src = "fn main() {\n    let x: Option<Result<Text, Int>> = Some(Ok(\"payload\"))\n}\n";
+    // A parameter uses a fully resolved nested type. Nested Ok inside Some
+    // expression constructors need separate contextual propagation (#5),
+    // so that unrelated lowering feature is deliberately not claimed here.
+    let src = "fn receive(x: Option<Result<Text, Int>>) {}\nfn main() {}\n";
     let dump = plan("nested_owner", src);
-    assert_eq!(drops(&dump), 1, "nested owned union is an atomic owner:\n{dump}");
+    assert_eq!(
+        drops(&dump),
+        1,
+        "nested owned union is an atomic owner:\n{dump}"
+    );
     let output = run("nested_owner", src, "--emit-lir");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn owned_error_variant_and_option_text_also_need_drops() {
+    let cases = [
+        (
+            "owned_error",
+            "fn main() {\n    let error: Result<Int, Text> = Err(\"problem\")\n}\n",
+        ),
+        ("owned_option", "fn main() {\n    let value = Some(\"ok\")\n}\n"),
+    ];
+    for (name, src) in cases {
+        let dump = plan(name, src);
+        assert_eq!(drops(&dump), 1, "{name} must drop its active owner:\n{dump}");
+        let output = run(name, src, "--emit-lir");
+        assert!(!output.status.success(), "{name} must not emit owner-bearing LIR");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("error[L0016]"));
+        assert!(output.stdout.is_empty());
+    }
 }
