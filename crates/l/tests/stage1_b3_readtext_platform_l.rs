@@ -48,30 +48,17 @@ fn readtext_borrows_stable_path_with_independent_length() {
     let (ok, stderr) = check(&valid);
     assert!(ok, "readText(path, max_len): {stderr}");
 
-    // Stage 1's owner-bearing Result<Text,Int> is not yet accepted by the
-    // independent ELE-LIR protocol. A successful emission must validate;
-    // otherwise it must fail closed and emit no partial/unchecked module.
+    // The independent ELE-LIR protocol cannot yet verify an owned
+    // Result<Text,Int> payload. Do not fake its ABI or emit malformed LIR.
     let out = Command::new(checker())
         .arg(&valid)
         .arg("--emit-lir")
         .output()
         .unwrap();
-    if out.status.success() {
-        let lir = String::from_utf8(out.stdout).unwrap();
-        let line = lir
-            .lines()
-            .find(|line| line.contains(" readtext 2 "))
-            .expect("readText instruction absent");
-        assert!(line.contains(" ref p"), "path was not a place: {line}");
-        assert!(line.contains(" val v"), "max_len was not a value: {line}");
-        let module = project_l::lir_protocol::parse(&lir).unwrap();
-        project_l::lir_protocol::validate(&module).unwrap();
-    } else {
-        assert!(
-            out.stdout.is_empty(),
-            "Stage 1 must not output partial invalid LIR"
-        );
-    }
+    assert!(!out.status.success(), "owned Result must be gated");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("error[L0016]"), "{stderr}");
+    assert!(out.stdout.is_empty(), "invalid LIR must not escape");
 }
 
 #[test]
