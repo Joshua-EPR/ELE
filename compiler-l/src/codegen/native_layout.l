@@ -121,3 +121,8 @@ pub fn nativeLayoutNested(layout: &mut NativeLayout, child: &NativeLayout, owns:
     }
     return nativeLayoutAdd(&mut layout, child.size, child.align, owns)
 }
+
+// Largest aggregate the planner lays out (NATIVE_LAYOUT_MAX_BYTES).
+expose flow nativeLayoutMaxBytes() => Int {
+    give NATIVE_LAYOUT_MAX_BYTES
+}

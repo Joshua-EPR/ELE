@@ -22,8 +22,8 @@ take x86_64
 expose flow rtListReserve() => Int { give 9 }
 expose flow rtGlueBase() => Int { give 10 }
 
-// Largest capacity in elements. With elements of at most 512 bytes every
-// byte size stays far below the Int range.
+// Largest capacity in elements. With elements of at most 1 MiB (the
+// cfgMaxValueBytes bound) every byte size stays below 2^53, far from Int overflow.
 expose flow rtListLimit() => Int { give 4294967296 }
 
 flow rtListExit(code: edit X64Code, status: Int) {

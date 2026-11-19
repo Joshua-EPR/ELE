@@ -182,6 +182,9 @@ flow cfgCheckCalls(p: view CfgProgram) => Int {
                     hold callee = inst.callee
                     when callee < 0 || callee >= p.functions.length { give 51 }
                     hold target = view p.functions[callee]
+                    // Calls of functions returning a reference are not
+                    // lowered yet (native_cfg_returnref).
+                    when target.result_ref >= 0 { give 141 }
                     when inst.argc != target.params { give 52 }
                     hold dst_type = p.types_code[func.first_var + inst.dst]
                     when dst_type != cfgResultType(target) { give 53 }
@@ -305,6 +308,17 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     // aggregate fields (native_cfg_paths). Parameters arrive whole.
     hold paths = cfgPathsOf(p, f)
     hold bits = vars + paths.var_of.length
+    // Predecessors, found once: every round below visits each (block, bit)
+    // pair, so scanning all blocks for edges there costs blocks^2 * bits.
+    change pred_first: List of[Int] = List[]
+    change preds: List of[Int] = List[]
+    each b among 0..blocks {
+        pred_first@push(preds.length)
+        each from among 0..blocks {
+            when cfgEdge(p, f, from, b) { preds@push(from) }
+        }
+    }
+    pred_first@push(preds.length)
     change inputs: List of[Bool] = List[]
     change outputs: List of[Bool] = List[]
     each b among 0..blocks {
@@ -332,10 +346,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
                 // states rather than assuming every iteration begins with
                 // fresh parameters; moving a parameter in a loop must not
                 // silently reinitialize it.
-                each pred among 0..blocks {
-                    when cfgEdge(p, f, pred, b) && !outputs[pred * bits + v] {
-                        is_init = false
-                    }
+                each n among pred_first[b]..pred_first[b + 1] {
+                    when !outputs[preds[n] * bits + v] { is_init = false }
                 }
                 hold slot = b * bits + v
                 when inputs[slot] != is_init { inputs[slot] = is_init; changing = true }
@@ -377,7 +389,9 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             hold last = cfgTakeOperand(p, f, view block.value, edit live)
             when last != 0 { give last }
         }
-        when block.term == 1 {
+        // returnref: the reference must still be valid (native_cfg_returnref).
+        when block.term == 5 && !live[block.value.value] { give 57 }
+        when block.term == 1 || block.term == 5 {
             // A Text field still owned by a live variable leaks; a referent
             // must be given back whole.
             each k among 0..paths.var_of.length {

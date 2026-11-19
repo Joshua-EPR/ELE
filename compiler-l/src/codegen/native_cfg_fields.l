@@ -110,7 +110,7 @@ flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
         p.fields[k].offset = offset
     }
     hold size = nativeLayoutSeal(edit layout)
-    when size <= 0 || size > 512 { give 63 }
+    when size <= 0 || size > cfgMaxValueBytes() { give 63 }
     p.structs[s].size = size
     p.structs[s].align = layout.align
     give 1
@@ -136,7 +136,7 @@ flow cfgLayoutEnum(p: edit CfgProgram, e: Int) => Int {
     }
     change size = 8
     when largest > 0 { size = 8 + 8 * ((largest + 7) / 8) }
-    when size > 520 { give 63 }
+    when size > 8 + cfgMaxValueBytes() { give 63 }
     p.enums[e].size = size
     p.enums[e].align = 8
     give 1

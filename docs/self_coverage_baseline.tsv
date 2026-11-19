@@ -19,6 +19,7 @@ codegen/native_cfg_loan.l	lir
 codegen/native_cfg_paths.l	lir
 codegen/native_cfg_platform.l	lir
 codegen/native_cfg_ref.l	lir
+codegen/native_cfg_returnref.l	lir
 codegen/native_cfg_text.l	lir
 codegen/native_cfg_types.l	lir
 codegen/native_cfg_verify.l	lir
