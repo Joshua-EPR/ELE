@@ -1,26 +1,26 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 68; total legacy constructs: 11808
+# files with legacy syntax: 69; total legacy constructs: 11817
 # total	angle_generic	333
 # total	borrow_mut	2017
 # total	borrow_ref	872
 # total	dot_method_call	413
 # total	kw_break	44
-# total	kw_const	93
+# total	kw_const	94
 # total	kw_continue	26
-# total	kw_else	171
+# total	kw_else	172
 # total	kw_enum	9
 # total	kw_fn	455
 # total	kw_for	202
 # total	kw_if	1615
-# total	kw_import	319
+# total	kw_import	321
 # total	kw_in	202
 # total	kw_let	1367
 # total	kw_match	169
-# total	kw_pub	458
+# total	kw_pub	461
 # total	kw_return	1562
-# total	kw_struct	61
+# total	kw_struct	63
 # total	kw_var	410
 # total	kw_while	106
 # total	match_arm_arrow	594
@@ -383,6 +383,11 @@ compiler-l/src/lir_verify.l	kw_var	7
 compiler-l/src/lir_verify.l	kw_while	1
 compiler-l/src/lir_verify.l	match_arm_arrow	21
 compiler-l/src/lir_verify.l	return_arrow	3
+compiler-l/src/lir_verify_core.l	kw_const	1
+compiler-l/src/lir_verify_core.l	kw_else	1
+compiler-l/src/lir_verify_core.l	kw_import	2
+compiler-l/src/lir_verify_core.l	kw_pub	3
+compiler-l/src/lir_verify_core.l	kw_struct	2
 compiler-l/src/lir_verify_helpers.l	borrow_mut	8
 compiler-l/src/lir_verify_helpers.l	borrow_ref	10
 compiler-l/src/lir_verify_helpers.l	dot_method_call	1
