@@ -40,8 +40,8 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
     } else if op == LIR_PLATFORM_PRINT_ERROR {
         if result != 6 { return 3 }
     } else {
-        // processArg/readText produce Result<Text,Int>. An owned payload
-        // is still rejected by Stage 1's separate LIR support gate.
+        // processArg/readText produce Result<Text,Int>: an owned union
+        // whose active Text is dropped once (or moved out by a match).
         if result < 8 || result >= types.types.length { return 3 }
         match types.types[result].kind {
             SemTypeKind.Result => {
@@ -112,6 +112,40 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
         } else if v.table[cell] && !incoming {
             v.table[cell] = false
             changed = true
+        }
+        // May-analysis for owned-union moves: moved on any incoming edge.
+        when cell < v.mtable.length && i < v.moved.length {
+            hold gone = v.moved[i]
+            when first {
+                v.mtable[cell] = gone
+            } otherwise when gone && !v.mtable[cell] {
+                v.mtable[cell] = true
+                changed = true
+            }
+        }
+        when v.has_flags {
+            when i < v.flag_root.length && v.flag_root[i] >= 0 {
+                hold f_in = v.flags[i]
+                when cell < v.ftable.length {
+                    when first {
+                        v.ftable[cell] = f_in
+                    } otherwise when v.ftable[cell] != f_in && v.ftable[cell] != 2 {
+                        v.ftable[cell] = 2
+                        changed = true
+                    }
+                }
+                hold root = v.flag_root[i]
+                hold rcell = target * vars + root
+                when root >= 0 && root < v.owned.length && rcell < v.otable.length {
+                    hold o_in = v.owned[root]
+                    when first {
+                        v.otable[rcell] = o_in
+                    } otherwise when v.otable[rcell] != o_in && v.otable[rcell] != 2 {
+                        v.otable[rcell] = 2
+                        changed = true
+                    }
+                }
+            }
         }
     }
     v.seen[target] = true

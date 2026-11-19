@@ -25,7 +25,17 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     let scrut_t = semaExprMode(&mut ctx, source, tree, scrut_e, ACCESS_READ)
     // Move path of a place scrutinee (-1 for temporaries), consumed when an
     // arm binds a non-Copy payload (lirMatchArmBind).
-    let scrut_path = ctx.expression_path
+    change scrut_path = ctx.expression_path
+    // An owned union scrutinee must be a directly owned variable: a field
+    // projection or a borrowed referent would be copied by `read`, aliasing
+    // its owner (L0016, never an unchecked copy).
+    hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
+    hold scrut_place = ctx.lir.place
+    when owned_scrut && scrut_place >= 0 {
+        when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
+        }
+    }
     var match_covered = false
     if scrut_t >= 0 && scrut_t < ctx.types.types.length {
         match ctx.types.types[scrut_t].kind {
@@ -57,6 +67,11 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     }
     let scrut_var = lirMatchScrutVar(&mut ctx, scrut_t)
     let join = flowBlock(&mut ctx.flow)
+    // The scope of an owned temporary scrutinee is the whole match.
+    semaScopeEnter(edit ctx)
+    when owned_scrut && scrut_path < 0 && scrut_place < 0 {
+        scrut_path = semaOwnScrutinee(edit ctx, source, tree, scrut_var, scrut_t, expr.start, expr.end)
+    }
 
     for i in 0..arm_count {
         let p_start = tree.extra[first_arm + 3 * i]
@@ -68,8 +83,10 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = arm_body
         scopePush(&mut ctx.scopes)
         semaScopeEnter(&mut ctx)
+        hold frozen_mark = ctx.frozen_symbols.length
         lirMatchArmBind(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, scrut_path)
         if body_stmt >= 0 { semaCheckStmt(&mut ctx, source, tree, body_stmt) }
+        during ctx.frozen_symbols.length > frozen_mark { ctx.frozen_symbols@pop() }
         semaScopeExit(&mut ctx, p_end, p_end)
         scopePop(&mut ctx.scopes)
         flowLink(&mut ctx.flow, join, -1)
@@ -77,6 +94,7 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = next_test
     }
     ctx.flow.current = join
+    semaScopeExit(edit ctx, expr.end, expr.end)
 }
 
 pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: Int) -> Int {
@@ -107,6 +125,11 @@ pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_
                 semaAddError(&mut ctx, "L0016", "destino de asignación no verificado", stmt.start, stmt.end)
             } else {
                 let sym = ctx.flow.paths[target].symbol
+                each f among 0..ctx.frozen_symbols.length {
+                    when sym >= 0 && ctx.frozen_symbols[f] == sym {
+                        semaAddError(edit ctx, "L0005", "no se puede modificar un valor mientras match examina sus datos", stmt.start, stmt.end)
+                    }
+                }
                 let loan = loanOfPath(&ctx.flow, target)
                 if loan >= 0 {
                     // Writing through a reference binding requires &mut.

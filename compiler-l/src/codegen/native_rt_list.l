@@ -24,7 +24,7 @@ expose flow rtGlueBase() => Int { give 10 }
 
 // Largest capacity in elements. With elements of at most 512 bytes every
 // byte size stays far below the Int range.
-flow rtListLimit() => Int { give 4294967296 }
+expose flow rtListLimit() => Int { give 4294967296 }
 
 flow rtListExit(code: edit X64Code, status: Int) {
     x64MovImm64(edit code, 7, status)
@@ -45,7 +45,7 @@ flow rtListFailIf(code: edit X64Code, condition: Int) {
 }
 
 // slot = max(slot, RAX), signed. Clobbers RAX, RCX and R9.
-flow rtListMaxSlot(code: edit X64Code, slot: Int) {
+expose flow rtListMaxSlot(code: edit X64Code, slot: Int) {
     x64MovReg(edit code, 9, 0)
     x64LoadSlot(edit code, 1, slot)
     x64CmpReg(edit code, 0, 1)

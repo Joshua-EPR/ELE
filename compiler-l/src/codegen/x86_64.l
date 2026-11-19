@@ -376,3 +376,48 @@ pub fn x64PatchAbsolute64(code: &mut X64Code, at: Int, value: Int) {
         n = n / 256
     }
 }
+
+// ----- Forms used by the Windows x64 (PE32+) target. -----
+// None of them is emitted by the ELF64 path, whose images stay unchanged.
+
+// CALL [RIP+disp32] (FF 15): indirect call through an import address table
+// slot. Returns the position of the displacement, which the image writer
+// patches once the slot's RVA is known. The displacement is relative to the
+// end of the instruction, i.e. to the position returned plus 4.
+expose flow x64CallRipPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 255)
+    x64Put(edit code, 21)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
+}
+
+// LEA r64,[RIP+disp32] (REX.W 8D, ModRM mod=00 r/m=101). Returns the
+// displacement position; it ends the instruction, so x64PatchRelative can
+// point it at a later byte of the same code buffer.
+expose flow x64LeaRipPlaceholder(code: edit X64Code, dst: Int) => Int {
+    when !x64RegisterValid(dst) { code.error = 3; give -1 }
+    change rex = 72
+    when dst >= 8 { rex += 4 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 141)
+    x64Put(edit code, 5 + (dst % 8) * 8)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
+}
+
+// LEA r64,[base+disp32] (REX.W 8D), e.g. the address of a stack local
+// passed by pointer to a Windows API.
+expose flow x64LeaMem(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    x64RexRegRm(edit code, dst, base)
+    x64Put(edit code, 141)
+    x64MemoryAddress(edit code, dst, base, displacement)
+}
+
+// TEST EAX,EAX (85 C0): a Win32 BOOL is defined only in its low 32 bits.
+expose flow x64TestEax(code: edit X64Code) {
+    x64Put(edit code, 133)
+    x64Put(edit code, 192)
+}

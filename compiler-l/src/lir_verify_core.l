@@ -16,6 +16,19 @@ pub struct LirVerifier {
     pending: List<Bool>
     queue: List<Int>
     status: Int
+    // Owned-union ownership (#5): may-moved bit per variable (OR join) and
+    // its per-block entry table. A moved variable may not be used, read,
+    // borrowed or dropped without a flag until it is assigned again.
+    moved: List of[Bool]
+    mtable: List of[Bool]
+    // Drop flags (#F1): abstract values (0: Off, 1: On, 2: Unknown) and
+    // ownership states (0: Uninit, 1: Init, 2: Maybe) of guarded places.
+    flags: List of[Int]
+    ftable: List of[Int]
+    owned: List of[Int]
+    otable: List of[Int]
+    flag_root: List of[Int]
+    has_flags: Bool
 }
 
 expose flow lirVarOk(l: view LirFn, slot: Int) => Bool {
@@ -109,7 +122,7 @@ expose flow lirUse(v: edit LirVerifier, l: view LirFn, operand: Int, check: Bool
     if !check { return true }
     // A malformed defined-state table must be rejected, not indexed.
     if operand >= v.defined.length { return false }
-    return v.defined[operand]
+    give v.defined[operand] && !(operand < v.moved.length && v.moved[operand])
 }
 
 expose flow lirArgType(l: view LirFn, types: view TypeTable, lm: view LirModule, arg: Int) => Int {
@@ -131,7 +144,7 @@ expose flow lirArgDefined(v: edit LirVerifier, l: view LirFn, arg: Int, check: B
         if !lirVarOk(l, root) { return false }
         if !check { return true }
         if root >= v.defined.length { return false }
-        return v.defined[root]
+        give v.defined[root] && !(root < v.moved.length && v.moved[root])
     }
     return lirUse(&mut v, l, l.args[arg].value, check)
 }

@@ -1,29 +1,29 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 70; total legacy constructs: 12092
-# total	angle_generic	345
-# total	borrow_mut	2056
-# total	borrow_ref	876
-# total	dot_method_call	419
+# files with legacy syntax: 87; total legacy constructs: 12112
+# total	angle_generic	351
+# total	borrow_mut	2052
+# total	borrow_ref	878
+# total	dot_method_call	421
 # total	kw_break	44
 # total	kw_const	97
 # total	kw_continue	26
 # total	kw_else	172
-# total	kw_enum	9
+# total	kw_enum	11
 # total	kw_fn	461
-# total	kw_for	213
-# total	kw_if	1678
-# total	kw_import	321
-# total	kw_in	213
-# total	kw_let	1384
-# total	kw_match	172
-# total	kw_pub	464
-# total	kw_return	1636
+# total	kw_for	208
+# total	kw_if	1669
+# total	kw_import	367
+# total	kw_in	208
+# total	kw_let	1381
+# total	kw_match	171
+# total	kw_pub	466
+# total	kw_return	1626
 # total	kw_struct	63
-# total	kw_var	420
+# total	kw_var	419
 # total	kw_while	109
-# total	match_arm_arrow	600
+# total	match_arm_arrow	598
 # total	return_arrow	314
 # file	category	count
 compiler-l/src/ast.l	angle_generic	19
@@ -90,6 +90,7 @@ compiler-l/src/codegen/lir_tokens.l	kw_struct	3
 compiler-l/src/codegen/lir_tokens.l	kw_var	12
 compiler-l/src/codegen/lir_tokens.l	kw_while	5
 compiler-l/src/codegen/lir_tokens.l	return_arrow	9
+compiler-l/src/codegen/native_cfg_arith.l	kw_import	5
 compiler-l/src/codegen/native_cfg_defs.l	angle_generic	30
 compiler-l/src/codegen/native_cfg_defs.l	borrow_ref	2
 compiler-l/src/codegen/native_cfg_defs.l	kw_fn	4
@@ -100,6 +101,13 @@ compiler-l/src/codegen/native_cfg_defs.l	kw_pub	13
 compiler-l/src/codegen/native_cfg_defs.l	kw_return	5
 compiler-l/src/codegen/native_cfg_defs.l	kw_struct	9
 compiler-l/src/codegen/native_cfg_defs.l	return_arrow	4
+compiler-l/src/codegen/native_cfg_fields.l	kw_import	4
+compiler-l/src/codegen/native_cfg_list.l	kw_import	3
+compiler-l/src/codegen/native_cfg_list_emit.l	kw_import	6
+compiler-l/src/codegen/native_cfg_loan.l	kw_import	3
+compiler-l/src/codegen/native_cfg_paths.l	angle_generic	4
+compiler-l/src/codegen/native_cfg_paths.l	kw_import	1
+compiler-l/src/codegen/native_cfg_ref.l	kw_import	3
 compiler-l/src/codegen/native_cfg_text.l	angle_generic	9
 compiler-l/src/codegen/native_cfg_text.l	borrow_mut	163
 compiler-l/src/codegen/native_cfg_text.l	borrow_ref	37
@@ -126,6 +134,9 @@ compiler-l/src/codegen/native_heap.l	kw_let	5
 compiler-l/src/codegen/native_heap.l	kw_pub	3
 compiler-l/src/codegen/native_heap.l	kw_return	7
 compiler-l/src/codegen/native_heap.l	return_arrow	3
+compiler-l/src/codegen/native_heap_dynamic.l	kw_import	1
+compiler-l/src/codegen/native_heap_owner.l	kw_import	3
+compiler-l/src/codegen/native_heap_resize.l	kw_import	2
 compiler-l/src/codegen/native_layout.l	angle_generic	4
 compiler-l/src/codegen/native_layout.l	borrow_mut	10
 compiler-l/src/codegen/native_layout.l	borrow_ref	3
@@ -140,9 +151,11 @@ compiler-l/src/codegen/native_layout.l	kw_struct	1
 compiler-l/src/codegen/native_layout.l	kw_var	3
 compiler-l/src/codegen/native_layout.l	kw_while	2
 compiler-l/src/codegen/native_layout.l	return_arrow	11
+compiler-l/src/codegen/native_list_int.l	kw_import	2
 compiler-l/src/codegen/native_rt.l	angle_generic	2
 compiler-l/src/codegen/native_rt.l	dot_method_call	9
 compiler-l/src/codegen/native_rt.l	kw_import	1
+compiler-l/src/codegen/native_rt_list.l	kw_import	1
 compiler-l/src/codegen/x86_64.l	angle_generic	1
 compiler-l/src/codegen/x86_64.l	borrow_mut	137
 compiler-l/src/codegen/x86_64.l	dot_method_call	1
@@ -314,18 +327,18 @@ compiler-l/src/lir_build.l	kw_while	2
 compiler-l/src/lir_build.l	match_arm_arrow	2
 compiler-l/src/lir_build.l	return_arrow	11
 compiler-l/src/lir_builtin_union.l	borrow_mut	2
-compiler-l/src/lir_builtin_union.l	borrow_ref	11
+compiler-l/src/lir_builtin_union.l	borrow_ref	10
 compiler-l/src/lir_builtin_union.l	dot_method_call	18
 compiler-l/src/lir_builtin_union.l	kw_fn	7
 compiler-l/src/lir_builtin_union.l	kw_for	5
 compiler-l/src/lir_builtin_union.l	kw_if	14
 compiler-l/src/lir_builtin_union.l	kw_import	3
 compiler-l/src/lir_builtin_union.l	kw_in	5
-compiler-l/src/lir_builtin_union.l	kw_let	10
-compiler-l/src/lir_builtin_union.l	kw_match	4
+compiler-l/src/lir_builtin_union.l	kw_let	9
+compiler-l/src/lir_builtin_union.l	kw_match	3
 compiler-l/src/lir_builtin_union.l	kw_pub	6
-compiler-l/src/lir_builtin_union.l	kw_return	25
-compiler-l/src/lir_builtin_union.l	match_arm_arrow	12
+compiler-l/src/lir_builtin_union.l	kw_return	22
+compiler-l/src/lir_builtin_union.l	match_arm_arrow	10
 compiler-l/src/lir_builtin_union.l	return_arrow	6
 compiler-l/src/lir_emit.l	angle_generic	8
 compiler-l/src/lir_emit.l	borrow_mut	2
@@ -362,14 +375,14 @@ compiler-l/src/lir_finish.l	kw_struct	1
 compiler-l/src/lir_finish.l	kw_var	12
 compiler-l/src/lir_finish.l	kw_while	2
 compiler-l/src/lir_finish.l	return_arrow	3
-compiler-l/src/lir_module.l	borrow_mut	27
+compiler-l/src/lir_module.l	borrow_mut	25
 compiler-l/src/lir_module.l	borrow_ref	47
 compiler-l/src/lir_module.l	dot_method_call	36
 compiler-l/src/lir_module.l	kw_continue	1
 compiler-l/src/lir_module.l	kw_else	1
 compiler-l/src/lir_module.l	kw_fn	7
 compiler-l/src/lir_module.l	kw_for	22
-compiler-l/src/lir_module.l	kw_if	37
+compiler-l/src/lir_module.l	kw_if	36
 compiler-l/src/lir_module.l	kw_import	14
 compiler-l/src/lir_module.l	kw_in	22
 compiler-l/src/lir_module.l	kw_let	49
@@ -382,19 +395,19 @@ compiler-l/src/lir_module.l	return_arrow	1
 compiler-l/src/lir_verify.l	angle_generic	3
 compiler-l/src/lir_verify.l	borrow_mut	21
 compiler-l/src/lir_verify.l	borrow_ref	15
-compiler-l/src/lir_verify.l	dot_method_call	6
+compiler-l/src/lir_verify.l	dot_method_call	4
 compiler-l/src/lir_verify.l	kw_break	1
 compiler-l/src/lir_verify.l	kw_else	19
 compiler-l/src/lir_verify.l	kw_fn	3
-compiler-l/src/lir_verify.l	kw_for	10
-compiler-l/src/lir_verify.l	kw_if	113
+compiler-l/src/lir_verify.l	kw_for	5
+compiler-l/src/lir_verify.l	kw_if	107
 compiler-l/src/lir_verify.l	kw_import	7
-compiler-l/src/lir_verify.l	kw_in	10
+compiler-l/src/lir_verify.l	kw_in	5
 compiler-l/src/lir_verify.l	kw_let	32
 compiler-l/src/lir_verify.l	kw_match	7
 compiler-l/src/lir_verify.l	kw_pub	1
-compiler-l/src/lir_verify.l	kw_return	93
-compiler-l/src/lir_verify.l	kw_var	8
+compiler-l/src/lir_verify.l	kw_return	88
+compiler-l/src/lir_verify.l	kw_var	7
 compiler-l/src/lir_verify.l	kw_while	1
 compiler-l/src/lir_verify.l	match_arm_arrow	21
 compiler-l/src/lir_verify.l	return_arrow	3
@@ -410,7 +423,7 @@ compiler-l/src/lir_verify_core.l	kw_in	1
 compiler-l/src/lir_verify_core.l	kw_let	10
 compiler-l/src/lir_verify_core.l	kw_match	2
 compiler-l/src/lir_verify_core.l	kw_pub	3
-compiler-l/src/lir_verify_core.l	kw_return	42
+compiler-l/src/lir_verify_core.l	kw_return	40
 compiler-l/src/lir_verify_core.l	kw_struct	2
 compiler-l/src/lir_verify_core.l	kw_var	5
 compiler-l/src/lir_verify_core.l	kw_while	2
@@ -571,11 +584,11 @@ compiler-l/src/native_binary_io.l	kw_return	5
 compiler-l/src/native_binary_io.l	kw_var	1
 compiler-l/src/native_binary_io.l	match_arm_arrow	2
 compiler-l/src/native_binary_io.l	return_arrow	1
-compiler-l/src/native_cfg_demo.l	borrow_ref	2
+compiler-l/src/native_cfg_demo.l	borrow_ref	1
 compiler-l/src/native_cfg_demo.l	kw_fn	1
-compiler-l/src/native_cfg_demo.l	kw_if	4
+compiler-l/src/native_cfg_demo.l	kw_if	2
 compiler-l/src/native_cfg_demo.l	kw_import	2
-compiler-l/src/native_cfg_demo.l	kw_let	4
+compiler-l/src/native_cfg_demo.l	kw_let	3
 compiler-l/src/native_cfg_demo.l	kw_match	3
 compiler-l/src/native_cfg_demo.l	kw_return	8
 compiler-l/src/native_cfg_demo.l	match_arm_arrow	6
@@ -621,6 +634,15 @@ compiler-l/src/native_heap_cases.l	kw_return	19
 compiler-l/src/native_heap_cases.l	kw_var	2
 compiler-l/src/native_heap_cases.l	match_arm_arrow	4
 compiler-l/src/native_heap_cases.l	return_arrow	1
+compiler-l/src/native_heap_dynamic_cases.l	borrow_ref	1
+compiler-l/src/native_heap_dynamic_cases.l	dot_method_call	1
+compiler-l/src/native_heap_dynamic_cases.l	kw_import	3
+compiler-l/src/native_heap_owner_cases.l	borrow_ref	1
+compiler-l/src/native_heap_owner_cases.l	dot_method_call	1
+compiler-l/src/native_heap_owner_cases.l	kw_import	3
+compiler-l/src/native_heap_resize_cases.l	borrow_ref	1
+compiler-l/src/native_heap_resize_cases.l	dot_method_call	1
+compiler-l/src/native_heap_resize_cases.l	kw_import	3
 compiler-l/src/native_layout_cases.l	borrow_mut	15
 compiler-l/src/native_layout_cases.l	borrow_ref	8
 compiler-l/src/native_layout_cases.l	kw_fn	1
@@ -638,6 +660,9 @@ compiler-l/src/native_lir_demo.l	kw_match	3
 compiler-l/src/native_lir_demo.l	kw_return	8
 compiler-l/src/native_lir_demo.l	match_arm_arrow	6
 compiler-l/src/native_lir_demo.l	return_arrow	1
+compiler-l/src/native_list_cases.l	borrow_ref	1
+compiler-l/src/native_list_cases.l	dot_method_call	1
+compiler-l/src/native_list_cases.l	kw_import	3
 compiler-l/src/native_memory_cases.l	borrow_mut	8
 compiler-l/src/native_memory_cases.l	kw_fn	1
 compiler-l/src/native_memory_cases.l	kw_if	4
@@ -782,7 +807,7 @@ compiler-l/src/sema_builtin_union.l	kw_var	1
 compiler-l/src/sema_builtin_union.l	match_arm_arrow	2
 compiler-l/src/sema_builtin_union.l	return_arrow	1
 compiler-l/src/sema_collection_ops.l	angle_generic	1
-compiler-l/src/sema_collection_ops.l	borrow_mut	59
+compiler-l/src/sema_collection_ops.l	borrow_mut	58
 compiler-l/src/sema_collection_ops.l	borrow_ref	15
 compiler-l/src/sema_collection_ops.l	kw_else	1
 compiler-l/src/sema_collection_ops.l	kw_fn	5
@@ -833,7 +858,7 @@ compiler-l/src/sema_drop.l	kw_while	11
 compiler-l/src/sema_drop.l	match_arm_arrow	17
 compiler-l/src/sema_drop.l	return_arrow	5
 compiler-l/src/sema_expr.l	angle_generic	11
-compiler-l/src/sema_expr.l	borrow_mut	148
+compiler-l/src/sema_expr.l	borrow_mut	147
 compiler-l/src/sema_expr.l	borrow_ref	45
 compiler-l/src/sema_expr.l	dot_method_call	16
 compiler-l/src/sema_expr.l	kw_continue	1
@@ -927,7 +952,7 @@ compiler-l/src/sema_stmt.l	kw_for	3
 compiler-l/src/sema_stmt.l	kw_if	48
 compiler-l/src/sema_stmt.l	kw_import	18
 compiler-l/src/sema_stmt.l	kw_in	3
-compiler-l/src/sema_stmt.l	kw_let	88
+compiler-l/src/sema_stmt.l	kw_let	87
 compiler-l/src/sema_stmt.l	kw_match	5
 compiler-l/src/sema_stmt.l	kw_pub	1
 compiler-l/src/sema_stmt.l	kw_return	4
@@ -1047,3 +1072,6 @@ compiler-l/src/types.l	kw_var	7
 compiler-l/src/types.l	kw_while	2
 compiler-l/src/types.l	match_arm_arrow	4
 compiler-l/src/types.l	return_arrow	2
+crates/l/src/prelude.l	angle_generic	2
+crates/l/src/prelude.l	kw_enum	2
+crates/l/src/prelude.l	kw_pub	2

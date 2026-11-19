@@ -26,7 +26,8 @@
 //! atomic pending variant-sensitive ownership and native enum code generation.
 use crate::{
     cfg::{
-        Arg, Func, Inst, InstKind, Module, Operand, Place, Proj, Rvalue, Terminator, VarId, VarTy,
+        Arg, Const, Func, Inst, InstKind, Module, Operand, Place, Proj, Rvalue, Terminator, VarId,
+        VarTy,
     },
     lir::{EnumDef, StructDef, Type},
 };
@@ -270,9 +271,10 @@ impl Owned<'_> {
                     }
                     // Taking the last element moves it out of the list, whose
                     // length shrinks: the list keeps owning the rest.
-                    Rvalue::Len(p) | Rvalue::Cap(p) | Rvalue::ListTakeLast(p) => {
-                        out.push(Effect::Use(p.clone()))
-                    }
+                    Rvalue::Len(p)
+                    | Rvalue::Cap(p)
+                    | Rvalue::ListTakeLast(p)
+                    | Rvalue::ListPop(p, _) => out.push(Effect::Use(p.clone())),
                 }
                 out.push(Effect::Def(root(*d)));
             }
@@ -713,6 +715,169 @@ pub fn verify(func: &Func, ownership: &Ownership) -> Result<(), Violation> {
                 return Err(Violation {
                     block: b,
                     message: format!("{p:?} sigue poseyendo un valor al retornar: fuga"),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Abstract value of a drop flag on the paths reaching a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlagValue {
+    Off,
+    On,
+    Unknown,
+}
+fn join_flag(a: FlagValue, b: FlagValue) -> FlagValue {
+    if a == b { a } else { FlagValue::Unknown }
+}
+/// The places each drop flag guards (from every flagged `Drop`/`DropField`).
+fn flag_places(func: &Func) -> HashMap<VarId, Vec<Place>> {
+    let mut out: HashMap<VarId, Vec<Place>> = HashMap::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            let (place, flag) = match &inst.kind {
+                InstKind::Drop(v, Some(f)) => (root(*v), *f),
+                InstKind::DropField(p, Some(f)) => (p.clone(), *f),
+                _ => continue,
+            };
+            let places = out.entry(flag).or_default();
+            if !places.contains(&place) {
+                places.push(place);
+            }
+        }
+    }
+    out
+}
+fn flag_transfer(flags: &mut HashMap<VarId, FlagValue>, kind: &InstKind) {
+    if let InstKind::Assign(d, rv) = kind
+        && let Some(value) = flags.get_mut(d)
+    {
+        *value = match rv {
+            Rvalue::Use(Operand::Const(Const::Bool(true))) => FlagValue::On,
+            Rvalue::Use(Operand::Const(Const::Bool(false))) => FlagValue::Off,
+            _ => FlagValue::Unknown,
+        };
+    }
+}
+/// Whether flag value `f` agrees with the ownership state of every leaf the
+/// flag guards: `On` exactly when each leaf owns a value, `Off` exactly when
+/// none does, `Unknown` only where the leaves are `Maybe` (a join of agreeing
+/// paths).
+fn flag_agrees(owned: &Owned, state: &States, places: &[Place], f: FlagValue) -> bool {
+    places.iter().all(|p| {
+        owned.leaves(p).iter().all(|leaf| {
+            let st = state.get(leaf).copied().unwrap_or(State::Uninit);
+            matches!(
+                (st, f),
+                (State::Init, FlagValue::On)
+                    | (State::Uninit, FlagValue::Off)
+                    | (State::Maybe, FlagValue::Unknown)
+            )
+        })
+    })
+}
+/// Drop-flag values (#F1). `verify` treats a flagged drop as possibly not
+/// executing, so a forged flag value could double free (flag set while the
+/// value was moved or dropped) or leak (flag clear while it owns a value).
+/// This pass tracks every flag as an abstract constant per path (CFG
+/// dataflow over `Off`/`On`/`Unknown`) next to the ownership states, and
+/// requires the Stage 0 invariant "flag == value currently owned": at each
+/// flagged drop and at the end of every block that continues to another
+/// block. Joins of agreeing paths stay agreeing (`Maybe`/`Unknown`); any
+/// other combination is rejected, never assumed.
+pub fn verify_flags(func: &Func, ownership: &Ownership) -> Result<(), Violation> {
+    let guarded = flag_places(func);
+    if guarded.is_empty() {
+        return Ok(());
+    }
+    let owned = Owned {
+        vars: &func.vars,
+        ownership,
+    };
+    for flag in guarded.keys() {
+        if func.vars.get(*flag) != Some(&VarTy::Value(Type::Bool)) {
+            return Err(Violation {
+                block: 0,
+                message: format!("v{flag} no es un flag Bool"),
+            });
+        }
+    }
+    let places = entry_states(func, &owned);
+    let start: HashMap<VarId, FlagValue> = guarded.keys().map(|f| (*f, FlagValue::Off)).collect();
+    let mut flags: Vec<Option<HashMap<VarId, FlagValue>>> = vec![None; func.blocks.len()];
+    if flags.is_empty() {
+        return Ok(());
+    }
+    flags[0] = Some(start);
+    let mut work = vec![0];
+    while let Some(b) = work.pop() {
+        let Some(mut values) = flags[b].clone() else {
+            continue;
+        };
+        for inst in &func.blocks[b].insts {
+            flag_transfer(&mut values, &inst.kind);
+        }
+        let Some(t) = &func.blocks[b].term else {
+            continue;
+        };
+        for next in successors(t) {
+            if next >= flags.len() {
+                continue;
+            }
+            let merged = match &flags[next] {
+                None => values.clone(),
+                Some(old) => old
+                    .iter()
+                    .map(|(f, v)| (*f, join_flag(*v, values[f])))
+                    .collect(),
+            };
+            if flags[next].as_ref() != Some(&merged) {
+                flags[next] = Some(merged);
+                work.push(next);
+            }
+        }
+    }
+    for (b, block) in func.blocks.iter().enumerate() {
+        let (Some(mut state), Some(mut values)) = (places[b].clone(), flags[b].clone()) else {
+            continue;
+        };
+        for inst in &block.insts {
+            if let InstKind::Drop(_, Some(f)) | InstKind::DropField(_, Some(f)) = &inst.kind {
+                let here = [match &inst.kind {
+                    InstKind::Drop(v, _) => root(*v),
+                    InstKind::DropField(p, _) => p.clone(),
+                    _ => unreachable!(),
+                }];
+                if !flag_agrees(&owned, &state, &here, values[f]) {
+                    return Err(Violation {
+                        block: b,
+                        message: format!(
+                            "flag v{f} = {:?} no coincide con la propiedad de {:?}: doble liberación o fuga",
+                            values[f], here[0]
+                        ),
+                    });
+                }
+            }
+            apply(&owned, &mut state, &owned.inst(&inst.kind));
+            flag_transfer(&mut values, &inst.kind);
+        }
+        let Some(t) = &block.term else {
+            continue;
+        };
+        apply(&owned, &mut state, &owned.terminator(t));
+        if successors(t).is_empty() {
+            continue;
+        }
+        for (f, guarded_places) in &guarded {
+            if !flag_agrees(&owned, &state, guarded_places, values[f]) {
+                return Err(Violation {
+                    block: b,
+                    message: format!(
+                        "flag v{f} = {:?} no refleja la propiedad de {:?} al salir del bloque",
+                        values[f], guarded_places
+                    ),
                 });
             }
         }

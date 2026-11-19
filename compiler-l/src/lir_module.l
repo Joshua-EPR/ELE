@@ -160,6 +160,12 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
             let first_variant = ctx.lir_module.en_first[k]
             let first_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant])
             let second_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
+            // An owned payload (e.g. a list type never registered) must have
+            // a concrete LIR type code; `?` is never serialized.
+            hold unit_first = ctx.lir_module.variant_payload[first_variant] == 0
+            when (!unit_first && first_code.byteLength == 1 && first_code@byteAt(0) == 63) || (second_code.byteLength == 1 && second_code@byteAt(0) == 63) {
+                semaAddError(edit ctx, "L0016", "payload de Option/Result no representable en ELE-LIR 1", 0, 0)
+            }
             lirBuiltinHeader(&mut ctx, k, first_code, second_code)
             continue
         }
@@ -216,7 +222,8 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
         return
     }
     var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
-    if ctx.lir_fault > 0 { lirInjectFault(&mut ctx.lir, &mut body, ctx.lir_fault) }
+    when ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(edit ctx.lir, edit body, ctx.lir_fault) }
+    when ctx.lir_fault >= 14 { lirInjectUnionFault(edit ctx.lir, edit body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, ctx.lir_fault) }
     let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
     if checked.status != 0 {
         let rule = checked.status
@@ -236,6 +243,86 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
 // 5 call arity, 6 drop of a non-owned value, 7 return type, 8 field index.
 // 9 invalid platform opcode, 10 platform arity, 11 argument loan mode,
 // 12 platform result type, 13 invalid platform argument id.
+// Owned unions (#5): 14 owned payload read from the other variant (rule 3),
+// 15 conditional drop of a maybe-moved union made unconditional (rule 6),
+// 16 a use after an owned payload consumed its union (rule 5),
+// 17 drop flag forged to cb1 after move-out (double free, rule 6),
+// 18 drop flag forged to cb0 when owned (leak, rule 6).
+flow lirInjectUnionFault(l: edit LirFn, body: edit LirBody, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], fault: Int) {
+    each n among 0..body.order.length {
+        hold id = body.order[n]
+        hold kind = l.insts[id].kind
+        hold dst = l.insts[id].dst
+        when kind == LIR_DROP && fault == 15 && l.insts[id].a >= 0 && dst >= 0 && dst < l.vars.length {
+            hold ty = l.vars[dst].ty
+            when ty >= 0 && ty < types.types.length {
+                change union = false
+                choose types.types[ty].kind {
+                    SemTypeKind.Option : { union = true }
+                    SemTypeKind.Result : { union = true }
+                    _ : {}
+                }
+                when union {
+                    l.insts[id].a = -1
+                    give
+                }
+            }
+        }
+        hold is_payload = kind == LIR_PAYLOAD && dst >= 0 && dst < l.vars.length && lirBuiltinPayloadOwned(types, lm, l.vars[dst].ty)
+        hold is_read_field = kind == LIR_READ && dst >= 0 && dst < l.vars.length && l.vars[dst].ty >= 0 && l.vars[dst].ty < drop_memo.length && drop_memo[l.vars[dst].ty] == 2
+        when is_payload || is_read_field {
+            when fault == 14 && is_payload {
+                l.insts[id].c = 1 - l.insts[id].c
+                give
+            }
+            when fault == 16 && is_payload {
+                hold root = l.places[l.insts[id].a].root
+                hold block = l.insts[id].block
+                each m among (n + 1)..body.order.length {
+                    hold later = body.order[m]
+                    when l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        hold ldst = l.insts[later].dst
+                        when ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            proceed
+                        }
+                        // Well-typed copy of the consumed union into a fresh variable.
+                        hold union_ty = l.vars[root].ty
+                        hold copy = lirVar(edit l, union_ty, false)
+                        l.insts[later].dst = copy
+                        l.insts[later].a = root
+                        give
+                    }
+                }
+            }
+            when fault == 17 {
+                // Double free: drop flag forged to cb1 after payload move-out.
+                hold block = l.insts[id].block
+                each m among (n + 1)..body.order.length {
+                    hold later = body.order[m]
+                    when l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        hold ldst = l.insts[later].dst
+                        when ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            l.insts[later].a = lirConst(edit l, LIR_CONST_BOOL, 1, 0, 0)
+                            give
+                        }
+                    }
+                }
+            }
+        }
+        when fault == 18 && kind == LIR_USE && dst >= 0 && dst < l.vars.length && l.vars[dst].ty == 4 {
+            // Leak: drop flag forged to cb0 when owned.
+            hold operand = l.insts[id].a
+            when !lirIsVar(operand) {
+                hold cid = lirConstId(operand)
+                when cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL && l.consts[cid].value == 1 {
+                    l.insts[id].a = lirConst(edit l, LIR_CONST_BOOL, 0, 0, 0)
+                    give
+                }
+            }
+        }
+    }
+}
+
 fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]

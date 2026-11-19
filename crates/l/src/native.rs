@@ -233,7 +233,8 @@ pub fn check_supported(module: &cfg::Module) -> Result<(), Diagnostic> {
                         Rvalue::BytesLen(p)
                         | Rvalue::Len(p)
                         | Rvalue::Cap(p)
-                        | Rvalue::ListTakeLast(p) => check_place(p, span)?,
+                        | Rvalue::ListTakeLast(p)
+                        | Rvalue::ListPop(p, _) => check_place(p, span)?,
                         Rvalue::ArrayLit(_, ops) | Rvalue::ListLit(_, ops) => {
                             for o in ops {
                                 check_operand(o, span)?;
@@ -1305,6 +1306,60 @@ impl FnGen<'_> {
                             .load(clif_type_of(c.ty), flags(), at, c.offset as i32)
                     })
                     .collect()
+            }
+            Rvalue::ListPop(p, opt_ty) => {
+                let Type::Enum(e) = opt_ty else {
+                    return Err(internal("opt_ty no es enum"));
+                };
+                let enum_layout = self.layouts.enum_layout(*e).map_err(internal)?;
+                let slot = b.create_sized_stack_slot(ir::StackSlotData::new(
+                    ir::StackSlotKind::ExplicitSlot,
+                    enum_layout.layout.size.max(1),
+                    enum_layout.layout.align.trailing_zeros() as u8,
+                ));
+                let base = b.ins().stack_addr(types::I64, slot, 0);
+                let zero = b.ins().iconst(types::I64, 0);
+                for w in 0..(enum_layout.layout.size / 8) {
+                    b.ins().store(flags(), zero, base, (w * 8) as i32);
+                }
+                let elem = self.elem_of(self.place_type(p)?)?;
+                let hdr = self.place_addr(b, h, p)?;
+                let len = b.ins().load(types::I64, flags(), hdr, runtime::LIST_LEN);
+                let empty = b.ins().icmp_imm_s(IntCC::Equal, len, 0);
+                let (none_b, some_b, merge_b) =
+                    (b.create_block(), b.create_block(), b.create_block());
+                brif(b, empty, none_b, some_b);
+                b.switch_to_block(none_b);
+                b.ins().store(flags(), zero, base, 0);
+                jump(b, merge_b, &[]);
+                b.switch_to_block(some_b);
+                let one = b.ins().iconst(types::I64, 1);
+                b.ins().store(flags(), one, base, 0);
+                let last = b.ins().iadd_imm_s(len, -1);
+                b.ins().store(flags(), last, hdr, runtime::LIST_LEN);
+                let ptr = b.ins().load(types::I64, flags(), hdr, runtime::LIST_PTR);
+                let scaled = b.ins().imul_imm_s(last, self.stride(elem)?);
+                let at = b.ins().iadd(ptr, scaled);
+                let field_off = self
+                    .layouts
+                    .variant_field_offset(*e, 1, 0)
+                    .map_err(internal)?;
+                let op_layout = self.layouts.get(elem).map_err(internal)?;
+                for c in &op_layout.components {
+                    let val = b
+                        .ins()
+                        .load(clif_type_of(c.ty), flags(), at, c.offset as i32);
+                    b.ins()
+                        .store(flags(), val, base, (field_off + c.offset) as i32);
+                }
+                jump(b, merge_b, &[]);
+                b.switch_to_block(merge_b);
+                let num_words = enum_layout.layout.size / 8;
+                let mut words = Vec::new();
+                for w in 0..num_words {
+                    words.push(b.ins().load(types::I64, flags(), base, (w * 8) as i32));
+                }
+                words
             }
             // A new task state: zeroed, so `resume` is 0 (nothing has run
             // yet) and every field owns nothing until it is written.

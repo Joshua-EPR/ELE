@@ -8,6 +8,7 @@ import loans_l
 import lir_build
 import sema_context
 import sema_lower
+take lir_builtin_union
 
 pub fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     let expected = ctx.expected_list_type
@@ -107,11 +108,10 @@ pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
         }
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         let opt_t = semTypeMakeOption(&mut ctx.types, elem_t)
-        // List.pop requires a verified bridge from List storage to the
-        // Some/None tagged value and ownership-aware element transfer.
-        // Option<T> match support alone does not make this operation safe.
-        // Keep Stage 1 semantic/ownership checking, but fail --emit-lir.
-        lirMarkUnsupported(&mut ctx.lir, expr.start)
+        hold enum_id = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, opt_t)
+        when enum_id < 0 {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
+        }
         let dst = lirVar(&mut ctx.lir, opt_t, false)
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_POP, dst, base_place, 0, 0) }

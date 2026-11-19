@@ -88,3 +88,49 @@ cargo test -p project-l --test lir_option_result_aggregate_l -- --test-threads=1
 `examples/native_option_result_aggregate_stage1.l`: Stage 1 → ELE-LIR →
 backend ELE → ELF64; en Linux imprime `42 205 8 156 3` y sale con 158, igual
 que `l run` y `l run-lir` de Stage 0.
+
+## Incremento: payloads propietarios en Stage 1 (#5, parte propietaria de #4)
+
+`Option`/`Result` aceptan payloads **propietarios** en ELE-LIR: `Text`,
+`List<T>`, `Option`/`Result` anidados (`Option<Result<Text,Int>>`) y
+`shape` cuyos campos son, recursivamente, representables
+(`lirBuiltinPayloadOk` en `lir_builtin_union.l`). Cada instanciación sigue
+siendo un enum sintético distinto: `Result<Text,Int>` y `Result<Int,Text>`
+no se confunden, y un enum anidado se registra antes que el que lo contiene.
+
+- **Construcción**: `Some(x)`, `Ok(x)` y `Err(x)` evalúan `x` con
+  `ACCESS_MOVE`: la fuente queda movida (uso posterior = `L0005`, sin drop de
+  la fuente). El tipo contextual se propaga solo al payload que es a su vez
+  `Option`/`Result` (`Some(Ok(t))`).
+- **Drop**: la unión es una hoja atómica del plan de drops (PR #93); se emite
+  un único `drop vN` (o `cdrop` con flag si quizá se movió) en cada salida
+  del CFG: fin de ámbito, `return`, `break`, `continue`. El backend
+  libera solo el payload de la variante activa.
+- **match**: ligar un payload propietario emite `i payload` tras la
+  comprobación del discriminante del brazo (o la prueba de cobertura del último
+  brazo, con comprobación dinámica en el backend) y **consume** el escrutinio
+  (`semaAccess(ACCESS_MOVE)`); el binding es un local propietario con su propio
+  drop. Un escrutinio temporal propietario (`match readText(...)`) recibe un
+  camino propio cuyo ámbito es todo el `match`.
+- **Rechazos explícitos**: mover un payload desde un escrutinio prestado
+  (`L0005`); un escrutinio proyectado (`h.o`) o detrás de referencia, que
+  `read` copiaría aliasando a su dueño (`L0016`); `choice` nominales con
+  payload propietario (`L0016`).
+- **Verificador ELE** (`lir_verify.l`): análisis *may* de movimientos de
+  uniones propietarias (y de payloads movidos a `variant`): uso, préstamo,
+  `disc`/`payload` tras movimiento = regla 5; `drop` sin flag de una unión
+  quizá movida = regla 6. Fallos inyectables `--lir-fault=14|15|16`.
+- **Verificador Rust** (`lir_protocol.rs`): `payload_ok` + marcador `Moved`
+  tras una extracción propietaria; `drops::verify` rechaza fugas, doble
+  drop y doble extracción.
+- **Backend ELE nativo**: sin layout verificado para payloads propietarios;
+  rechaza el módulo (código 82) sin escribir ELF. Los programas se ejecutan
+  con `l run-lir` (Cranelift) con heap equilibrado y paridad con Stage 0.
+
+```bash
+cargo test -p project-l --test stage1_owned_union_lir_l -- --test-threads=1
+```
+
+Siguen fuera: el operador `?`, préstamos de payloads (`view` sobre el
+payload sin mover), movimientos parciales de un payload y `List.pop` como
+escrutinio (siguiente bloqueo de autocobertura).

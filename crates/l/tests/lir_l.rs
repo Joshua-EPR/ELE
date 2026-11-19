@@ -221,13 +221,13 @@ fn compiles_real_flow_cfg_functions_natively() {
 }
 
 #[test]
-fn unsupported_list_pop_match_reports_a_diagnostic_not_an_ice() {
+fn list_pop_option_match_supported() {
     let source = "flow main() {\n    change xs: List of[Int] = List[1, 2]\n    hold x = xs@pop()\n    match x {\n        Some(v) => { print(v) }\n        None => { print(0) }\n    }\n}\n";
-    let out = emit_lir("list_pop_option_unsupported", source, "--emit-lir");
-    assert_ne!(out.code, Some(0));
-    assert!(out.stdout.is_empty(), "{}", out.stdout);
-    assert!(out.stderr.contains("error[L0016]"), "{}", out.stderr);
-    assert!(!out.stderr.contains("error[ICE]"), "{}", out.stderr);
+    let out = emit_lir("list_pop_option_supported", source, "--emit-lir");
+    assert_eq!(out.code, Some(0), "{}", out.stderr);
+    let (_, one) = build_and_run_lir("list_pop_option_supported", &out.stdout);
+    assert_eq!(one.code, Some(0), "{}", one.stderr);
+    assert_eq!(one.stdout, "2\n");
 }
 
 #[test]

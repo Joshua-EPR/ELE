@@ -220,6 +220,23 @@ pub fn semaTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: Int, s
     ctx.pending_temps.push(path)
 }
 
+// An owned temporary scrutinee (e.g. `choose readText(...)`) held among LIR
+// variable `value`. It becomes an owned binding of the enclosing scope, not
+// a statement temporary: an arm that binds its payload moves it, and every
+// exit (arm end, give, leave, proceed) drops it otherwise. Returns its
+// move path, or -1 when it owns nothing.
+expose flow semaOwnScrutinee(ctx: edit SemaContext, source: view Text, tree: view AstTree, value: Int, ty: Int, start: Int, end: Int) => Int {
+    when value < 0 || !semaNeedsDrop(edit ctx, source, tree, ty) { give -1 }
+    hold path = flowRoot(edit ctx.flow, -1)
+    lirBindPath(edit ctx.lir, path, value)
+    flowPad(edit ctx.flow)
+    ctx.flow.origins[path] = start
+    semaMaterialize(edit ctx, source, tree, path, ty)
+    flowEvent(edit ctx.flow, FLOW_INIT, path, start, end)
+    ctx.owned_locals@push(path)
+    give path
+}
+
 // Temporaries die at the end of their statement, last created first.
 pub fn semaFlushTemps(ctx: &mut SemaContext, start: Int, end: Int) {
     while ctx.pending_temps.length > 0 {

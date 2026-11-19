@@ -16,6 +16,7 @@ import sema_ops
 import sema_collection_ops
 import stmt_lower
 import sema_builtin_union
+take lir_builtin_union
 
 fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
     let decl = &tree.declarations[decl_id]
@@ -257,8 +258,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             if builtin_variant >= 0 && arg_count == 1 {
                 // A nested expression must not inherit the result union type
                 // of its constructor's own expected destination.
+                // Only a nested Option/Result payload type is propagated
+                // (e.g. `Some(Ok(x))` against Option<Result<T, E>>).
                 let contextual = ctx.expected_union_type
-                ctx.expected_union_type = -1
+                ctx.expected_union_type = semaBuiltinPayloadExpected(ctx, contextual, builtin_variant)
                 let arg_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
                 let payload = lirTakeOperand(&mut ctx, arg_t)
                 ctx.expected_union_type = contextual
@@ -295,6 +298,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     let argument = lirArg(&mut ctx.lir, false, operand, false)
                     args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+                    when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                     semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
                     return res_t
                 }
@@ -335,9 +339,9 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let len_arg = lirArg(&mut ctx.lir, false, len, false)
                 args.push(len_arg)
                 let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                // Owner payload Text in Result<Text, Int> has no verified
-                // ELE-LIR layout/ABI/drop yet. Reject emit-lir safely.
-                lirMarkUnsupported(&mut ctx.lir, expr.start)
+                // Result<Text, Int> owns its active Text (#5): a registered
+                // builtin union with an atomic drop obligation.
+                when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                 semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
                 return res_t
             }
