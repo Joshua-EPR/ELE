@@ -1,4 +1,4 @@
-import x86_64
+take x86_64
 
 // Runtime of `List of[T]` for the ELE-written Linux x86-64 backend: one
 // routine that grows a list buffer. Machine code produced through the ELE

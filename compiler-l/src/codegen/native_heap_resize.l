@@ -1,5 +1,5 @@
-import x86_64
-import native_heap_dynamic
+take x86_64
+take native_heap_dynamic
 
 // Linux mremap(MREMAP_MAYMOVE) for runtime-sized ELE heap allocations.
 // ABI: RDI=owned mmap address, RSI=old raw request, RDX=new raw request.

@@ -1,6 +1,6 @@
-import x86_64
-import native_heap_dynamic
-import native_heap_resize
+take x86_64
+take native_heap_dynamic
+take native_heap_resize
 
 // Minimal linear owner-slot machine. Each owner occupies three independent
 // stack slots: address, raw requested bytes, live flag (0 or 1). These are

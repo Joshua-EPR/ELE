@@ -183,6 +183,18 @@ fn migrated_native_cfg_core_uses_ele_v2_surface() {
         "native_cfg_ir.l",
         "native_cfg_inst.l",
         "native_cfg_types.l",
+        "native_cfg_paths.l",
+        "native_cfg_fields.l",
+        "native_cfg_list.l",
+        "native_cfg_list_emit.l",
+        "native_cfg_loan.l",
+        "native_cfg_ref.l",
+        "native_cfg_arith.l",
+        "native_heap_dynamic.l",
+        "native_heap_owner.l",
+        "native_heap_resize.l",
+        "native_list_int.l",
+        "native_rt_list.l",
     ];
     let legacy = [
         "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if", "else",

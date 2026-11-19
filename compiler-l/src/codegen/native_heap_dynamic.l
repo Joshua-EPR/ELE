@@ -1,4 +1,4 @@
-import x86_64
+take x86_64
 
 // Runtime-sized mmap/munmap emission for ELF64 Linux x86-64. This is a
 // bounded allocation primitive, not yet an allocator for ELE's Text/List.
