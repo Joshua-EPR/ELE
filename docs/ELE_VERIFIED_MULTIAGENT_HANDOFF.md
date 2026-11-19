@@ -112,11 +112,15 @@ GAMMA × DELTA, GAMMA × BETA, GAMMA × EPSILON, BETA × DELTA, DELTA × EPSILON
 
 1. `chore/eta-storage-repro-audit` (scripts, independiente).
 2. `fix/beta-drop-flags-partial-moves` (seguridad del verificador).
-3. `test/epsilon-test-integrity` — rebasar/adaptar sobre BETA y resolver `stage1_adversarial_drops_l.rs`.
+3. `test/epsilon-test-integrity` — conflicto ya resuelto: el merge `9902ff6` integra BETA (`b8abd4e`)
+   y conserva las categorías 5 (EPSILON) y 6 (BETA); stage1_adversarial_drops_l 12/12, drops_l 6/6,
+   lir_payload_protocol 7/7, stage1_b3 5/5, stage1_owned_union_lir_l 16/16, native_builtin_union_l 4/4,
+   fmt y clippy PASS. Fusionar después de BETA (su PR incluirá el commit de BETA hasta entonces).
 4. `feat/delta-pe64-next`.
 5. `feat/gamma-native-elf64-next`.
 
-Cada rama tiene exactamente un commit sobre `81de31e`. Ninguna se ha fusionado.
+Cada rama tiene exactamente un commit sobre `81de31e`, salvo `test/epsilon-test-integrity`
+(`693baf1` + `b8abd4e` + merge `9902ff6`). Ninguna se ha fusionado.
 
 ## Próxima prioridad técnica
 
