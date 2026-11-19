@@ -126,7 +126,7 @@ fn reportSemaError(paths: &List<Text>, starts: &List<Int>, source: &Text, error:
     printError("{path}:{lc.line}:{lc.column}: error[{code}]: {msg}")
 }
 
-fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int) -> Int {
+fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int, patch: Text) -> Int {
     match loadProgram(path) {
         Ok(prog) => {
             let source = &prog.source
@@ -142,6 +142,7 @@ fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int) -
             semaCtx.drop_fault = fault
             semaCtx.emit_lir = lir
             semaCtx.lir_fault = lir_fault
+            semaCtx.lir_patch = patch
             semaSetDeclModules(&mut semaCtx, &prog.decl_module)
             semaSetModuleAccess(&mut semaCtx, &prog.module_access, prog.module_count)
             semaAnalyze(&mut semaCtx, source, &prog.tree)
@@ -187,8 +188,8 @@ fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int) -
 
 fn main() -> Int {
     let count = processArgCount()
-    let usage = "Uso: sema-l <archivo.l> [--check-ownership | --drop-plan | --emit-lir]"
-    if count < 1 || count > 2 {
+    let usage = "Uso: sema-l <archivo.l> [--check-ownership | --drop-plan | --emit-lir] | sema-l <archivo.l> --lir-patch <parche>"
+    if count < 1 || count > 3 {
         printError(usage)
         return 2
     }
@@ -196,6 +197,33 @@ fn main() -> Int {
     var fault = 0
     var lir = false
     var lir_fault = 0
+    change patch = ""
+    when count == 3 {
+        // Test hook: verify a lowered function rewritten by a patch file.
+        hold patch_flag = "--lir-patch"
+        change known = false
+        choose processArg(1) {
+            Ok(flag): { known = symbolNameEqualsText(flag, 0, flag.byteLength, patch_flag) }
+            Err(code): {}
+        }
+        when !known {
+            printError(usage)
+            give 2
+        }
+        choose processArg(2) {
+            Ok(file): {
+                choose readText(file, 1048576) {
+                    Ok(text): { patch = text }
+                    Err(code): {
+                        printError("sema-l: no se pudo leer el parche de LIR")
+                        give 2
+                    }
+                }
+            }
+            Err(code): { give 2 }
+        }
+        lir = true
+    }
     if count == 2 {
         match processArg(1) {
             Ok(flag) => {
@@ -236,7 +264,7 @@ fn main() -> Int {
                 printError(usage)
                 return 2
             }
-            return analyzeFile(path, dump, fault, lir, lir_fault)
+            return analyzeFile(path, dump, fault, lir, lir_fault, patch)
         }
         Err(code) => {
             printError("sema-l: argumento inválido")
