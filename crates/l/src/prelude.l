@@ -3,12 +3,12 @@
 // usable unqualified (Some/None/Ok/Err) and that `??` and `?` are defined
 // on Option and Result (spec §7).
 
-pub enum Option<T> {
+expose choice Option of[T] {
     Some(T)
     None
 }
 
-pub enum Result<T, E> {
+expose choice Result of[T, E] {
     Ok(T)
     Err(E)
 }

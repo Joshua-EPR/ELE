@@ -1,9 +1,9 @@
-import native_cfg_defs
-import native_cfg_types
-import native_cfg_fields
-import x86_64
-import native_rt_list
-import native_cfg_text
+take native_cfg_defs
+take native_cfg_types
+take native_cfg_fields
+take x86_64
+take native_rt_list
+take native_cfg_text
 
 // x86-64 lowering of `List of[T]` (kinds 18..21) and the drop glue of the
 // types that own heap storage. Rules and layout: native_cfg_list.
