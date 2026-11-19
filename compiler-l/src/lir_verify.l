@@ -5,6 +5,7 @@ import lir_finish
 import lir_verify_core
 import lir_verify_helpers
 import lir_builtin_union
+take lir_verify_own
 
 // Verifier of one lowered function. It does not trust the lowering: every
 // id is range-checked before use, so a corrupt function is rejected instead
@@ -18,6 +19,15 @@ import lir_builtin_union
 //   7 return value does not match the function result
 //   8 field projection on a non-struct or out of range
 //   9 instruction listed in the wrong block
+//  10 an owned value is leaked: overwritten, or still owned at a return
+//     (reported only when no other rule is violated)
+// Every owned value, not only unions, is tracked per leaf by
+// `lir_verify_own.l`: a use, move or loan of a moved/dropped value is rule
+// 5, an unflagged drop of it rule 6; a drop flag must agree with the
+// ownership of the place it guards (rule 6), so a flag that is a parameter
+// or is assigned anything but a Bool constant is rejected. A reference is
+// usable only while the places it borrows are owned (rule 5) and a
+// borrowed return may only borrow from reference parameters (rule 7).
 // Owned unions (#5): a by-value use of an Option/Result owning heap storage,
 // an owned payload moved into `variant` and an owned `payload` extraction
 // (which consumes its union) mark the variable moved (may-analysis). Using,
@@ -70,8 +80,16 @@ flow lirRootLive(v: edit LirVerifier, l: view LirFn, place: Int) => Bool {
     give v.defined[root] && !(root < v.moved.length && v.moved[root])
 }
 
+// Check one instruction, then its ownership and loan effects
+// (`lir_verify_own.l`). Returns a status.
+flow lirVerifyInst(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], id: Int, block: Int, check: Bool) => Int {
+    hold status = lirVerifyInstCore(edit v, l, types, lm, drop_memo, id, block, check)
+    when status != 0 { give status }
+    give lirOwnInst(edit v, l, types, lm, drop_memo, id, check)
+}
+
 // Check one instruction and apply its definition. Returns a status.
-fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, id: Int, block: Int, check: Bool) -> Int {
+fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, id: Int, block: Int, check: Bool) -> Int {
     if id < 0 || id >= l.insts.length { return 1 }
     let inst = &l.insts[id]
     if inst.block != block { return 9 }
@@ -355,10 +373,13 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
                         v.flags[dst] = 0
                     }
                 } otherwise {
-                    v.flags[dst] = 2
+                    v.flags[dst] = 3
                 }
             } otherwise {
-                v.flags[dst] = 2
+                // Any other value is forged (3): unlike Unknown (2), which
+                // only joins paths where the flag agreed with ownership, it
+                // is not tied to ownership, so no drop may trust it.
+                v.flags[dst] = 3
             }
         } otherwise when !dst_ref {
             lirGuardSet(edit v, l, dst, -1, 1, false)
@@ -383,11 +404,16 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
                 when root >= 0 {
                     when f >= v.owned.length || f >= v.flags.length { give 6 }
                     when v.flags[f] != v.owned[f] { give 6 }
+                    hold guarded = v.flag_place[f]
+                    hold value = v.flags[f]
+                    when !lirLeafAgrees(edit v, l, root, guarded, value) { give 6 }
                 }
             }
         }
     }
-    return lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
+    hold term = lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
+    when term != 0 { give term }
+    give lirOwnTerm(edit v, l, body, b, check)
 }
 
 pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
@@ -413,6 +439,20 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         flag_root: List[],
         flag_place: List[],
         has_flags: false,
+        leaf_var: List[],
+        leaf_first: List[],
+        leaf_len: List[],
+        leaf_path: List[],
+        lown: List[],
+        lgone: List[],
+        lotable: List[],
+        lgtable: List[],
+        org_ref: List[],
+        org_root: List[],
+        org_place: List[],
+        stale: List[],
+        stable: List[],
+        leaked: false,
     )
     each i among 0..vars {
         v.defined@push(false)
@@ -448,6 +488,11 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                 }
             }
             when f >= 0 {
+                // A parameter's value is chosen by the caller: as a drop
+                // flag it could claim ownership of anything.
+                when f < l.params {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
                 when !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
                     give LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
@@ -463,6 +508,8 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
             }
         }
     }
+    lirLeafSetup(edit v, l, types, lm, drop_memo, blocks)
+    lirLoanSetup(edit v, l)
     each i among 0..(blocks * vars) {
         v.table@push(true)
         v.mtable@push(false)
@@ -498,6 +545,7 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                 v.owned[i] = v.otable[b * vars + i]
             }
         }
+        lirLeafLoad(edit v, b)
         let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, false)
         if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
         let kind = body.term[b]
@@ -506,6 +554,7 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         }
         if kind == LIR_T_BRANCH { lirVerifyFlow(&mut v, body.tb[b], vars) }
     }
+    change leak_block = -1
     for b in 0..blocks {
         if v.seen[b] {
             each i among 0..vars {
@@ -516,10 +565,14 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                     v.owned[i] = v.otable[b * vars + i]
                 }
             }
+            lirLeafLoad(edit v, b)
             let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, true)
             if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
+            when v.leaked && leak_block < 0 { leak_block = b }
         }
     }
+    // A leak only once no memory-safety rule is violated anywhere.
+    when leak_block >= 0 { give LirCheck(status: 10, block: leak_block, inst: -1) }
     return LirCheck(status: 0, block: -1, inst: steps)
 }
 

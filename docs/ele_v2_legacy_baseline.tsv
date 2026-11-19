@@ -1,7 +1,7 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 69; total legacy constructs: 11817
+# files with legacy syntax: 69; total legacy constructs: 11816
 # total	angle_generic	333
 # total	borrow_mut	2017
 # total	borrow_ref	872
@@ -19,7 +19,7 @@
 # total	kw_let	1367
 # total	kw_match	169
 # total	kw_pub	461
-# total	kw_return	1562
+# total	kw_return	1561
 # total	kw_struct	63
 # total	kw_var	410
 # total	kw_while	106
@@ -378,7 +378,7 @@ compiler-l/src/lir_verify.l	kw_in	5
 compiler-l/src/lir_verify.l	kw_let	32
 compiler-l/src/lir_verify.l	kw_match	7
 compiler-l/src/lir_verify.l	kw_pub	1
-compiler-l/src/lir_verify.l	kw_return	88
+compiler-l/src/lir_verify.l	kw_return	87
 compiler-l/src/lir_verify.l	kw_var	7
 compiler-l/src/lir_verify.l	kw_while	1
 compiler-l/src/lir_verify.l	match_arm_arrow	21
