@@ -8,10 +8,16 @@ representa el estado de propiedad del recurso al que protege.
 ## Invariantes
 
 - **LIR_DROP:** el flag (`inst.a`) protege la variable destino (`inst.dst`).
-- **LIR_DROPFIELD:** el flag (`inst.b`) protege la raíz del lugar
-  `inst.a`; el lugar debe existir y tener un tipo que requiere drop.
+- **LIR_DROPFIELD:** el flag (`inst.b`) protege el lugar `inst.a` (un
+  campo de su raíz); el lugar debe existir y tener un tipo que requiere drop.
 - Cada flag que interviene en un drop condicional está asociado a una sola
-  raíz; usar el mismo flag para raíces diferentes es inválido.
+  raíz y a un solo lugar; usar el mismo flag para raíces o lugares
+  diferentes es inválido.
+- El estado de propiedad se sigue **por flag (por lugar protegido)**, no
+  por raíz: dos campos de un mismo struct pueden poseer o no su valor de
+  forma independiente. Mover o soltar un lugar apaga los guards que contiene
+  (o que lo contienen); escribir la variable entera o un campo (`store`)
+  enciende los guards que contiene.
 - Los flags se siguen por flujo abstracto con `Off`, `On` y `Unknown`;
   la propiedad se sigue con `Uninit`, `Init` y `Maybe`.
 - En cada drop condicionado, el valor del flag debe coincidir con el estado
@@ -43,6 +49,13 @@ La suite `crates/l/tests/stage1_owned_union_lir_l.rs` ejercita:
   `List`, incluidos movimientos parciales.
 - Fallos inyectados `--lir-fault=17` y `--lir-fault=18`:
   el verificador ELE debe emitir un error de Regla 6 sin escribir LIR válida.
+
+`crates/l/tests/stage1_adversarial_drops_l.rs` (categoría 6) cubre flags de
+campos con estados divergentes en un mismo struct, un flag de campo
+limpiado antes de la arista de retorno de un bucle y el movimiento parcial
+condicional de un parámetro: la LIR correcta se acepta (antes era un ICE de
+Regla 6), se ejecuta con heap equilibrado y paridad con Stage 0, y sus
+flags falsificados se siguen rechazando.
 
 La matriz de pruebas de compilación y ejecución debe mantenerse en Ubuntu y
 Windows. Un resultado verde en la rama base de un PR apilado **no certifica**

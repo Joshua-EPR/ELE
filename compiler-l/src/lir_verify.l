@@ -34,6 +34,23 @@ flow lirOwnedUnion(types: view TypeTable, drop_memo: view List of[Int], ty: Int)
     }
 }
 
+// Ownership of the places guarded by drop flags under `root`: every guard
+// inside `place` (-1: the whole variable) becomes `state`. With `overlap`,
+// a guard that contains `place` is updated too (moving or dropping part
+// of a guarded place leaves it owning less than all of it).
+flow lirGuardSet(v: edit LirVerifier, l: view LirFn, root: Int, place: Int, state: Int, overlap: Bool) {
+    when !v.has_flags { give }
+    hold target = lirPlacePath(l, place)
+    each f among 0..v.flag_root.length {
+        when v.flag_root[f] == root && f < v.owned.length && f < v.flag_place.length {
+            hold guard = lirPlacePath(l, v.flag_place[f])
+            when lirPathCovers(target, guard) || (overlap && lirPathCovers(guard, target)) {
+                v.owned[f] = state
+            }
+        }
+    }
+}
+
 // A by-value operand consuming an owned union marks it moved; with `any`,
 // every owned operand is marked (an owned payload moved into a union).
 flow lirMoveOut(v: edit LirVerifier, l: view LirFn, types: view TypeTable, drop_memo: view List of[Int], operand: Int, any: Bool) {
@@ -42,8 +59,8 @@ flow lirMoveOut(v: edit LirVerifier, l: view LirFn, types: view TypeTable, drop_
     when lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
         v.moved[operand] = true
     }
-    when v.has_flags && operand < v.owned.length && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
-        v.owned[operand] = 0
+    when v.has_flags && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
+        lirGuardSet(edit v, l, operand, -1, 0, true)
     }
 }
 
@@ -79,6 +96,9 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
+        // The stored place owns its new value (the drop plan released the
+        // old one before the store).
+        lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 1, false)
         return 0
     }
     if kind == LIR_LIST_PUSH || kind == LIR_LIST_RESERVE {
@@ -120,13 +140,18 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
             if check && !v.defined[flag] { return 5 }
             when check && v.has_flags {
-                when root < 0 || root >= v.owned.length || flag >= v.flags.length { give 6 }
-                when v.flags[flag] != v.owned[root] { give 6 }
+                when root < 0 || flag >= v.flag_root.length || v.flag_root[flag] != root { give 6 }
+                when flag >= v.owned.length || flag >= v.flags.length { give 6 }
+                when v.flags[flag] != v.owned[flag] { give 6 }
             }
         }
         when kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
-        when v.has_flags && kind == LIR_DROP && dst < v.owned.length {
-            v.owned[dst] = 0
+        when v.has_flags {
+            when kind == LIR_DROP {
+                lirGuardSet(edit v, l, dst, -1, 0, true)
+            } otherwise {
+                lirGuardSet(edit v, l, root, inst.a, 0, true)
+            }
         }
         return 0
     }
@@ -231,9 +256,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         // An owned payload is moved out: the whole union is consumed.
         when lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length {
             v.moved[root] = true
-            when v.has_flags && root < v.owned.length {
-                v.owned[root] = 0
-            }
+            lirGuardSet(edit v, l, root, -1, 0, true)
         }
         result = payload_ty
     } else if kind == LIR_DISC {
@@ -274,10 +297,9 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         result_ref = kind == LIR_LOAN
         when kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
-            hold root = l.places[inst.a].root
-            when v.has_flags && root >= 0 && root < v.owned.length {
-                v.owned[root] = 0
-            }
+            // Moving an owned value out of a place releases only the
+            // guards inside (or containing) that place.
+            lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 0, true)
         }
     } else if kind == LIR_TEXTBUF {
         result = 5
@@ -338,8 +360,8 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             } otherwise {
                 v.flags[dst] = 2
             }
-        } otherwise when !dst_ref && dst < v.owned.length {
-            v.owned[dst] = 1
+        } otherwise when !dst_ref {
+            lirGuardSet(edit v, l, dst, -1, 1, false)
         }
     }
     return 0
@@ -359,8 +381,8 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
             each f among 0..v.flag_root.length {
                 hold root = v.flag_root[f]
                 when root >= 0 {
-                    when root >= v.owned.length || f >= v.flags.length { give 6 }
-                    when v.flags[f] != v.owned[root] { give 6 }
+                    when f >= v.owned.length || f >= v.flags.length { give 6 }
+                    when v.flags[f] != v.owned[f] { give 6 }
                 }
             }
         }
@@ -389,6 +411,7 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         owned: List[],
         otable: List[],
         flag_root: List[],
+        flag_place: List[],
         has_flags: false,
     )
     each i among 0..vars {
@@ -397,12 +420,14 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         v.flags@push(0)
         v.owned@push(0)
         v.flag_root@push(-1)
+        v.flag_place@push(-1)
     }
     each id among 0..l.insts.length {
         hold kind = l.insts[id].kind
         when kind == LIR_DROP || kind == LIR_DROPFIELD {
             change f = l.insts[id].a
             change root = l.insts[id].dst
+            change guarded = -1
             when kind == LIR_DROPFIELD {
                 f = l.insts[id].b
                 hold place = l.insts[id].a
@@ -411,6 +436,15 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                         give LirCheck(status: 1, block: l.insts[id].block, inst: id)
                     }
                     root = l.places[place].root
+                    guarded = place
+                }
+            }
+            // One flag guards one place: every drop it guards names it.
+            when f >= 0 && lirVarOk(l, f) && v.flag_root[f] >= 0 {
+                hold known = lirPlacePath(l, v.flag_place[f])
+                hold named = lirPlacePath(l, guarded)
+                when !lirPathCovers(known, named) || !lirPathCovers(named, known) {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
             }
             when f >= 0 {
@@ -424,6 +458,7 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                     give LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
                 v.flag_root[f] = root
+                v.flag_place[f] = guarded
                 v.has_flags = true
             }
         }
@@ -441,7 +476,8 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     // Parameters are assigned on entry.
     each i among 0..vars {
         v.table[i] = i < l.params
-        when i < l.params { v.otable[i] = 1 }
+        // A guard of a parameter starts owning its place.
+        when v.flag_root[i] >= 0 && v.flag_root[i] < l.params { v.otable[i] = 1 }
     }
     v.queue.push(0)
     var steps = 0
