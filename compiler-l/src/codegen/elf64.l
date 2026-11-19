@@ -28,8 +28,27 @@ pub fn elf64CodeAddress() -> Int {
 
 // Return an empty buffer for unsupported / unrepresentable inputs.
 pub fn elf64Executable(code: &List<Int>) -> List<Int> {
+    return elf64ExecutableData(code, 0)
+}
+
+fn elfPageUp(n: Int) -> Int {
+    return (n + 4095) / 4096 * 4096
+}
+
+// Virtual address of the read-write data area that follows a code segment
+// of `code_length` bytes: the first page boundary after it.
+pub fn elf64DataAddress(code_length: Int) -> Int {
+    return ELF64_LOAD_ADDRESS + elfPageUp(ELF64_CODE_OFFSET + code_length)
+}
+
+// `data_pages` > 0 adds a second PT_LOAD segment, read-write and never
+// executable, of that many zero-filled pages at elf64DataAddress. The pages
+// are stored in the file (no bss), so every kernel maps them the same way.
+// With 0 the image is byte-identical to the historical single-segment one.
+pub fn elf64ExecutableData(code: &List<Int>, data_pages: Int) -> List<Int> {
     var out: List<Int> = List[]
     if code.length == 0 || code.length > ELF64_MAX_CODE { return out }
+    if data_pages < 0 || data_pages > 16 { return out }
     // The owned output buffer must not escape from inside the loop: the
     // ownership checker conservatively prohibits moving an outer local there.
     var valid_bytes = true
@@ -59,7 +78,9 @@ pub fn elf64Executable(code: &List<Int>) -> List<Int> {
     elfLittle(&mut out, 0, 4)                    // flags
     elfLittle(&mut out, 64, 2)                   // e_ehsize
     elfLittle(&mut out, 56, 2)                   // e_phentsize
-    elfLittle(&mut out, 1, 2)                    // e_phnum
+    var phnum = 1
+    if data_pages > 0 { phnum = 2 }
+    elfLittle(&mut out, phnum, 2)                // e_phnum
     elfLittle(&mut out, 0, 2)                    // e_shentsize
     elfLittle(&mut out, 0, 2)                    // e_shnum
     elfLittle(&mut out, 0, 2)                    // e_shstrndx
@@ -74,8 +95,26 @@ pub fn elf64Executable(code: &List<Int>) -> List<Int> {
     elfLittle(&mut out, total, 8)                // p_memsz
     elfLittle(&mut out, ELF64_CODE_OFFSET, 8)    // p_align
 
+    // Data segment: PT_LOAD, R + W (never X), its file offset congruent to
+    // its address modulo the page size.
+    let data_offset = elfPageUp(total)
+    let data_size = data_pages * 4096
+    if data_pages > 0 {
+        elfLittle(&mut out, 1, 4)                // p_type
+        elfLittle(&mut out, 6, 4)                // p_flags: R + W
+        elfLittle(&mut out, data_offset, 8)      // p_offset
+        elfLittle(&mut out, ELF64_LOAD_ADDRESS + data_offset, 8)
+        elfLittle(&mut out, ELF64_LOAD_ADDRESS + data_offset, 8)
+        elfLittle(&mut out, data_size, 8)        // p_filesz
+        elfLittle(&mut out, data_size, 8)        // p_memsz
+        elfLittle(&mut out, ELF64_CODE_OFFSET, 8)
+    }
+
     while out.length < ELF64_CODE_OFFSET { elfPut(&mut out, 0) }
     for i in 0..code.length { elfPut(&mut out, code[i]) }
+    if data_pages > 0 {
+        while out.length < data_offset + data_size { elfPut(&mut out, 0) }
+    }
     return out
 }
 

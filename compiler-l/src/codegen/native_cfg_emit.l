@@ -12,6 +12,8 @@ take native_cfg_arith
 take native_cfg_list_emit
 take native_cfg_fields
 take native_cfg_ir
+take native_cfg_platform
+take native_rt_platform
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -240,6 +242,8 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         // loan: the address of the place becomes the local reference.
         cfgPlaceAddressRax(edit code, p, f, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, edit fix)
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
+    } otherwise when inst.kind == 24 {
+        cfgEmitPlatform(edit code, p, f, inst, edit fix)
     } otherwise {
         cfgEmitText(edit code, p, f, inst, edit fix)
     }
@@ -300,7 +304,8 @@ flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     // Text elements through the runtime.
     when p.decl_lists > 0 { give true }
     each i among 0..p.insts.length {
-        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { give true }
+        // The platform runtime allocates and releases through native_rt.
+        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 || p.insts[i].kind == 24 { give true }
     }
     give false
 }
@@ -351,7 +356,15 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 73
         give result
     }
+    // Platform builtins (native_cfg_platform) exist only on Linux ELF64.
+    hold platform = cfgUsesKind(p, 24)
+    when platform && target != 0 {
+        result.error = 133
+        give result
+    }
     change imports = pe64NewImports()
+    // Immediates holding the address of the ELF read-write data page.
+    change data_at: List of[Int] = List[]
 
     when target == 1 {
         // PE entry point: ExitProcess(main()).
@@ -359,6 +372,16 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         fix.call_at@push(main_call)
         fix.call_to@push(p.main)
     } otherwise {
+        when platform {
+            // Keep the initial stack pointer (argc, argv) in the first word
+            // of the data page for native_rt_platform. At process entry RSP
+            // is 16-byte aligned; the CALL below leaves main's frame as
+            // before.
+            x64MovImm64(edit code, 0, 0)
+            data_at@push(code.bytes.length - 8)
+            x64MovReg(edit code, 1, 4)
+            x64StoreMem64(edit code, 0, 0, 1)
+        }
         // ELF entry point: sys_exit(main()).
         cfgCall(edit code, edit fix, p.main)
         x64MovReg(edit code, 7, 0)
@@ -395,6 +418,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         } otherwise {
             cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
         }
+    }
+    change platform_at: List of[Int] = List[]
+    when platform {
+        hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
+        platform_at = pfEmitAll(edit code, view rt, edit data_at)
     }
 
     each f among 0..p.functions.length {
@@ -434,8 +462,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     }
     each i among 0..fix.call_at.length {
         hold callee = fix.call_to[i]
+        hold routine = -1 - callee - cfgPlatformBase()
         when callee >= 0 {
             x64PatchRelative(edit code, fix.call_at[i], func_at[callee])
+        } otherwise when routine >= 0 && routine < platform_at.length {
+            x64PatchRelative(edit code, fix.call_at[i], platform_at[routine])
         } otherwise when -1 - callee < runtime_at.length {
             x64PatchRelative(edit code, fix.call_at[i], runtime_at[-1 - callee])
         } otherwise {
@@ -468,6 +499,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     each i among 0..fix.text_at.length {
         x64PatchAbsolute64(edit code, fix.text_at[i], code_address + literal_at[fix.text_id[i]])
     }
+    // The data page follows the final code and literals (elf64.l).
+    hold data_address = elf64DataAddress(code.bytes.length)
+    each i among 0..data_at.length {
+        x64PatchAbsolute64(edit code, data_at[i], data_address)
+    }
     when code.error != 0 {
         result.error = 71
         give result
@@ -481,7 +517,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         }
         result.image = pe.bytes
     } otherwise {
-        result.image = elf64Executable(view code.bytes)
+        change data_pages = 0
+        when data_at.length > 0 { data_pages = 1 }
+        result.image = elf64ExecutableData(view code.bytes, data_pages)
     }
     when result.image.length == 0 { result.error = 72 }
     give result

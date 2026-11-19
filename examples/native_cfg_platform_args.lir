@@ -1,0 +1,119 @@
+ELE-LIR 1
+module structs 0 enums 1 funcs 2 main f0
+enum e0 6:82,101,115,117,108,116 variants 2
+variant 2:79,107 types 1 t
+variant 3:69,114,114 types 1 i
+func f0 4:109,97,105,110 params 0 result i 0 0 vars 15 blocks 12
+var v0 val i
+var v1 val i
+var v2 val b
+var v3 val e0
+var v4 val i
+var v5 val b
+var v6 val t
+var v7 val i
+var v8 val i
+var v9 val i
+var v10 val t
+var v11 val i
+var v12 val u
+var v13 val t
+var v14 val t
+block 0 3
+i platform v0 argcount 0
+i print val v0
+i use v1 ci0
+t jump 1
+block 1 1
+i binary v2 le v1 v0
+t branch v2 2 6
+block 2 3
+i platform v3 arg 1 val v1
+i disc v4 p3
+i binary v5 eq v4 ci0
+t branch v5 3 4
+block 3 3
+i payload v6 p3 e0 0
+i platform v12 printerror 1 ref p6 0
+i drop v6 -
+t jump 5
+block 4 2
+i payload v7 p3 e0 1
+i print val v7
+t jump 5
+block 5 1
+i binary v1 add v1 ci1
+t jump 1
+block 6 4
+i binary v8 sub ci0 ci1
+i platform v3 arg 1 val v8
+i payload v7 p3 e0 1
+i print val v7
+t jump 7
+block 7 3
+i platform v3 arg 1 val ci0
+i disc v4 p3
+i binary v5 eq v4 ci0
+t branch v5 8 9
+block 8 18
+i payload v6 p3 e0 0
+i call v11 f1 2 ref p6 0 val ci1048576
+i print val v11
+i call v11 f1 2 ref p6 0 val ci2
+i print val v11
+i call v11 f1 2 ref p6 0 val v8
+i print val v11
+i call v11 f1 2 ref p6 0 val ci67108865
+i print val v11
+i use v10 ct12:110,111,47,115,117,99,104,47,102,105,108,101
+i call v11 f1 2 ref p10 0 val ci100
+i print val v11
+i drop v10 -
+i use v14 ct1:46
+i call v11 f1 2 ref p14 0 val ci100
+i print val v11
+i drop v14 -
+i drop v6 -
+t jump 10
+block 9 0
+t return ci9
+block 10 3
+i use v13 ct0:
+i call v11 f1 2 ref p13 0 val ci100
+i print val v11
+t jump 11
+block 11 5
+i drop v13 -
+i platform v3 arg 1 val ci1
+i payload v6 p3 e0 0
+i call v9 f1 2 ref p6 0 val ci100
+i drop v6 -
+t return v9
+endfunc
+func f1 8:114,101,97,100,70,105,108,101 params 2 result i 0 0 vars 9 blocks 3
+var v0 ref t
+var v1 val i
+var v2 val e0
+var v3 val i
+var v4 val b
+var v5 val t
+var v6 val i
+var v7 val i
+var v8 val i
+block 0 3
+i platform v2 readtext 2 ref p0 0 val v1
+i disc v3 p2
+i binary v4 eq v3 ci0
+t branch v4 1 2
+block 1 4
+i payload v5 p2 e0 0
+i print val v5
+i len v6 p5
+i drop v5 -
+t return v6
+block 2 2
+i payload v7 p2 e0 1
+i binary v8 sub ci0 v7
+t return v8
+endfunc
+end

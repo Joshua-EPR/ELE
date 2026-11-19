@@ -45,7 +45,8 @@ flow cfgMoveOperand(p: view CfgProgram, f: Int, op: view NativeOperand, variable
 // in a drop. Primitive values are Copy.
 flow cfgMoves(p: view CfgProgram, f: Int, inst: view CfgInst, variable: Int) => Bool {
     when inst.kind == 13 { give inst.place_var == variable }
-    when inst.kind == 3 {
+    // A platform call (kind 24) passes its arguments like a call.
+    when inst.kind == 3 || inst.kind == 24 {
         each n among 0..inst.argc {
             hold arg = view p.call_args[inst.arg_first + n]
             when p.call_ref[inst.arg_first + n] < 0 && cfgMoveOperand(p, f, view arg, variable) { give true }
@@ -124,7 +125,8 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
     // An aggregate payload is moved out: the enum is consumed (a later
     // `disc`, `payload` or use of it is a use after move).
     when inst.kind == 9 && cfgPayloadMoves(p, f, inst) { live[inst.place_var] = false }
-    when inst.kind == 3 {
+    // A platform call (kind 24) passes its arguments like a call.
+    when inst.kind == 3 || inst.kind == 24 {
         each n among 0..inst.argc {
             hold arg = view p.call_args[inst.arg_first + n]
             when p.call_ref[inst.arg_first + n] >= 0 {
@@ -241,7 +243,8 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
             when !cfgWholeLive(paths, vars, live, view arg) { give false }
         }
     }
-    when inst.kind == 3 {
+    // A platform call (kind 24) passes its arguments like a call.
+    when inst.kind == 3 || inst.kind == 24 {
         each n among 0..inst.argc {
             hold k = inst.arg_first + n
             hold arg = view p.call_args[k]
