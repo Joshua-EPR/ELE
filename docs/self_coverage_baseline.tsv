@@ -17,6 +17,7 @@ codegen/native_cfg_list.l	lir
 codegen/native_cfg_list_emit.l	lir
 codegen/native_cfg_loan.l	lir
 codegen/native_cfg_paths.l	lir
+codegen/native_cfg_platform.l	lir
 codegen/native_cfg_ref.l	lir
 codegen/native_cfg_text.l	lir
 codegen/native_cfg_types.l	lir
@@ -29,6 +30,7 @@ codegen/native_layout.l	lir
 codegen/native_list_int.l	lir
 codegen/native_rt.l	lir
 codegen/native_rt_list.l	lir
+codegen/native_rt_platform.l	lir
 codegen/pe64.l	lir
 codegen/win64_heap.l	lir
 codegen/win64_rt.l	lir
