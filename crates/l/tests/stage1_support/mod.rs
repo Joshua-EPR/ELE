@@ -36,6 +36,19 @@ fn announce_skipped_native_execution(entry: &str) {
 
 pub fn build(entry: &str, trace: bool) -> PathBuf {
     announce_skipped_native_execution(entry);
+    build_entry(entry, trace)
+}
+
+/// Like `build`, for test binaries that execute the ELF64 images themselves
+/// (natively or through WSL) and report every image they could not run with
+/// their own explicit NOT RUN line under the same `ELE_REQUIRE_NATIVE_EXEC`
+/// policy (see `image_support::not_run`).
+#[allow(dead_code)]
+pub fn build_self_executing(entry: &str) -> PathBuf {
+    build_entry(entry, false)
+}
+
+fn build_entry(entry: &str, trace: bool) -> PathBuf {
     // Tests of one binary run in parallel and may ask for the same entry;
     // two compilers writing the same output directory corrupt each other.
     static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
