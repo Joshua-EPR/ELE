@@ -8,7 +8,7 @@ take x86_64
 // `i platform vD <op> <argc> <args>` (instruction kind 24) of ELE-LIR 1:
 // the platform builtins processArgCount, processArg, readText, printError
 // and writeBytes, lowered to the routines of native_rt_platform (Linux
-// ELF64 only). `op` holds the ELE-LIR platform code, the same numbering as
+// ELF64) or win64_rt_platform (Windows PE32+, KERNEL32 only). `op` holds the ELE-LIR platform code, the same numbering as
 // Stage 1 (lir_build.l): 0 argcount, 1 arg, 2 readtext, 3 printerror,
 // 4 writebytes. Arguments live in the call argument tables from
 // `arg_first`, as for `call`, so the verifier treats them alike: `val`
@@ -25,8 +25,8 @@ take x86_64
 //
 // Rejection codes: 130 unknown operation or wrong arity, 131 argument of
 // the wrong mode or type (a platform call never borrows exclusively),
-// 132 destination of the wrong type, 133 platform call on a target
-// without the platform runtime (PE32+).
+// 132 destination of the wrong type. (133, a platform call on a target
+// without the platform runtime, is no longer produced: both targets have it.)
 
 // Platform routine k is called as runtime target cfgPlatformBase() + k,
 // far above the native_rt, native_rt_list and drop glue indexes.

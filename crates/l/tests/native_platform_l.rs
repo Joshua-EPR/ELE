@@ -232,9 +232,8 @@ fn platform_case(name: &str, decls: &str, body: &[&str]) -> PathBuf {
     file
 }
 
-/// Malformed or ill-typed platform calls, and platform calls for a target
-/// without the platform runtime, are rejected with a diagnostic and no
-/// image is written.
+/// Malformed or ill-typed platform calls are rejected with a diagnostic and
+/// no image is written; well-formed ones also build for PE32+.
 #[test]
 fn invalid_platform_calls_are_rejected() {
     let cases: &[(&str, &[&str], u32)] = &[
@@ -306,7 +305,9 @@ fn invalid_platform_calls_are_rejected() {
     let out = backend(&file, &temp("arg_wrong_result.elf"));
     assert!(String::from_utf8_lossy(&out.stderr).contains("rechazado (código 132)"));
 
-    // The Windows PE32+ target has no platform runtime in this backend.
+    // The Windows PE32+ target now has its platform runtime
+    // (win64_rt_platform, exercised by native_pe64_platform_l.rs): the same
+    // LIR builds there instead of being rejected with 133.
     let pe = temp("platform.exe");
     let _ = fs::remove_file(&pe);
     let out = Command::new(native())
@@ -315,9 +316,13 @@ fn invalid_platform_calls_are_rejected() {
         .arg("--pe64")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("rechazado (código 133)"));
-    assert!(!pe.exists());
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("código 133"));
+    assert_eq!(&fs::read(&pe).unwrap()[..2], b"MZ");
 }
 
 /// Programs without platform calls keep the historical single-segment image.

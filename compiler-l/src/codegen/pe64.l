@@ -2,8 +2,10 @@
 // Produces a console image with no linker:
 //   .text   RX  machine code followed by its read-only literals
 //   .idata  RW  import directory, ILT, IAT and hint/name table of
-//               KERNEL32.dll (GetStdHandle, WriteFile, ExitProcess,
-//               VirtualAlloc, VirtualFree)
+//               KERNEL32.dll: the base set (GetStdHandle, WriteFile,
+//               ExitProcess, VirtualAlloc, VirtualFree) always, then every
+//               further known import the code calls (the platform runtime's
+//               GetCommandLineW ... GetLastError), in index order
 //   .reloc  R   (relocatable images only) IMAGE_REL_BASED_DIR64 base
 //               relocations for every absolute address embedded in .text
 //
@@ -35,18 +37,30 @@ fixed PE64_DOS_SIZE = 128
 // DOS area + "PE\0\0" + COFF header + PE32+ optional header, before the
 // 40-byte section headers.
 fixed PE64_OPTIONAL_END = 392
-fixed PE64_IMPORT_COUNT = 5
+// Known imports; the first PE64_BASE_IMPORTS are in every image.
+fixed PE64_IMPORT_COUNT = 13
+fixed PE64_BASE_IMPORTS = 5
 fixed PE64_STACK_SIZE = 8388608
 fixed PE64_PAGE = 4096
 
-// Indexes of the imported functions (their IAT slots).
+// Indexes of the known imported functions. A base import's index is also
+// its IAT slot; a further import takes the next slot after the base set and
+// the further imports of lower index that the image calls.
 expose flow pe64ImportGetStdHandle() => Int { give 0 }
 expose flow pe64ImportWriteFile() => Int { give 1 }
 expose flow pe64ImportExitProcess() => Int { give 2 }
 expose flow pe64ImportVirtualAlloc() => Int { give 3 }
 expose flow pe64ImportVirtualFree() => Int { give 4 }
+expose flow pe64ImportGetCommandLineW() => Int { give 5 }
+expose flow pe64ImportWideCharToMultiByte() => Int { give 6 }
+expose flow pe64ImportMultiByteToWideChar() => Int { give 7 }
+expose flow pe64ImportCreateFileW() => Int { give 8 }
+expose flow pe64ImportReadFile() => Int { give 9 }
+expose flow pe64ImportCloseHandle() => Int { give 10 }
+expose flow pe64ImportGetFileType() => Int { give 11 }
+expose flow pe64ImportGetLastError() => Int { give 12 }
 
-// Number of imported functions: valid import indexes are 0..count-1.
+// Number of known imported functions: valid import indexes are 0..count-1.
 expose flow pe64ImportCount() => Int { give PE64_IMPORT_COUNT }
 
 // Places in the code where a CALL [RIP+disp32] must reach IAT slot `index`.
@@ -86,14 +100,52 @@ expose flow pe64CodeAddress() => Int {
     give PE64_IMAGE_BASE + PE64_SECTION_ALIGN
 }
 
-// The import list, in IAT slot order. The ILT, the IAT, the hint/name
-// table and every bound below derive from it and from PE64_IMPORT_COUNT.
+// The known imports by index. The ILT, the IAT, the hint/name table and
+// every bound below derive from the list of imports an image carries
+// (peActiveImports), never from a fixed count.
 flow peImportName(index: Int) => Text {
     when index == 0 { give "GetStdHandle" }
     when index == 1 { give "WriteFile" }
     when index == 2 { give "ExitProcess" }
     when index == 3 { give "VirtualAlloc" }
-    give "VirtualFree"
+    when index == 4 { give "VirtualFree" }
+    when index == 5 { give "GetCommandLineW" }
+    when index == 6 { give "WideCharToMultiByte" }
+    when index == 7 { give "MultiByteToWideChar" }
+    when index == 8 { give "CreateFileW" }
+    when index == 9 { give "ReadFile" }
+    when index == 10 { give "CloseHandle" }
+    when index == 11 { give "GetFileType" }
+    give "GetLastError"
+}
+
+// The imports of an image, in IAT slot order: the base set, then each
+// further known import some fixup calls, by increasing index. Images that
+// call only base imports keep the historical five-entry table.
+flow peActiveImports(imports: view Pe64Imports) => List of[Int] {
+    change active: List of[Int] = List[]
+    each i among 0..PE64_IMPORT_COUNT {
+        change used = i < PE64_BASE_IMPORTS
+        each j among 0..imports.index.length {
+            when imports.index[j] == i { used = true }
+        }
+        when used { active@push(i) }
+    }
+    give active
+}
+
+flow peBaseImports() => List of[Int] {
+    change active: List of[Int] = List[]
+    each i among 0..PE64_BASE_IMPORTS { active@push(i) }
+    give active
+}
+
+// IAT slot of import `index` in `active`, or -1 when the image lacks it.
+flow peSlotOf(active: view List of[Int], index: Int) => Int {
+    each k among 0..active.length {
+        when active[k] == index { give k }
+    }
+    give -1
 }
 
 flow peDllName() => Text {
@@ -208,60 +260,76 @@ flow pePadTo(out: edit List of[Int], size: Int) {
 
 // .idata offsets: 2 import descriptors (KERNEL32 + terminator), ILT, IAT,
 // DLL name and one hint/name entry per import, each 2-byte aligned.
+// `count` is the number of imports the image carries.
 flow peIltOffset() => Int { give 40 }
-flow peIatOffset() => Int { give 40 + (PE64_IMPORT_COUNT + 1) * 8 }
-flow peDllNameOffset() => Int { give 40 + 2 * (PE64_IMPORT_COUNT + 1) * 8 }
+flow peIatOffset(count: Int) => Int { give 40 + (count + 1) * 8 }
+flow peDllNameOffset(count: Int) => Int { give 40 + 2 * (count + 1) * 8 }
 
 flow peEven(n: Int) => Int {
     give n + n % 2
 }
 
-flow peHintNameOffset(index: Int) => Int {
+// Offset of the hint/name entry of the `k`-th import of `active` (k ==
+// active.length: the end of the table).
+flow peHintNameOffset(active: view List of[Int], k: Int) => Int {
     hold dll = peDllName()
-    change at = peEven(peDllNameOffset() + dll.byteLength + 1)
-    each i among 0..index {
-        hold name = peImportName(i)
+    change at = peEven(peDllNameOffset(active.length) + dll.byteLength + 1)
+    each i among 0..k {
+        hold name = peImportName(active[i])
         at = peEven(at + 2 + name.byteLength + 1)
     }
     give at
 }
 
+flow peIdataLengthFor(active: view List of[Int]) => Int {
+    give peHintNameOffset(active, active.length)
+}
+
+// Length of .idata for an image calling only base imports.
 expose flow pe64IdataLength() => Int {
-    give peHintNameOffset(PE64_IMPORT_COUNT)
+    hold base = peBaseImports()
+    give peIdataLengthFor(view base)
 }
 
-// RVA of the IAT slot of import `index` in an image laid out as `layout`.
+// RVA of the IAT slot of base import `index` in an image laid out as
+// `layout` that calls only base imports.
 expose flow pe64IatSlotRva(layout: view Pe64Layout, index: Int) => Int {
-    give layout.idata_rva + peIatOffset() + 8 * index
+    give layout.idata_rva + peIatOffset(PE64_BASE_IMPORTS) + 8 * index
 }
 
-flow peIdata(rva: Int) => List of[Int] {
+// RVA of the IAT slot of import `index` in an image carrying `active`.
+flow peIatSlotRvaFor(layout: view Pe64Layout, active: view List of[Int], index: Int) => Int {
+    give layout.idata_rva + peIatOffset(active.length) + 8 * peSlotOf(active, index)
+}
+
+flow peIdata(rva: Int, active: view List of[Int]) => List of[Int] {
+    hold count = active.length
     change out: List of[Int] = List[]
     // IMAGE_IMPORT_DESCRIPTOR for KERNEL32.dll.
     peLittle(edit out, rva + peIltOffset(), 4)    // OriginalFirstThunk (ILT)
     peLittle(edit out, 0, 4)                      // TimeDateStamp
     peLittle(edit out, 0, 4)                      // ForwarderChain
-    peLittle(edit out, rva + peDllNameOffset(), 4) // Name
-    peLittle(edit out, rva + peIatOffset(), 4)    // FirstThunk (IAT)
+    peLittle(edit out, rva + peDllNameOffset(count), 4) // Name
+    peLittle(edit out, rva + peIatOffset(count), 4) // FirstThunk (IAT)
     peZeros(edit out, 20)                         // terminator descriptor
     // ILT and IAT start identical: RVAs of the hint/name entries; the loader
     // overwrites the IAT with the resolved addresses.
     each table among 0..2 {
-        each i among 0..PE64_IMPORT_COUNT {
-            peLittle(edit out, rva + peHintNameOffset(i), 8)
+        each k among 0..count {
+            peLittle(edit out, rva + peHintNameOffset(active, k), 8)
         }
         peLittle(edit out, 0, 8)
     }
     hold dll = peDllName()
     peAscii(edit out, view dll)
     pePut(edit out, 0)
-    pePadTo(edit out, peHintNameOffset(0))
-    each i among 0..PE64_IMPORT_COUNT {
+    pePadTo(edit out, peHintNameOffset(active, 0))
+    each k among 0..count {
         peLittle(edit out, 0, 2)                  // hint: none, bind by name
-        hold name = peImportName(i)
+        hold name = peImportName(active[k])
         peAscii(edit out, view name)
         pePut(edit out, 0)
-        pePadTo(edit out, peHintNameOffset(i + 1))
+        pePadTo(edit out, peHintNameOffset(active, k + 1))
     }
     give out
 }
@@ -311,7 +379,7 @@ flow peSectionHeader(out: edit List of[Int], name: view Text, virtual_size: Int,
 }
 
 // `reloc_length` 0: fixed image; otherwise the size of the .reloc data.
-flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int, idata_length: Int, reloc_length: Int, entry: Int, section_align: Int, file_align: Int) {
+flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int, idata_length: Int, import_count: Int, reloc_length: Int, entry: Int, section_align: Int, file_align: Int) {
     hold relocatable = reloc_length > 0
     peDosStub(edit out)
     hold signature = "PE"
@@ -381,8 +449,8 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
             peLittle(edit out, layout.reloc_rva, 4)    // base relocation table
             peLittle(edit out, reloc_length, 4)
         } otherwise when d == 12 {
-            peLittle(edit out, layout.idata_rva + peIatOffset(), 4) // IAT
-            peLittle(edit out, (PE64_IMPORT_COUNT + 1) * 8, 4)
+            peLittle(edit out, layout.idata_rva + peIatOffset(import_count), 4) // IAT
+            peLittle(edit out, (import_count + 1) * 8, 4)
         } otherwise {
             peLittle(edit out, 0, 8)
         }
@@ -504,7 +572,8 @@ flow peWrite(code: view List of[Int], entry: Int, imports: view Pe64Imports, abs
         }
     }
     when !valid_relocs { give peFail(8) }
-    hold idata_length = pe64IdataLength()
+    hold active = peActiveImports(imports)
+    hold idata_length = peIdataLengthFor(view active)
     change reloc_length = 0
     change relocs: List of[Int] = List[]
     when relocatable {
@@ -529,7 +598,7 @@ flow peWrite(code: view List of[Int], entry: Int, imports: view Pe64Imports, abs
     change valid_displacements = true
     each i among 0..imports.at.length {
         hold at = imports.at[i]
-        hold delta = pe64IatSlotRva(view layout, imports.index[i]) - (layout.text_rva + at + 4)
+        hold delta = peIatSlotRvaFor(view layout, view active, imports.index[i]) - (layout.text_rva + at + 4)
         when delta < -2147483648 || delta > 2147483647 {
             valid_displacements = false
         } otherwise {
@@ -545,11 +614,11 @@ flow peWrite(code: view List of[Int], entry: Int, imports: view Pe64Imports, abs
     when !valid_displacements { give peFail(5) }
 
     change out: List of[Int] = List[]
-    peHeaders(edit out, view layout, code.length, idata_length, reloc_length, entry, section_align, file_align)
+    peHeaders(edit out, view layout, code.length, idata_length, active.length, reloc_length, entry, section_align, file_align)
     pePadTo(edit out, layout.text_offset)
     each i among 0..text.length { pePut(edit out, text[i]) }
     pePadTo(edit out, layout.idata_offset)
-    hold idata = peIdata(layout.idata_rva)
+    hold idata = peIdata(layout.idata_rva, view active)
     each i among 0..idata.length { pePut(edit out, idata[i]) }
     when relocatable {
         pePadTo(edit out, layout.reloc_offset)
