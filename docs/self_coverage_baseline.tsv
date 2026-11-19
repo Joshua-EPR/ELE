@@ -50,9 +50,11 @@ lir_builtin_union.l	lir
 lir_emit.l	lir
 lir_finish.l	lir
 lir_module.l	lir
+lir_patch.l	lir
 lir_verify.l	lir
 lir_verify_core.l	lir
 lir_verify_helpers.l	lir
+lir_verify_own.l	lir
 lir_write.l	lir
 loans_check.l	lir
 loans_l.l	lir

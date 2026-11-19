@@ -3,6 +3,7 @@ import sema_types
 import lir_build
 import lir_finish
 import lir_verify_core
+take lir_verify_own
 
 // Verified call/terminator contracts and dataflow join for Stage 1.
 pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, callee: Int, first: Int, count: Int, check: Bool) -> Int {
@@ -129,9 +130,15 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
                 when cell < v.ftable.length {
                     when first {
                         v.ftable[cell] = f_in
-                    } otherwise when v.ftable[cell] != f_in && v.ftable[cell] != 2 {
-                        v.ftable[cell] = 2
-                        changed = true
+                    } otherwise when v.ftable[cell] != f_in {
+                        // Paths that disagree join to Unknown; a forged
+                        // value (3) stays forged.
+                        change joined = 2
+                        when v.ftable[cell] == 3 || f_in == 3 { joined = 3 }
+                        when v.ftable[cell] != joined {
+                            v.ftable[cell] = joined
+                            changed = true
+                        }
                     }
                 }
                 // Ownership of the place this flag guards (per flag, not
@@ -148,6 +155,7 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
             }
         }
     }
+    when lirLeafJoin(edit v, target, first) { changed = true }
     v.seen[target] = true
     if changed && !v.pending[target] {
         v.pending[target] = true
