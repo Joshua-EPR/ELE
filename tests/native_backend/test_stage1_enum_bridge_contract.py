@@ -84,7 +84,7 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('when payload == cfgTextType() {', emit)
         self.assertIn('x64StoreMem64(edit code, 5, dest + 24, 1)', emit)
         self.assertIn(
-            'when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }',
+            'when owner != cfgTextType() && !union_owner && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }',
             inst,
         )
         self.assertIn('when inst.kind == 9 && cfgPayloadMoves(p, f, inst) { live[inst.place_var] = false }', verify)

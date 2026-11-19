@@ -34,6 +34,7 @@ fn temp(name: &str) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
+#[cfg(all(windows, target_arch = "x86_64"))]
 fn fresh_dir(name: &str) -> PathBuf {
     let dir = temp(name);
     let _ = fs::remove_dir_all(&dir);
