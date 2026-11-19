@@ -58,7 +58,18 @@ fn readtext_borrows_stable_path_with_independent_length() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let lir = String::from_utf8(out.stdout).unwrap();
-    assert!(lir.contains("i platform "), "{lir}");
+    let platform_line = lir
+        .lines()
+        .find(|line| line.contains(" readtext 2 "))
+        .expect("readText platform instruction absent");
+    assert!(
+        platform_line.contains(" ref p"),
+        "path must be passed as ref place: {platform_line}"
+    );
+    assert!(
+        platform_line.contains(" val v") || platform_line.contains(" val ci"),
+        "max_len must be passed as val: {platform_line}"
+    );
     assert!(
         lir.contains("i drop "),
         "owned result must be dropped: {lir}"
@@ -95,6 +106,215 @@ fn readtext_rejects_wrong_types_arity_and_unstable_path() {
         let path = file(name, source);
         let (ok, stderr) = check(&path);
         assert!(!ok, "{name}: invalid input must fail");
+        assert!(
+            stderr.contains(expected),
+            "{name}: expected {expected}, got {stderr}"
+        );
+    }
+}
+
+#[test]
+fn readtext_evaluates_max_len_with_calls_and_temporaries_preserving_borrow() {
+    // 1. max_len evaluated from a function call with local variables and arithmetic
+    let call_case = file(
+        "call_len.l",
+        r#"fn compute_len(factor: Int) -> Int {
+    let base = 10
+    return base + factor
+}
+
+fn main() -> Int {
+    let path = "payload.txt"
+    let content = readText(path, compute_len(6))
+    return 0
+}
+"#,
+    );
+    let (ok, stderr) = check(&call_case);
+    assert!(ok, "readText with function call in max_len: {stderr}");
+    let out = Command::new(checker())
+        .arg(&call_case)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        lir.contains("i call "),
+        "call in max_len must be lowered: {lir}"
+    );
+    let platform_line = lir
+        .lines()
+        .find(|line| line.contains(" readtext 2 "))
+        .expect("readText platform instruction absent");
+    assert!(
+        platform_line.contains(" ref p"),
+        "path must be ref: {platform_line}"
+    );
+    assert!(
+        platform_line.contains(" val v"),
+        "max_len must be val: {platform_line}"
+    );
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+
+    // 2. max_len evaluated with temporary list collection passed to helper
+    let temp_list_case = file(
+        "temp_list_len.l",
+        r#"fn sum_list(xs: List<Int>) -> Int {
+    var total = 0
+    for x in xs {
+        total = total + x
+    }
+    return total
+}
+
+fn main() -> Int {
+    let path = "payload.txt"
+    let content = readText(path, sum_list(List[10, 20, 30]))
+    return 0
+}
+"#,
+    );
+    let (ok, stderr) = check(&temp_list_case);
+    assert!(ok, "readText with temporary list in max_len: {stderr}");
+    let out = Command::new(checker())
+        .arg(&temp_list_case)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        lir.contains("i listlit "),
+        "list literal must be lowered: {lir}"
+    );
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+
+    // 3. max_len shared re-borrow of path (&Text) is compatible with readText's loan
+    let reborrow_case = file(
+        "shared_reborrow_len.l",
+        r#"fn inspect(p: &Text) -> Int {
+    return 16
+}
+
+fn main() -> Int {
+    let path = "payload.txt"
+    let content = readText(path, inspect(&path))
+    return 0
+}
+"#,
+    );
+    let (ok, stderr) = check(&reborrow_case);
+    assert!(ok, "readText with shared re-borrow in max_len: {stderr}");
+    let out = Command::new(checker())
+        .arg(&reborrow_case)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+
+    // 4. match on readText result with Ok/Err branches and computed max_len
+    let match_case = file(
+        "match_readtext.l",
+        r#"fn compute_limit(factor: Int) -> Int {
+    return factor * 1024
+}
+
+fn main() -> Int {
+    let path = "payload.txt"
+    match readText(path, compute_limit(4)) {
+        Ok(content) => {
+            return 0
+        }
+        Err(code) => {
+            return code
+        }
+    }
+}
+"#,
+    );
+    let (ok, stderr) = check(&match_case);
+    assert!(ok, "match on readText with computed max_len: {stderr}");
+    let out = Command::new(checker())
+        .arg(&match_case)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let lir = String::from_utf8(out.stdout).unwrap();
+    let readtext = lir
+        .lines()
+        .find(|line| line.contains(" readtext 2 "))
+        .expect("readText platform instruction required");
+    assert!(
+        readtext.contains(" ref p"),
+        "path must be a loaned place: {readtext}"
+    );
+    assert!(
+        readtext.contains(" val v") || readtext.contains(" val ci"),
+        "computed max_len must be passed by value: {readtext}"
+    );
+    assert!(lir.contains("i disc "), "variant discriminant required");
+    let module = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&module).unwrap();
+}
+
+#[test]
+fn readtext_adversarial_rejects_borrow_conflicts_during_max_len() {
+    let cases = [
+        (
+            "mut_borrow_conflict.l",
+            r#"fn touch(p: &mut Text) -> Int {
+    return 10
+}
+
+fn main() -> Int {
+    var path = "test.txt"
+    let content = readText(path, touch(&mut path))
+    return 0
+}
+"#,
+            "error[L0012]",
+        ),
+        (
+            "move_conflict.l",
+            r#"fn consume(p: Text) -> Int {
+    return 10
+}
+
+fn main() -> Int {
+    let path = "test.txt"
+    let content = readText(path, consume(path))
+    return 0
+}
+"#,
+            "error[L0012]",
+        ),
+        (
+            "unstable_path_with_computed_len.l",
+            r#"fn compute(n: Int) -> Int { return n * 2 }
+
+fn main() -> Int {
+    let content = readText("test.txt", compute(10))
+    return 0
+}
+"#,
+            "error[L0016]",
+        ),
+    ];
+    for (name, source, expected) in cases {
+        let path = file(name, source);
+        let (ok, stderr) = check(&path);
+        assert!(!ok, "{name}: adversarial borrow violation must fail");
         assert!(
             stderr.contains(expected),
             "{name}: expected {expected}, got {stderr}"
