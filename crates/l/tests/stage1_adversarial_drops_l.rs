@@ -713,3 +713,382 @@ fn test_duplicated_unconditional_drop_is_a_double_free() {
     );
     assert!(!err.contains("fuga"), "a double free is not a leak: {err}");
 }
+
+// =========================================================================
+// Category 6: Field drop flags are per place, not per root
+// =========================================================================
+//
+// The ELE verifier used to keep one ownership state per root variable for
+// every drop flag. Two fields of one struct with diverging states, or a
+// field flag cleared before a loop back-edge, made it reject the correct
+// LIR that Stage 1 had lowered (ICE, rule 6), although Stage 0 compiles and
+// runs the same programs with a balanced heap.
+
+const FIELD_FLAGS_PREFIX: &str = r#"struct U {
+    n: Text,
+    c: Text,
+}
+fn mk(s: Text) -> Text {
+    return "{s}!"
+}
+fn take(t: Text) {
+    print(t)
+}
+"#;
+
+/// Two field flags of one struct with opposite states after the join, then
+/// both fields stored again (a store re-initializes only that field).
+const FIELD_FLAGS_DIVERGE: &str = r#"fn field_reinit(k: Bool) -> Int {
+    var u = U(n: mk("n"), c: mk("c"))
+    if k {
+        take(u.c)
+    } else {
+        take(u.n)
+    }
+    u.c = mk("c2")
+    u.n = mk("n2")
+    take(u.c)
+    return 6
+}
+fn main() -> Int {
+    var t = 0
+    t += field_reinit(true)
+    t += field_reinit(false)
+    return t
+}
+"#;
+
+/// A struct declared in a loop body with a conditionally moved field: the
+/// field flag is cleared before the back-edge.
+const FIELD_FLAGS_LOOP: &str = r#"fn loop_moves(n: Int) -> Int {
+    var t = 0
+    var i = 0
+    while i < n {
+        let u = U(n: mk("ln"), c: mk("lc"))
+        if i % 2 == 0 {
+            take(u.c)
+        }
+        i = i + 1
+        t += 1
+    }
+    return t
+}
+fn main() -> Int {
+    return loop_moves(3)
+}
+"#;
+
+/// Conditional partial move out of a by-value struct parameter: `u.n` is
+/// always dropped, `u.c` only when it was not moved.
+const FIELD_FLAGS_PARAM: &str = r#"fn f(u: U, k: Bool) {
+    if k {
+        take(u.c)
+    }
+}
+fn main() -> Int {
+    f(U(n: mk("n1"), c: mk("c1")), true)
+    f(U(n: mk("n2"), c: mk("c2")), false)
+    return 0
+}
+"#;
+
+/// Option/Result whose active variant is only known at run time, maybe
+/// moved: the union drop releases the active payload only.
+const MAYBE_UNIONS: &str = r#"fn mk(s: Text) -> Text {
+    return "{s}!"
+}
+fn res(n: Int) -> Result<Text, Text> {
+    if n > 0 { return Ok(mk("ok")) }
+    return Err(mk("err"))
+}
+fn opt(n: Int) -> Option<Text> {
+    if n > 0 { return Some(mk("some")) }
+    return None
+}
+fn take(t: Text) {
+    print(t)
+}
+fn g(n: Int, k: Bool) -> Int {
+    let r = res(n)
+    let o = opt(n)
+    if k {
+        match r {
+            Ok(t) => { take(t) }
+            Err(e) => { take(e) }
+        }
+        match o {
+            Some(t) => { take(t) }
+            None => {}
+        }
+    }
+    return n
+}
+fn main() -> Int {
+    var t = 0
+    t += g(1, true)
+    t += g(1, false)
+    t += g(-1, true)
+    t += g(-1, false)
+    return t + 10
+}
+"#;
+
+/// Nested Option<Result<Text, Text>> maybe consumed, as a local and as a
+/// by-value parameter.
+const MAYBE_NESTED_UNIONS: &str = r#"fn mk(s: Text) -> Text {
+    return "{s}!"
+}
+fn nest(n: Int) -> Option<Result<Text, Text>> {
+    if n == 0 { return None }
+    if n > 0 { return Some(Ok(mk("ok"))) }
+    return Some(Err(mk("err")))
+}
+fn take(t: Text) {
+    print(t)
+}
+fn g(n: Int, k: Bool) -> Int {
+    let x = nest(n)
+    if k {
+        match x {
+            Some(r) => {
+                match r {
+                    Ok(t) => { take(t) }
+                    Err(_) => { print("e") }
+                }
+            }
+            None => {}
+        }
+    }
+    return 1
+}
+fn h(x: Option<Result<Text, Text>>, k: Bool) {
+    if k {
+        match x {
+            Some(r) => { print("s") }
+            None => {}
+        }
+    }
+}
+fn main() -> Int {
+    var t = 0
+    for i in 0..3 {
+        t += g(i - 1, true)
+        t += g(i - 1, false)
+        h(nest(i - 1), true)
+        h(nest(i - 1), false)
+    }
+    return t
+}
+"#;
+
+fn field_flags(body: &str) -> String {
+    format!("{FIELD_FLAGS_PREFIX}{body}")
+}
+
+/// Removes the first drop-flag clear `i use vN cb0` outside an entry block
+/// (the clear that records a move) and fixes the block's instruction
+/// count: the flag then claims a value that is gone (double free).
+fn drop_move_clear(lir: &str) -> String {
+    let mut lines: Vec<String> = lir.lines().map(str::to_string).collect();
+    let mut in_entry = false;
+    let mut found = None;
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("block ") {
+            in_entry = line.starts_with("block 0 ");
+        } else if !in_entry && line.starts_with("i use ") && line.contains(" cb0 @") {
+            found = Some(i);
+            break;
+        }
+    }
+    let at = found.expect("flag clear to remove");
+    let header = (0..=at)
+        .rev()
+        .find(|&i| lines[i].starts_with("block "))
+        .expect("block header");
+    let mut parts: Vec<String> = lines[header]
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let count: usize = parts[2].parse().unwrap();
+    parts[2] = (count - 1).to_string();
+    lines[header] = parts.join(" ");
+    lines.remove(at);
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn field_drop_flags_are_tracked_per_place_not_per_root() {
+    for (name, source, flagged) in [
+        ("ff_diverge", field_flags(FIELD_FLAGS_DIVERGE), 2),
+        ("ff_loop", field_flags(FIELD_FLAGS_LOOP), 1),
+        ("ff_param", field_flags(FIELD_FLAGS_PARAM), 1),
+    ] {
+        // Stage 1 lowers and verifies it; the Rust validator agrees.
+        let lir = emit(&format!("{name}.l"), &source);
+        validate(&lir).unwrap_or_else(|e| panic!("{name}: {e}\n{lir}"));
+        let guarded = lir
+            .lines()
+            .filter(|l| l.starts_with("i dropfield ") && !l.contains(" - @"))
+            .count();
+        assert_eq!(guarded, flagged, "{name}: flagged dropfields\n{lir}");
+        // Forged flags stay rejected by both verifiers.
+        stage1_fault(&format!("{name}_f17.l"), &source, 17, 6);
+        stage1_fault(&format!("{name}_f18.l"), &source, 18, 6);
+        let forged = drop_move_clear(&lir);
+        assert!(
+            validate(&forged).is_err(),
+            "{name}: a missing flag clear was accepted\n{forged}"
+        );
+    }
+}
+
+/// Every reservation is released exactly once and the heap stays valid.
+#[cfg(windows)]
+fn assert_balanced(name: &str, stderr: &str) {
+    let (_, trace) = stderr
+        .rsplit_once("l-alloc: ")
+        .unwrap_or_else(|| panic!("{name}: no allocation trace: {stderr}"));
+    let field = |key: &str| -> u64 {
+        trace
+            .split_whitespace()
+            .find_map(|w| w.strip_prefix(key))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("{name}: missing {key}: {trace}"))
+    };
+    assert!(field("allocs=") > 0, "{name}: {trace}");
+    assert_eq!(field("allocs="), field("frees="), "{name}: {trace}");
+    assert_eq!(field("heap_ok="), 1, "{name}: {trace}");
+}
+
+#[cfg(windows)]
+fn run_balanced_with_stage0(name: &str, source: &str) -> (i32, String) {
+    let lir = emit(&format!("{name}.l"), source);
+    validate(&lir).unwrap_or_else(|e| panic!("{name}: {e}\n{lir}"));
+    let file = write(&format!("{name}.lir"), &lir);
+    let run = |args: Vec<String>| {
+        let out = Command::new(env!("CARGO_BIN_EXE_l"))
+            .current_dir(temp())
+            .args(&args)
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap(),
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n"),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    let (code, stdout, stderr) = run(vec![
+        "run-lir".into(),
+        file.display().to_string(),
+        "--trace-alloc".into(),
+    ]);
+    assert_balanced(name, &stderr);
+    let source_file = temp().join(format!("{name}.l"));
+    let (code0, stdout0, stderr0) = run(vec![
+        "run".into(),
+        source_file.display().to_string(),
+        "--backend".into(),
+        "cranelift".into(),
+        "--trace-alloc".into(),
+    ]);
+    assert_balanced(name, &stderr0);
+    assert_eq!((code, &stdout), (code0, &stdout0), "{name}: {stderr0}");
+    (code, stdout)
+}
+
+#[cfg(windows)]
+#[test]
+fn maybe_moved_fields_and_unions_run_balanced_with_stage0_parity() {
+    let cases: [(&str, String, i32, &str); 5] = [
+        (
+            "rf_diverge",
+            field_flags(FIELD_FLAGS_DIVERGE),
+            12,
+            "c!\nc2!\nn!\nc2!\n",
+        ),
+        ("rf_loop", field_flags(FIELD_FLAGS_LOOP), 3, "lc!\nlc!\n"),
+        ("rf_param", field_flags(FIELD_FLAGS_PARAM), 0, "c1!\n"),
+        (
+            "ru_maybe",
+            MAYBE_UNIONS.to_string(),
+            10,
+            "ok!\nsome!\nerr!\n",
+        ),
+        (
+            "ru_nested",
+            MAYBE_NESTED_UNIONS.to_string(),
+            6,
+            "e\ns\nok!\ns\n",
+        ),
+    ];
+    for (name, source, code, stdout) in cases {
+        let got = run_balanced_with_stage0(name, &source);
+        assert_eq!(got, (code, stdout.to_string()), "{name}");
+    }
+}
+
+#[test]
+fn unsafe_moves_and_borrows_are_rejected_by_both_stages() {
+    let main = "fn main() -> Int {\n    return 0\n}\n";
+    let cases = [
+        (
+            "neg_maybe_moved_field_use",
+            field_flags(&format!(
+                "fn f(u: U, k: Bool) {{\n    if k {{\n        take(u.c)\n    }}\n    print(u.c)\n}}\n{main}"
+            )),
+            "L0005",
+        ),
+        (
+            "neg_moved_in_both_branches",
+            field_flags(&format!(
+                "fn f(t: Text, k: Bool) {{\n    if k {{\n        take(t)\n    }} else {{\n        take(t)\n    }}\n    print(t)\n}}\n{main}"
+            )),
+            "L0005",
+        ),
+        (
+            "neg_maybe_moved_union_use",
+            field_flags(&format!(
+                "fn f(k: Bool) {{\n    let o = Some(mk(\"x\"))\n    if k {{\n        match o {{\n            Some(t) => {{ take(t) }}\n            None => {{}}\n        }}\n    }}\n    match o {{\n        Some(t) => {{ take(t) }}\n        None => {{}}\n    }}\n}}\n{main}"
+            )),
+            "L0005",
+        ),
+        (
+            "neg_borrow_conflict",
+            format!(
+                "fn f() {{\n    var a = \"x\"\n    let r = &mut a\n    let s = &a\n    print(s)\n    print(r)\n}}\n{main}"
+            ),
+            "L0012",
+        ),
+        (
+            "neg_move_while_borrowed",
+            field_flags(&format!(
+                "fn g() {{\n    let u = U(n: \"a\", c: \"b\")\n    let r = &u\n    take(u.c)\n    print(r.n)\n}}\n{main}"
+            )),
+            "L0012",
+        ),
+        (
+            "neg_move_out_of_reference",
+            field_flags(&format!("fn f(u: &U) {{\n    take(u.c)\n}}\n{main}")),
+            "L0005",
+        ),
+    ];
+    for (name, source, code) in cases {
+        let path = write(&format!("{name}.l"), &source);
+        let out = stage1(&path, "--emit-lir");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{name}: Stage 1 accepted it");
+        assert!(out.stdout.is_empty(), "{name}: Stage 1 emitted LIR");
+        assert!(
+            stderr.contains(&format!("error[{code}]")) && !stderr.contains("ICE"),
+            "{name}: Stage 1 stderr: {stderr}"
+        );
+        let out0 = Command::new(env!("CARGO_BIN_EXE_l"))
+            .arg("check")
+            .arg(&path)
+            .output()
+            .unwrap();
+        let stderr0 = String::from_utf8_lossy(&out0.stderr);
+        assert!(!out0.status.success(), "{name}: Stage 0 accepted it");
+        assert!(stderr0.contains(code), "{name}: Stage 0 stderr: {stderr0}");
+    }
+}

@@ -23,12 +23,53 @@ pub struct LirVerifier {
     mtable: List of[Bool]
     // Drop flags (#F1): abstract values (0: Off, 1: On, 2: Unknown) and
     // ownership states (0: Uninit, 1: Init, 2: Maybe) of guarded places.
+    // `owned`/`otable` are indexed by the flag variable: each flag guards
+    // one place (`flag_place`, -1 for the whole variable `flag_root`), and
+    // two fields of one struct may own different values at the same point.
     flags: List of[Int]
     ftable: List of[Int]
     owned: List of[Int]
     otable: List of[Int]
     flag_root: List of[Int]
+    flag_place: List of[Int]
     has_flags: Bool
+}
+
+// Field/index path of a place from its root, outermost first. The whole
+// variable (a root place, or -1) is the empty path. A malformed chain
+// yields a path that no other place shares.
+expose flow lirPlacePath(l: view LirFn, place: Int) => List of[Int] {
+    var rev: List<Int> = List[]
+    var path: List<Int> = List[]
+    if place < 0 || place >= l.places.length { return path }
+    var cursor = place
+    var steps = 0
+    var bad = false
+    while !bad && l.places[cursor].parent >= 0 {
+        rev.push(l.places[cursor].field)
+        cursor = l.places[cursor].parent
+        steps += 1
+        if cursor < 0 || cursor >= l.places.length || steps > l.places.length { bad = true }
+    }
+    if bad {
+        path.push(0 - 1000000000)
+        return path
+    }
+    var i = rev.length - 1
+    while i >= 0 {
+        path.push(rev[i])
+        i -= 1
+    }
+    return path
+}
+
+// Is `outer` a prefix of `inner` (the place `outer` contains `inner`)?
+expose flow lirPathCovers(outer: view List of[Int], inner: view List of[Int]) => Bool {
+    if outer.length > inner.length { return false }
+    for i in 0..outer.length {
+        if outer[i] != inner[i] { return false }
+    }
+    return true
 }
 
 expose flow lirVarOk(l: view LirFn, slot: Int) => Bool {

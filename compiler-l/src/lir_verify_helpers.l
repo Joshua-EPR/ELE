@@ -134,14 +134,14 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
                         changed = true
                     }
                 }
-                hold root = v.flag_root[i]
-                hold rcell = target * vars + root
-                when root >= 0 && root < v.owned.length && rcell < v.otable.length {
-                    hold o_in = v.owned[root]
+                // Ownership of the place this flag guards (per flag, not
+                // per root: fields of one struct are owned independently).
+                when i < v.owned.length && cell < v.otable.length {
+                    hold o_in = v.owned[i]
                     when first {
-                        v.otable[rcell] = o_in
-                    } otherwise when v.otable[rcell] != o_in && v.otable[rcell] != 2 {
-                        v.otable[rcell] = 2
+                        v.otable[cell] = o_in
+                    } otherwise when v.otable[cell] != o_in && v.otable[cell] != 2 {
+                        v.otable[cell] = 2
                         changed = true
                     }
                 }
