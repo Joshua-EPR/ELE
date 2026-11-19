@@ -61,15 +61,26 @@ expose flow cfgCheckDropField(p: view CfgProgram, f: Int, inst: view CfgInst) =>
 }
 
 // Whether a value of type `ty` owns heap storage: a Text or a list, directly
-// or in a nested field. Only such values need drops; the others may be
-// copied bitwise. A list answers without looking at its element, so a shape
-// that holds a list of itself terminates.
+// or in a nested field, or an enum variant with an owned payload. Only such
+// values need drops; the others may be copied bitwise. A list answers without
+// looking at its element, so a shape that holds a list of itself terminates.
 expose flow cfgOwnsHeap(p: view CfgProgram, ty: Int) => Bool {
     when cfgHeapDirect(p, ty) { give true }
-    when ty < 2 || ty - 2 >= p.structs.length { give false }
-    hold first = p.structs[ty - 2].first_field
-    each k among 0..p.structs[ty - 2].fields {
-        when cfgOwnsHeap(p, p.fields[first + k].ty) { give true }
+    when ty < 2 { give false }
+    when ty - 2 < p.structs.length {
+        hold first = p.structs[ty - 2].first_field
+        each k among 0..p.structs[ty - 2].fields {
+            when cfgOwnsHeap(p, p.fields[first + k].ty) { give true }
+        }
+        give false
+    }
+    hold enum_id = ty - 2 - p.structs.length
+    when enum_id >= 0 && enum_id < p.enums.length {
+        hold first = p.enums[enum_id].first_variant
+        each v among first..(first + p.enums[enum_id].variants) {
+            hold payload = p.variants[v].payload_type
+            when payload != -1 && cfgOwnsHeap(p, payload) { give true }
+        }
     }
     give false
 }
@@ -100,17 +111,17 @@ flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
 // Enum layout: an 8-byte tag at offset 0 and, when some variant carries a
 // payload, a payload area at offset 8 sized by the largest payload rounded
 // up to whole words. Every alignment in this backend is at most 8, so
-// offset 8 suits any payload. A payload that owns a Text or a list,
-// directly or in a nested field, is rejected (82): enums stay drop-free.
+// offset 8 suits any payload. Payloads may own heap storage (Text, list,
+// nested aggregates) and are sized accordingly; alignment > 8 is rejected (82).
 flow cfgLayoutEnum(p: edit CfgProgram, e: Int) => Int {
     hold first = p.enums[e].first_variant
     hold count = p.enums[e].variants
     change largest = 0
     each v among first..(first + count) {
         hold payload = p.variants[v].payload_type
-        when payload >= 0 {
+        when payload != -1 {
             when cfgTypeSize(p, payload) <= 0 { give 0 }
-            when cfgOwnsHeap(p, payload) || cfgTypeAlign(p, payload) > 8 { give 82 }
+            when cfgTypeAlign(p, payload) > 8 { give 82 }
             hold size = cfgTypeSize(p, payload)
             when size > largest { largest = size }
         }

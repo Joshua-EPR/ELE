@@ -171,7 +171,7 @@ fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
         project_l::lir_protocol::validate(&parsed).unwrap();
         let file = temp().join(format!("{name}.lir"));
         fs::write(&file, &lir).unwrap();
-        // Fail closed: no verified owned-payload layout in the ELE backend.
+        // Fail closed: layout code 82 resolved; whole-union drop remains fail-closed (code 92).
         assert!(native_build(&file, name).is_none(), "{name}: ELF built");
         let rejected = Command::new(native())
             .arg(&file)
@@ -180,7 +180,7 @@ fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
             .unwrap();
         assert_eq!(rejected.status.code(), Some(3), "{name}: not a rejection");
         assert!(
-            String::from_utf8_lossy(&rejected.stderr).contains("ELE-LIR/CFG rechazado (código 82)"),
+            String::from_utf8_lossy(&rejected.stderr).contains("ELE-LIR/CFG rechazado (código 92)"),
             "{name}: {}",
             String::from_utf8_lossy(&rejected.stderr)
         );

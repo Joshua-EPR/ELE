@@ -87,7 +87,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         inst.place_field = nativeNumber(source, edit reader)
         inst.argc = nativeNumber(source, edit reader)
         when inst.argc < 0 || inst.argc > 1 { p.error = 83 }
-        when inst.argc == 1 { inst.a = nativeOperand(source, edit reader) }
+        when inst.argc == 1 { inst.a = cfgOperand(edit p, source, edit reader) }
     } otherwise when nativeEquals(source, view kind, "disc") {
         inst.kind = 8
         inst.dst = nativeId(source, edit reader, 118)
@@ -230,7 +230,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
             } otherwise {
                 hold variant = view p.variants[item.first_variant + inst.place_field]
                 change required = 0
-                when variant.payload_type >= 0 { required = 1 }
+                when variant.payload_type != -1 { required = 1 }
                 when inst.argc != required || (required == 1 && first_type != variant.payload_type) { p.error = 86 }
             }
         }
@@ -255,11 +255,11 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
             } otherwise {
                 hold payload = p.variants[e.first_variant + inst.place_field].payload_type
                 // A unit variant cannot be projected. Payloads are Int/Bool
-                // (copied) or drop-free aggregates (cfgLayoutEnum), whose
+                // (copied) or aggregates/Text (cfgLayoutEnum), whose
                 // extraction MOVES the whole enum (native_cfg_verify). Moving
                 // out of a referent is not allowed.
-                when payload < 0 || dest_type != payload { p.error = 89 }
-                when payload >= 2 && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
+                when (payload < 0 && payload != cfgTextType()) || dest_type != payload { p.error = 89 }
+                when (payload >= 2 || payload == cfgTextType()) && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
             }
         }
     }
