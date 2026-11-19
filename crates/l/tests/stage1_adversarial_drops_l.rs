@@ -56,7 +56,12 @@ fn emit(name: &str, text: &str) -> String {
         "{name}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8(out.stdout).unwrap()
+    let lir = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        lir.starts_with("ELE-LIR 1\n"),
+        "{name}: Stage 1 emitted no canonical ELE-LIR header"
+    );
+    lir
 }
 
 fn validate(lir: &str) -> Result<(), String> {
