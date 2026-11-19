@@ -300,7 +300,10 @@ fn test_drop_flag_attacks_on_lir_drop_double_free_and_leak() {
             || err_df.contains("no refleja"),
         "unexpected error: {err_df}"
     );
-    assert!(err_df.contains("L0017"), "canonical L0017 required: {err_df}");
+    assert!(
+        err_df.contains("L0017"),
+        "canonical L0017 required: {err_df}"
+    );
 
     // Attack 1b: Leak (change cb1 to cb0 when value is owned)
     let forged_leak = lir.replacen("i use v32 cb1 @20:5", "i use v32 cb0 @20:5", 1);
@@ -312,7 +315,10 @@ fn test_drop_flag_attacks_on_lir_drop_double_free_and_leak() {
             || err_leak.contains("no refleja"),
         "unexpected error: {err_leak}"
     );
-    assert!(err_leak.contains("L0017"), "canonical L0017 required: {err_leak}");
+    assert!(
+        err_leak.contains("L0017"),
+        "canonical L0017 required: {err_leak}"
+    );
 
     // Self-hosted ELE verifier checks (fail-closed rule 6)
     stage1_fault("b_wild_fault17.l", B_WILD, 17, 6);
@@ -324,11 +330,18 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
     // 1. Struct with Text field
     let lir_text = emit("struct_text.l", STRUCT_PARTIAL_MOVE_TEXT);
     validate(&lir_text).expect("clean struct text must validate");
-    assert!(lir_text.contains("i dropfield p2.0 v5"), "must have flagged dropfield: {lir_text}");
+    assert!(
+        lir_text.contains("i dropfield p2.0 v5"),
+        "must have flagged dropfield: {lir_text}"
+    );
 
     // Attack 1a: Double free (cb0 -> cb1)
     let forged_df = if lir_text.contains("val v3 @9:9\r\ni use v5 cb0") {
-        lir_text.replacen("val v3 @9:9\r\ni use v5 cb0", "val v3 @9:9\r\ni use v5 cb1", 1)
+        lir_text.replacen(
+            "val v3 @9:9\r\ni use v5 cb0",
+            "val v3 @9:9\r\ni use v5 cb1",
+            1,
+        )
     } else {
         lir_text.replacen("val v3 @9:9\ni use v5 cb0", "val v3 @9:9\ni use v5 cb1", 1)
     };
@@ -340,7 +353,10 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
             || err_df.contains("no refleja"),
         "unexpected error: {err_df}"
     );
-    assert!(err_df.contains("L0017"), "canonical code required: {err_df}");
+    assert!(
+        err_df.contains("L0017"),
+        "canonical code required: {err_df}"
+    );
 
     // Attack 1b: Leak (cb1 -> cb0)
     let forged_leak = lir_text.replacen("i use v5 cb1", "i use v5 cb0", 1);
@@ -352,15 +368,25 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
             || err_leak.contains("no refleja"),
         "unexpected error: {err_leak}"
     );
-    assert!(err_leak.contains("L0017"), "canonical code required: {err_leak}");
+    assert!(
+        err_leak.contains("L0017"),
+        "canonical code required: {err_leak}"
+    );
 
     // 2. Struct with List field
     let lir_list = emit("struct_list.l", STRUCT_PARTIAL_MOVE_LIST);
     validate(&lir_list).expect("clean struct list must validate");
-    assert!(lir_list.contains("i dropfield p3.0 v6"), "must have flagged dropfield: {lir_list}");
+    assert!(
+        lir_list.contains("i dropfield p3.0 v6"),
+        "must have flagged dropfield: {lir_list}"
+    );
 
     let forged_df_l = if lir_list.contains("val v4 @9:9\r\ni use v6 cb0") {
-        lir_list.replacen("val v4 @9:9\r\ni use v6 cb0", "val v4 @9:9\r\ni use v6 cb1", 1)
+        lir_list.replacen(
+            "val v4 @9:9\r\ni use v6 cb0",
+            "val v4 @9:9\r\ni use v6 cb1",
+            1,
+        )
     } else {
         lir_list.replacen("val v4 @9:9\ni use v6 cb0", "val v4 @9:9\ni use v6 cb1", 1)
     };
@@ -372,7 +398,10 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
             || err_df_l.contains("no refleja"),
         "unexpected error: {err_df_l}"
     );
-    assert!(err_df_l.contains("L0017"), "canonical code required: {err_df_l}");
+    assert!(
+        err_df_l.contains("L0017"),
+        "canonical code required: {err_df_l}"
+    );
 
     let forged_leak_l = lir_list.replacen("i use v6 cb1", "i use v6 cb0", 1);
     assert_ne!(forged_leak_l, lir_list);
@@ -383,7 +412,10 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
             || err_leak_l.contains("no refleja"),
         "unexpected error: {err_leak_l}"
     );
-    assert!(err_leak_l.contains("L0017"), "canonical code required: {err_leak_l}");
+    assert!(
+        err_leak_l.contains("L0017"),
+        "canonical code required: {err_leak_l}"
+    );
 
     // Self-hosted ELE verifier checks on both structs (fail-closed rule 6)
     stage1_fault("struct_text_fault17.l", STRUCT_PARTIAL_MOVE_TEXT, 17, 6);
@@ -461,7 +493,10 @@ fn test_nested_enums_conditional_drops_and_cfg_joins() {
             || err_inner_flag.contains("no refleja"),
         "unexpected error: {err_inner_flag}"
     );
-    assert!(err_inner_flag.contains("L0017"), "canonical code required: {err_inner_flag}");
+    assert!(
+        err_inner_flag.contains("L0017"),
+        "canonical code required: {err_inner_flag}"
+    );
 
     // Self-hosted ELE verifier rejects nested enum mutations
     // Fault 14: wrong variant payload -> Rule 3
@@ -491,7 +526,10 @@ fn test_loop_and_diamond_cfg_joins_with_unions() {
             || err_diamond.contains("no refleja"),
         "unexpected error: {err_diamond}"
     );
-    assert!(err_diamond.contains("L0017"), "canonical code required: {err_diamond}");
+    assert!(
+        err_diamond.contains("L0017"),
+        "canonical code required: {err_diamond}"
+    );
 
     // Attack 2.7: Loop back-edge flag corruption: cb0 -> cb1 in loop body
     let forged_loop_df = lir.replacen("i use v11 cb0 @16:18", "i use v11 cb1 @16:18", 1);
@@ -503,7 +541,10 @@ fn test_loop_and_diamond_cfg_joins_with_unions() {
             || err_loop.contains("no refleja"),
         "unexpected error: {err_loop}"
     );
-    assert!(err_loop.contains("L0017"), "canonical code required: {err_loop}");
+    assert!(
+        err_loop.contains("L0017"),
+        "canonical code required: {err_loop}"
+    );
 
     // Attack 2.8: Loop duplicate drop
     let double_loop_drop = mutate(&lir, |l| l.contains("i drop v4 v11"), true);
@@ -512,7 +553,10 @@ fn test_loop_and_diamond_cfg_joins_with_unions() {
         err_loop_drop.contains("doble liberación") || err_loop_drop.contains("no coincide"),
         "unexpected error: {err_loop_drop}"
     );
-    assert!(err_loop_drop.contains("L0017"), "canonical code required: {err_loop_drop}");
+    assert!(
+        err_loop_drop.contains("L0017"),
+        "canonical code required: {err_loop_drop}"
+    );
 
     // Self-hosted ELE verifier on loops and diamond CFG joins
     stage1_fault("loop_fault15.l", LOOP_AND_DIAMOND_CFG, 15, 6);
@@ -531,7 +575,11 @@ fn test_forged_uninitialized_operands_fail_closed() {
     validate(&lir).expect("clean simple arith must validate");
 
     // Attack 3.1: Read unassigned variable v3 in binary operation before it is defined
-    let forged_uninit = lir.replacen("i binary v2 add v0 v1 @3:13", "i binary v2 add v3 v1 @3:13", 1);
+    let forged_uninit = lir.replacen(
+        "i binary v2 add v0 v1 @3:13",
+        "i binary v2 add v3 v1 @3:13",
+        1,
+    );
     assert_ne!(forged_uninit, lir);
     let err_uninit = validate_err(&forged_uninit);
     assert!(
@@ -572,7 +620,11 @@ fn test_read_and_use_after_move_fail_closed() {
     validate(&lir).expect("clean cfg must validate");
 
     // Attack 3.3: Place read (i disc) of consumed place p2 after payload extraction into Int variable v3
-    let forged_disc_consumed = insert_inst_after(&lir, |l| l.contains("i use v6 v5 @6:13"), "i disc v3 p2 @6:13");
+    let forged_disc_consumed = insert_inst_after(
+        &lir,
+        |l| l.contains("i use v6 v5 @6:13"),
+        "i disc v3 p2 @6:13",
+    );
     let err_disc = validate_err(&forged_disc_consumed);
     assert!(
         err_disc.contains("uso tras movimiento o inicialización parcial"),
@@ -600,7 +652,11 @@ fn test_read_and_use_after_move_fail_closed() {
     let lir_arith = emit("arith_use_move.l", SIMPLE_ARITH);
     // In SIMPLE_ARITH, v4 (Text) is passed by value to f0 at `i call v5 f0 1 val v4 @5:5`
     // Inserting another use of v4 `i call v5 f0 1 val v4 @5:5` after it attempts to move v4 twice
-    let forged_call_twice = mutate(&lir_arith, |l| l.contains("i call v5 f0 1 val v4 @5:5"), true);
+    let forged_call_twice = mutate(
+        &lir_arith,
+        |l| l.contains("i call v5 f0 1 val v4 @5:5"),
+        true,
+    );
     let err_call_twice = validate_err(&forged_call_twice);
     assert!(
         err_call_twice.contains("uso tras movimiento o inicialización parcial"),
@@ -624,27 +680,40 @@ fn test_canonical_fail_closed_error_codes() {
     // 1. Rust validator must consistently reject illegal LIR with canonical diagnostics:
     // a) Structural CFG / definite assignment violation -> L0007
     let lir = emit("simple_canonical.l", SIMPLE_ARITH);
-    let forged = lir.replacen("i binary v2 add v0 v1 @3:13", "i binary v2 add v3 v1 @3:13", 1);
+    let forged = lir.replacen(
+        "i binary v2 add v0 v1 @3:13",
+        "i binary v2 add v3 v1 @3:13",
+        1,
+    );
     let parsed = project_l::lir_protocol::parse(&forged).expect("protocol parse succeeds");
-    let diag = project_l::lir_protocol::validate(&parsed).expect_err("must fail closed on unassigned var");
-    assert_eq!(diag.code, "L0007", "Rust validator must emit canonical diagnostic code L0007 for CFG violation");
+    let diag =
+        project_l::lir_protocol::validate(&parsed).expect_err("must fail closed on unassigned var");
+    assert_eq!(
+        diag.code, "L0007",
+        "Rust validator must emit canonical diagnostic code L0007 for CFG violation"
+    );
 
     // b) Drop flag disagreement / double-free violation -> L0017
     let lir_drop = emit("b_wild_canonical.l", B_WILD);
     let forged_flag = lir_drop.replacen("i use v32 cb0 @22:14", "i use v32 cb1 @22:14", 1);
-    let parsed_flag = project_l::lir_protocol::parse(&forged_flag).expect("protocol parse succeeds");
-    let diag_flag = project_l::lir_protocol::validate(&parsed_flag).expect_err("must fail closed on flag tampering");
-    assert_eq!(diag_flag.code, "L0017", "Rust validator must emit canonical diagnostic code L0017 for drop flag violation");
+    let parsed_flag =
+        project_l::lir_protocol::parse(&forged_flag).expect("protocol parse succeeds");
+    let diag_flag = project_l::lir_protocol::validate(&parsed_flag)
+        .expect_err("must fail closed on flag tampering");
+    assert_eq!(
+        diag_flag.code, "L0017",
+        "Rust validator must emit canonical diagnostic code L0017 for drop flag violation"
+    );
 
     // 2. ELE self-hosted verifier must fail closed with error[ICE] (regla N, bloque B)
     // and must NEVER emit unchecked LIR to stdout when verification fails
     for (fault, expected_rule) in [
-        (4, 5),   // use of unassigned variable -> Rule 5
-        (14, 3),  // wrong variant payload -> Rule 3
-        (15, 6),  // unflagged drop of conditionally moved union -> Rule 6
-        (16, 5),  // use after move -> Rule 5
-        (17, 6),  // drop flag cb1 double free -> Rule 6
-        (18, 6),  // drop flag cb0 leak -> Rule 6
+        (4, 5),  // use of unassigned variable -> Rule 5
+        (14, 3), // wrong variant payload -> Rule 3
+        (15, 6), // unflagged drop of conditionally moved union -> Rule 6
+        (16, 5), // use after move -> Rule 5
+        (17, 6), // drop flag cb1 double free -> Rule 6
+        (18, 6), // drop flag cb0 leak -> Rule 6
     ] {
         stage1_fault("fail_closed.l", LOOP_AND_DIAMOND_CFG, fault, expected_rule);
     }
