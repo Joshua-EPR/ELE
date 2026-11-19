@@ -7,17 +7,19 @@
 //! * Stage 1 `main_sema --emit-lir` is deterministic on main.l,
 //!   main_parser.l, main_sema.l and native_cfg_demo.l;
 //! * Stage 1 `native_cfg_demo` turns the LIR of main.l (lexer), main_parser.l
-//!   (parser) and native_cfg_demo.l (the backend itself) into ELF64 images;
+//!   (parser), main_sema.l (semantic analyser and LIR emitter, since shape-
+//!   and union-typed fields are released through drop glue and whole owning
+//!   referents can be replaced) and native_cfg_demo.l (the backend itself)
+//!   into ELF64 images;
 //! * on Linux x86-64, or through WSL when `ELE_TEST_WSL_DISTRO` names a
 //!   distribution, the native lexer reproduces the Stage-0-built lexer byte
 //!   for byte on a compiler source, and the native backend recompiles its
 //!   own LIR into exactly the image that the Stage-0-built backend produced
 //!   (generation 2 == generation 1).
 //!
-//! Not asserted (still open): main_sema.l's LIR is rejected by the backend
-//! (code 92: `dropfield` of a whole struct-typed field, first at
-//! `ctx.flow = flowNew()` in sema.l), so the semantic analyser cannot yet be
-//! built natively and Stage 3 is not autonomous.
+//! Opt-in (`ELE_TEST_NATIVE_SEMA=1`, about ten minutes through WSL): the
+//! native semantic analyser emits, for main_sema.l itself, exactly the LIR
+//! that Stage 1 emitted.
 //!
 //! The images run without strace (stage1_support/elf_exec.rs traces every
 //! mmap, and the backend's trace is megabytes written through WSL's /mnt).
@@ -90,6 +92,11 @@ fn execute(image: &Path, dir: &Path, args: &[&str]) -> Option<Output> {
 /// LIR of `compiler-l/src/<component>.l`, emitted twice from the repository
 /// root; both runs must succeed with identical bytes.
 fn lir(component: &str) -> PathBuf {
+    // Two tests may ask for the same component; they write the same file.
+    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = WRITING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let source = format!("compiler-l/src/{component}.l");
     let run = || {
         let out = Command::new(sema())
@@ -160,6 +167,51 @@ fn native_lexer_matches_the_stage0_built_lexer() {
         );
         assert_eq!(run.stdout, reference.stdout);
         assert_eq!(run.stderr, reference.stderr);
+    }
+}
+
+#[test]
+fn main_sema_lir_reaches_elf64() {
+    let source = lir("main_sema");
+    let image = accepted("main_sema", &source);
+    if std::env::var_os("ELE_TEST_NATIVE_SEMA").is_none_or(|v| v != "1") {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "SKIP[native-sema]: set ELE_TEST_NATIVE_SEMA=1 to run the native semantic analyser on main_sema.l"
+        );
+        return;
+    }
+    // Generation 2 of the LIR: the native analyser, run from a copy of the
+    // compiler sources (imports are relative), on main_sema.l.
+    let dir = work("main_sema-gen2");
+    let tree = dir.join("compiler-l");
+    let _ = fs::remove_dir_all(&tree);
+    copy_tree(&root().join("compiler-l/src"), &tree.join("src"));
+    if let Some(run) = execute(&image, &dir, &["compiler-l/src/main_sema.l", "--emit-lir"]) {
+        assert_eq!(
+            run.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert!(
+            run.stdout == fs::read(&source).unwrap(),
+            "the native main_sema emits a different LIR for main_sema.l"
+        );
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
     }
 }
 
