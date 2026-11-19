@@ -85,6 +85,14 @@ expose flow cfgOwnsHeap(p: view CfgProgram, ty: Int) => Bool {
     give false
 }
 
+// Whether `ty` is a union (enum) with at least one variant whose payload owns
+// heap storage: the only unions that a whole `i drop` may release.
+expose flow cfgOwningUnion(p: view CfgProgram, ty: Int) => Bool {
+    hold enum_id = ty - 2 - p.structs.length
+    when ty < 2 || enum_id < 0 || enum_id >= p.enums.length { give false }
+    give cfgOwnsHeap(p, ty)
+}
+
 // Declaration layouts (after cfgReadStruct/cfgReadEnum in native_cfg_types).
 // Lays out struct `s` once all its field types are sized. Returns 1 when it
 // was laid out now, 0 when it must wait, or an error code.

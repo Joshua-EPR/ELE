@@ -206,6 +206,37 @@ flow cfgEmitShapeGlue(code: edit X64Code, p: view CfgProgram, s: Int, fix: edit 
     x64FrameEnd(edit code)
 }
 
+// Drop glue of union `e` (an Option/Result instantiation or another tagged
+// choice): glue(RDI = address of the value). It reads the tag at offset 0
+// and releases only the payload of the active variant, at offset 8, when that
+// payload owns heap storage; unit and drop-free variants release nothing. A
+// nested union, shape or list payload is released through its own glue, so
+// the recursion follows the (acyclic, by-value) payload types. A tag that
+// names no owning variant releases nothing. Slot 0: the address.
+flow cfgEmitUnionGlue(code: edit X64Code, p: view CfgProgram, e: Int, fix: edit CfgFix) {
+    x64FrameBegin(edit code, 2)
+    x64StoreSlot(edit code, 0, 7)
+    hold first = p.enums[e].first_variant
+    each k among 0..p.enums[e].variants {
+        hold payload = p.variants[first + k].payload_type
+        when payload != -1 && cfgOwnsHeap(p, payload) {
+            // The payload glue clobbers caller-saved registers: reload the
+            // address and the tag for every owning variant.
+            x64LoadSlot(edit code, 7, 0)
+            x64LoadMem64(edit code, 0, 7, 0)
+            x64MovImm64(edit code, 1, k)
+            x64CmpReg(edit code, 0, 1)
+            hold inactive = x64ConditionalPlaceholder(edit code, false)
+            x64MovImm64(edit code, 10, 8)
+            x64AddReg(edit code, 7, 10)
+            cfgDropAt(edit code, edit fix, payload)
+            hold next_variant = code.bytes.length
+            x64PatchRelative(edit code, inactive, next_variant)
+        }
+    }
+    x64FrameEnd(edit code)
+}
+
 // Emits the list runtime and the drop glue, appending their addresses to
 // `at` (after the routines of native_rt): first list_reserve, then one entry
 // per type code from 2 on, -1 for the types that need no glue.
@@ -227,7 +258,12 @@ expose flow cfgEmitDropGlue(code: edit X64Code, p: view CfgProgram, fix: edit Cf
         }
     }
     each e among 0..p.decl_enums {
-        at@push(-1)
+        when cfgOwnsHeap(p, 2 + p.decl_structs + e) {
+            at@push(code.bytes.length)
+            cfgEmitUnionGlue(edit code, p, e, edit fix)
+        } otherwise {
+            at@push(-1)
+        }
     }
     each k among 0..p.decl_lists {
         at@push(code.bytes.length)

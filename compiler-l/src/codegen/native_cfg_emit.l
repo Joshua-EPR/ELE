@@ -299,10 +299,31 @@ flow cfgEmitParams(code: edit X64Code, p: view CfgProgram, f: Int) {
     }
 }
 
+// The drop glue table (cfgEmitDropGlue) is emitted when a list type exists,
+// or when some `i drop` releases a whole union (cfgEmitUnionGlue). Programs
+// without either keep their previous, glue-free image.
+flow cfgNeedsGlue(p: view CfgProgram) => Bool {
+    when p.decl_lists > 0 { give true }
+    hold first_enum = 2 + p.decl_structs
+    each f among 0..p.functions.length {
+        hold func = view p.functions[f]
+        each b among func.first_block..(func.first_block + func.blocks) {
+            hold block = view p.blocks[b]
+            each i among block.first..(block.first + block.count) {
+                when p.insts[i].kind == 13 {
+                    hold owner = p.types_code[func.first_var + p.insts[i].place_var]
+                    when owner >= first_enum && owner < first_enum + p.decl_enums { give true }
+                }
+            }
+        }
+    }
+    give false
+}
+
 flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     // A list type brings its growth routine and drop glue, which release
-    // Text elements through the runtime.
-    when p.decl_lists > 0 { give true }
+    // Text elements through the runtime; so does an owning union.
+    when cfgNeedsGlue(p) { give true }
     each i among 0..p.insts.length {
         // The platform runtime allocates and releases through native_rt.
         when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 || p.insts[i].kind == 24 { give true }
@@ -411,7 +432,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             runtime_at = rtEmitAll(edit code)
         }
     }
-    when p.decl_lists > 0 {
+    when cfgNeedsGlue(p) {
         when target == 1 {
             // list_reserve is already rtListReserve() of the Windows runtime.
             cfgEmitDropGlue(edit code, p, edit fix, edit runtime_at, 1)
