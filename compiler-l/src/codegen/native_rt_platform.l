@@ -1,4 +1,4 @@
-import x86_64
+take x86_64
 
 // Platform runtime of the ELE-written Linux x86-64 backend: the five
 // `i platform` operations of ELE-LIR 1 (processArgCount, processArg,
