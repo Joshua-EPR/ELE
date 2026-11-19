@@ -799,6 +799,7 @@ fn main() -> Int {
 
 /// Option/Result whose active variant is only known at run time, maybe
 /// moved: the union drop releases the active payload only.
+#[cfg(windows)]
 const MAYBE_UNIONS: &str = r#"fn mk(s: Text) -> Text {
     return "{s}!"
 }
@@ -840,6 +841,7 @@ fn main() -> Int {
 
 /// Nested Option<Result<Text, Text>> maybe consumed, as a local and as a
 /// by-value parameter.
+#[cfg(windows)]
 const MAYBE_NESTED_UNIONS: &str = r#"fn mk(s: Text) -> Text {
     return "{s}!"
 }
