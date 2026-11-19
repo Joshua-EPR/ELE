@@ -140,13 +140,22 @@ fn main() -> Int {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let lir = String::from_utf8(out.stdout).unwrap();
-    assert!(lir.contains("i call "), "call in max_len must be lowered: {lir}");
+    assert!(
+        lir.contains("i call "),
+        "call in max_len must be lowered: {lir}"
+    );
     let platform_line = lir
         .lines()
         .find(|line| line.contains(" readtext 2 "))
         .expect("readText platform instruction absent");
-    assert!(platform_line.contains(" ref p"), "path must be ref: {platform_line}");
-    assert!(platform_line.contains(" val v"), "max_len must be val: {platform_line}");
+    assert!(
+        platform_line.contains(" ref p"),
+        "path must be ref: {platform_line}"
+    );
+    assert!(
+        platform_line.contains(" val v"),
+        "max_len must be val: {platform_line}"
+    );
     let module = project_l::lir_protocol::parse(&lir).unwrap();
     project_l::lir_protocol::validate(&module).unwrap();
 
@@ -178,7 +187,10 @@ fn main() -> Int {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let lir = String::from_utf8(out.stdout).unwrap();
-    assert!(lir.contains("i listlit "), "list literal must be lowered: {lir}");
+    assert!(
+        lir.contains("i listlit "),
+        "list literal must be lowered: {lir}"
+    );
     let module = project_l::lir_protocol::parse(&lir).unwrap();
     project_l::lir_protocol::validate(&module).unwrap();
 
@@ -239,10 +251,14 @@ fn main() -> Int {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let lir = String::from_utf8(out.stdout).unwrap();
-    let readtext = lir.lines()
+    let readtext = lir
+        .lines()
         .find(|line| line.contains(" readtext 2 "))
         .expect("readText platform instruction required");
-    assert!(readtext.contains(" ref p"), "path must be a loaned place: {readtext}");
+    assert!(
+        readtext.contains(" ref p"),
+        "path must be a loaned place: {readtext}"
+    );
     assert!(
         readtext.contains(" val v") || readtext.contains(" val ci"),
         "computed max_len must be passed by value: {readtext}"
