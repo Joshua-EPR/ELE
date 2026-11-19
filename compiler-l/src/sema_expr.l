@@ -338,15 +338,15 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     semaAddError(&mut ctx, "L0016", "readText requiere un lugar Text prestable; los temporales propietarios no están soportados", expr.start, expr.end)
                     return 7
                 }
+                let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                 var loans: List<Int> = List[]
                 loans.push(path_loan)
-                semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
+                semaCallLoans(&mut ctx, &loans, res_t, SITE_NONE, expr.start, expr.end)
                 var args: List<Int> = List[]
                 let path_arg = lirArg(&mut ctx.lir, true, path, false)
                 args.push(path_arg)
                 let len_arg = lirArg(&mut ctx.lir, false, len, false)
                 args.push(len_arg)
-                let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                 // Result<Text, Int> owns its active Text (#5): a registered
                 // builtin union with an atomic drop obligation.
                 if lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, res_t) < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
