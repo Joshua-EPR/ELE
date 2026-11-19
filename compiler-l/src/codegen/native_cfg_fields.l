@@ -47,11 +47,14 @@ expose flow cfgReadDropField(p: edit CfgProgram, f: Int, source: view Text, read
     }
 }
 
-// A dropfield names a Text or list field (not a whole variable, and not a
-// place inside a list) and an optional Bool flag.
+// A dropfield names a field that owns heap storage (not a whole variable,
+// and not a place inside a list) and an optional Bool flag. A Text or list
+// field is released directly; a shape- or union-typed field through its drop
+// glue (cfgEmitShapeGlue, cfgEmitUnionGlue). A field that owns nothing has
+// nothing to release and stays rejected (92).
 expose flow cfgCheckDropField(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
-    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgHeapDirect(p, cfgPlaceType(p, f, view place)) { give 92 }
+    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgOwnsHeap(p, cfgPlaceType(p, f, view place)) { give 92 }
     when inst.op >= 0 {
         when inst.op >= p.functions[f].vars { give 94 }
         hold first = p.functions[f].first_var
@@ -85,6 +88,14 @@ expose flow cfgOwnsHeap(p: view CfgProgram, ty: Int) => Bool {
     give false
 }
 
+// Whether `ty` is a union (enum) with at least one variant whose payload owns
+// heap storage: the only unions that a whole `i drop` may release.
+expose flow cfgOwningUnion(p: view CfgProgram, ty: Int) => Bool {
+    hold enum_id = ty - 2 - p.structs.length
+    when ty < 2 || enum_id < 0 || enum_id >= p.enums.length { give false }
+    give cfgOwnsHeap(p, ty)
+}
+
 // Declaration layouts (after cfgReadStruct/cfgReadEnum in native_cfg_types).
 // Lays out struct `s` once all its field types are sized. Returns 1 when it
 // was laid out now, 0 when it must wait, or an error code.
@@ -102,7 +113,7 @@ flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
         p.fields[k].offset = offset
     }
     hold size = nativeLayoutSeal(edit layout)
-    when size <= 0 || size > 512 { give 63 }
+    when size <= 0 || size > cfgMaxValueBytes() { give 63 }
     p.structs[s].size = size
     p.structs[s].align = layout.align
     give 1
@@ -128,7 +139,7 @@ flow cfgLayoutEnum(p: edit CfgProgram, e: Int) => Int {
     }
     change size = 8
     when largest > 0 { size = 8 + 8 * ((largest + 7) / 8) }
-    when size > 520 { give 63 }
+    when size > 8 + cfgMaxValueBytes() { give 63 }
     p.enums[e].size = size
     p.enums[e].align = 8
     give 1

@@ -17,6 +17,7 @@
 //!    - `main_parser.exe` parses source to canonical AST.
 //!    - `main_sema.exe --emit-lir` produces valid ELE-LIR 1.
 //!    - `native_cfg_demo.exe` consumes LIR and emits a valid ELF64 executable.
+mod image_support;
 mod stage1_support;
 
 use std::{
@@ -115,6 +116,28 @@ fn test_stage2_determinism_and_bit_for_bit_parity() {
     assert_eq!(
         run1.stdout, run2.stdout,
         "Non-deterministic LIR emission within Stage 1"
+    );
+
+    // 2b. A third run from another working directory and with an empty
+    // environment: the emitted LIR depends only on the source text.
+    let elsewhere = scratch.join("other-cwd");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let run3 = Command::new(sema_exe)
+        .arg(&sema_src)
+        .arg("--emit-lir")
+        .current_dir(&elsewhere)
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(
+        run3.status.success(),
+        "Stage 1 Run 3 failed: {}",
+        String::from_utf8_lossy(&run3.stderr)
+    );
+    assert_eq!(
+        image_support::sha256(&run1.stdout),
+        image_support::sha256(&run3.stdout),
+        "Stage 1 LIR depends on the working directory or the environment"
     );
 
     let lir_path = scratch.join("main_sema_stage1.lir");
@@ -250,6 +273,98 @@ fn test_stage2_full_pipeline_end_to_end() {
             Some(2),
             "flow_self_harness ELF execution expected exit code 2, got: {:?}",
             result.status.code()
+        );
+    }
+}
+
+/// The self-contained SHA-256 used below matches the FIPS 180-4 vectors.
+#[test]
+fn test_sha256_helper_matches_known_vectors() {
+    assert_eq!(
+        image_support::sha256(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        image_support::sha256(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        image_support::sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+    );
+}
+
+/// Stage 1 LIR -> ELE native backend, twice per target, from different
+/// working directories and into differently named files: the ELF64 and the
+/// PE32+ images have identical SHA-256 digests (no timestamp, path or
+/// address-space dependent byte), and the two targets differ.
+#[test]
+fn test_native_images_of_a_fixed_input_are_bit_identical() {
+    let base = root();
+    let scratch = base.join("target/stage1-tests/stage2-bootstrap-native-determinism");
+    fs::create_dir_all(&scratch).unwrap();
+    for source in [
+        "compiler-l/src/flow_self_harness.l",
+        "examples/native_list_owned_stage1.l",
+        "examples/native_loans_stage1.l",
+    ] {
+        let emitted = run_isolated(
+            bin_sema(),
+            &[base.join(source).as_os_str(), OsStr::new("--emit-lir")],
+        );
+        assert!(
+            emitted.status.success(),
+            "{source}: {}",
+            String::from_utf8_lossy(&emitted.stderr)
+        );
+        let stem = Path::new(source)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let lir = scratch.join(format!("{stem}.lir"));
+        fs::write(&lir, &emitted.stdout).unwrap();
+        let mut digests = Vec::new();
+        for (target, extension, flag) in [("ELF64", "elf", None), ("PE32+", "exe", Some("--pe64"))]
+        {
+            let mut images = Vec::new();
+            for run in 0..2 {
+                let cwd = scratch.join(format!("cwd{run}"));
+                fs::create_dir_all(&cwd).unwrap();
+                let image = cwd.join(format!("{stem}-{run}-{}.{extension}", "x".repeat(run * 7)));
+                let _ = fs::remove_file(&image);
+                let mut cmd = Command::new(bin_native());
+                cmd.current_dir(&cwd).arg(&lir).arg(&image);
+                if let Some(flag) = flag {
+                    cmd.arg(flag);
+                }
+                let out = cmd.output().unwrap();
+                assert!(
+                    out.status.success(),
+                    "{source} [{target}]: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                images.push(fs::read(&image).unwrap());
+            }
+            match target {
+                "ELF64" => {
+                    image_support::validate_elf64(&images[0]).unwrap();
+                }
+                _ => {
+                    image_support::validate_pe32plus(&images[0]).unwrap();
+                }
+            }
+            let first = image_support::sha256(&images[0]);
+            assert_eq!(
+                first,
+                image_support::sha256(&images[1]),
+                "{source} [{target}]: two builds differ"
+            );
+            digests.push(first);
+        }
+        assert_ne!(
+            digests[0], digests[1],
+            "{source}: ELF64 and PE32+ images coincide"
         );
     }
 }

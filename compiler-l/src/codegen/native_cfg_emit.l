@@ -14,6 +14,7 @@ take native_cfg_fields
 take native_cfg_ir
 take native_cfg_platform
 take native_rt_platform
+take win64_rt_platform
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -36,8 +37,10 @@ flow cfgPlaceKind(p: view CfgProgram, f: Int, variable: Int, field: Int, subfiel
 // The place may be reached through a reference parameter or a list index.
 flow cfgStoreField(code: edit X64Code, p: view CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: view NativeOperand, fix: edit CfgFix) {
     hold ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
-    when ext >= 0 && cfgOwnsHeap(p, ty) {
+    hold whole_referent = field < 0 && ext < 0
+    when (ext >= 0 || whole_referent) && cfgOwnsHeap(p, ty) {
         // Indexed owners have no partial-move flag: the old element is live.
+        // A whole referent is live too (native_cfg_verify requires it whole).
         // Drop it before loading the source, then recompute the address since
         // drop glue may clobber caller-saved registers.
         cfgPlaceAddressRax(edit code, p, f, variable, field, subfield, ext, edit fix)
@@ -278,6 +281,10 @@ flow cfgEmitTerm(code: edit X64Code, p: view CfgProgram, f: Int, block: view Cfg
         fix.jump_to@push(func.first_block + block.no)
     } otherwise when block.term == 4 {
         x64Unreachable(edit code)
+    } otherwise when block.term == 5 {
+        // returnref: the reference's slot holds the referent's address.
+        x64LoadSlot(edit code, 0, p.slot_start[cfgVarIndex(p, f, block.value.value)])
+        x64FrameEnd(edit code)
     } otherwise {
         code.error = 11
     }
@@ -299,10 +306,40 @@ flow cfgEmitParams(code: edit X64Code, p: view CfgProgram, f: Int) {
     }
 }
 
+// The drop glue table (cfgEmitDropGlue) is emitted when a list type exists,
+// when some `i drop` releases a whole union (cfgEmitUnionGlue), or when a
+// shape- or union-typed value is released by `dropfield` or replaced by a
+// whole `store` through a reference. Other programs keep their glue-free
+// image.
+flow cfgNeedsGlue(p: view CfgProgram) => Bool {
+    when p.decl_lists > 0 { give true }
+    hold first_enum = 2 + p.decl_structs
+    each f among 0..p.functions.length {
+        hold func = view p.functions[f]
+        each b among func.first_block..(func.first_block + func.blocks) {
+            hold block = view p.blocks[b]
+            each i among block.first..(block.first + block.count) {
+                hold inst = view p.insts[i]
+                when inst.kind == 13 {
+                    hold owner = p.types_code[func.first_var + inst.place_var]
+                    when owner >= first_enum && owner < first_enum + p.decl_enums { give true }
+                }
+                hold whole_store = inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0
+                when inst.kind == 17 || whole_store {
+                    hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
+                    hold ty = cfgPlaceType(p, f, view place)
+                    when ty >= 2 && cfgOwnsHeap(p, ty) { give true }
+                }
+            }
+        }
+    }
+    give false
+}
+
 flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     // A list type brings its growth routine and drop glue, which release
-    // Text elements through the runtime.
-    when p.decl_lists > 0 { give true }
+    // Text elements through the runtime; so does an owning union.
+    when cfgNeedsGlue(p) { give true }
     each i among 0..p.insts.length {
         // The platform runtime allocates and releases through native_rt.
         when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 || p.insts[i].kind == 24 { give true }
@@ -356,12 +393,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 73
         give result
     }
-    // Platform builtins (native_cfg_platform) exist only on Linux ELF64.
+    // Platform builtins (native_cfg_platform): native_rt_platform on Linux
+    // ELF64, win64_rt_platform (KERNEL32 only) on Windows PE32+.
     hold platform = cfgUsesKind(p, 24)
-    when platform && target != 0 {
-        result.error = 133
-        give result
-    }
     change imports = pe64NewImports()
     // Immediates holding the address of the ELF read-write data page.
     change data_at: List of[Int] = List[]
@@ -411,7 +445,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             runtime_at = rtEmitAll(edit code)
         }
     }
-    when p.decl_lists > 0 {
+    when cfgNeedsGlue(p) {
         when target == 1 {
             // list_reserve is already rtListReserve() of the Windows runtime.
             cfgEmitDropGlue(edit code, p, edit fix, edit runtime_at, 1)
@@ -419,10 +453,20 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
         }
     }
+    // Runtime and drop-glue indexes share the call target space with the
+    // platform routines from cfgPlatformBase() on: they must stay below it.
+    when runtime_at.length >= cfgPlatformBase() {
+        result.error = 74
+        give result
+    }
     change platform_at: List of[Int] = List[]
     when platform {
         hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
-        platform_at = pfEmitAll(edit code, view rt, edit data_at)
+        when target == 1 {
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt)
+        } otherwise {
+            platform_at = pfEmitAll(edit code, view rt, edit data_at)
+        }
     }
 
     each f among 0..p.functions.length {
@@ -454,7 +498,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     // provides every entry of native_rt and native_rt_list.
     change missing_routine = false
     each i among 0..fix.call_at.length {
-        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length { missing_routine = true }
+        hold routine = -1 - fix.call_to[i] - cfgPlatformBase()
+        hold platform_routine = routine >= 0 && routine < platform_at.length
+        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine { missing_routine = true }
     }
     when missing_routine {
         result.error = 73

@@ -141,7 +141,7 @@ fn write_case(name: &str, text: &str) -> PathBuf {
 }
 
 #[test]
-fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
+fn owned_payloads_are_verified_lir_and_built_by_the_ele_backend() {
     let cases = [
         (
             "result_text.l",
@@ -171,19 +171,8 @@ fn owned_payloads_are_verified_lir_but_rejected_by_the_ele_backend() {
         project_l::lir_protocol::validate(&parsed).unwrap();
         let file = temp().join(format!("{name}.lir"));
         fs::write(&file, &lir).unwrap();
-        // Fail closed: layout code 82 resolved; whole-union drop remains fail-closed (code 92).
-        assert!(native_build(&file, name).is_none(), "{name}: ELF built");
-        let rejected = Command::new(native())
-            .arg(&file)
-            .arg(temp().join(format!("{name}.rejected.elf")))
-            .output()
-            .unwrap();
-        assert_eq!(rejected.status.code(), Some(3), "{name}: not a rejection");
-        assert!(
-            String::from_utf8_lossy(&rejected.stderr).contains("ELE-LIR/CFG rechazado (código 92)"),
-            "{name}: {}",
-            String::from_utf8_lossy(&rejected.stderr)
-        );
+        // Whole-union drop glue (code 92) is resolved: ELF builds cleanly.
+        assert!(native_build(&file, name).is_some(), "{name}: ELF not built");
     }
     // A nominal choice with an owned payload stays outside ELE-LIR.
     let path = write_case(

@@ -33,6 +33,28 @@ pub struct LirVerifier {
     flag_root: List of[Int]
     flag_place: List of[Int]
     has_flags: Bool
+    // Owned leaves (`lir_verify_own.l`): variable and field path of each
+    // leaf, its may-own / may-be-gone bits and their per-block entry tables.
+    leaf_var: List of[Int]
+    leaf_first: List of[Int]
+    leaf_len: List of[Int]
+    leaf_path: List of[Int]
+    lown: List of[Bool]
+    lgone: List of[Bool]
+    lotable: List of[Bool]
+    lgtable: List of[Bool]
+    // Loan origins: reference `org_ref` borrows place `org_place` (-1: the
+    // whole variable) of the by-value variable `org_root`.
+    org_ref: List of[Int]
+    org_root: List of[Int]
+    org_place: List of[Int]
+    // Per variable: a reference that may borrow a list element after that
+    // list was mutated (push, pop, reserve, element store, edit loan to a
+    // call), with its per-block entry table (OR join).
+    stale: List of[Bool]
+    stable: List of[Bool]
+    // A leak was seen while checking (rule 10, reported last).
+    leaked: Bool
 }
 
 // Field/index path of a place from its root, outermost first. The whole

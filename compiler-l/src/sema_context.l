@@ -78,6 +78,8 @@ pub struct SemaContext {
     lir_module: LirModule
     emit_lir: Bool
     lir_fault: Int
+    // Test hook: forged-instruction patch applied before verification.
+    lir_patch: Text
     lir_lines: List<Text>
     lir_functions: List<Text>
     lir_line_starts: List<Int>
@@ -138,6 +140,7 @@ pub fn semaContextNew() -> SemaContext {
         lir_module: lirModuleNew(),
         emit_lir: false,
         lir_fault: 0,
+        lir_patch: "",
         lir_lines: List[],
         lir_functions: List[],
         lir_line_starts: List[],

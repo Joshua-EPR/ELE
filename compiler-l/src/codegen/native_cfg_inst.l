@@ -187,9 +187,13 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars {
             p.error = 92
         } otherwise {
-            // `append` writes a Text buffer; `drop` releases a Text or a list.
+            // `append` writes a Text buffer; `drop` releases a Text, a list or
+            // a whole union whose variants own heap storage (union drop glue
+            // in native_cfg_list_emit). A whole shape, or a union that owns
+            // nothing, is still rejected.
             hold owner = p.types_code[p.functions[f].first_var + inst.place_var]
-            when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
+            hold union_owner = inst.kind == 13 && cfgOwningUnion(p, owner)
+            when owner != cfgTextType() && !union_owner && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
         }
         // Appending a buffer to itself would read storage that growth moves.
         when inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
@@ -281,7 +285,11 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         // buffer. A field of an owned shape moves out, and a store may refill
         // a field whose value was moved or released (native_cfg_paths).
         when inst.kind == 5 && cfgOwnsHeap(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
-        when inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) { p.error = 95 }
+        // A whole store through a reference (`i store pN vM`) replaces an
+        // owning referent: the emitter releases the old value through its
+        // drop glue, then moves the new one in (the verifier requires the
+        // old value whole). The source cannot be the reference itself.
+        when inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) && inst.a.is_var && inst.a.value == inst.place_var { p.error = 104 }
         // Moving an owner out of an indexed place is not tracked by move
         // paths. A store releases the old element before transferring its
         // replacement; the source cannot be the collection itself.

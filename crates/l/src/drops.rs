@@ -727,10 +727,21 @@ pub fn verify(func: &Func, ownership: &Ownership) -> Result<(), Violation> {
 enum FlagValue {
     Off,
     On,
+    /// Join of paths on which the flag agreed with the ownership it guards.
     Unknown,
+    /// Assigned anything but a Bool constant: not tied to ownership, so it
+    /// agrees with no state (an `Unknown` here would make any Maybe place
+    /// droppable on the strength of an arbitrary Bool).
+    Forged,
 }
 fn join_flag(a: FlagValue, b: FlagValue) -> FlagValue {
-    if a == b { a } else { FlagValue::Unknown }
+    if a == FlagValue::Forged || b == FlagValue::Forged {
+        FlagValue::Forged
+    } else if a == b {
+        a
+    } else {
+        FlagValue::Unknown
+    }
 }
 /// The places each drop flag guards (from every flagged `Drop`/`DropField`).
 fn flag_places(func: &Func) -> HashMap<VarId, Vec<Place>> {
@@ -757,7 +768,7 @@ fn flag_transfer(flags: &mut HashMap<VarId, FlagValue>, kind: &InstKind) {
         *value = match rv {
             Rvalue::Use(Operand::Const(Const::Bool(true))) => FlagValue::On,
             Rvalue::Use(Operand::Const(Const::Bool(false))) => FlagValue::Off,
-            _ => FlagValue::Unknown,
+            _ => FlagValue::Forged,
         };
     }
 }
@@ -801,6 +812,14 @@ pub fn verify_flags(func: &Func, ownership: &Ownership) -> Result<(), Violation>
             return Err(Violation {
                 block: 0,
                 message: format!("v{flag} no es un flag Bool"),
+            });
+        }
+        // The caller chooses a parameter's value; the analysis below starts
+        // every flag `Off`, which would let it claim anything.
+        if func.params.contains(flag) {
+            return Err(Violation {
+                block: 0,
+                message: format!("v{flag} es un parámetro y no puede ser un drop flag"),
             });
         }
     }
@@ -878,6 +897,219 @@ pub fn verify_flags(func: &Func, ownership: &Ownership) -> Result<(), Violation>
                         "flag v{f} = {:?} no refleja la propiedad de {:?} al salir del bloque",
                         values[f], guarded_places
                     ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_ref_var(func: &Func, v: VarId) -> bool {
+    matches!(func.vars.get(v), Some(VarTy::Ref(_)))
+}
+
+/// The value-rooted places each reference variable may borrow: the place of
+/// a loan, the origins of a reference it copies or loans through, and the
+/// places a call returning a reference borrows by reference. A reference
+/// parameter has none (its referent outlives the function). Every
+/// definition contributes (flow-insensitive), up to a fixed point.
+fn loan_origins(func: &Func) -> HashMap<VarId, Vec<Place>> {
+    let mut out: HashMap<VarId, Vec<Place>> = HashMap::new();
+    loop {
+        let mut changed = false;
+        for block in &func.blocks {
+            for inst in &block.insts {
+                let InstKind::Assign(d, rv) = &inst.kind else {
+                    continue;
+                };
+                if !is_ref_var(func, *d) {
+                    continue;
+                }
+                let borrowed: Vec<Place> = match rv {
+                    Rvalue::Loan(p, ..) | Rvalue::FieldLoan(p) | Rvalue::Ref(p) => vec![p.clone()],
+                    Rvalue::Use(Operand::Var(s)) => vec![root(*s)],
+                    Rvalue::Call(_, args) | Rvalue::Platform(_, args, _) => args
+                        .iter()
+                        .filter_map(|a| match a {
+                            Arg::Ref(p, _) => Some(p.clone()),
+                            Arg::Value(_) => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for p in borrowed {
+                    let found = if is_ref_var(func, p.var) {
+                        out.get(&p.var).cloned().unwrap_or_default()
+                    } else {
+                        vec![p]
+                    };
+                    let entry = out.entry(*d).or_default();
+                    for origin in found {
+                        if !entry.contains(&origin) {
+                            entry.push(origin);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            return out;
+        }
+    }
+}
+
+/// List places an instruction mutates in a way that may move the buffer or
+/// drop an element: push, pop, reserve, element store, edit loan to a call.
+fn mutated_lists(kind: &InstKind) -> Vec<Place> {
+    match kind {
+        InstKind::ListPush(p, _) | InstKind::ListReserve(p, _) => vec![p.clone()],
+        InstKind::Store(p, _) if p.proj.iter().any(|x| matches!(x, Proj::Index(_))) => {
+            vec![p.clone()]
+        }
+        InstKind::Assign(_, Rvalue::ListPop(p, _) | Rvalue::ListTakeLast(p)) => vec![p.clone()],
+        InstKind::Assign(_, Rvalue::Call(_, args) | Rvalue::Platform(_, args, _)) => args
+            .iter()
+            .filter_map(|a| match a {
+                Arg::Ref(p, true) => Some(p.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Projections of a place before its first list index.
+fn before_index(p: &Place) -> &[Proj] {
+    let end = p
+        .proj
+        .iter()
+        .position(|x| matches!(x, Proj::Index(_)))
+        .unwrap_or(p.proj.len());
+    &p.proj[..end]
+}
+
+/// Mark stale every reference borrowing an element of a list that the
+/// mutation of `mutated` (directly or through a reference) may reach.
+fn invalidate(
+    func: &Func,
+    origins: &HashMap<VarId, Vec<Place>>,
+    mutated: &Place,
+    stale: &mut HashSet<VarId>,
+) {
+    let targets = if is_ref_var(func, mutated.var) {
+        origins.get(&mutated.var).cloned().unwrap_or_default()
+    } else {
+        vec![mutated.clone()]
+    };
+    for target in &targets {
+        let t = before_index(target);
+        for (r, borrowed) in origins {
+            for origin in borrowed {
+                let o = before_index(origin);
+                let element = o.len() < origin.proj.len();
+                let overlap = o.starts_with(t) || t.starts_with(o);
+                if element && origin.var == target.var && overlap {
+                    stale.insert(*r);
+                }
+            }
+        }
+    }
+}
+
+/// Loans of protocol LIR. Ownership alone (`verify`) does not see through
+/// references, so forged LIR could free or move a value and keep reading it
+/// through a loan. This pass requires:
+/// - a reference is used only while every place it borrows owns its value
+///   (no use after move or free through a loan);
+/// - a reference to a list element is stale after any mutation of that list
+///   (its buffer may move, the element may be dropped) until reassigned;
+/// - a borrowed return borrows only from reference parameters.
+pub fn verify_loans(func: &Func, ownership: &Ownership) -> Result<(), Violation> {
+    let origins = loan_origins(func);
+    if origins.is_empty() {
+        return Ok(());
+    }
+    let owned = Owned {
+        vars: &func.vars,
+        ownership,
+    };
+    let places = entry_states(func, &owned);
+    let transfer = |stale: &mut HashSet<VarId>, kind: &InstKind| {
+        for p in mutated_lists(kind) {
+            invalidate(func, &origins, &p, stale);
+        }
+        if let (_, Some(d)) = crate::cfg::uses_defs(kind) {
+            stale.remove(&d);
+        }
+    };
+    let mut stale_in: Vec<Option<HashSet<VarId>>> = vec![None; func.blocks.len()];
+    if stale_in.is_empty() {
+        return Ok(());
+    }
+    stale_in[0] = Some(HashSet::new());
+    let mut work = vec![0];
+    while let Some(b) = work.pop() {
+        let Some(mut stale) = stale_in[b].clone() else {
+            continue;
+        };
+        for inst in &func.blocks[b].insts {
+            transfer(&mut stale, &inst.kind);
+        }
+        let Some(t) = &func.blocks[b].term else {
+            continue;
+        };
+        for next in successors(t) {
+            if next >= stale_in.len() {
+                continue;
+            }
+            let merged = match &stale_in[next] {
+                None => stale.clone(),
+                Some(old) => old.union(&stale).copied().collect(),
+            };
+            if stale_in[next].as_ref() != Some(&merged) {
+                stale_in[next] = Some(merged);
+                work.push(next);
+            }
+        }
+    }
+    let check = |r: VarId, state: &States, stale: &HashSet<VarId>, b: usize| {
+        if stale.contains(&r) {
+            return Err(Violation {
+                block: b,
+                message: format!("v{r}: préstamo de un elemento usado tras modificar su lista"),
+            });
+        }
+        for origin in origins.get(&r).map(Vec::as_slice).unwrap_or(&[]) {
+            for leaf in owned.leaves(origin) {
+                if state.get(&leaf).copied().unwrap_or(State::Uninit) != State::Init {
+                    return Err(Violation {
+                        block: b,
+                        message: format!("v{r}: préstamo usado tras mover o liberar {origin:?}"),
+                    });
+                }
+            }
+        }
+        Ok(())
+    };
+    for (b, block) in func.blocks.iter().enumerate() {
+        let (Some(mut state), Some(mut stale)) = (places[b].clone(), stale_in[b].clone()) else {
+            continue;
+        };
+        for inst in &block.insts {
+            let (uses, _) = crate::cfg::uses_defs(&inst.kind);
+            for r in uses.into_iter().filter(|v| is_ref_var(func, *v)) {
+                check(r, &state, &stale, b)?;
+            }
+            transfer(&mut stale, &inst.kind);
+            apply(&owned, &mut state, &owned.inst(&inst.kind));
+        }
+        if let Some(Terminator::ReturnRef(v, _)) = &block.term {
+            check(*v, &state, &stale, b)?;
+            if origins.get(v).is_some_and(|o| !o.is_empty()) {
+                return Err(Violation {
+                    block: b,
+                    message: format!("returnref v{v} devuelve un préstamo de una variable local"),
                 });
             }
         }

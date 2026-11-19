@@ -10,6 +10,7 @@ import lir_verify
 import lir_emit
 import lir_write
 import lir_builtin_union
+take lir_patch
 import sema_context
 import sema_drop
 
@@ -224,6 +225,13 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
     var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
     when ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(edit ctx.lir, edit body, ctx.lir_fault) }
     when ctx.lir_fault >= 14 { lirInjectUnionFault(edit ctx.lir, edit body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, ctx.lir_fault) }
+    when ctx.lir_patch.byteLength > 0 {
+        hold bad = lirApplyPatch(edit ctx.lir, edit body, view ctx.lir_patch, fn_index)
+        when bad != 0 {
+            semaAddError(edit ctx, "ICE", "error interno del compilador: parche de LIR inválido (línea {bad})", decl.start, decl.end)
+            give
+        }
+    }
     let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
     if checked.status != 0 {
         let rule = checked.status

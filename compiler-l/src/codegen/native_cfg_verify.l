@@ -182,6 +182,9 @@ flow cfgCheckCalls(p: view CfgProgram) => Int {
                     hold callee = inst.callee
                     when callee < 0 || callee >= p.functions.length { give 51 }
                     hold target = view p.functions[callee]
+                    // Calls of functions returning a reference are not
+                    // lowered yet (native_cfg_returnref).
+                    when target.result_ref >= 0 { give 141 }
                     when inst.argc != target.params { give 52 }
                     hold dst_type = p.types_code[func.first_var + inst.dst]
                     when dst_type != cfgResultType(target) { give 53 }
@@ -208,8 +211,9 @@ flow cfgPathAfter(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view C
         when (moved >= 2 || moved == cfgTextType()) && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
     }
     when inst.kind == 17 && inst.place_var == v && cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = false }
-    // A store through an extension writes inside a list, not the path.
-    when inst.kind == 6 && inst.place_ext < 0 && inst.place_var == v && inst.place_field >= 0 {
+    // A store through an extension writes inside a list, not the path. A
+    // whole store through a reference (field -1) sets every path inside.
+    when inst.kind == 6 && inst.place_ext < 0 && inst.place_var == v {
         when cfgPathWithin(paths, k, v, inst.place_field, inst.place_subfield) { live = true }
     }
     when cfgHasDst(inst) && inst.dst == v { live = true }
@@ -259,7 +263,10 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
     // is indexed must still be there, also for a store.
     hold reads_place = inst.kind == 5 || inst.kind == 14 || inst.kind == 15 || (inst.kind == 17 && inst.op < 0) || inst.kind == 19 || inst.kind == 20 || inst.kind == 21 || inst.kind == 22 || inst.kind == 23 || (inst.kind == 6 && inst.place_ext >= 0)
     when reads_place && !cfgPathsLive(paths, vars, live, inst.place_var, inst.place_field, inst.place_subfield) { give false }
-    hold whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13
+    // A whole store through a reference releases the old referent through
+    // its drop glue first: every part of it must still be there.
+    hold whole_store = inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0
+    hold whole_place = inst.kind == 8 || inst.kind == 9 || inst.kind == 12 || inst.kind == 13 || whole_store
     when whole_place && !cfgPathsLive(paths, vars, live, inst.place_var, -1, -1) { give false }
     hold projected_source = (inst.kind == 10 || inst.kind == 12) && inst.op >= 0
     when projected_source && !cfgPathsLive(paths, vars, live, inst.op, inst.src_field, inst.src_sub) { give false }
@@ -305,6 +312,17 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     // aggregate fields (native_cfg_paths). Parameters arrive whole.
     hold paths = cfgPathsOf(p, f)
     hold bits = vars + paths.var_of.length
+    // Predecessors, found once: every round below visits each (block, bit)
+    // pair, so scanning all blocks for edges there costs blocks^2 * bits.
+    change pred_first: List of[Int] = List[]
+    change preds: List of[Int] = List[]
+    each b among 0..blocks {
+        pred_first@push(preds.length)
+        each from among 0..blocks {
+            when cfgEdge(p, f, from, b) { preds@push(from) }
+        }
+    }
+    pred_first@push(preds.length)
     change inputs: List of[Bool] = List[]
     change outputs: List of[Bool] = List[]
     each b among 0..blocks {
@@ -332,10 +350,8 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
                 // states rather than assuming every iteration begins with
                 // fresh parameters; moving a parameter in a loop must not
                 // silently reinitialize it.
-                each pred among 0..blocks {
-                    when cfgEdge(p, f, pred, b) && !outputs[pred * bits + v] {
-                        is_init = false
-                    }
+                each n among pred_first[b]..pred_first[b + 1] {
+                    when !outputs[preds[n] * bits + v] { is_init = false }
                 }
                 hold slot = b * bits + v
                 when inputs[slot] != is_init { inputs[slot] = is_init; changing = true }
@@ -359,8 +375,9 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             // A use of a moved-out field, or of a partially moved value.
             when !cfgPathUses(p, f, view paths, view inst, view live) { give 57 }
             // Storing over a live Text, or giving a new value to a variable
-            // that still owns one in a field, would leak it.
-            when inst.kind == 6 && inst.place_ext < 0 && cfgTextLiveWithin(view paths, vars, view live, inst.place_var, inst.place_field, inst.place_subfield) { give 59 }
+            // that still owns one in a field, would leak it. A whole store
+            // through a reference releases the old referent itself.
+            when inst.kind == 6 && inst.place_ext < 0 && inst.place_field >= 0 && cfgTextLiveWithin(view paths, vars, view live, inst.place_var, inst.place_field, inst.place_subfield) { give 59 }
             when cfgHasDst(inst) && live[inst.dst] && !p.var_ref[func.first_var + inst.dst] && cfgTextLiveWithin(view paths, vars, view live, inst.dst, -1, -1) { give 59 }
             each k among 0..paths.var_of.length {
                 live[vars + k] = cfgPathAfter(p, f, view paths, view inst, k, live[vars + k])
@@ -377,7 +394,9 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
             hold last = cfgTakeOperand(p, f, view block.value, edit live)
             when last != 0 { give last }
         }
-        when block.term == 1 {
+        // returnref: the reference must still be valid (native_cfg_returnref).
+        when block.term == 5 && !live[block.value.value] { give 57 }
+        when block.term == 1 || block.term == 5 {
             // A Text field still owned by a live variable leaks; a referent
             // must be given back whole.
             each k among 0..paths.var_of.length {

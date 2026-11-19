@@ -44,7 +44,7 @@ expose flow cfgReadList(p: edit CfgProgram, source: view Text, reader: edit Nati
     change valid = reader.error == 0 && id == k && elem != cfgUnitType() && (elem >= 0 || elem == cfgTextType())
     when valid {
         hold size = cfgTypeSize(p, elem)
-        valid = size >= 1 && size <= 512
+        valid = size >= 1 && size <= cfgMaxValueBytes()
     }
     when valid {
         p.list_elem@push(elem)

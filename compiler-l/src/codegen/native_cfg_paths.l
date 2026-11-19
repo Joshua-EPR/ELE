@@ -1,4 +1,5 @@
 take native_cfg_defs
+take native_cfg_fields
 
 // Move paths for partial moves out of shapes and for their Text fields.
 //
@@ -7,15 +8,20 @@ take native_cfg_defs
 // to the bits of the variables (intersection at joins):
 // - reading the place out of an owned shape (`i read`) moves it: its bits
 //   die; through a reference the read is a copy and changes nothing;
-// - `i dropfield` releases a Text field: its bit dies;
+// - `i dropfield` releases a field (Text, list, or through its drop glue an
+//   owning shape or union): its bit and the bits inside it die;
 // - `i store` to a place, or a new whole value of the variable, sets them;
 // - a whole move of the variable kills all of them;
 // - using a place, or the whole variable, requires every bit within it and
 //   the bit of its enclosing field.
-// `text` marks the paths that own heap storage themselves (a Text or a list
-// field). Those bits also carry ownership: a live Text field of a live variable at
-// `return` leaks (59); storing a Text over a live one leaks (59); and a
-// reference parameter must give its referent back whole (95).
+// `text` marks the paths that own heap storage (cfgOwnsHeap): a Text, list or
+// union field, or an owning shape subfield. A shape field owns through the
+// paths of its subfields, so releasing all of them leaves nothing owned;
+// shapes nested deeper are owned as a whole by their subfield path, which
+// `dropfield` of that subfield or of its field releases. Those bits also carry
+// ownership: a live owning field of a live variable at `return` leaks (59);
+// storing over a live one leaks (59); and a reference parameter must give
+// its referent back whole (95).
 // Primitive fields are copied, so they have no bit of their own.
 
 expose shape CfgPaths {
@@ -47,15 +53,19 @@ expose flow cfgPathsOf(p: view CfgProgram, f: Int) => CfgPaths {
             hold first_field = p.structs[ty - 2].first_field
             each k among 0..p.structs[ty - 2].fields {
                 hold field_ty = p.fields[first_field + k].ty
+                // A shape field's storage is owned through its subfield
+                // paths below; a union field, like a deeper shape, owns it
+                // as a whole.
+                hold shape_field = field_ty >= 2 && field_ty - 2 < p.structs.length
                 when cfgTracked(p, field_ty) {
-                    cfgPathPush(edit paths, v, k, -1, cfgHeapDirect(p, field_ty))
+                    cfgPathPush(edit paths, v, k, -1, !shape_field && cfgOwnsHeap(p, field_ty))
                 }
-                when field_ty >= 2 && field_ty - 2 < p.structs.length {
+                when shape_field {
                     hold child_first = p.structs[field_ty - 2].first_field
                     each j among 0..p.structs[field_ty - 2].fields {
                         hold sub_ty = p.fields[child_first + j].ty
                         when cfgTracked(p, sub_ty) {
-                            cfgPathPush(edit paths, v, k, j, cfgHeapDirect(p, sub_ty))
+                            cfgPathPush(edit paths, v, k, j, cfgOwnsHeap(p, sub_ty))
                         }
                     }
                 }

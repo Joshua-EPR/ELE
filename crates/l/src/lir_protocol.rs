@@ -901,6 +901,7 @@ pub fn validate(module: &Module) -> Result<(), Diagnostic> {
     for func in &module.funcs {
         drops::verify(func, &ownership)
             .and_then(|()| drops::verify_flags(func, &ownership))
+            .and_then(|()| drops::verify_loans(func, &ownership))
             .map_err(|v| {
                 Diagnostic::new(
                     Span::at(1, 1),
