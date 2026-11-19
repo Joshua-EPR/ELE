@@ -1,24 +1,24 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 87; total legacy constructs: 12112
-# total	angle_generic	351
+# files with legacy syntax: 70; total legacy constructs: 12048
+# total	angle_generic	345
 # total	borrow_mut	2052
-# total	borrow_ref	878
-# total	dot_method_call	421
+# total	borrow_ref	874
+# total	dot_method_call	417
 # total	kw_break	44
 # total	kw_const	97
 # total	kw_continue	26
 # total	kw_else	172
-# total	kw_enum	11
+# total	kw_enum	9
 # total	kw_fn	461
 # total	kw_for	208
 # total	kw_if	1669
-# total	kw_import	367
+# total	kw_import	321
 # total	kw_in	208
 # total	kw_let	1381
 # total	kw_match	171
-# total	kw_pub	466
+# total	kw_pub	464
 # total	kw_return	1626
 # total	kw_struct	63
 # total	kw_var	419
@@ -90,7 +90,6 @@ compiler-l/src/codegen/lir_tokens.l	kw_struct	3
 compiler-l/src/codegen/lir_tokens.l	kw_var	12
 compiler-l/src/codegen/lir_tokens.l	kw_while	5
 compiler-l/src/codegen/lir_tokens.l	return_arrow	9
-compiler-l/src/codegen/native_cfg_arith.l	kw_import	5
 compiler-l/src/codegen/native_cfg_defs.l	angle_generic	30
 compiler-l/src/codegen/native_cfg_defs.l	borrow_ref	2
 compiler-l/src/codegen/native_cfg_defs.l	kw_fn	4
@@ -101,13 +100,6 @@ compiler-l/src/codegen/native_cfg_defs.l	kw_pub	13
 compiler-l/src/codegen/native_cfg_defs.l	kw_return	5
 compiler-l/src/codegen/native_cfg_defs.l	kw_struct	9
 compiler-l/src/codegen/native_cfg_defs.l	return_arrow	4
-compiler-l/src/codegen/native_cfg_fields.l	kw_import	4
-compiler-l/src/codegen/native_cfg_list.l	kw_import	3
-compiler-l/src/codegen/native_cfg_list_emit.l	kw_import	6
-compiler-l/src/codegen/native_cfg_loan.l	kw_import	3
-compiler-l/src/codegen/native_cfg_paths.l	angle_generic	4
-compiler-l/src/codegen/native_cfg_paths.l	kw_import	1
-compiler-l/src/codegen/native_cfg_ref.l	kw_import	3
 compiler-l/src/codegen/native_cfg_text.l	angle_generic	9
 compiler-l/src/codegen/native_cfg_text.l	borrow_mut	163
 compiler-l/src/codegen/native_cfg_text.l	borrow_ref	37
@@ -134,9 +126,6 @@ compiler-l/src/codegen/native_heap.l	kw_let	5
 compiler-l/src/codegen/native_heap.l	kw_pub	3
 compiler-l/src/codegen/native_heap.l	kw_return	7
 compiler-l/src/codegen/native_heap.l	return_arrow	3
-compiler-l/src/codegen/native_heap_dynamic.l	kw_import	1
-compiler-l/src/codegen/native_heap_owner.l	kw_import	3
-compiler-l/src/codegen/native_heap_resize.l	kw_import	2
 compiler-l/src/codegen/native_layout.l	angle_generic	4
 compiler-l/src/codegen/native_layout.l	borrow_mut	10
 compiler-l/src/codegen/native_layout.l	borrow_ref	3
@@ -151,11 +140,9 @@ compiler-l/src/codegen/native_layout.l	kw_struct	1
 compiler-l/src/codegen/native_layout.l	kw_var	3
 compiler-l/src/codegen/native_layout.l	kw_while	2
 compiler-l/src/codegen/native_layout.l	return_arrow	11
-compiler-l/src/codegen/native_list_int.l	kw_import	2
 compiler-l/src/codegen/native_rt.l	angle_generic	2
 compiler-l/src/codegen/native_rt.l	dot_method_call	9
 compiler-l/src/codegen/native_rt.l	kw_import	1
-compiler-l/src/codegen/native_rt_list.l	kw_import	1
 compiler-l/src/codegen/x86_64.l	angle_generic	1
 compiler-l/src/codegen/x86_64.l	borrow_mut	137
 compiler-l/src/codegen/x86_64.l	dot_method_call	1
@@ -634,15 +621,6 @@ compiler-l/src/native_heap_cases.l	kw_return	19
 compiler-l/src/native_heap_cases.l	kw_var	2
 compiler-l/src/native_heap_cases.l	match_arm_arrow	4
 compiler-l/src/native_heap_cases.l	return_arrow	1
-compiler-l/src/native_heap_dynamic_cases.l	borrow_ref	1
-compiler-l/src/native_heap_dynamic_cases.l	dot_method_call	1
-compiler-l/src/native_heap_dynamic_cases.l	kw_import	3
-compiler-l/src/native_heap_owner_cases.l	borrow_ref	1
-compiler-l/src/native_heap_owner_cases.l	dot_method_call	1
-compiler-l/src/native_heap_owner_cases.l	kw_import	3
-compiler-l/src/native_heap_resize_cases.l	borrow_ref	1
-compiler-l/src/native_heap_resize_cases.l	dot_method_call	1
-compiler-l/src/native_heap_resize_cases.l	kw_import	3
 compiler-l/src/native_layout_cases.l	borrow_mut	15
 compiler-l/src/native_layout_cases.l	borrow_ref	8
 compiler-l/src/native_layout_cases.l	kw_fn	1
@@ -660,9 +638,6 @@ compiler-l/src/native_lir_demo.l	kw_match	3
 compiler-l/src/native_lir_demo.l	kw_return	8
 compiler-l/src/native_lir_demo.l	match_arm_arrow	6
 compiler-l/src/native_lir_demo.l	return_arrow	1
-compiler-l/src/native_list_cases.l	borrow_ref	1
-compiler-l/src/native_list_cases.l	dot_method_call	1
-compiler-l/src/native_list_cases.l	kw_import	3
 compiler-l/src/native_memory_cases.l	borrow_mut	8
 compiler-l/src/native_memory_cases.l	kw_fn	1
 compiler-l/src/native_memory_cases.l	kw_if	4
@@ -1072,6 +1047,3 @@ compiler-l/src/types.l	kw_var	7
 compiler-l/src/types.l	kw_while	2
 compiler-l/src/types.l	match_arm_arrow	4
 compiler-l/src/types.l	return_arrow	2
-crates/l/src/prelude.l	angle_generic	2
-crates/l/src/prelude.l	kw_enum	2
-crates/l/src/prelude.l	kw_pub	2
