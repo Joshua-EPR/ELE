@@ -35,8 +35,9 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         parser = src('crates/l/src/lir_protocol.rs')
         native = src('crates/l/src/native.rs')
         self.assertIn('"payload" => {', parser)
-        # Owned payloads are now admitted, but exact type, direct-value,
-        # variant and move checks must remain at the protocol boundary.
+        # Payloads are admitted only with exact type, direct-value, variant
+        # and move checks at the protocol boundary. A drop-free aggregate
+        # still moves its owner-bearing Result; only Int and Bool copy.
         self.assertIn('fn payload_ok(', parser)
         self.assertIn('if depth > 8 {', parser)
         self.assertIn('Type::Int | Type::Bool | Type::Text | Type::List(_) => true,', parser)
@@ -45,7 +46,7 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('if place.var == d {', parser)
         self.assertIn('Proj::Payload(variant_id, 0)', parser)
         self.assertIn('fn consumed_enum(', parser)
-        self.assertIn('owns(t, self.structs, self.enums, 0).then_some(place.var)', parser)
+        self.assertIn('(!matches!(t, Type::Int | Type::Bool)).then_some(place.var)', parser)
         self.assertIn('kind: InstKind::Moved(var)', parser)
         self.assertIn('acceso a variante enum inactiva', native)
         self.assertIn('enum_layout.layout.size / 8', native)

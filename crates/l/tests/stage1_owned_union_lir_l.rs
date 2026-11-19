@@ -590,6 +590,52 @@ fn lexer_return_ok_tokens_no_longer_blocks_stage1() {
     assert!(text.contains(&format!("{OK} l0")), "{text}");
 }
 
+const DROP_FREE_ERR_OF_OWNED_RESULT: &str = r#"shape Failure {
+    code: Int
+}
+
+flow scan(n: Int) => Result<List<Int>, Failure> {
+    when n < 0 { give Err(Failure(code: 7)) }
+    change values: List<Int> = List[]
+    values@push(n)
+    give Ok(values)
+}
+
+flow visit(n: Int) => Int {
+    choose scan(n) {
+        Ok(values): { give values.length }
+        Err(failure): { give failure.code }
+    }
+}
+
+flow main() => Int { give visit(-1) + visit(3) }
+"#;
+
+#[test]
+fn drop_free_error_payload_consumes_owner_bearing_result() {
+    // Regression for loadModuleRecursive's Result<List<LexToken>, LexError>:
+    // the Err payload is a drop-free shape, but binding it moves the whole
+    // Result, whose Ok variant owns a List. No owner may survive the return.
+    let lir = emit(
+        "drop_free_err_owned_result.l",
+        DROP_FREE_ERR_OF_OWNED_RESULT,
+    );
+    validate(&lir).expect("drop-free Err arm must consume its owner-bearing Result");
+
+    let err_payload =
+        |line: &str| line.starts_with("i payload ") && line.split_whitespace().nth(5) == Some("1");
+    assert!(lir.lines().any(err_payload), "{lir}");
+    let twice = mutate(&lir, err_payload, true);
+    assert!(validate(&twice).is_err(), "double extraction accepted");
+}
+
+#[cfg(windows)]
+#[test]
+fn drop_free_error_payload_runs_with_stage0_parity_and_balanced_heap() {
+    let (code, _) = run_lir_and_stage0("drop_free_err_owned_result", DROP_FREE_ERR_OF_OWNED_RESULT);
+    assert_eq!(code, 8);
+}
+
 #[test]
 fn ele_native_backend_rejects_owned_union_lir_without_an_image() {
     // Fail closed: layout code 82 is resolved, but whole-union drop glue
