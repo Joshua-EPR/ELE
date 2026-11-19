@@ -1,6 +1,6 @@
-module hola.main
-import std.io.print
+space hola.main
+take std.io.print
 
-fn main() {
+flow main() {
     print("Hola desde L")
 }

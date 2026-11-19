@@ -424,7 +424,22 @@ fn stage1_self_coverage_matches_versioned_baseline() {
         match baseline.get(&row.file) {
             None => added.push(format!("{} ({})", row.file, now.key())),
             Some(&before) if now < before => {
-                regressions.push(format!("{}: {} -> {}", row.file, before.key(), now.key()))
+                // Surface the first failing phase diagnostic directly in CI.
+                // Without this, a reported "lir -> parser" transition hides
+                // the actual semantic or codegen error in a local matrix.
+                let detail = row.steps.iter().find_map(|step| match step {
+                    Step::Failed(message) => Some(message.as_str()),
+                    _ => None,
+                });
+                regressions.push(match detail {
+                    Some(message) => format!(
+                        "{}: {} -> {} ({message})",
+                        row.file,
+                        before.key(),
+                        now.key()
+                    ),
+                    None => format!("{}: {} -> {}", row.file, before.key(), now.key()),
+                });
             }
             Some(&before) if now > before => {
                 improvements.push(format!("{}: {} -> {}", row.file, before.key(), now.key()))

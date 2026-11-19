@@ -1,6 +1,6 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
 
 // Local loans of the ELE-written CFG backend: `i loan vD <place> <0|1>`
 // (kind 22) gives the local reference `vD` (`var vD ref T`, D >= params) the

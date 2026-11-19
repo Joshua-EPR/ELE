@@ -59,66 +59,66 @@ fn lirDropFreeValue(types: &TypeTable, lm: &LirModule, ty: Int, depth: Int) -> B
 
 // Lowerable payload: drop-free, or owned as described above. `depth`
 // bounds the walk (nested unions, list elements, shape fields).
-fn lirPayloadValue(types: &TypeTable, lm: &LirModule, ty: Int, depth: Int) -> Bool {
-    if lirDropFreeValue(types, lm, ty, 0) { return true }
-    if depth > 8 || ty < 0 || ty >= types.types.length { return false }
-    let elem = types.types[ty].elem_type
-    let other = types.types[ty].nominal_id
-    match types.types[ty].kind {
-        SemTypeKind.Text => { return true }
-        SemTypeKind.List => { return lirPayloadValue(types, lm, elem, depth + 1) }
-        SemTypeKind.Option => { return lirPayloadValue(types, lm, elem, depth + 1) }
-        SemTypeKind.Result => {
-            return lirPayloadValue(types, lm, elem, depth + 1) && lirPayloadValue(types, lm, other, depth + 1)
+flow lirPayloadValue(types: view TypeTable, lm: view LirModule, ty: Int, depth: Int) => Bool {
+    when lirDropFreeValue(types, lm, ty, 0) { give true }
+    when depth > 8 || ty < 0 || ty >= types.types.length { give false }
+    hold elem = types.types[ty].elem_type
+    hold other = types.types[ty].nominal_id
+    choose types.types[ty].kind {
+        SemTypeKind.Text : { give true }
+        SemTypeKind.List : { give lirPayloadValue(types, lm, elem, depth + 1) }
+        SemTypeKind.Option : { give lirPayloadValue(types, lm, elem, depth + 1) }
+        SemTypeKind.Result : {
+            give lirPayloadValue(types, lm, elem, depth + 1) && lirPayloadValue(types, lm, other, depth + 1)
         }
-        SemTypeKind.Struct => {
-            for k in 0..lm.st_decl.length {
-                if lm.st_decl[k] == other {
-                    if lm.st_count[k] < 1 { return false }
-                    let first = lm.st_first[k]
-                    for f in first..(first + lm.st_count[k]) {
-                        if !lirPayloadValue(types, lm, lm.field_ty[f], depth + 1) { return false }
+        SemTypeKind.Struct : {
+            each k among 0..lm.st_decl.length {
+                when lm.st_decl[k] == other {
+                    when lm.st_count[k] < 1 { give false }
+                    hold first = lm.st_first[k]
+                    each f among first..(first + lm.st_count[k]) {
+                        when !lirPayloadValue(types, lm, lm.field_ty[f], depth + 1) { give false }
                     }
-                    return true
+                    give true
                 }
             }
-            return false
+            give false
         }
-        _ => { return false }
+        _ : { give false }
     }
 }
 
 // Payload accepted by `i variant` / `i payload` of a builtin union.
 pub fn lirBuiltinPayloadOk(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
-    return lirPayloadValue(types, lm, ty, 0)
+    give lirPayloadValue(types, lm, ty, 0)
 }
 
 // Payload that owns heap storage: extracting it moves it out of the union.
-pub fn lirBuiltinPayloadOwned(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
-    return lirPayloadValue(types, lm, ty, 0) && !lirDropFreeValue(types, lm, ty, 0)
+expose flow lirBuiltinPayloadOwned(types: view TypeTable, lm: view LirModule, ty: Int) => Bool {
+    give lirPayloadValue(types, lm, ty, 0) && !lirDropFreeValue(types, lm, ty, 0)
 }
 
 pub fn lirBuiltinSupported(types: &TypeTable, lm: &LirModule, ty: Int) -> Bool {
     if ty < 0 || ty >= types.types.length { return false }
-    match types.types[ty].kind {
-        SemTypeKind.Option => { return lirPayloadValue(types, lm, ty, 0) }
-        SemTypeKind.Result => { return lirPayloadValue(types, lm, ty, 0) }
+    choose types.types[ty].kind {
+        SemTypeKind.Option : { give lirPayloadValue(types, lm, ty, 0) }
+        SemTypeKind.Result : { give lirPayloadValue(types, lm, ty, 0) }
         _ => { return false }
     }
 }
 
-fn lirBuiltinRegisterNested(lm: &mut LirModule, types: &TypeTable, ty: Int) {
-    if ty < 0 || ty >= types.types.length { return }
-    var nested = false
-    match types.types[ty].kind {
-        SemTypeKind.Option => { nested = true }
-        SemTypeKind.Result => { nested = true }
-        _ => {}
+flow lirBuiltinRegisterNested(lm: edit LirModule, types: view TypeTable, ty: Int) {
+    when ty < 0 || ty >= types.types.length { give }
+    change nested = false
+    choose types.types[ty].kind {
+        SemTypeKind.Option : { nested = true }
+        SemTypeKind.Result : { nested = true }
+        _ : {}
     }
-    if !nested { return }
+    when !nested { give }
     // A failed nested registration leaves its code `?`: rejected (L0016).
-    let index = lirBuiltinRegister(&mut lm, types, ty)
-    if index < 0 { return }
+    hold index = lirBuiltinRegister(edit lm, types, ty)
+    when index < 0 { give }
 }
 
 pub fn lirBuiltinEnumIndex(lm: &LirModule, ty: Int) -> Int {
@@ -136,10 +136,10 @@ pub fn lirBuiltinRegister(lm: &mut LirModule, types: &TypeTable, ty: Int) -> Int
     if existing >= 0 { return existing }
     // Nested unions are registered first, so a payload code `eK` always
     // names an enum declared before the one that contains it.
-    lirBuiltinRegisterNested(&mut lm, types, types.types[ty].elem_type)
-    match types.types[ty].kind {
-        SemTypeKind.Result => { lirBuiltinRegisterNested(&mut lm, types, types.types[ty].nominal_id) }
-        _ => {}
+    lirBuiltinRegisterNested(edit lm, types, types.types[ty].elem_type)
+    choose types.types[ty].kind {
+        SemTypeKind.Result : { lirBuiltinRegisterNested(edit lm, types, types.types[ty].nominal_id) }
+        _ : {}
     }
     let t = &types.types[ty]
     let index = lm.en_decl.length

@@ -8,7 +8,7 @@ import loans_l
 import lir_build
 import sema_context
 import sema_lower
-import lir_builtin_union
+take lir_builtin_union
 
 pub fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     let expected = ctx.expected_list_type
@@ -108,9 +108,9 @@ pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
         }
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         let opt_t = semTypeMakeOption(&mut ctx.types, elem_t)
-        let enum_id = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, opt_t)
-        if enum_id < 0 {
-            lirMarkUnsupported(&mut ctx.lir, expr.start)
+        hold enum_id = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, opt_t)
+        when enum_id < 0 {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
         }
         let dst = lirVar(&mut ctx.lir, opt_t, false)
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }

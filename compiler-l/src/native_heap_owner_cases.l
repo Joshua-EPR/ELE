@@ -1,6 +1,6 @@
-import codegen.x86_64
-import codegen.elf64
-import codegen.native_heap_owner
+take codegen.x86_64
+take codegen.elf64
+take codegen.native_heap_owner
 
 // Generated ELF runtime checks for explicit owner slots (not Stage 1 drops).
 // o = move owner, access mapped 42, free once -> 42
@@ -12,7 +12,7 @@ flow main() => Int {
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
-            hold kind = mode.byteAt(0)
+            hold kind = mode@byteAt(0)
             when kind != 111 && kind != 100 && kind != 109 && kind != 114 && kind != 98 { give 4 }
             change code = x64New()
             x64FrameBegin(edit code, 8)
@@ -45,7 +45,7 @@ flow main() => Int {
             x64MovImm64(edit code, 0, 60)
             x64Syscall(edit code)
             when code.error != 0 { give 5 }
-            hold image = elf64Executable(&code.bytes)
+            hold image = elf64Executable(view code.bytes)
             when image.length <= 4096 { give 6 }
             choose processArg(1) {
                 Ok(path): { give writeBytes(path, image) },

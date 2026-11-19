@@ -243,17 +243,18 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         let finish = p_end - 1
         if source.byteAt(finish) != 41 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
         if finish == start + 1 && source.byteAt(start) == 95 { return }
-        // Binding an owned payload by value MOVES it out of the scrutinee
-        // (as in Stage 0): the whole union is consumed, so a later use of the
-        // scrutinee is a use after move, and moving out of a borrowed
-        // scrutinee is rejected (L0005). Drop-free payloads stay copies/reads.
-        if payload_ty >= 0 && payload_ty < ctx.types.types.length && semaNeedsDrop(&mut ctx, source, tree, payload_ty) {
+        // Copyability and drop glue are different properties: Int/Bool copy,
+        // but even a drop-free nominal shape/choice MOVES when bound by value.
+        // The whole scrutinee is consumed; a second use (or move out of a
+        // borrowed scrutinee) is rejected by ownership as L0005.
+        // semaNeedsDrop only controls destruction, not the move decision.
+        if payload_ty >= 0 && payload_ty < ctx.types.types.length && !lirBuiltinPrimitive(payload_ty) {
             semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)
             // The examined place stays frozen for the whole arm: assigning
             // it there is rejected like in Stage 0 (semaCheckMatch unfreezes).
-            if scrut_path >= 0 && scrut_path < ctx.flow.paths.length && ctx.flow.paths[scrut_path].symbol >= 0 {
-                let frozen = ctx.flow.paths[scrut_path].symbol
-                ctx.frozen_symbols.push(frozen)
+            when scrut_path >= 0 && scrut_path < ctx.flow.paths.length && ctx.flow.paths[scrut_path].symbol >= 0 {
+                hold frozen = ctx.flow.paths[scrut_path].symbol
+                ctx.frozen_symbols@push(frozen)
             }
         }
         // The binding's instructions carry the position of its pattern
@@ -272,10 +273,10 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         }
         let enum_id = lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)
         if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, p_start); return }
-        let owned = lirBuiltinPayloadOwned(&ctx.types, &ctx.lir_module, payload_ty)
+        hold owned = lirBuiltinPayloadOwned(view ctx.types, view ctx.lir_module, payload_ty)
         // Moving an owned payload out needs a tracked, directly owned union.
-        if owned && (scrut_path < 0 || scrut_var < 0 || scrut_var >= ctx.lir.vars.length || ctx.lir.vars[scrut_var].is_ref) {
-            lirMarkUnsupported(&mut ctx.lir, p_start)
+        when owned && (scrut_path < 0 || scrut_var < 0 || scrut_var >= ctx.lir.vars.length || ctx.lir.vars[scrut_var].is_ref) {
+            lirMarkUnsupported(edit ctx.lir, p_start)
         }
         let place = lirPlaceVar(&mut ctx.lir, scrut_var)
         let value = lirNew(&mut ctx, payload_ty, false, LIR_PAYLOAD, place, enum_id, which)
@@ -288,7 +289,7 @@ pub fn lirMatchArmBind(ctx: &mut SemaContext, source: &Text, tree: &AstTree, p_s
         lirLetBind(&mut ctx, bind_path, payload_ty, false)
         // The moved-out payload is an owned binding: dropped at the end of
         // its arm unless moved on (return, call, constructor).
-        if owned { semaOwn(&mut ctx, source, tree, bind_path, payload_ty, start) }
+        when owned { semaOwn(edit ctx, source, tree, bind_path, payload_ty, start) }
         return
     }
     match ctx.types.types[scrut_t].kind {

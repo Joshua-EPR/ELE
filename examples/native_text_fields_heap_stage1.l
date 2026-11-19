@@ -50,7 +50,7 @@ flow main() {
     change i = 0
     during i < 50 {
         hold f = ficha(i)
-        print(f.valor.byteAt(0))
+        print(f.valor@byteAt(0))
         i += 1
     }
 }
