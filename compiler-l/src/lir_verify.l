@@ -25,32 +25,32 @@ import lir_builtin_union
 // move); an unflagged drop of it is rule 6 (double drop).
 
 // Option/Result whose payloads own heap storage.
-fn lirOwnedUnion(types: &TypeTable, drop_memo: &List<Int>, ty: Int) -> Bool {
-    if ty < 0 || ty >= types.types.length || ty >= drop_memo.length || drop_memo[ty] != 2 { return false }
-    match types.types[ty].kind {
-        SemTypeKind.Option => { return true }
-        SemTypeKind.Result => { return true }
-        _ => { return false }
+flow lirOwnedUnion(types: view TypeTable, drop_memo: view List of[Int], ty: Int) => Bool {
+    when ty < 0 || ty >= types.types.length || ty >= drop_memo.length || drop_memo[ty] != 2 { give false }
+    choose types.types[ty].kind {
+        SemTypeKind.Option : { give true }
+        SemTypeKind.Result : { give true }
+        _ : { give false }
     }
 }
 
 // A by-value operand consuming an owned union marks it moved; with `any`,
 // every owned operand is marked (an owned payload moved into a union).
-fn lirMoveOut(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, drop_memo: &List<Int>, operand: Int, any: Bool) {
-    if !lirIsVar(operand) || !lirVarOk(l, operand) || l.vars[operand].is_ref || operand >= v.moved.length { return }
-    let ty = l.vars[operand].ty
-    if lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
+flow lirMoveOut(v: edit LirVerifier, l: view LirFn, types: view TypeTable, drop_memo: view List of[Int], operand: Int, any: Bool) {
+    when !lirIsVar(operand) || !lirVarOk(l, operand) || l.vars[operand].is_ref || operand >= v.moved.length { give }
+    hold ty = l.vars[operand].ty
+    when lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
         v.moved[operand] = true
     }
-    if v.has_flags && operand < v.owned.length && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
+    when v.has_flags && operand < v.owned.length && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
         v.owned[operand] = 0
     }
 }
 
 // Root of a place definitely assigned and not moved.
-fn lirRootLive(v: &mut LirVerifier, l: &LirFn, place: Int) -> Bool {
-    let root = l.places[place].root
-    return v.defined[root] && !(root < v.moved.length && v.moved[root])
+flow lirRootLive(v: edit LirVerifier, l: view LirFn, place: Int) => Bool {
+    hold root = l.places[place].root
+    give v.defined[root] && !(root < v.moved.length && v.moved[root])
 }
 
 // Check one instruction and apply its definition. Returns a status.
@@ -77,8 +77,8 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if ty == LIR_TY_ERR { return 8 }
         if !lirTypesCompat(types, lm, lirOperandType(l, inst.b), ty) { return 3 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
-        if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
-        lirMoveOut(&mut v, l, types, drop_memo, inst.b, false)
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
+        lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
         return 0
     }
     if kind == LIR_LIST_PUSH || kind == LIR_LIST_RESERVE {
@@ -91,9 +91,9 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         var expected = types.types[ty].elem_type
         if kind == LIR_LIST_RESERVE { expected = 1 }
         if lirOperandType(l, inst.b) != expected { return 3 }
-        if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
-        lirMoveOut(&mut v, l, types, drop_memo, inst.b, false)
+        lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
         return 0
     }
     if kind == LIR_DROP || kind == LIR_DROPFIELD {
@@ -104,28 +104,28 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             if check && !v.defined[dst] { return 5 }
             // An unflagged drop of a (maybe) moved owned union is a double
             // drop; afterwards the union owns nothing.
-            if check && inst.a < 0 && dst < v.moved.length && v.moved[dst] { return 6 }
+            when check && inst.a < 0 && dst < v.moved.length && v.moved[dst] { give 6 }
         } else {
             ty = lirPlaceType(l, types, lm, inst.a)
             if ty == LIR_TY_ERR { return 8 }
         }
         if ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { return 6 }
         var flag = inst.a
-        var root = dst
-        if kind == LIR_DROPFIELD {
+        change root = dst
+        when kind == LIR_DROPFIELD {
             flag = inst.b
             root = l.places[inst.a].root
         }
         if flag >= 0 {
             if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
             if check && !v.defined[flag] { return 5 }
-            if check && v.has_flags {
-                if root < 0 || root >= v.owned.length || flag >= v.flags.length { return 6 }
-                if v.flags[flag] != v.owned[root] { return 6 }
+            when check && v.has_flags {
+                when root < 0 || root >= v.owned.length || flag >= v.flags.length { give 6 }
+                when v.flags[flag] != v.owned[root] { give 6 }
             }
         }
-        if kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
-        if v.has_flags && kind == LIR_DROP && dst < v.owned.length {
+        when kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
+        when v.has_flags && kind == LIR_DROP && dst < v.owned.length {
             v.owned[dst] = 0
         }
         return 0
@@ -143,7 +143,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             result = lirOperandType(l, inst.a)
         }
         if !lirUse(&mut v, l, inst.a, check) { return 5 }
-        lirMoveOut(&mut v, l, types, drop_memo, inst.a, false)
+        lirMoveOut(edit v, l, types, drop_memo, inst.a, false)
     } else if kind == LIR_UNARY {
         let ty = lirOperandType(l, inst.b)
         if (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
@@ -159,9 +159,9 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
     } else if kind == LIR_CALL {
         let status = lirVerifyCall(&mut v, l, types, lm, inst.a, inst.b, inst.c, check)
         if status != 0 { return status }
-        for i in 0..inst.c {
-            let arg = l.operands[inst.b + i]
-            if !l.args[arg].by_ref { lirMoveOut(&mut v, l, types, drop_memo, l.args[arg].value, false) }
+        each i among 0..inst.c {
+            hold arg = l.operands[inst.b + i]
+            when !l.args[arg].by_ref { lirMoveOut(edit v, l, types, drop_memo, l.args[arg].value, false) }
         }
         result = lm.fn_ret[inst.a]
         result_ref = lm.fn_ret_ref[inst.a]
@@ -172,7 +172,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let operand = l.operands[inst.b + i]
             if lirOperandType(l, operand) != lm.field_ty[lm.st_first[inst.a] + i] { return 3 }
             if !lirUse(&mut v, l, operand, check) { return 5 }
-            lirMoveOut(&mut v, l, types, drop_memo, operand, false)
+            lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
         if lirStructOf(types, lm, dst_t) == inst.a { result = dst_t }
     } else if kind == LIR_VARIANT {
@@ -184,7 +184,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let payload_ty = lm.variant_type[which]
             if !lirBuiltinPayloadOk(types, lm, payload_ty) || lirOperandType(l, inst.c) != payload_ty { return 3 }
             if !lirUse(&mut v, l, inst.c, check) { return 5 }
-            lirMoveOut(&mut v, l, types, drop_memo, inst.c, true)
+            lirMoveOut(edit v, l, types, drop_memo, inst.c, true)
         } else if count != 0 { return 3 }
         else if inst.c != LIR_NONE { return 3 }
         if dst_t < 0 || dst_t >= types.types.length { return 3 }
@@ -227,11 +227,11 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             }
             _ => { return 3 }
         }
-        if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         // An owned payload is moved out: the whole union is consumed.
-        if lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length {
+        when lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length {
             v.moved[root] = true
-            if v.has_flags && root < v.owned.length {
+            when v.has_flags && root < v.owned.length {
                 v.owned[root] = 0
             }
         }
@@ -251,7 +251,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             }
             _ => { return 3 }
         }
-        if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
     } else if kind == LIR_LIST_LIT {
         if inst.a < 0 || inst.a >= lm.list_elem.length || inst.c < 0 || inst.b < 0 || inst.c > l.operands.length || inst.b > l.operands.length - inst.c { return 1 }
         if dst_t < 0 || dst_t >= types.types.length { return 3 }
@@ -265,17 +265,17 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let operand = l.operands[inst.b + i]
             if lirOperandType(l, operand) != lm.list_elem[inst.a] { return 3 }
             if !lirUse(&mut v, l, operand, check) { return 5 }
-            lirMoveOut(&mut v, l, types, drop_memo, operand, false)
+            lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
         result = dst_t
     } else if kind == LIR_READ || kind == LIR_LOAN {
         result = lirPlaceType(l, types, lm, inst.a)
         if result == LIR_TY_ERR { return 8 }
-        if check && !lirRootLive(&mut v, l, inst.a) { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         result_ref = kind == LIR_LOAN
-        if kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
-            let root = l.places[inst.a].root
-            if v.has_flags && root >= 0 && root < v.owned.length {
+        when kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
+            hold root = l.places[inst.a].root
+            when v.has_flags && root >= 0 && root < v.owned.length {
                 v.owned[root] = 0
             }
         }
@@ -297,18 +297,18 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if check && !v.defined[l.places[inst.a].root] { return 5 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
     } else if kind == LIR_LIST_POP {
-        let list_t = lirPlaceType(l, types, lm, inst.a)
-        if list_t < 0 || list_t >= types.types.length { return 8 }
-        match types.types[list_t].kind {
-            SemTypeKind.List => {}
-            _ => { return 3 }
+        hold list_t = lirPlaceType(l, types, lm, inst.a)
+        when list_t < 0 || list_t >= types.types.length { give 8 }
+        choose types.types[list_t].kind {
+            SemTypeKind.List : {}
+            _ : { give 3 }
         }
-        if dst_t < 0 || dst_t >= types.types.length { return 3 }
-        match types.types[dst_t].kind {
-            SemTypeKind.Option => {
-                if types.types[dst_t].elem_type != types.types[list_t].elem_type { return 3 }
+        when dst_t < 0 || dst_t >= types.types.length { give 3 }
+        choose types.types[dst_t].kind {
+            SemTypeKind.Option : {
+                when types.types[dst_t].elem_type != types.types[list_t].elem_type { give 3 }
             }
-            _ => { return 3 }
+            _ : { give 3 }
         }
         result = dst_t
         if check && !v.defined[l.places[inst.a].root] { return 5 }
@@ -321,24 +321,24 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
     }
     if result == LIR_TY_ERR || !lirTypesCompat(types, lm, result, dst_t) || result_ref != dst_ref { return 3 }
     v.defined[dst] = true
-    if dst < v.moved.length { v.moved[dst] = false }
-    if v.has_flags {
-        if dst < v.flag_root.length && v.flag_root[dst] >= 0 {
-            if kind == LIR_USE && !lirIsVar(inst.a) {
-                let cid = lirConstId(inst.a)
-                if cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL {
-                    if l.consts[cid].value != 0 {
+    when dst < v.moved.length { v.moved[dst] = false }
+    when v.has_flags {
+        when dst < v.flag_root.length && v.flag_root[dst] >= 0 {
+            when kind == LIR_USE && !lirIsVar(inst.a) {
+                hold cid = lirConstId(inst.a)
+                when cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL {
+                    when l.consts[cid].value != 0 {
                         v.flags[dst] = 1
-                    } else {
+                    } otherwise {
                         v.flags[dst] = 0
                     }
-                } else {
+                } otherwise {
                     v.flags[dst] = 2
                 }
-            } else {
+            } otherwise {
                 v.flags[dst] = 2
             }
-        } else if !dst_ref && dst < v.owned.length {
+        } otherwise when !dst_ref && dst < v.owned.length {
             v.owned[dst] = 1
         }
     }
@@ -353,14 +353,14 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
         let status = lirVerifyInst(&mut v, l, types, lm, drop_memo, body.order[i], b, check)
         if status != 0 { return status }
     }
-    if check && v.has_flags {
-        let term = body.term[b]
-        if term == LIR_T_JUMP || term == LIR_T_BRANCH {
-            for f in 0..v.flag_root.length {
-                let root = v.flag_root[f]
-                if root >= 0 {
-                    if root >= v.owned.length || f >= v.flags.length { return 6 }
-                    if v.flags[f] != v.owned[root] { return 6 }
+    when check && v.has_flags {
+        hold term = body.term[b]
+        when term == LIR_T_JUMP || term == LIR_T_BRANCH {
+            each f among 0..v.flag_root.length {
+                hold root = v.flag_root[f]
+                when root >= 0 {
+                    when root >= v.owned.length || f >= v.flags.length { give 6 }
+                    when v.flags[f] != v.owned[root] { give 6 }
                 }
             }
         }
@@ -375,7 +375,7 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     if body.first.length != blocks || body.count.length != blocks || body.ta.length != blocks || body.tb.length != blocks || body.top.length != blocks {
         return LirCheck(status: 2, block: -1, inst: -1)
     }
-    var v = LirVerifier(
+    change v = LirVerifier(
         defined: List[],
         table: List[],
         seen: List[],
@@ -391,57 +391,57 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         flag_root: List[],
         has_flags: false,
     )
-    for i in 0..vars {
-        v.defined.push(false)
-        v.moved.push(false)
-        v.flags.push(0)
-        v.owned.push(0)
-        v.flag_root.push(-1)
+    each i among 0..vars {
+        v.defined@push(false)
+        v.moved@push(false)
+        v.flags@push(0)
+        v.owned@push(0)
+        v.flag_root@push(-1)
     }
-    for id in 0..l.insts.length {
-        let kind = l.insts[id].kind
-        if kind == LIR_DROP || kind == LIR_DROPFIELD {
-            var f = l.insts[id].a
-            var root = l.insts[id].dst
-            if kind == LIR_DROPFIELD {
+    each id among 0..l.insts.length {
+        hold kind = l.insts[id].kind
+        when kind == LIR_DROP || kind == LIR_DROPFIELD {
+            change f = l.insts[id].a
+            change root = l.insts[id].dst
+            when kind == LIR_DROPFIELD {
                 f = l.insts[id].b
-                let place = l.insts[id].a
-                if f >= 0 {
-                    if place < 0 || place >= l.places.length {
-                        return LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                hold place = l.insts[id].a
+                when f >= 0 {
+                    when place < 0 || place >= l.places.length {
+                        give LirCheck(status: 1, block: l.insts[id].block, inst: id)
                     }
                     root = l.places[place].root
                 }
             }
-            if f >= 0 {
-                if !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
-                    return LirCheck(status: 6, block: l.insts[id].block, inst: id)
+            when f >= 0 {
+                when !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
-                if !lirVarOk(l, root) {
-                    return LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                when !lirVarOk(l, root) {
+                    give LirCheck(status: 1, block: l.insts[id].block, inst: id)
                 }
-                if v.flag_root[f] >= 0 && v.flag_root[f] != root {
-                    return LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                when v.flag_root[f] >= 0 && v.flag_root[f] != root {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
                 }
                 v.flag_root[f] = root
                 v.has_flags = true
             }
         }
     }
-    for i in 0..(blocks * vars) {
-        v.table.push(true)
-        v.mtable.push(false)
-        v.ftable.push(0)
-        v.otable.push(0)
+    each i among 0..(blocks * vars) {
+        v.table@push(true)
+        v.mtable@push(false)
+        v.ftable@push(0)
+        v.otable@push(0)
     }
     for b in 0..blocks {
         v.seen.push(b == 0)
         v.pending.push(b == 0)
     }
     // Parameters are assigned on entry.
-    for i in 0..vars {
+    each i among 0..vars {
         v.table[i] = i < l.params
-        if i < l.params { v.otable[i] = 1 }
+        when i < l.params { v.otable[i] = 1 }
     }
     v.queue.push(0)
     var steps = 0
@@ -454,10 +454,10 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         v.pending[b] = false
         steps += 1
         if steps > 100000 { return LirCheck(status: 2, block: b, inst: -1) }
-        for i in 0..vars {
+        each i among 0..vars {
             v.defined[i] = v.table[b * vars + i]
             v.moved[i] = v.mtable[b * vars + i]
-            if v.has_flags {
+            when v.has_flags {
                 v.flags[i] = v.ftable[b * vars + i]
                 v.owned[i] = v.otable[b * vars + i]
             }
@@ -472,10 +472,10 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
     }
     for b in 0..blocks {
         if v.seen[b] {
-            for i in 0..vars {
+            each i among 0..vars {
                 v.defined[i] = v.table[b * vars + i]
                 v.moved[i] = v.mtable[b * vars + i]
-                if v.has_flags {
+                when v.has_flags {
                     v.flags[i] = v.ftable[b * vars + i]
                     v.owned[i] = v.otable[b * vars + i]
                 }

@@ -21,7 +21,7 @@ flow contar(t: view Text, b: Int) => Int {
     change i = 0
     change total = 0
     during i < t.byteLength {
-        when t.byteAt(i) == b {
+        when t@byteAt(i) == b {
             total += 1
         }
         i += 1
@@ -35,7 +35,7 @@ flow iguales(a: view Text, b: view Text) => Bool {
     }
     change i = 0
     during i < a.byteLength {
-        when a.byteAt(i) != b.byteAt(i) {
+        when a@byteAt(i) != b@byteAt(i) {
             give false
         }
         i += 1
@@ -48,7 +48,7 @@ flow caracteres(t: view Text) => Int {
     change i = 0
     change total = 0
     during i < t.byteLength {
-        hold b = t.byteAt(i)
+        hold b = t@byteAt(i)
         when b < 128 || b >= 192 {
             total += 1
         }
