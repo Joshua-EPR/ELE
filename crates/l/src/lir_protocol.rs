@@ -518,8 +518,10 @@ impl FnCtx<'_> {
                 // a lowerable value (`payload_ok`): Int, Bool, Text, a list, or
                 // a struct/enum built recursively from them. Floats, units and
                 // by-value cycles stay rejected. The runtime performs a
-                // discriminant check on every access. An OWNED payload (one
-                // that needs a drop) is moved out and consumes its whole enum:
+                // discriminant check on every access. A non-Copy payload is
+                // moved out and consumes its whole enum, even when that
+                // payload itself needs no drop (e.g. a drop-free shape in the
+                // Err arm of Result<List<T>, E>):
                 // the reader appends the explicit `Moved` marker of Stage 0,
                 // so the ownership verifier sees no later use, drop or leak of
                 // the enum (it never owns the payload twice).
@@ -563,7 +565,7 @@ impl FnCtx<'_> {
             other => return line.fail(format!("instrucción desconocida: '{other}'")),
         })
     }
-    /// The enum consumed by an owned `payload` extraction, if `kind` is one.
+    /// The enum consumed by a non-Copy `payload` extraction, if `kind` is one.
     /// Only the `payload` instruction produces a `Payload` projection.
     fn consumed_enum(&self, kind: &InstKind) -> Option<usize> {
         let InstKind::Assign(_, Rvalue::Read(place)) = kind else {
@@ -576,7 +578,11 @@ impl FnCtx<'_> {
             return None;
         };
         let t = *self.enums.get(e)?.variants.get(*variant)?.1.get(*field)?;
-        owns(t, self.structs, self.enums, 0).then_some(place.var)
+        // Stage 1 copies only Int and Bool payload bindings. A drop-free
+        // shape or enum still moves by value, so its source union must be
+        // marked moved before ownership verification. Otherwise a Result
+        // whose other variant owns a resource appears to leak on this arm.
+        (!matches!(t, Type::Int | Type::Bool)).then_some(place.var)
     }
 }
 
@@ -603,28 +609,6 @@ fn payload_ok(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -
                         .iter()
                         .all(|p| payload_ok(*p, structs, enums, depth + 1))
             })
-        }),
-        _ => false,
-    }
-}
-
-/// Whether a value of type `t` owns a resource (Text, a list, or an
-/// aggregate containing one). Callers bound the type by `payload_ok` first.
-fn owns(t: Type, structs: &[StructDef], enums: &[EnumDef], depth: usize) -> bool {
-    if depth > 8 {
-        return true;
-    }
-    match t {
-        Type::Text | Type::List(_) => true,
-        Type::Struct(s) => structs.get(s).is_some_and(|def| {
-            def.fields
-                .iter()
-                .any(|(_, f)| owns(*f, structs, enums, depth + 1))
-        }),
-        Type::Enum(e) => enums.get(e).is_some_and(|def| {
-            def.variants
-                .iter()
-                .any(|(_, payload)| payload.iter().any(|p| owns(*p, structs, enums, depth + 1)))
         }),
         _ => false,
     }
