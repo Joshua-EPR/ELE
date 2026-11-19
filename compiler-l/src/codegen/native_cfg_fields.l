@@ -1,7 +1,7 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
-import native_layout
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
+take native_layout
 
 // Text fields of shapes in the ELE-written CFG backend: projected sources
 // of `print`/`append` (`ref pN.k[.j] 0`) and `i dropfield <place> v<flag>|-`

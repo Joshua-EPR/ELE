@@ -114,33 +114,33 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
             changed = true
         }
         // May-analysis for owned-union moves: moved on any incoming edge.
-        if cell < v.mtable.length && i < v.moved.length {
-            let gone = v.moved[i]
-            if first {
+        when cell < v.mtable.length && i < v.moved.length {
+            hold gone = v.moved[i]
+            when first {
                 v.mtable[cell] = gone
-            } else if gone && !v.mtable[cell] {
+            } otherwise when gone && !v.mtable[cell] {
                 v.mtable[cell] = true
                 changed = true
             }
         }
-        if v.has_flags {
-            if i < v.flag_root.length && v.flag_root[i] >= 0 {
-                let f_in = v.flags[i]
-                if cell < v.ftable.length {
-                    if first {
+        when v.has_flags {
+            when i < v.flag_root.length && v.flag_root[i] >= 0 {
+                hold f_in = v.flags[i]
+                when cell < v.ftable.length {
+                    when first {
                         v.ftable[cell] = f_in
-                    } else if v.ftable[cell] != f_in && v.ftable[cell] != 2 {
+                    } otherwise when v.ftable[cell] != f_in && v.ftable[cell] != 2 {
                         v.ftable[cell] = 2
                         changed = true
                     }
                 }
-                let root = v.flag_root[i]
-                let rcell = target * vars + root
-                if root >= 0 && root < v.owned.length && rcell < v.otable.length {
-                    let o_in = v.owned[root]
-                    if first {
+                hold root = v.flag_root[i]
+                hold rcell = target * vars + root
+                when root >= 0 && root < v.owned.length && rcell < v.otable.length {
+                    hold o_in = v.owned[root]
+                    when first {
                         v.otable[rcell] = o_in
-                    } else if v.otable[rcell] != o_in && v.otable[rcell] != 2 {
+                    } otherwise when v.otable[rcell] != o_in && v.otable[rcell] != 2 {
                         v.otable[rcell] = 2
                         changed = true
                     }

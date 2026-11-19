@@ -1,6 +1,6 @@
-import codegen.x86_64
-import codegen.elf64
-import codegen.native_list_int
+take codegen.x86_64
+take codegen.elf64
+take codegen.native_list_int
 
 // Stage-0 bootstrap generates native ELF64 from this ELE v2 source.
 // p: push 40+2 (capacity 1->2) => 42
@@ -17,7 +17,7 @@ flow main() => Int {
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
-            hold kind = mode.byteAt(0)
+            hold kind = mode@byteAt(0)
             when kind != 112 && kind != 103 && kind != 116 && kind != 111 && kind != 101 && kind != 100 && kind != 98 && kind != 99 && kind != 107 && kind != 113 { give 4 }
             hold slots = NativeIntListSlots(ptr: 0, bytes: 1, live: 2, len: 3, cap: 4, resize_scratch: 5, cap_scratch: 6)
             change code = x64New()
@@ -91,7 +91,7 @@ flow main() => Int {
             x64MovImm64(edit code, 0, 60)
             x64Syscall(edit code)
             when code.error != 0 { give 5 }
-            hold image = elf64Executable(&code.bytes)
+            hold image = elf64Executable(view code.bytes)
             when image.length <= 4096 { give 6 }
             choose processArg(1) {
                 Ok(path): { give writeBytes(path, image) },

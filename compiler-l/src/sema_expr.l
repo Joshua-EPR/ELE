@@ -16,7 +16,7 @@ import sema_ops
 import sema_collection_ops
 import stmt_lower
 import sema_builtin_union
-import lir_builtin_union
+take lir_builtin_union
 
 fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
     let decl = &tree.declarations[decl_id]
@@ -269,18 +269,16 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             }
             let name_print_err = "printError"
             if symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
-                let mark = ctx.pending_temps.length
+                hold mark = ctx.pending_temps.length
                 let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
-                semaReadTemp(&mut ctx, source, tree, tree.extra[first_arg], ty, mark)
+                semaReadTemp(edit ctx, source, tree, tree.extra[first_arg], ty, mark)
                 if ty == 5 || semaRefElem(ctx, ty) == 5 {
-                    if ctx.lir.place < 0 {
-                        if ctx.pending_temps.length == mark {
-                            semaTemp(&mut ctx, source, tree, 5, expr.start, expr.end)
+                    when ctx.lir.place < 0 {
+                        when ctx.pending_temps.length == mark {
+                            semaTemp(edit ctx, source, tree, 5, expr.start, expr.end)
                         }
-                        let temp_var = ctx.lir.val
-                        if temp_var >= 0 {
-                            ctx.lir.place = lirPlaceVar(&mut ctx.lir, temp_var)
-                        }
+                        hold temp_var = ctx.lir.val
+                        when temp_var >= 0 { ctx.lir.place = lirPlaceVar(edit ctx.lir, temp_var) }
                     }
                     if ctx.lir.place < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                     var args: List<Int> = List[]
@@ -306,7 +304,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     let argument = lirArg(&mut ctx.lir, false, operand, false)
                     args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                    if lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, res_t) < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                    when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                     semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
                     return res_t
                 }
@@ -349,7 +347,7 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
                 // Result<Text, Int> owns its active Text (#5): a registered
                 // builtin union with an atomic drop obligation.
-                if lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, res_t) < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
+                when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                 semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
                 return res_t
             }
