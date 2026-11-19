@@ -201,7 +201,8 @@ fn unsound_reference_forms_are_rejected() {
     rejected("native_cfg_ref_as_dst.lir", 96);
     rejected("native_cfg_ref_as_value.lir", 34);
     rejected("native_cfg_ref_return.lir", 41);
-    rejected("native_cfg_ref_returnref.lir", 44);
+    // `main` cannot return a reference (native_cfg_returnref).
+    rejected("native_cfg_ref_returnref.lir", 50);
     rejected("native_cfg_ref_drop.lir", 95);
     // Moving a Text out of its referent would duplicate the buffer.
     rejected("native_cfg_ref_read_text.lir", 95);

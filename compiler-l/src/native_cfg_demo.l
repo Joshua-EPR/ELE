@@ -1,5 +1,6 @@
 import codegen.native_cfg_emit
 import codegen.elf64
+import codegen.native_cfg_ir
 
 // Execute as a Stage-0-built ELE compiler component; Stage 0 is bootstrap.
 // Usage: native-cfg-demo <input.lir> [output.elf]
@@ -57,7 +58,7 @@ fn main() -> Int {
     }
     match processArg(0) {
         Ok(path) => {
-            match readText(path, 1048576) {
+            match readText(path, cfgMaxSource()) {
                 Ok(source) => {
                     hold compiled = cfgCompileFor(view source, target)
                     if compiled.error != 0 {

@@ -65,6 +65,14 @@ expose flow cfgTypeSize(p: view CfgProgram, ty: Int) => Int {
     give -1
 }
 
+// Largest shape, choice payload, aggregate result or list element: the
+// bound of the layout planner (native_layout). Copies of aggregates are
+// unrolled word by word, so code size grows linearly up to it; a list of
+// rtListLimit() such elements stays below 2^53 bytes, far from Int overflow.
+expose flow cfgMaxValueBytes() => Int {
+    give nativeLayoutMaxBytes()
+}
+
 expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
     when ty == 0 { give 8 }
     when ty == 1 { give 1 }

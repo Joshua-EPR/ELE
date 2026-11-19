@@ -4,8 +4,25 @@ take native_cfg_types
 take native_cfg_inst
 take native_cfg_list
 take native_cfg_fields
+take native_cfg_platform
+take x86_64
+take native_cfg_returnref
 
 // ELE-LIR CFG reader; split across modules to obey CORE-1 token limit.
+//
+// Capacity: functions, variables, structs, enums and lists live in growable
+// lists, so their counts have no fixed cap. What remains bounded is bounded
+// by an encoding: a frame must fit x64MaxFrameSlots (disp32/imm32, code 69),
+// and every type code needs a drop-glue runtime index below
+// cfgPlatformBase() (code 48 here, 74 in native_cfg_emit). A declared count
+// larger than the declarations that follow fails on the first missing line.
+
+// Largest ELE-LIR input: the 16 MiB per-file limit with which the Stage 1
+// front end (modules_l) reads the sources that produce it.
+expose flow cfgMaxSource() => Int {
+    give 16777216
+}
+
 flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int, b: Int) {
     nativeExpect(source, edit reader, "block")
     hold id = nativeNumber(source, edit reader)
@@ -40,6 +57,10 @@ flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeRead
         no = nativeNumber(source, edit reader)
     } otherwise when nativeEquals(source, view keyword, "unreachable") {
         kind = 4
+    } otherwise when nativeEquals(source, view keyword, "returnref") {
+        // Checked with the whole function (native_cfg_returnref).
+        kind = 5
+        value = nativeOperand(source, edit reader)
     } otherwise {
         p.error = 39
     }
@@ -72,15 +93,19 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
     nativeExpect(source, edit reader, "blocks")
     hold blocks = nativeNumber(source, edit reader)
     nativeEndLine(source, edit reader)
-    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || vars > 256 || blocks < 1 || blocks > 1024 || returned_ref != 0 || returned_mut != 0 || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
+    hold ref_mode = cfgReturnedRefMode(returned_ref, returned_mut)
+    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || blocks < 1 || blocks > 1024 || ref_mode == -2 || (ref_mode >= 0 && result_type == cfgUnitType()) || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType()) {
         p.error = 44
         give
     }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     // Aggregate results travel through a hidden pointer (see native_cfg_emit).
-    when result_type >= 2 && cfgTypeSize(p, result_type) > 512 { p.error = 68; give }
-    p.functions@push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: result_type == 1, result_unit: result_type == cfgUnitType(), result_text: result_type == cfgTextType(), result_type: result_type))
+    when ref_mode < 0 && result_type >= 2 && cfgTypeSize(p, result_type) > cfgMaxValueBytes() { p.error = 68; give }
+    // A returned reference is one word: the referent's address.
+    change value_type = result_type
+    when ref_mode >= 0 { value_type = 0 }
+    p.functions@push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: value_type == 1, result_unit: value_type == cfgUnitType(), result_text: value_type == cfgTextType(), result_type: value_type, result_ref: ref_mode, result_ref_type: result_type))
     change next_slot = 0
     each i among 0..vars {
         nativeExpect(source, edit reader, "var")
@@ -98,7 +123,7 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         change size = cfgTypeSize(p, ty)
         when is_ref { size = 8 }
         hold count_slots = (size + 7) / 8
-        when size < 1 || count_slots < 1 || next_slot + count_slots > 512 { p.error = 69; leave }
+        when size < 1 || count_slots < 1 || next_slot + count_slots > x64MaxFrameSlots() { p.error = 69; leave }
         p.types_bool@push(ty == 1 && !is_ref)
         p.types_code@push(ty)
         p.var_ref@push(is_ref)
@@ -116,6 +141,8 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         cfgReadBlock(edit p, source, edit reader, f, i)
     }
     when p.error != 0 { give }
+    hold returned = cfgCheckReturnRefs(p, f)
+    when returned != 0 { p.error = returned; give }
     nativeExpect(source, edit reader, "endfunc")
     nativeEndLine(source, edit reader)
     when reader.error != 0 { p.error = 46 }
@@ -123,7 +150,7 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
 
 expose flow cfgParse(source: view Text) => CfgProgram {
     change p = cfgEmpty()
-    when source.byteLength == 0 || source.byteLength > 1048576 {
+    when source.byteLength == 0 || source.byteLength > cfgMaxSource() {
         p.error = 47
         give p
     }
@@ -153,7 +180,7 @@ expose flow cfgParse(source: view Text) => CfgProgram {
     nativeExpect(source, edit r, "main")
     hold main = nativeId(source, edit r, 102)
     nativeEndLine(source, edit r)
-    when r.error != 0 || structs < 0 || structs > 16 || enums < 0 || enums > 16 || lists < 0 || lists > 64 || functions < 1 || functions > 256 || main < 0 || main >= functions {
+    when r.error != 0 || structs < 0 || enums < 0 || lists < 0 || 2 + structs + enums + lists >= cfgPlatformBase() || functions < 1 || main < 0 || main >= functions {
         p.error = 48
         give p
     }
@@ -190,6 +217,6 @@ expose flow cfgParse(source: view Text) => CfgProgram {
         p.error = 49
         give p
     }
-    when p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 { p.error = 50 }
+    when p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 || p.functions[main].result_ref >= 0 { p.error = 50 }
     give p
 }
