@@ -1,5 +1,5 @@
-import x86_64
-import native_heap_owner
+take x86_64
+take native_heap_owner
 
 // Experimental, bounded native List<Int> buffer layout for Linux ELF64.
 // Ownership is explicit in stack slots, NOT yet a Stage 1 List lowering.

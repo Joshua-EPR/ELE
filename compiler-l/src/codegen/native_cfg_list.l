@@ -1,6 +1,6 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
 
 // `List of[T]` in the ELE-written CFG backend: declarations, instructions
 // and their static rules. Lowering lives in native_cfg_list_emit and the

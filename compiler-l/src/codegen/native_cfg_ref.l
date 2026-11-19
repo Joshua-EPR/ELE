@@ -1,6 +1,6 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
 
 // Reference parameters (`view T` / `edit T`) and Text queries of the
 // ELE-written CFG backend.

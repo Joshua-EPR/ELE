@@ -1,6 +1,6 @@
-import codegen.x86_64
-import codegen.elf64
-import codegen.native_heap_owner
+take codegen.x86_64
+take codegen.elf64
+take codegen.native_heap_owner
 
 // Linux ELF64 owner resize integration tests, emitted by code written in ELE.
 // g: 8 -> 4097 bytes, preserved 40 + second page 2 => 42
@@ -16,7 +16,7 @@ flow main() => Int {
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
-            hold kind = mode.byteAt(0)
+            hold kind = mode@byteAt(0)
             when kind != 103 && kind != 115 && kind != 116 && kind != 122 && kind != 104 && kind != 109 { give 4 }
             change code = x64New()
             x64FrameBegin(edit code, 9)
@@ -73,7 +73,7 @@ flow main() => Int {
             x64MovImm64(edit code, 0, 60)
             x64Syscall(edit code)
             when code.error != 0 { give 5 }
-            hold image = elf64Executable(&code.bytes)
+            hold image = elf64Executable(view code.bytes)
             when image.length <= 4096 { give 6 }
             choose processArg(1) {
                 Ok(path): { give writeBytes(path, image) },
