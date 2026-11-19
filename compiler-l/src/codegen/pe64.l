@@ -1,14 +1,21 @@
 // Minimal Windows PE32+ (PE64, AMD64) executable writer, written in ELE.
-// Produces a console image with two sections and no linker:
+// Produces a console image with no linker:
 //   .text   RX  machine code followed by its read-only literals
 //   .idata  RW  import directory, ILT, IAT and hint/name table of
 //               KERNEL32.dll (GetStdHandle, WriteFile, ExitProcess,
 //               VirtualAlloc, VirtualFree)
-// There is no relocation directory. Code that embeds absolute addresses
-// (the CFG lowering does, for Text literals) needs the image at its
-// preferred base, so the image declares IMAGE_FILE_RELOCS_STRIPPED and does
-// NOT claim DYNAMIC_BASE (ASLR) nor HIGH_ENTROPY_VA. It does claim NX_COMPAT:
-// no section is both writable and executable.
+//   .reloc  R   (relocatable images only) IMAGE_REL_BASED_DIR64 base
+//               relocations for every absolute address embedded in .text
+//
+// Two image kinds:
+// - fixed (pe64Executable, pe64ExecutableWith): no relocation directory, so
+//   the image declares IMAGE_FILE_RELOCS_STRIPPED and claims neither
+//   DYNAMIC_BASE (ASLR) nor HIGH_ENTROPY_VA; it must load at its base.
+// - relocatable (pe64ExecutableRelocatable): the caller lists the code
+//   offsets of every 64-bit absolute address (patched for the preferred
+//   base); the writer emits a .reloc section and claims DYNAMIC_BASE and
+//   HIGH_ENTROPY_VA, so the loader may place the image anywhere.
+// Both claim NX_COMPAT: no section is both writable and executable.
 //
 // Every size, offset and RVA is computed with checked arithmetic bounded by
 // the 32-bit PE fields. Invalid inputs give a deterministic error and an
@@ -16,7 +23,8 @@
 //
 // Errors: 1 empty code, 2 code larger than PE64_MAX_CODE, 3 byte outside
 // [0,255], 4 invalid alignment, 5 size/offset overflow (does not fit a
-// 32-bit PE field), 6 invalid entry point, 7 invalid import fixup.
+// 32-bit PE field), 6 invalid entry point, 7 invalid import fixup,
+// 8 invalid base relocation.
 
 fixed PE64_IMAGE_BASE = 5368709120
 fixed PE64_SECTION_ALIGN = 4096
@@ -24,10 +32,12 @@ fixed PE64_FILE_ALIGN = 512
 fixed PE64_MAX_CODE = 16777216
 fixed PE64_DWORD_MAX = 4294967295
 fixed PE64_DOS_SIZE = 128
-// DOS area + "PE\0\0" + COFF header + PE32+ optional header + 2 sections.
-fixed PE64_HEADERS_END = 472
+// DOS area + "PE\0\0" + COFF header + PE32+ optional header, before the
+// 40-byte section headers.
+fixed PE64_OPTIONAL_END = 392
 fixed PE64_IMPORT_COUNT = 5
 fixed PE64_STACK_SIZE = 8388608
+fixed PE64_PAGE = 4096
 
 // Indexes of the imported functions (their IAT slots).
 expose flow pe64ImportGetStdHandle() => Int { give 0 }
@@ -59,6 +69,9 @@ expose shape Pe64Layout {
     idata_rva: Int
     idata_offset: Int
     idata_raw: Int
+    reloc_rva: Int
+    reloc_offset: Int
+    reloc_raw: Int
     image_size: Int
     file_size: Int
 }
@@ -121,18 +134,26 @@ expose flow pe64AlignmentError(section_align: Int, file_align: Int) => Int {
 }
 
 flow peLayoutFail(code: Int) => Pe64Layout {
-    give Pe64Layout(error: code, headers_size: 0, text_rva: 0, text_offset: 0, text_raw: 0, idata_rva: 0, idata_offset: 0, idata_raw: 0, image_size: 0, file_size: 0)
+    give Pe64Layout(error: code, headers_size: 0, text_rva: 0, text_offset: 0, text_raw: 0, idata_rva: 0, idata_offset: 0, idata_raw: 0, reloc_rva: 0, reloc_offset: 0, reloc_raw: 0, image_size: 0, file_size: 0)
 }
 
 // File and memory layout of headers, .text (`code_length` bytes) and
 // .idata (`idata_length` bytes). Checks every intermediate value.
 expose flow pe64Layout(code_length: Int, idata_length: Int, section_align: Int, file_align: Int) => Pe64Layout {
+    give pe64LayoutWith(code_length, idata_length, 0, section_align, file_align)
+}
+
+// As pe64Layout, plus a .reloc section of `reloc_length` bytes after .idata
+// when `reloc_length` > 0 (0: no .reloc section, two section headers).
+expose flow pe64LayoutWith(code_length: Int, idata_length: Int, reloc_length: Int, section_align: Int, file_align: Int) => Pe64Layout {
     when code_length <= 0 { give peLayoutFail(1) }
     when code_length > PE64_MAX_CODE { give peLayoutFail(2) }
-    when idata_length <= 0 { give peLayoutFail(5) }
+    when idata_length <= 0 || reloc_length < 0 { give peLayoutFail(5) }
     hold bad_alignment = pe64AlignmentError(section_align, file_align)
     when bad_alignment != 0 { give peLayoutFail(bad_alignment) }
-    hold headers = peAlign(PE64_HEADERS_END, file_align)
+    change sections = 2
+    when reloc_length > 0 { sections = 3 }
+    hold headers = peAlign(PE64_OPTIONAL_END + 40 * sections, file_align)
     hold text_rva = peAlign(headers, section_align)
     hold text_raw = peAlign(code_length, file_align)
     hold text_span = peAlign(code_length, section_align)
@@ -140,12 +161,23 @@ expose flow pe64Layout(code_length: Int, idata_length: Int, section_align: Int, 
     hold idata_offset = peAdd(headers, text_raw)
     hold idata_raw = peAlign(idata_length, file_align)
     hold idata_span = peAlign(idata_length, section_align)
-    hold image_size = peAdd(idata_rva, idata_span)
-    hold file_size = peAdd(idata_offset, idata_raw)
+    hold reloc_rva = peAdd(idata_rva, idata_span)
+    hold reloc_offset = peAdd(idata_offset, idata_raw)
+    hold reloc_raw = peAlign(reloc_length, file_align)
+    hold reloc_span = peAlign(reloc_length, section_align)
+    hold image_size = peAdd(reloc_rva, reloc_span)
+    hold file_size = peAdd(reloc_offset, reloc_raw)
     when headers < 0 || text_rva < 0 || text_raw < 0 || text_span < 0 { give peLayoutFail(5) }
     when idata_rva < 0 || idata_offset < 0 || idata_raw < 0 || idata_span < 0 { give peLayoutFail(5) }
+    when reloc_rva < 0 || reloc_offset < 0 || reloc_raw < 0 || reloc_span < 0 { give peLayoutFail(5) }
     when image_size < 0 || file_size < 0 { give peLayoutFail(5) }
-    give Pe64Layout(error: 0, headers_size: headers, text_rva: text_rva, text_offset: headers, text_raw: text_raw, idata_rva: idata_rva, idata_offset: idata_offset, idata_raw: idata_raw, image_size: image_size, file_size: file_size)
+    change r_rva = reloc_rva
+    change r_offset = reloc_offset
+    when reloc_length == 0 {
+        r_rva = 0
+        r_offset = 0
+    }
+    give Pe64Layout(error: 0, headers_size: headers, text_rva: text_rva, text_offset: headers, text_raw: text_raw, idata_rva: idata_rva, idata_offset: idata_offset, idata_raw: idata_raw, reloc_rva: r_rva, reloc_offset: r_offset, reloc_raw: reloc_raw, image_size: image_size, file_size: file_size)
 }
 
 flow pePut(out: edit List of[Int], b: Int) {
@@ -278,20 +310,31 @@ flow peSectionHeader(out: edit List of[Int], name: view Text, virtual_size: Int,
     peLittle(edit out, flags, 4)
 }
 
-flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int, idata_length: Int, entry: Int, section_align: Int, file_align: Int) {
+// `reloc_length` 0: fixed image; otherwise the size of the .reloc data.
+flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int, idata_length: Int, reloc_length: Int, entry: Int, section_align: Int, file_align: Int) {
+    hold relocatable = reloc_length > 0
     peDosStub(edit out)
     hold signature = "PE"
     peAscii(edit out, view signature)
     peZeros(edit out, 2)
     // COFF file header.
     peLittle(edit out, 34404, 2)            // Machine: AMD64 (0x8664)
-    peLittle(edit out, 2, 2)                // NumberOfSections
+    when relocatable {
+        peLittle(edit out, 3, 2)            // NumberOfSections
+    } otherwise {
+        peLittle(edit out, 2, 2)
+    }
     peLittle(edit out, 0, 4)                // TimeDateStamp: reproducible
     peLittle(edit out, 0, 4)                // PointerToSymbolTable
     peLittle(edit out, 0, 4)                // NumberOfSymbols
     peLittle(edit out, 240, 2)              // SizeOfOptionalHeader
-    // RELOCS_STRIPPED | EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE.
-    peLittle(edit out, 35, 2)
+    when relocatable {
+        // EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE.
+        peLittle(edit out, 34, 2)
+    } otherwise {
+        // RELOCS_STRIPPED | EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE.
+        peLittle(edit out, 35, 2)
+    }
     // PE32+ optional header.
     peLittle(edit out, 523, 2)              // Magic 0x20B
     peLittle(edit out, 0, 2)                // linker version
@@ -314,7 +357,13 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
     peLittle(edit out, layout.headers_size, 4)
     peLittle(edit out, 0, 4)                // CheckSum (not required for EXEs)
     peLittle(edit out, 3, 2)                // Subsystem: WINDOWS_CUI
-    peLittle(edit out, 256, 2)              // DllCharacteristics: NX_COMPAT only
+    when relocatable {
+        // HIGH_ENTROPY_VA | DYNAMIC_BASE | NX_COMPAT: every absolute address
+        // has a DIR64 relocation, so any 64-bit base works.
+        peLittle(edit out, 352, 2)
+    } otherwise {
+        peLittle(edit out, 256, 2)          // DllCharacteristics: NX_COMPAT only
+    }
     // The whole stack is committed up front: the lowering emits no stack
     // probes and a frame may reach 4 KiB (x64FrameBegin), which could step
     // over a single guard page. 8 MiB matches the usual Linux main stack.
@@ -328,6 +377,9 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
         when d == 1 {
             peLittle(edit out, layout.idata_rva, 4)    // import directory
             peLittle(edit out, 40, 4)
+        } otherwise when d == 5 && relocatable {
+            peLittle(edit out, layout.reloc_rva, 4)    // base relocation table
+            peLittle(edit out, reloc_length, 4)
         } otherwise when d == 12 {
             peLittle(edit out, layout.idata_rva + peIatOffset(), 4) // IAT
             peLittle(edit out, (PE64_IMPORT_COUNT + 1) * 8, 4)
@@ -340,6 +392,62 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
     hold idata_name = ".idata"
     peSectionHeader(edit out, view text_name, code_length, layout.text_rva, layout.text_raw, layout.text_offset, 1610612768)
     peSectionHeader(edit out, view idata_name, idata_length, layout.idata_rva, layout.idata_raw, layout.idata_offset, 3221225536)
+    when relocatable {
+        // INITIALIZED_DATA | DISCARDABLE | READ.
+        hold reloc_name = ".reloc"
+        peSectionHeader(edit out, view reloc_name, reloc_length, layout.reloc_rva, layout.reloc_raw, layout.reloc_offset, 1107296320)
+    }
+}
+
+// 64-bit little-endian value stored at code[at..at+8], or -1 when it cannot
+// be an address of this image (any of the top three bytes set).
+flow peAbsoluteAt(code: view List of[Int], at: Int) => Int {
+    when code[at + 5] != 0 || code[at + 6] != 0 || code[at + 7] != 0 { give -1 }
+    change value = 0
+    change k = 4
+    during k >= 0 {
+        value = value * 256 + code[at + k]
+        k = k - 1
+    }
+    give value
+}
+
+// .reloc contents: one IMAGE_BASE_RELOCATION block per 4 KiB page of .text
+// holding at least one absolute address, each entry IMAGE_REL_BASED_DIR64
+// (type 10) and every block padded to 4 bytes with an ABSOLUTE (type 0)
+// entry. Pages are visited in increasing order and entries keep the order of
+// `abs64`, so the output is deterministic. An image without absolute
+// addresses still gets one block of two ABSOLUTE entries: a relocatable
+// image always carries a (possibly no-op) relocation directory.
+flow peRelocs(text_rva: Int, code_length: Int, abs64: view List of[Int]) => List of[Int] {
+    change out: List of[Int] = List[]
+    change page = text_rva - text_rva % PE64_PAGE
+    hold end = text_rva + code_length
+    during page < end {
+        change count = 0
+        each i among 0..abs64.length {
+            hold rva = text_rva + abs64[i]
+            when rva >= page && rva < page + PE64_PAGE { count += 1 }
+        }
+        when count > 0 {
+            peLittle(edit out, page, 4)                    // VirtualAddress
+            peLittle(edit out, 8 + 2 * (count + count % 2), 4) // SizeOfBlock
+            each i among 0..abs64.length {
+                hold rva = text_rva + abs64[i]
+                when rva >= page && rva < page + PE64_PAGE {
+                    peLittle(edit out, 40960 + (rva - page), 2) // DIR64 << 12
+                }
+            }
+            when count % 2 == 1 { peLittle(edit out, 0, 2) }
+        }
+        page += PE64_PAGE
+    }
+    when out.length == 0 {
+        peLittle(edit out, text_rva - text_rva % PE64_PAGE, 4)
+        peLittle(edit out, 12, 4)
+        peLittle(edit out, 0, 4)
+    }
+    give out
 }
 
 flow peFail(code: Int) => Pe64Image {
@@ -347,8 +455,11 @@ flow peFail(code: Int) => Pe64Image {
 }
 
 // Writes an image whose entry point is code offset `entry`, patching each
-// import fixup with the displacement to its IAT slot.
-expose flow pe64ExecutableWith(code: view List of[Int], entry: Int, imports: view Pe64Imports, section_align: Int, file_align: Int) => Pe64Image {
+// import fixup with the displacement to its IAT slot. With `relocatable`,
+// `abs64` lists the code offsets of the 64-bit absolute addresses (already
+// patched for the preferred base) and the image gets a .reloc section;
+// otherwise `abs64` must be empty and the image is fixed at its base.
+flow peWrite(code: view List of[Int], entry: Int, imports: view Pe64Imports, abs64: view List of[Int], relocatable: Bool, section_align: Int, file_align: Int) => Pe64Image {
     when code.length == 0 { give peFail(1) }
     when code.length > PE64_MAX_CODE { give peFail(2) }
     change valid_bytes = true
@@ -378,9 +489,40 @@ expose flow pe64ExecutableWith(code: view List of[Int], entry: Int, imports: vie
         }
     }
     when !valid_fixups { give peFail(7) }
+    // Base relocations: each covers 8 bytes inside the code and shares no
+    // byte with another relocation nor with an import CALL (opcode included).
+    when !relocatable && abs64.length > 0 { give peFail(8) }
+    change valid_relocs = true
+    each i among 0..abs64.length {
+        hold at = abs64[i]
+        when at < 0 || at > code.length - 8 { valid_relocs = false }
+        each j among 0..abs64.length {
+            when i != j && abs64[j] > at - 8 && abs64[j] < at + 8 { valid_relocs = false }
+        }
+        each j among 0..imports.at.length {
+            when imports.at[j] - 2 < at + 8 && at < imports.at[j] + 4 { valid_relocs = false }
+        }
+    }
+    when !valid_relocs { give peFail(8) }
     hold idata_length = pe64IdataLength()
-    hold layout = pe64Layout(code.length, idata_length, section_align, file_align)
+    change reloc_length = 0
+    change relocs: List of[Int] = List[]
+    when relocatable {
+        // .text placement does not depend on the size of .reloc.
+        hold probe = pe64LayoutWith(code.length, idata_length, 1, section_align, file_align)
+        when probe.error != 0 { give peFail(probe.error) }
+        relocs = peRelocs(probe.text_rva, code.length, abs64)
+        reloc_length = relocs.length
+    }
+    hold layout = pe64LayoutWith(code.length, idata_length, reloc_length, section_align, file_align)
     when layout.error != 0 { give peFail(layout.error) }
+    // Every relocated value must be an address inside this image at its
+    // preferred base: anything else would be relocated into garbage.
+    each i among 0..abs64.length {
+        hold value = peAbsoluteAt(code, abs64[i])
+        when value < PE64_IMAGE_BASE || value >= PE64_IMAGE_BASE + layout.image_size { valid_relocs = false }
+    }
+    when !valid_relocs { give peFail(8) }
 
     change text: List of[Int] = List[]
     each i among 0..code.length { pePut(edit text, code[i]) }
@@ -403,18 +545,35 @@ expose flow pe64ExecutableWith(code: view List of[Int], entry: Int, imports: vie
     when !valid_displacements { give peFail(5) }
 
     change out: List of[Int] = List[]
-    peHeaders(edit out, view layout, code.length, idata_length, entry, section_align, file_align)
+    peHeaders(edit out, view layout, code.length, idata_length, reloc_length, entry, section_align, file_align)
     pePadTo(edit out, layout.text_offset)
     each i among 0..text.length { pePut(edit out, text[i]) }
     pePadTo(edit out, layout.idata_offset)
     hold idata = peIdata(layout.idata_rva)
     each i among 0..idata.length { pePut(edit out, idata[i]) }
+    when relocatable {
+        pePadTo(edit out, layout.reloc_offset)
+        each i among 0..relocs.length { pePut(edit out, relocs[i]) }
+    }
     pePadTo(edit out, layout.file_size)
     give Pe64Image(bytes: out, error: 0)
+}
+
+// Fixed-base image (no .reloc, RELOCS_STRIPPED, no ASLR).
+expose flow pe64ExecutableWith(code: view List of[Int], entry: Int, imports: view Pe64Imports, section_align: Int, file_align: Int) => Pe64Image {
+    hold none: List of[Int] = List[]
+    give peWrite(code, entry, imports, view none, false, section_align, file_align)
 }
 
 // Default layout: 4 KiB sections, 512-byte file alignment, so .text starts
 // at pe64CodeAddress().
 expose flow pe64Executable(code: view List of[Int], entry: Int, imports: view Pe64Imports) => Pe64Image {
     give pe64ExecutableWith(code, entry, imports, PE64_SECTION_ALIGN, PE64_FILE_ALIGN)
+}
+
+// Relocatable image with the default layout: `abs64` holds the code offset
+// of every 64-bit absolute address, each patched for .text at
+// pe64CodeAddress(). The loader may then place the image at any base (ASLR).
+expose flow pe64ExecutableRelocatable(code: view List of[Int], entry: Int, imports: view Pe64Imports, abs64: view List of[Int]) => Pe64Image {
+    give peWrite(code, entry, imports, abs64, true, PE64_SECTION_ALIGN, PE64_FILE_ALIGN)
 }

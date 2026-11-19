@@ -13,6 +13,10 @@ take codegen.win64_rt
 //   native-pe-demo --bad-alignment <out.exe> must fail, writing nothing
 //   native-pe-demo --self-check              print the writer's error codes
 //   native-pe-demo --deep-frames <out.exe>   1000 nested 4 KiB frames, exit 43
+//   native-pe-demo --relocated <out.exe>     ASLR image with a DIR64 relocation;
+//                                            exit 0 when moved and correct
+//   native-pe-demo --relocated-missing <out.exe>  same, relocation omitted:
+//                                            exit 2 when moved (stale address)
 
 flow demoMessage() => Text {
     give "Hola desde ELE: PE32+ nativo para Windows x64\n"
@@ -90,6 +94,56 @@ flow deepFramesCode(imports: edit Pe64Imports) => X64Code {
     give code
 }
 
+// Base relocation probe: compares the run-time address of a code label
+// (LEA RIP-relative, always right) with the same address stored as a 64-bit
+// absolute (MOVABS, right only if the loader applied a DIR64 relocation).
+// Exits 2 if the absolute address is stale, 1 if the image was loaded at
+// its preferred base (nothing was relocated, the check proved nothing), and
+// 0 if the image was moved and the relocated address is exact. `abs_at`
+// receives the code offset of the relocated MOVABS immediate.
+flow relocProbeCode(imports: edit Pe64Imports, abs_at: edit List of[Int]) => X64Code {
+    change code = x64New()
+    hold lea_at = x64LeaRipPlaceholder(edit code, 0)
+    x64MovImm64(edit code, 1, 0)
+    hold absolute_at = code.bytes.length - 8
+    abs_at@push(absolute_at)
+    x64CmpReg(edit code, 0, 1)
+    hold same = x64ConditionalPlaceholder(edit code, true)
+    w64EmitExit(edit code, edit imports, 2)
+    hold same_at = code.bytes.length
+    x64PatchRelative(edit code, same, same_at)
+    // The preferred-base address, built so that it is NOT an image address
+    // in the code (value + 2^40, then minus 2^40): never relocated.
+    x64MovImm64(edit code, 1, 0)
+    hold preferred_at = code.bytes.length - 8
+    x64MovImm64(edit code, 10, 1099511627776)
+    x64SubReg(edit code, 1, 10)
+    x64CmpReg(edit code, 0, 1)
+    hold moved = x64ConditionalPlaceholder(edit code, false)
+    w64EmitExit(edit code, edit imports, 1)
+    hold moved_at = code.bytes.length
+    x64PatchRelative(edit code, moved, moved_at)
+    w64EmitExit(edit code, edit imports, 0)
+    hold label = code.bytes.length
+    code.bytes@push(195)
+    x64PatchRelative(edit code, lea_at, label)
+    x64PatchAbsolute64(edit code, absolute_at, pe64CodeAddress() + label)
+    x64PatchAbsolute64(edit code, preferred_at, pe64CodeAddress() + label + 1099511627776)
+    give code
+}
+
+// MOVABS RAX, imm64; RET with the immediate at offset 2.
+flow movabsCode(value: Int) => List of[Int] {
+    change out: List of[Int] = List[72, 184]
+    change n = value
+    each i among 0..8 {
+        out@push(n % 256)
+        n = n / 256
+    }
+    out@push(195)
+    give out
+}
+
 flow selfCheckLine(name: Text, error: Int) {
     print("{name}={error}")
 }
@@ -161,6 +215,37 @@ flow selfCheck() => Int {
     hold fine = pe64Executable(view one, 0, view none)
     selfCheckLine("writer_ok", fine.error)
     print("writer_ok.length={fine.bytes.length}")
+    // Base relocations (error 8).
+    hold reloc_layout = pe64LayoutWith(4096, pe64IdataLength(), 12, 4096, 512)
+    selfCheckLine("reloc_layout", reloc_layout.error)
+    print("reloc_layout.reloc_rva={reloc_layout.reloc_rva}")
+    print("reloc_layout.image_size={reloc_layout.image_size}")
+    print("reloc_layout.file_size={reloc_layout.file_size}")
+    selfCheckLine("reloc_layout_negative", pe64LayoutWith(16, 100, -1, 4096, 512).error)
+    hold inside = movabsCode(pe64CodeAddress())
+    change at2: List of[Int] = List[2]
+    hold relocated = pe64ExecutableRelocatable(view inside, 0, view none, view at2)
+    selfCheckLine("reloc_ok", relocated.error)
+    print("reloc_ok.length={relocated.bytes.length}")
+    hold no_relocs: List of[Int] = List[]
+    selfCheckLine("reloc_none_ok", pe64ExecutableRelocatable(view inside, 0, view none, view no_relocs).error)
+    change at_negative: List of[Int] = List[-1]
+    selfCheckLine("reloc_negative", pe64ExecutableRelocatable(view inside, 0, view none, view at_negative).error)
+    change at_late: List of[Int] = List[4]
+    selfCheckLine("reloc_out_of_code", pe64ExecutableRelocatable(view inside, 0, view none, view at_late).error)
+    change at_overlap: List of[Int] = List[2, 3]
+    selfCheckLine("reloc_overlap", pe64ExecutableRelocatable(view inside, 0, view none, view at_overlap).error)
+    change at_twice: List of[Int] = List[2, 2]
+    selfCheckLine("reloc_duplicate", pe64ExecutableRelocatable(view inside, 0, view none, view at_twice).error)
+    hold null_address = movabsCode(0)
+    selfCheckLine("reloc_outside_image", pe64ExecutableRelocatable(view null_address, 0, view none, view at2).error)
+    hold past_end = movabsCode(pe64CodeAddress() + 1048576)
+    selfCheckLine("reloc_past_image", pe64ExecutableRelocatable(view past_end, 0, view none, view at2).error)
+    change on_call = pe64NewImports()
+    on_call.at@push(2)
+    on_call.index@push(0)
+    change at_zero: List of[Int] = List[0]
+    selfCheckLine("reloc_on_import", pe64ExecutableRelocatable(view two_calls, 0, view on_call, view at_zero).error)
     give 0
 }
 
@@ -200,6 +285,10 @@ flow main() => Int {
                 hold deep_frames = "--deep-frames"
                 when sameBytes(view flag, view bad_alignment) { mode = 1 }
                 when sameBytes(view flag, view deep_frames) { mode = 2 }
+                hold relocated = "--relocated"
+                hold relocated_missing = "--relocated-missing"
+                when sameBytes(view flag, view relocated) { mode = 3 }
+                when sameBytes(view flag, view relocated_missing) { mode = 4 }
             }
             Err(e) : { give 5 }
         }
@@ -213,6 +302,16 @@ flow main() => Int {
                     hold deep_image = pe64Executable(view deep.bytes, 0, view imports)
                     give writeImage(view path, view deep_image)
                 }
+                when mode == 3 || mode == 4 {
+                    change abs_at: List of[Int] = List[]
+                    hold probe = relocProbeCode(edit imports, edit abs_at)
+                    when probe.error != 0 { give 2 }
+                    // --relocated-missing: same code and DYNAMIC_BASE, but
+                    // the MOVABS gets no relocation entry.
+                    when mode == 4 { abs_at = List[] }
+                    hold probe_image = pe64ExecutableRelocatable(view probe.bytes, 0, view imports, view abs_at)
+                    give writeImage(view path, view probe_image)
+                }
                 hold code = demoCode(edit imports)
                 when code.error != 0 { give 2 }
                 // File alignment 100 is not a power of two: nothing is written.
@@ -222,6 +321,6 @@ flow main() => Int {
             Err(e) : { give 5 }
         }
     }
-    printError("Uso: native-pe-demo <salida.exe> | --bad-alignment <salida.exe> | --deep-frames <salida.exe> | --self-check")
+    printError("Uso: native-pe-demo <salida.exe> | --bad-alignment <salida.exe> | --deep-frames <salida.exe> | --relocated <salida.exe> | --relocated-missing <salida.exe> | --self-check")
     give 6
 }

@@ -333,7 +333,7 @@ flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, sta
 // VirtualAlloc/VirtualFree) provides the same entries as native_rt and
 // native_rt_list. A call to a runtime entry the target does not have is
 // rejected with error 73 instead of emitting Linux system calls. A
-// rejection by the PE writer (pe64.l codes 1..7) is reported as 111..117.
+// rejection by the PE writer (pe64.l codes 1..8) is reported as 111..118.
 expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change result = CfgImage(image: List[], error: 0)
     hold verified = cfgVerify(p)
@@ -473,9 +473,12 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         give result
     }
     when target == 1 {
-        hold pe = pe64Executable(view code.bytes, 0, view imports)
+        // The Text literal addresses are the only absolute addresses in
+        // the code: each gets a DIR64 base relocation, so the image is
+        // relocatable (DYNAMIC_BASE, HIGH_ENTROPY_VA) instead of fixed.
+        hold pe = pe64ExecutableRelocatable(view code.bytes, 0, view imports, view fix.text_at)
         when pe.error != 0 {
-            // pe64.l writer codes 1..7 are reported as 111..117.
+            // pe64.l writer codes 1..8 are reported as 111..118.
             result.error = 110 + pe.error
             give result
         }
