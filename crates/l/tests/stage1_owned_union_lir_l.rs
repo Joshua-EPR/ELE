@@ -576,8 +576,8 @@ fn lexer_return_ok_tokens_no_longer_blocks_stage1() {
 
 #[test]
 fn ele_native_backend_rejects_owned_union_lir_without_an_image() {
-    // Fail closed: the ELE backend has no verified layout/drop glue for
-    // owned payloads yet (cfgEnumLayout code 82), so no ELF is written.
+    // Fail closed: layout code 82 is resolved, but whole-union drop glue
+    // is not implemented yet in the native backend (code 92), so no ELF is written.
     let lir = emit("native_reject.l", &program(LOOPS));
     validate(&lir).unwrap();
     let file = write("native_reject.lir", &lir);
@@ -591,7 +591,7 @@ fn ele_native_backend_rejects_owned_union_lir_without_an_image() {
     assert!(!out.status.success(), "owned union LIR reached native code");
     assert_eq!(out.status.code(), Some(3), "a crash is not a rejection");
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("ELE-LIR/CFG rechazado (código 82)"),
+        String::from_utf8_lossy(&out.stderr).contains("ELE-LIR/CFG rechazado (código 92)"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );

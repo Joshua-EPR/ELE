@@ -137,11 +137,8 @@ flow cfgDeclType(p: view CfgProgram, source: view Text, reader: edit NativeReade
 // Read a complete enum descriptor from the official ELE-LIR 1 extension:
 // enum eN <encoded-name> variants V
 // variant <encoded-name> types 0|1 [<type>]
-// A payload is Int, Bool or a DROP-FREE aggregate: a struct or enum that
-// owns no Text and no list, directly or in a nested field. That, and the
+// A payload is Int, Bool, Text or an aggregate: a struct or enum. That, and the
 // layout, are checked by cfgLayoutDecls once every member is known.
-// Text payloads are not even parsed here. No user-provided layouts and no
-// heap/owned payloads are trusted.
 expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit NativeReader, id: Int) {
     nativeExpect(source, edit reader, "enum")
     hold actual = nativeId(source, edit reader, 101)
@@ -161,9 +158,9 @@ expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit Nati
         hold argc = nativeNumber(source, edit reader)
         when argc < 0 || argc > 1 { p.error = 81; give }
         change payload = -1
-        when argc == 1 { payload = cfgDeclType(p, source, edit reader, false) }
+        when argc == 1 { payload = cfgDeclType(p, source, edit reader, true) }
         nativeEndLine(source, edit reader)
-        when reader.error != 0 || !cfgEncodedName(source, view vname) || (argc == 1 && payload < 0) {
+        when reader.error != 0 || !cfgEncodedName(source, view vname) || (argc == 1 && payload < 0 && payload != cfgTextType()) {
             p.error = 82
             give
         }
