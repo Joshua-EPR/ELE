@@ -14,6 +14,7 @@ take native_cfg_fields
 take native_cfg_ir
 take native_cfg_platform
 take native_rt_platform
+take win64_rt_platform
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -381,12 +382,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 73
         give result
     }
-    // Platform builtins (native_cfg_platform) exist only on Linux ELF64.
+    // Platform builtins (native_cfg_platform): native_rt_platform on Linux
+    // ELF64, win64_rt_platform (KERNEL32 only) on Windows PE32+.
     hold platform = cfgUsesKind(p, 24)
-    when platform && target != 0 {
-        result.error = 133
-        give result
-    }
     change imports = pe64NewImports()
     // Immediates holding the address of the ELF read-write data page.
     change data_at: List of[Int] = List[]
@@ -453,7 +451,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change platform_at: List of[Int] = List[]
     when platform {
         hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
-        platform_at = pfEmitAll(edit code, view rt, edit data_at)
+        when target == 1 {
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt)
+        } otherwise {
+            platform_at = pfEmitAll(edit code, view rt, edit data_at)
+        }
     }
 
     each f among 0..p.functions.length {
@@ -485,7 +487,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     // provides every entry of native_rt and native_rt_list.
     change missing_routine = false
     each i among 0..fix.call_at.length {
-        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length { missing_routine = true }
+        hold routine = -1 - fix.call_to[i] - cfgPlatformBase()
+        hold platform_routine = routine >= 0 && routine < platform_at.length
+        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine { missing_routine = true }
     }
     when missing_routine {
         result.error = 73

@@ -35,6 +35,7 @@ codegen/native_rt_platform.l	lir
 codegen/pe64.l	lir
 codegen/win64_heap.l	lir
 codegen/win64_rt.l	lir
+codegen/win64_rt_platform.l	lir
 codegen/x86_64.l	lir
 cursor.l	lir
 decl.l	lir

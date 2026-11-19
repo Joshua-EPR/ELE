@@ -134,7 +134,7 @@ flow pfUtf8Next(state: Int, cls: Int) => Int {
 // The class table (256 bytes) and the transition table (9 x 12 bytes) are
 // emitted in front of the routine, after the `ret` of the previous one, and
 // reached RIP-relative. Returns the entry address.
-flow pfEmitUtf8(code: edit X64Code) => Int {
+expose flow pfEmitUtf8(code: edit X64Code) => Int {
     hold classes = code.bytes.length
     each b among 0..256 { code.bytes@push(pfUtf8Class(b)) }
     hold next = code.bytes.length
@@ -218,7 +218,7 @@ flow pfNotSlash(code: edit X64Code, offset: Int) => Int {
 
 // path_z(RDI = address of a Text) -> RAX = owned buffer holding the path
 // and a NUL byte, RDX = its capacity; RAX = 0 when the path is invalid.
-flow pfEmitPathZ(code: edit X64Code, rt: view PfRuntime) => Int {
+expose flow pfEmitPathZ(code: edit X64Code, rt: view PfRuntime) => Int {
     hold entry = code.bytes.length
     x64FrameBegin(edit code, 4)
     x64LoadMem64(edit code, 8, 7, 0)
@@ -278,7 +278,7 @@ flow pfEmitPathZ(code: edit X64Code, rt: view PfRuntime) => Int {
 }
 
 // Writes Err(RCX) into the Result<Text,Int> whose address is in R11.
-flow pfStoreErr(code: edit X64Code) {
+expose flow pfStoreErr(code: edit X64Code) {
     x64MovImm64(edit code, 0, 1)
     x64StoreMem64(edit code, 11, 0, 0)
     x64StoreMem64(edit code, 11, 8, 1)
