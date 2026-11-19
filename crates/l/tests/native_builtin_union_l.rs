@@ -166,6 +166,23 @@ end
     let bytes = fs::read(&image).unwrap();
     assert!(bytes.len() > 4096);
     assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
+
+    // ELF magic alone cannot establish valid payload moves, length reads,
+    // or drop semantics: execute the emitted program on a compatible host.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&image).unwrap().permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&image, perms).unwrap();
+        let actual = Command::new(&image).output().unwrap();
+        assert_eq!(
+            actual.status.code(),
+            Some(5),
+            "Option<Text> payload extraction must return its five-byte length: {}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+    }
 }
 
 #[test]
