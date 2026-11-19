@@ -154,6 +154,13 @@ fn test_stage2_determinism_and_bit_for_bit_parity() {
         String::from_utf8_lossy(&run_stage2.stderr)
     );
 
+    // A comparison against Stage 1 must not accidentally pass on
+    // matching empty or non-protocol output after an executable failure.
+    assert!(
+        run_stage2.stdout.starts_with(b"ELE-LIR 1\n"),
+        "Stage 2 did not emit the canonical ELE-LIR protocol header"
+    );
+
     // 5. Bit-for-bit equality check: Stage 1 output vs Stage 2 output
     assert_eq!(
         run1.stdout, run_stage2.stdout,
