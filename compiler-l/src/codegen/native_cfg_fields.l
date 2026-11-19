@@ -47,11 +47,14 @@ expose flow cfgReadDropField(p: edit CfgProgram, f: Int, source: view Text, read
     }
 }
 
-// A dropfield names a Text or list field (not a whole variable, and not a
-// place inside a list) and an optional Bool flag.
+// A dropfield names a field that owns heap storage (not a whole variable,
+// and not a place inside a list) and an optional Bool flag. A Text or list
+// field is released directly; a shape- or union-typed field through its drop
+// glue (cfgEmitShapeGlue, cfgEmitUnionGlue). A field that owns nothing has
+// nothing to release and stays rejected (92).
 expose flow cfgCheckDropField(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
-    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgHeapDirect(p, cfgPlaceType(p, f, view place)) { give 92 }
+    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgOwnsHeap(p, cfgPlaceType(p, f, view place)) { give 92 }
     when inst.op >= 0 {
         when inst.op >= p.functions[f].vars { give 94 }
         hold first = p.functions[f].first_var

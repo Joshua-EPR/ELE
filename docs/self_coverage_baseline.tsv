@@ -59,13 +59,13 @@ lir_verify_own.l	lir
 lir_write.l	lir
 loans_check.l	lir
 loans_l.l	lir
-main.l	lir
-main_parser.l	lir
-main_sema.l	lir
+main.l	backend
+main_parser.l	backend
+main_sema.l	backend
 module_graph_l.l	lir
 modules_l.l	lir
 native_binary_io.l	backend
-native_cfg_demo.l	lir
+native_cfg_demo.l	backend
 native_elf_demo.l	backend
 native_encoder_branches.l	backend
 native_encoder_cases.l	backend

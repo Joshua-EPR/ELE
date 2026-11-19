@@ -37,8 +37,10 @@ flow cfgPlaceKind(p: view CfgProgram, f: Int, variable: Int, field: Int, subfiel
 // The place may be reached through a reference parameter or a list index.
 flow cfgStoreField(code: edit X64Code, p: view CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: view NativeOperand, fix: edit CfgFix) {
     hold ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
-    when ext >= 0 && cfgOwnsHeap(p, ty) {
+    hold whole_referent = field < 0 && ext < 0
+    when (ext >= 0 || whole_referent) && cfgOwnsHeap(p, ty) {
         // Indexed owners have no partial-move flag: the old element is live.
+        // A whole referent is live too (native_cfg_verify requires it whole).
         // Drop it before loading the source, then recompute the address since
         // drop glue may clobber caller-saved registers.
         cfgPlaceAddressRax(edit code, p, f, variable, field, subfield, ext, edit fix)
@@ -305,8 +307,10 @@ flow cfgEmitParams(code: edit X64Code, p: view CfgProgram, f: Int) {
 }
 
 // The drop glue table (cfgEmitDropGlue) is emitted when a list type exists,
-// or when some `i drop` releases a whole union (cfgEmitUnionGlue). Programs
-// without either keep their previous, glue-free image.
+// when some `i drop` releases a whole union (cfgEmitUnionGlue), or when a
+// shape- or union-typed value is released by `dropfield` or replaced by a
+// whole `store` through a reference. Other programs keep their glue-free
+// image.
 flow cfgNeedsGlue(p: view CfgProgram) => Bool {
     when p.decl_lists > 0 { give true }
     hold first_enum = 2 + p.decl_structs
@@ -315,9 +319,16 @@ flow cfgNeedsGlue(p: view CfgProgram) => Bool {
         each b among func.first_block..(func.first_block + func.blocks) {
             hold block = view p.blocks[b]
             each i among block.first..(block.first + block.count) {
-                when p.insts[i].kind == 13 {
-                    hold owner = p.types_code[func.first_var + p.insts[i].place_var]
+                hold inst = view p.insts[i]
+                when inst.kind == 13 {
+                    hold owner = p.types_code[func.first_var + inst.place_var]
                     when owner >= first_enum && owner < first_enum + p.decl_enums { give true }
+                }
+                hold whole_store = inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0
+                when inst.kind == 17 || whole_store {
+                    hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
+                    hold ty = cfgPlaceType(p, f, view place)
+                    when ty >= 2 && cfgOwnsHeap(p, ty) { give true }
                 }
             }
         }
