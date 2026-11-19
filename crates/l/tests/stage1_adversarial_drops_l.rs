@@ -8,7 +8,11 @@
 //! - Manipulated drop flags (`cb0 -> cb1` double free, `cb1 -> cb0` leak) on `LIR_DROP` and `LIR_DROPFIELD`.
 //! - Nested enums with conditional drops, loop back-edges, and diamond CFG joins.
 //! - Forged uninitialized operands and reads/uses after move.
-//! - Strict fail-closed verification with canonical error codes (L0017 in Rust, ICE rule in ELE).
+//! - Deleted or duplicated unconditional drops (leak at return, double free).
+//! - Strict fail-closed verification in both verifiers. In Rust, drop-flag
+//!   disagreements are L0017 protocol rejections, while ownership-state
+//!   violations are reported as L0007 internal errors (see `assert_diag`);
+//!   the ELE verifier reports an ICE naming the violated rule.
 
 mod stage1_support;
 
@@ -77,6 +81,22 @@ fn validate_err(lir: &str) -> String {
         },
         Err(err) => format!("{err:?}"),
     }
+}
+
+/// Exactly one diagnostic code and one specific message: a forged LIR must be
+/// rejected for the property under attack, not for any reason at all.
+///
+/// Observed split (documented, not normalized here): drop-flag disagreements
+/// are protocol rejections (`L0017`, "LIR rechazada"), while ownership-state
+/// violations (use after move, double drop, leak at return, read before
+/// assignment) surface as `L0007` "error interno del compilador" even when
+/// the LIR came from outside the compiler.
+fn assert_diag(err: &str, code: &str, message: &str) {
+    assert!(
+        err.contains(&format!("code: \"{code}\"")),
+        "expected code {code}: {err}"
+    );
+    assert!(err.contains(message), "expected {message:?}: {err}");
 }
 
 fn mutate(lir: &str, pred: impl Fn(&str) -> bool, dup: bool) -> String {
@@ -293,31 +313,23 @@ fn test_drop_flag_attacks_on_lir_drop_double_free_and_leak() {
     // Attack 1a: Double free (change cb0 to cb1 after payload move-out)
     let forged_df = lir.replacen("i use v32 cb0 @22:14", "i use v32 cb1 @22:14", 1);
     assert_ne!(forged_df, lir, "replacement for double free must succeed");
+    // The flag claims ownership (On) of a value already moved out.
     let err_df = validate_err(&forged_df);
-    assert!(
-        err_df.contains("doble liberación o fuga")
-            || err_df.contains("no coincide")
-            || err_df.contains("no refleja"),
-        "unexpected error: {err_df}"
-    );
-    assert!(
-        err_df.contains("L0017"),
-        "canonical L0017 required: {err_df}"
+    assert_diag(
+        &err_df,
+        "L0017",
+        "flag v32 = On no refleja la propiedad de [Place { var: 2, proj: [] }]",
     );
 
     // Attack 1b: Leak (change cb1 to cb0 when value is owned)
     let forged_leak = lir.replacen("i use v32 cb1 @20:5", "i use v32 cb0 @20:5", 1);
     assert_ne!(forged_leak, lir, "replacement for leak must succeed");
+    // The flag denies ownership (Off) of a value still owned.
     let err_leak = validate_err(&forged_leak);
-    assert!(
-        err_leak.contains("doble liberación o fuga")
-            || err_leak.contains("no coincide")
-            || err_leak.contains("no refleja"),
-        "unexpected error: {err_leak}"
-    );
-    assert!(
-        err_leak.contains("L0017"),
-        "canonical L0017 required: {err_leak}"
+    assert_diag(
+        &err_leak,
+        "L0017",
+        "flag v32 = Off no refleja la propiedad de [Place { var: 2, proj: [] }]",
     );
 
     // Self-hosted ELE verifier checks (fail-closed rule 6)
@@ -347,30 +359,20 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
     };
     assert_ne!(forged_df, lir_text);
     let err_df = validate_err(&forged_df);
-    assert!(
-        err_df.contains("doble liberación o fuga")
-            || err_df.contains("no coincide")
-            || err_df.contains("no refleja"),
-        "unexpected error: {err_df}"
-    );
-    assert!(
-        err_df.contains("L0017"),
-        "canonical code required: {err_df}"
+    assert_diag(
+        &err_df,
+        "L0017",
+        "flag v5 = On no refleja la propiedad de [Place { var: 2, proj: [Field(0)] }]",
     );
 
     // Attack 1b: Leak (cb1 -> cb0)
     let forged_leak = lir_text.replacen("i use v5 cb1", "i use v5 cb0", 1);
     assert_ne!(forged_leak, lir_text);
     let err_leak = validate_err(&forged_leak);
-    assert!(
-        err_leak.contains("doble liberación o fuga")
-            || err_leak.contains("no coincide")
-            || err_leak.contains("no refleja"),
-        "unexpected error: {err_leak}"
-    );
-    assert!(
-        err_leak.contains("L0017"),
-        "canonical code required: {err_leak}"
+    assert_diag(
+        &err_leak,
+        "L0017",
+        "flag v5 = Off no refleja la propiedad de [Place { var: 2, proj: [Field(0)] }]",
     );
 
     // 2. Struct with List field
@@ -392,29 +394,19 @@ fn test_dropfield_flag_attacks_on_struct_text_and_list() {
     };
     assert_ne!(forged_df_l, lir_list);
     let err_df_l = validate_err(&forged_df_l);
-    assert!(
-        err_df_l.contains("doble liberación o fuga")
-            || err_df_l.contains("no coincide")
-            || err_df_l.contains("no refleja"),
-        "unexpected error: {err_df_l}"
-    );
-    assert!(
-        err_df_l.contains("L0017"),
-        "canonical code required: {err_df_l}"
+    assert_diag(
+        &err_df_l,
+        "L0017",
+        "flag v6 = On no refleja la propiedad de [Place { var: 3, proj: [Field(0)] }]",
     );
 
     let forged_leak_l = lir_list.replacen("i use v6 cb1", "i use v6 cb0", 1);
     assert_ne!(forged_leak_l, lir_list);
     let err_leak_l = validate_err(&forged_leak_l);
-    assert!(
-        err_leak_l.contains("doble liberación o fuga")
-            || err_leak_l.contains("no coincide")
-            || err_leak_l.contains("no refleja"),
-        "unexpected error: {err_leak_l}"
-    );
-    assert!(
-        err_leak_l.contains("L0017"),
-        "canonical code required: {err_leak_l}"
+    assert_diag(
+        &err_leak_l,
+        "L0017",
+        "flag v6 = Off no refleja la propiedad de [Place { var: 3, proj: [Field(0)] }]",
     );
 
     // Self-hosted ELE verifier checks on both structs (fail-closed rule 6)
@@ -435,67 +427,51 @@ fn test_nested_enums_conditional_drops_and_cfg_joins() {
 
     // Attack 2.1: Double move of inner payload using block-adjusted mutation
     let twice_inner = mutate(&lir, |l| l.contains("i payload v10 p7 e0 1"), true);
+    // The second payload read finds the inner union (v7) already consumed.
     let err_move_inner = validate_err(&twice_inner);
-    assert!(
-        err_move_inner.contains("uso tras movimiento o inicialización parcial")
-            || err_move_inner.contains("fuga por sobrescritura"),
-        "unexpected error: {err_move_inner}"
-    );
-    assert!(
-        err_move_inner.contains("L0007") || err_move_inner.contains("L0017"),
-        "canonical code required: {err_move_inner}"
+    assert_diag(
+        &err_move_inner,
+        "L0007",
+        "Place { var: 7, proj: [] }: uso tras movimiento o inicialización parcial",
     );
 
     // Attack 2.2: Double move of outer payload
     let twice_outer = mutate(&lir, |l| l.contains("i payload v6 p3 e1 1"), true);
     let err_move_outer = validate_err(&twice_outer);
-    assert!(
-        err_move_outer.contains("uso tras movimiento o inicialización parcial")
-            || err_move_outer.contains("fuga por sobrescritura"),
-        "unexpected error: {err_move_outer}"
-    );
-    assert!(
-        err_move_outer.contains("L0007") || err_move_outer.contains("L0017"),
-        "canonical code required: {err_move_outer}"
+    assert_diag(
+        &err_move_outer,
+        "L0007",
+        "Place { var: 3, proj: [] }: uso tras movimiento o inicialización parcial",
     );
 
-    // Attack 2.3: Double drop of inner union
+    // Attack 2.3: Double drop of inner union. Both drops are flagged, so the
+    // second one is caught by the flag analysis (flag state Unknown after the
+    // first conditional drop), not by the unflagged "doble liberación" rule.
     let double_inner_drop = mutate(&lir, |l| l.contains("i drop v7 v14"), true);
     let err_inner_drop = validate_err(&double_inner_drop);
-    assert!(
-        err_inner_drop.contains("doble liberación") || err_inner_drop.contains("no coincide"),
-        "unexpected error: {err_inner_drop}"
-    );
-    assert!(
-        err_inner_drop.contains("L0007") || err_inner_drop.contains("L0017"),
-        "canonical code required: {err_inner_drop}"
+    assert_diag(
+        &err_inner_drop,
+        "L0017",
+        "flag v14 = Unknown no coincide con la propiedad de Place { var: 7, proj: [] }",
     );
 
     // Attack 2.4: Double drop of outer union
     let double_outer_drop = mutate(&lir, |l| l.contains("i drop v3 v13"), true);
     let err_outer_drop = validate_err(&double_outer_drop);
-    assert!(
-        err_outer_drop.contains("doble liberación") || err_outer_drop.contains("no coincide"),
-        "unexpected error: {err_outer_drop}"
-    );
-    assert!(
-        err_outer_drop.contains("L0007") || err_outer_drop.contains("L0017"),
-        "canonical code required: {err_outer_drop}"
+    assert_diag(
+        &err_outer_drop,
+        "L0017",
+        "flag v13 = Unknown no coincide con la propiedad de Place { var: 3, proj: [] }",
     );
 
     // Attack 2.5: Tamper inner drop flag: cb0 -> cb1 after payload move-out
     let forged_inner_flag = lir.replacen("i use v14 cb0 @8:26", "i use v14 cb1 @8:26", 1);
     assert_ne!(forged_inner_flag, lir);
     let err_inner_flag = validate_err(&forged_inner_flag);
-    assert!(
-        err_inner_flag.contains("doble liberación o fuga")
-            || err_inner_flag.contains("no coincide")
-            || err_inner_flag.contains("no refleja"),
-        "unexpected error: {err_inner_flag}"
-    );
-    assert!(
-        err_inner_flag.contains("L0017"),
-        "canonical code required: {err_inner_flag}"
+    assert_diag(
+        &err_inner_flag,
+        "L0017",
+        "flag v14 = On no coincide con la propiedad de Place { var: 7, proj: [] }",
     );
 
     // Self-hosted ELE verifier rejects nested enum mutations
@@ -520,42 +496,29 @@ fn test_loop_and_diamond_cfg_joins_with_unions() {
     let forged_diamond_df = lir.replacen("i use v8 cb0 @6:18", "i use v8 cb1 @6:18", 1);
     assert_ne!(forged_diamond_df, lir);
     let err_diamond = validate_err(&forged_diamond_df);
-    assert!(
-        err_diamond.contains("doble liberación o fuga")
-            || err_diamond.contains("no coincide")
-            || err_diamond.contains("no refleja"),
-        "unexpected error: {err_diamond}"
-    );
-    assert!(
-        err_diamond.contains("L0017"),
-        "canonical code required: {err_diamond}"
+    assert_diag(
+        &err_diamond,
+        "L0017",
+        "flag v8 = On no coincide con la propiedad de Place { var: 2, proj: [] }",
     );
 
     // Attack 2.7: Loop back-edge flag corruption: cb0 -> cb1 in loop body
     let forged_loop_df = lir.replacen("i use v11 cb0 @16:18", "i use v11 cb1 @16:18", 1);
     assert_ne!(forged_loop_df, lir);
     let err_loop = validate_err(&forged_loop_df);
-    assert!(
-        err_loop.contains("doble liberación o fuga")
-            || err_loop.contains("no coincide")
-            || err_loop.contains("no refleja"),
-        "unexpected error: {err_loop}"
-    );
-    assert!(
-        err_loop.contains("L0017"),
-        "canonical code required: {err_loop}"
+    assert_diag(
+        &err_loop,
+        "L0017",
+        "flag v11 = On no coincide con la propiedad de Place { var: 4, proj: [] }",
     );
 
     // Attack 2.8: Loop duplicate drop
     let double_loop_drop = mutate(&lir, |l| l.contains("i drop v4 v11"), true);
     let err_loop_drop = validate_err(&double_loop_drop);
-    assert!(
-        err_loop_drop.contains("doble liberación") || err_loop_drop.contains("no coincide"),
-        "unexpected error: {err_loop_drop}"
-    );
-    assert!(
-        err_loop_drop.contains("L0017"),
-        "canonical code required: {err_loop_drop}"
+    assert_diag(
+        &err_loop_drop,
+        "L0017",
+        "flag v11 = Unknown no coincide con la propiedad de Place { var: 4, proj: [] }",
     );
 
     // Self-hosted ELE verifier on loops and diamond CFG joins
@@ -582,14 +545,10 @@ fn test_forged_uninitialized_operands_fail_closed() {
     );
     assert_ne!(forged_uninit, lir);
     let err_uninit = validate_err(&forged_uninit);
-    assert!(
-        err_uninit.contains("se usa antes de asignarse")
-            || err_uninit.contains("uso tras movimiento o inicialización parcial"),
-        "unexpected error: {err_uninit}"
-    );
-    assert!(
-        err_uninit.contains("L0007") || err_uninit.contains("L0017"),
-        "canonical code required: {err_uninit}"
+    assert_diag(
+        &err_uninit,
+        "L0007",
+        "v3 se usa antes de asignarse en alguna ruta",
     );
 
     // Attack 3.2: Self-use of v4 before initialization
@@ -600,14 +559,10 @@ fn test_forged_uninitialized_operands_fail_closed() {
     );
     assert_ne!(forged_self, lir);
     let err_self = validate_err(&forged_self);
-    assert!(
-        err_self.contains("se usa antes de asignarse")
-            || err_self.contains("uso tras movimiento o inicialización parcial"),
-        "unexpected error: {err_self}"
-    );
-    assert!(
-        err_self.contains("L0007") || err_self.contains("L0017"),
-        "canonical code required: {err_self}"
+    assert_diag(
+        &err_self,
+        "L0007",
+        "v4 se usa antes de asignarse en alguna ruta",
     );
 
     // Self-hosted ELE verifier rejects use of unassigned variable (Fault 4 -> Rule 5)
@@ -626,26 +581,20 @@ fn test_read_and_use_after_move_fail_closed() {
         "i disc v3 p2 @6:13",
     );
     let err_disc = validate_err(&forged_disc_consumed);
-    assert!(
-        err_disc.contains("uso tras movimiento o inicialización parcial"),
-        "unexpected error: {err_disc}"
-    );
-    assert!(
-        err_disc.contains("L0007") || err_disc.contains("L0017"),
-        "canonical code required: {err_disc}"
+    assert_diag(
+        &err_disc,
+        "L0007",
+        "Place { var: 2, proj: [] }: uso tras movimiento o inicialización parcial",
     );
 
     // Attack 3.4: Place loan (i loan) of consumed place p2 after payload extraction
     // Attempting to borrow a place whose root was consumed by payload
     let forged_payload_twice = mutate(&lir, |l| l.contains("i payload v5 p2 e0 1"), true);
     let err_payload = validate_err(&forged_payload_twice);
-    assert!(
-        err_payload.contains("uso tras movimiento o inicialización parcial"),
-        "unexpected error: {err_payload}"
-    );
-    assert!(
-        err_payload.contains("L0007") || err_payload.contains("L0017"),
-        "canonical code required: {err_payload}"
+    assert_diag(
+        &err_payload,
+        "L0007",
+        "Place { var: 2, proj: [] }: uso tras movimiento o inicialización parcial",
     );
 
     // Attack 3.5: By-value Text use after move into function call in SIMPLE_ARITH
@@ -658,13 +607,10 @@ fn test_read_and_use_after_move_fail_closed() {
         true,
     );
     let err_call_twice = validate_err(&forged_call_twice);
-    assert!(
-        err_call_twice.contains("uso tras movimiento o inicialización parcial"),
-        "unexpected error: {err_call_twice}"
-    );
-    assert!(
-        err_call_twice.contains("L0007") || err_call_twice.contains("L0017"),
-        "canonical code required: {err_call_twice}"
+    assert_diag(
+        &err_call_twice,
+        "L0007",
+        "Place { var: 4, proj: [] }: uso tras movimiento o inicialización parcial",
     );
 
     // Self-hosted ELE verifier rejects use after move (Fault 16 -> Rule 5)
@@ -717,6 +663,55 @@ fn test_canonical_fail_closed_error_codes() {
     ] {
         stage1_fault("fail_closed.l", LOOP_AND_DIAMOND_CFG, fault, expected_rule);
     }
+}
+
+// =========================================================================
+// Category 5: Deleting or duplicating an unconditional drop
+// =========================================================================
+
+/// `t` is owned, never moved and released by one unconditional `drop`.
+const UNCONDITIONAL_DROP: &str = r#"fn keep(n: Int) -> Int {
+    let t = "owned"
+    return n
+}
+fn main() -> Int {
+    return keep(7)
+}
+"#;
+
+fn is_unflagged_drop(line: &str) -> bool {
+    line.starts_with("i drop ") && line.split_whitespace().nth(3) == Some("-")
+}
+
+#[test]
+fn test_deleted_unconditional_drop_is_a_leak_at_return() {
+    let lir = emit("unconditional_drop.l", UNCONDITIONAL_DROP);
+    validate(&lir).expect("clean unconditional drop must validate");
+    assert_eq!(
+        lir.lines().filter(|l| is_unflagged_drop(l)).count(),
+        1,
+        "expected exactly one unflagged drop: {lir}"
+    );
+    let leaked = mutate(&lir, is_unflagged_drop, false);
+    let err = validate_err(&leaked);
+    assert_diag(
+        &err,
+        "L0007",
+        "Place { var: 1, proj: [] } sigue poseyendo un valor al retornar: fuga",
+    );
+}
+
+#[test]
+fn test_duplicated_unconditional_drop_is_a_double_free() {
+    let lir = emit("unconditional_drop_twice.l", UNCONDITIONAL_DROP);
+    let twice = mutate(&lir, is_unflagged_drop, true);
+    let err = validate_err(&twice);
+    assert_diag(
+        &err,
+        "L0007",
+        "Place { var: 1, proj: [] }: doble liberación",
+    );
+    assert!(!err.contains("fuga"), "a double free is not a leak: {err}");
 }
 
 // =========================================================================

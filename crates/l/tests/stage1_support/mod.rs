@@ -3,7 +3,39 @@ pub mod drop_cases;
 
 use std::{fs, path::PathBuf, process::Command};
 
+/// Backends whose ELF64 output is only executed under
+/// `cfg(all(target_os = "linux", target_arch = "x86_64"))` in the tests.
+const ELF_EMITTERS: [&str; 2] = ["native_cfg_demo", "native_stack_aggregate_demo"];
+/// Set to `1` to turn the skipped ELF64 execution into a test failure.
+pub const REQUIRE_NATIVE_EXEC: &str = "ELE_REQUIRE_NATIVE_EXEC";
+
+/// On hosts that cannot execute ELF64, the runtime half of every native test
+/// is compiled out and the test still reports `ok`. Make that skip explicit:
+/// announce it once per test binary on the real stderr (libtest captures only
+/// the print macros, so this line stays visible without `--nocapture`), and
+/// fail when the caller demands execution.
+fn announce_skipped_native_execution(entry: &str) {
+    if !ELF_EMITTERS.contains(&entry) || cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "SKIP[native-exec]: this host is not Linux x86-64; ELF64 images from `{entry}` are \
+             built and structurally checked but NOT executed, so their runtime assertions \
+             did not run. Set {REQUIRE_NATIVE_EXEC}=1 to fail instead."
+        );
+    });
+    assert!(
+        std::env::var_os(REQUIRE_NATIVE_EXEC).is_none_or(|v| v != "1"),
+        "{REQUIRE_NATIVE_EXEC}=1 but this host cannot execute the ELF64 images of `{entry}`"
+    );
+}
+
 pub fn build(entry: &str, trace: bool) -> PathBuf {
+    announce_skipped_native_execution(entry);
     // Tests of one binary run in parallel and may ask for the same entry;
     // two compilers writing the same output directory corrupt each other.
     static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
