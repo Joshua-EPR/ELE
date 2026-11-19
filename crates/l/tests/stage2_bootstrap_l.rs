@@ -71,9 +71,17 @@ fn test_all_four_stage2_executables_build_cleanly() {
     let native = bin_native();
 
     assert!(lexer.is_file(), "lexer binary missing: {}", lexer.display());
-    assert!(parser.is_file(), "parser binary missing: {}", parser.display());
+    assert!(
+        parser.is_file(),
+        "parser binary missing: {}",
+        parser.display()
+    );
     assert!(sema.is_file(), "sema binary missing: {}", sema.display());
-    assert!(native.is_file(), "native backend binary missing: {}", native.display());
+    assert!(
+        native.is_file(),
+        "native backend binary missing: {}",
+        native.display()
+    );
 }
 
 #[test]
@@ -86,10 +94,7 @@ fn test_stage2_determinism_and_bit_for_bit_parity() {
     let sema_exe = bin_sema();
 
     // 1. Run 1: Stage 1 emits LIR for its own compiler frontend
-    let run1 = run_isolated(
-        sema_exe,
-        &[sema_src.as_os_str(), OsStr::new("--emit-lir")],
-    );
+    let run1 = run_isolated(sema_exe, &[sema_src.as_os_str(), OsStr::new("--emit-lir")]);
     assert!(
         run1.status.success(),
         "Stage 1 Run 1 failed: {}",
@@ -101,10 +106,7 @@ fn test_stage2_determinism_and_bit_for_bit_parity() {
     );
 
     // 2. Run 2: Repeat to guarantee intra-phase determinism
-    let run2 = run_isolated(
-        sema_exe,
-        &[sema_src.as_os_str(), OsStr::new("--emit-lir")],
-    );
+    let run2 = run_isolated(sema_exe, &[sema_src.as_os_str(), OsStr::new("--emit-lir")]);
     assert!(
         run2.status.success(),
         "Stage 1 Run 2 failed: {}",
@@ -215,10 +217,7 @@ fn test_stage2_full_pipeline_end_to_end() {
     }
 
     // Step 3: Native CFG ELF64 generation
-    let built = run_isolated(
-        native_exe,
-        &[lir_file.as_os_str(), elf_file.as_os_str()],
-    );
+    let built = run_isolated(native_exe, &[lir_file.as_os_str(), elf_file.as_os_str()]);
     assert!(
         built.status.success(),
         "Native backend failed: {}",
@@ -226,8 +225,13 @@ fn test_stage2_full_pipeline_end_to_end() {
     );
 
     // Step 4: Verification of ELF64 image
-    let image = fs::read(&elf_file).unwrap_or_else(|err| panic!("Cannot read {}: {err}", elf_file.display()));
-    assert!(image.len() > 4096, "ELF64 image too small ({} bytes)", image.len());
+    let image = fs::read(&elf_file)
+        .unwrap_or_else(|err| panic!("Cannot read {}: {err}", elf_file.display()));
+    assert!(
+        image.len() > 4096,
+        "ELF64 image too small ({} bytes)",
+        image.len()
+    );
     assert_eq!(
         &image[..7],
         b"\x7fELF\x02\x01\x01",
