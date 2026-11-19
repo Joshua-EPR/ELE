@@ -142,7 +142,12 @@ fn chain(out: &mut String, count: usize, start: &str) {
 /// 512-slot limits.
 fn frame_program() -> String {
     let mut s = String::from("ELE-LIR 1\nmodule structs 0 funcs 2 main f1\n");
-    writeln!(s, "func f0 {} params 1 result i 0 0 vars 600 blocks 1", name("wide")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 1 result i 0 0 vars 600 blocks 1",
+        name("wide")
+    )
+    .unwrap();
     // v0 is the parameter: the chain starts from it.
     for i in 0..600 {
         writeln!(s, "var v{i} val i").unwrap();
@@ -152,7 +157,12 @@ fn frame_program() -> String {
         writeln!(s, "i binary v{i} add v{} ci1", i - 1).unwrap();
     }
     s.push_str("t return v599\nendfunc\n");
-    writeln!(s, "func f1 {} params 0 result i 0 0 vars 1100 blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f1 {} params 0 result i 0 0 vars 1100 blocks 1",
+        name("main")
+    )
+    .unwrap();
     chain(&mut s, 1100, "i call v0 f0 1 val ci3");
     s.push_str("end\n");
     s
@@ -201,7 +211,12 @@ fn large_frames_run_as_pe32_plus_too() {
 #[test]
 fn deep_recursion_with_large_frames_runs() {
     let mut s = String::from("ELE-LIR 1\nmodule structs 0 funcs 2 main f1\n");
-    writeln!(s, "func f0 {} params 1 result i 0 0 vars 1100 blocks 3", name("deep")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 1 result i 0 0 vars 1100 blocks 3",
+        name("deep")
+    )
+    .unwrap();
     s.push_str("var v0 val i\nvar v1 val b\nvar v2 val i\nvar v3 val i\nvar v4 val i\n");
     for i in 5..1100 {
         writeln!(s, "var v{i} val i").unwrap();
@@ -211,7 +226,12 @@ fn deep_recursion_with_large_frames_runs() {
     s.push_str("block 1 0\nt return v1099\n");
     s.push_str("block 2 3\ni binary v2 sub v0 ci1\ni call v3 f0 1 val v2\ni binary v4 add v3 ci1\nt return v4\n");
     s.push_str("endfunc\n");
-    writeln!(s, "func f1 {} params 0 result i 0 0 vars 1 blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f1 {} params 0 result i 0 0 vars 1 blocks 1",
+        name("main")
+    )
+    .unwrap();
     s.push_str("var v0 val i\nblock 0 1\ni call v0 f0 1 val ci500\nt return v0\nendfunc\nend\n");
     let image = accepted("deep", &s);
     expect_exit(&image, 500 % 256);
@@ -221,9 +241,17 @@ fn deep_recursion_with_large_frames_runs() {
 #[test]
 fn more_than_256_functions_run() {
     let total = 300;
-    let mut s = format!("ELE-LIR 1\nmodule structs 0 funcs {total} main f{}\n", total - 1);
+    let mut s = format!(
+        "ELE-LIR 1\nmodule structs 0 funcs {total} main f{}\n",
+        total - 1
+    );
     for i in 0..total - 2 {
-        writeln!(s, "func f{i} {} params 1 result i 0 0 vars 3 blocks 1", name(&format!("f{i}"))).unwrap();
+        writeln!(
+            s,
+            "func f{i} {} params 1 result i 0 0 vars 3 blocks 1",
+            name(&format!("f{i}"))
+        )
+        .unwrap();
         writeln!(
             s,
             "var v0 val i\nvar v1 val i\nvar v2 val i\nblock 0 2\ni call v1 f{} 1 val v0\ni binary v2 add v1 ci1\nt return v2\nendfunc",
@@ -231,9 +259,21 @@ fn more_than_256_functions_run() {
         )
         .unwrap();
     }
-    writeln!(s, "func f{} {} params 1 result i 0 0 vars 1 blocks 1", total - 2, name("last")).unwrap();
+    writeln!(
+        s,
+        "func f{} {} params 1 result i 0 0 vars 1 blocks 1",
+        total - 2,
+        name("last")
+    )
+    .unwrap();
     s.push_str("var v0 val i\nblock 0 0\nt return v0\nendfunc\n");
-    writeln!(s, "func f{} {} params 0 result i 0 0 vars 1 blocks 1", total - 1, name("main")).unwrap();
+    writeln!(
+        s,
+        "func f{} {} params 0 result i 0 0 vars 1 blocks 1",
+        total - 1,
+        name("main")
+    )
+    .unwrap();
     s.push_str("var v0 val i\nblock 0 1\ni call v0 f0 1 val ci0\nt return v0\nendfunc\nend\n");
     let image = accepted("functions", &s);
     expect_exit(&image, 298 % 256);
@@ -256,7 +296,12 @@ fn more_than_16_structs_and_aggregates_above_512_bytes_run() {
     writeln!(s, "struct s21 {} fields 2", name("Big")).unwrap();
     writeln!(s, "field {} s20\nfield {} s20", name("l"), name("r")).unwrap();
     // f0() -> s21: left w_k = k, right w_k = 100 + k.
-    writeln!(s, "func f0 {} params 0 result s21 0 0 vars 3 blocks 1", name("make")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 0 result s21 0 0 vars 3 blocks 1",
+        name("make")
+    )
+    .unwrap();
     s.push_str("var v0 val s20\nvar v1 val s20\nvar v2 val s21\nblock 0 3\n");
     let left: Vec<String> = (0..40).map(|k| format!("ci{k}")).collect();
     let right: Vec<String> = (0..40).map(|k| format!("ci{}", 100 + k)).collect();
@@ -264,13 +309,25 @@ fn more_than_16_structs_and_aggregates_above_512_bytes_run() {
     writeln!(s, "i struct v1 s20 40 {}", right.join(" ")).unwrap();
     s.push_str("i struct v2 s21 2 v0 v1\nt return v2\nendfunc\n");
     // f1(b: s21) -> Int: b.r.w39 - b.l.w5 = 139 - 5 = 134.
-    writeln!(s, "func f1 {} params 1 result i 0 0 vars 4 blocks 1", name("take")).unwrap();
+    writeln!(
+        s,
+        "func f1 {} params 1 result i 0 0 vars 4 blocks 1",
+        name("take")
+    )
+    .unwrap();
     s.push_str("var v0 val s21\nvar v1 val i\nvar v2 val i\nvar v3 val i\nblock 0 3\n");
-    s.push_str("i read v1 p0.1.39\ni read v2 p0.0.5\ni binary v3 sub v1 v2\nt return v3\nendfunc\n");
+    s.push_str(
+        "i read v1 p0.1.39\ni read v2 p0.0.5\ni binary v3 sub v1 v2\nt return v3\nendfunc\n",
+    );
     // main: sum of field a of s0..s19 (0+...+19 = 190), plus field b (20),
     // plus f1(f0()) - 134 = 0: 210.
     let vars = 20 + 20 * 2 + 3 + 21;
-    writeln!(s, "func f2 {} params 0 result i 0 0 vars {vars} blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f2 {} params 0 result i 0 0 vars {vars} blocks 1",
+        name("main")
+    )
+    .unwrap();
     for k in 0..20 {
         writeln!(s, "var v{k} val s{k}").unwrap();
     }
@@ -296,10 +353,14 @@ fn more_than_16_structs_and_aggregates_above_512_bytes_run() {
     body.push("i binary v62 sub v61 ci134".to_string());
     body.push("i use v63 v62".to_string());
     for k in 0..20 {
-        body.push(format!("i binary v{} add v{} v{}", 64 + k, 63 + k, 20 + 2 * k));
+        body.push(format!(
+            "i binary v{} add v{} v{}",
+            64 + k,
+            63 + k,
+            20 + 2 * k
+        ));
     }
-    // v83 = 190; add the 20 `b` fields through one more pass would need
-    // more variables: count them as 20 directly via v21 (= 1) * 20.
+    // v83 = 190. The 20 `b` fields are all 1: their sum is v21 * 20.
     body.push("i binary v62 mul v21 ci20".to_string());
     writeln!(s, "block 0 {}", body.len() + 1).unwrap();
     for line in &body {
@@ -317,10 +378,21 @@ fn more_than_16_enums_run() {
     let mut s = String::from("ELE-LIR 1\nmodule structs 0 enums 20 funcs 1 main f0\n");
     for k in 0..20 {
         writeln!(s, "enum e{k} {} variants 2", name(&format!("E{k}"))).unwrap();
-        writeln!(s, "variant {} types 0\nvariant {} types 1 i", name("None"), name("Some")).unwrap();
+        writeln!(
+            s,
+            "variant {} types 0\nvariant {} types 1 i",
+            name("None"),
+            name("Some")
+        )
+        .unwrap();
     }
     let vars = 20 + 20 + 20;
-    writeln!(s, "func f0 {} params 0 result i 0 0 vars {vars} blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 0 result i 0 0 vars {vars} blocks 1",
+        name("main")
+    )
+    .unwrap();
     for k in 0..20 {
         writeln!(s, "var v{k} val e{k}").unwrap();
     }
@@ -369,7 +441,12 @@ fn megabyte_structs(extra: &str, structs: usize) -> String {
 fn frames_beyond_the_disp32_encoding_are_rejected() {
     // 2115 variables of 126976 slots: 268554240, above x64MaxFrameSlots().
     let mut s = megabyte_structs("", 3);
-    writeln!(s, "func f0 {} params 0 result i 0 0 vars 2116 blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 0 result i 0 0 vars 2116 blocks 1",
+        name("main")
+    )
+    .unwrap();
     for i in 0..2115 {
         writeln!(s, "var v{i} val s2").unwrap();
     }
@@ -383,7 +460,12 @@ fn aggregates_beyond_the_layout_planner_are_rejected() {
     writeln!(extra, "struct s3 {} fields 2", name("D")).unwrap();
     writeln!(extra, "field {} s2\nfield {} s2", name("x"), name("y")).unwrap();
     let mut s = megabyte_structs(&extra, 4);
-    writeln!(s, "func f0 {} params 0 result i 0 0 vars 1 blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 0 result i 0 0 vars 1 blocks 1",
+        name("main")
+    )
+    .unwrap();
     s.push_str("var v0 val i\nblock 0 0\nt return ci0\nendfunc\nend\n");
     rejected("too-big", &s, 62);
 }
@@ -397,7 +479,13 @@ fn declared_counts_without_their_declarations_are_rejected() {
     // 20 structs declared, 19 present.
     let mut s = String::from("ELE-LIR 1\nmodule structs 20 funcs 1 main f0\n");
     for k in 0..19 {
-        writeln!(s, "struct s{k} {} fields 1\nfield {} i", name("S"), name("a")).unwrap();
+        writeln!(
+            s,
+            "struct s{k} {} fields 1\nfield {} i",
+            name("S"),
+            name("a")
+        )
+        .unwrap();
     }
     s.push_str(&main);
     s.push_str("end\n");
@@ -410,7 +498,12 @@ fn declared_counts_without_their_declarations_are_rejected() {
     );
     // 300 variables declared, 299 present.
     let mut s = String::from("ELE-LIR 1\nmodule structs 0 funcs 1 main f0\n");
-    writeln!(s, "func f0 {} params 0 result i 0 0 vars 300 blocks 1", name("main")).unwrap();
+    writeln!(
+        s,
+        "func f0 {} params 0 result i 0 0 vars 300 blocks 1",
+        name("main")
+    )
+    .unwrap();
     for i in 0..299 {
         writeln!(s, "var v{i} val i").unwrap();
     }
@@ -484,7 +577,11 @@ fn unsound_or_unlowered_returned_references_are_rejected() {
         "func f0 {} params 1 result i 1 0 vars 1 blocks 1\nvar v0 ref i\nblock 0 0\nt return ci1\nendfunc\n",
         name("plain")
     );
-    rejected("returnref-plain-return", &returnref_module(&plain, 1, main), 140);
+    rejected(
+        "returnref-plain-return",
+        &returnref_module(&plain, 1, main),
+        140,
+    );
     // A reference killed by a write before it is returned.
     let killed = format!(
         "func f0 {} params 1 result i 1 0 vars 2 blocks 1\nvar v0 ref s0\nvar v1 ref i\nblock 0 2\ni loan v1 p0.0 0\ni store p0.0 ci5\nt returnref v1\nendfunc\n",

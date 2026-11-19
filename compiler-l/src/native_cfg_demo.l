@@ -1,6 +1,6 @@
 import codegen.native_cfg_emit
 import codegen.elf64
-import codegen.native_cfg_ir
+take codegen.native_cfg_ir
 
 // Execute as a Stage-0-built ELE compiler component; Stage 0 is bootstrap.
 // Usage: native-cfg-demo <input.lir> [output.elf]
