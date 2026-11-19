@@ -28,7 +28,8 @@ import lir_tokens
 // kind 13 `place_var` is the value and `op` its drop flag, or -1.
 // Call arguments live in `CfgProgram.call_args` from `arg_first`.
 // Binary operations: 1 add, 2 sub, 3 mul, 4 eq, 5 ne, 6 lt,
-// 7 le, 8 gt, 9 ge. Terminators: 1 return, 2 jump, 3 branch.
+// 7 le, 8 gt, 9 ge. Terminators: 1 return, 2 jump, 3 branch,
+// 4 unreachable, 5 returnref.
 
 pub struct CfgInst {
     kind: Int
@@ -110,6 +111,11 @@ pub struct CfgFunc {
     // Result type code; an aggregate (>= 2) is written through the hidden
     // result pointer that the caller pushes after the arguments.
     result_type: Int
+    // A function returning a reference (`result T 1 m`): -1 for none, 0 shared,
+    // 1 exclusive. Then `result_type` is 0, the one-word address in RAX, and
+    // `result_ref_type` is the referent type T (native_cfg_returnref).
+    result_ref: Int
+    result_ref_type: Int
 }
 
 pub struct CfgProgram {

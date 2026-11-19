@@ -278,6 +278,10 @@ flow cfgEmitTerm(code: edit X64Code, p: view CfgProgram, f: Int, block: view Cfg
         fix.jump_to@push(func.first_block + block.no)
     } otherwise when block.term == 4 {
         x64Unreachable(edit code)
+    } otherwise when block.term == 5 {
+        // returnref: the reference's slot holds the referent's address.
+        x64LoadSlot(edit code, 0, p.slot_start[cfgVarIndex(p, f, block.value.value)])
+        x64FrameEnd(edit code)
     } otherwise {
         code.error = 11
     }
@@ -439,6 +443,12 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         } otherwise {
             cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
         }
+    }
+    // Runtime and drop-glue indexes share the call target space with the
+    // platform routines from cfgPlatformBase() on: they must stay below it.
+    when runtime_at.length >= cfgPlatformBase() {
+        result.error = 74
+        give result
     }
     change platform_at: List of[Int] = List[]
     when platform {
