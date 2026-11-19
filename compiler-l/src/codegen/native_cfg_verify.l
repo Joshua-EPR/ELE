@@ -28,11 +28,12 @@ flow cfgResultType(func: view CfgFunc) => Int {
     give func.result_type
 }
 
-// `i payload` of a shape/choice payload: a move, not a copy, because
-// aggregates are move-only in ELE even when drop-free.
+// `i payload` of an aggregate or Text payload: a move, not a copy, because
+// aggregates and Text are move-only in ELE.
 flow cfgPayloadMoves(p: view CfgProgram, f: Int, inst: view CfgInst) => Bool {
     when inst.kind != 9 || inst.dst < 0 || inst.dst >= p.functions[f].vars { give false }
-    give p.types_code[p.functions[f].first_var + inst.dst] >= 2
+    hold ty = p.types_code[p.functions[f].first_var + inst.dst]
+    give ty >= 2 || ty == cfgTextType()
 }
 
 flow cfgMoveOperand(p: view CfgProgram, f: Int, op: view NativeOperand, variable: Int) => Bool {

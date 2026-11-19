@@ -71,11 +71,21 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)', binding)
         self.assertIn('LIR_PAYLOAD, place, enum_id, which', binding)
         self.assertIn('semaBuiltinUnionValue', front)
-        # The separate ELE-native backend still rejects owned-enum layouts:
-        # Stage 1 LIR support does not silently imply unsafe native codegen.
+        # Owned-enum payload layout is supported for alignments <= 8, but
+        # unsupported whole-union drops remain explicitly fail-closed (92).
+        # A layout approval MUST NOT silently bypass variant ownership checks.
         types = src('compiler-l/src/codegen/native_cfg_fields.l')
         verify = src('compiler-l/src/codegen/native_cfg_verify.l')
-        self.assertIn('when cfgOwnsHeap(p, payload) || cfgTypeAlign(p, payload) > 8 { give 82 }', types)
+        emit = src('compiler-l/src/codegen/native_cfg_emit.l')
+        inst = src('compiler-l/src/codegen/native_cfg_inst.l')
+        self.assertIn('when cfgTypeAlign(p, payload) > 8 { give 82 }', types)
+        self.assertIn('when payload != -1 && cfgOwnsHeap(p, payload) { give true }', types)
+        self.assertIn('when payload == cfgTextType() {', emit)
+        self.assertIn('x64StoreMem64(edit code, 5, dest + 24, 1)', emit)
+        self.assertIn(
+            'when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }',
+            inst,
+        )
         self.assertIn('when inst.kind == 9 && cfgPayloadMoves(p, f, inst) { live[inst.place_var] = false }', verify)
         self.assertIn('lirMarkUnsupported(&mut ctx.lir, start)', src('compiler-l/src/sema_builtin_union.l'))
 

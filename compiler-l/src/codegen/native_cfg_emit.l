@@ -188,8 +188,13 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
             }
             when inst.argc == 1 {
                 hold payload = p.variants[kind.first_variant + inst.place_field].payload_type
-                when payload >= 2 {
-                    // A drop-free shape/choice moved in (the verifier kills
+                when payload == cfgTextType() {
+                    cfgTextWords(edit code, p, f, view inst.a, edit fix)
+                    x64StoreMem64(edit code, 5, dest + 8, 0)
+                    x64StoreMem64(edit code, 5, dest + 16, 2)
+                    x64StoreMem64(edit code, 5, dest + 24, 1)
+                } otherwise when payload >= 2 {
+                    // A shape/choice moved in (the verifier kills
                     // the source): copy its layout into the payload area.
                     cfgCopyValue(edit code, p, payload, 5, dest + 8, 5, cfgVarBase(p, f, inst.a.value))
                 } otherwise {
@@ -216,8 +221,8 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         fix.bad_variant_at@push(x64ConditionalPlaceholder(edit code, false))
         hold e = view p.enums[inst.op]
         hold payload = p.variants[e.first_variant + inst.place_field].payload_type
-        when payload >= 2 {
-            // Aggregate payload: copied by layout only after the check. The
+        when payload >= 2 || payload == cfgTextType() {
+            // Aggregate or Text payload: copied by layout only after the check. The
             // verifier treats this as a move of the whole (owned) enum.
             cfgCopyValue(edit code, p, payload, 5, cfgVarBase(p, f, inst.dst), at.base, owner + 8)
         } otherwise when payload == 1 {
