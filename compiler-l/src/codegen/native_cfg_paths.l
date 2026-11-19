@@ -1,4 +1,4 @@
-import native_cfg_defs
+take native_cfg_defs
 
 // Move paths for partial moves out of shapes and for their Text fields.
 //
@@ -19,10 +19,10 @@ import native_cfg_defs
 // Primitive fields are copied, so they have no bit of their own.
 
 expose shape CfgPaths {
-    var_of: List<Int>
-    field: List<Int>
-    sub: List<Int>
-    text: List<Bool>
+    var_of: List of[Int]
+    field: List of[Int]
+    sub: List of[Int]
+    text: List of[Bool]
 }
 
 flow cfgTracked(p: view CfgProgram, ty: Int) => Bool {

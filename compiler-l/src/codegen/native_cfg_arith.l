@@ -1,8 +1,8 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
-import native_cfg_text
-import x86_64
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
+take native_cfg_text
+take x86_64
 
 // Unary operators and checked division of the ELE-written CFG backend.
 //
