@@ -68,27 +68,44 @@ fn c_string(b: &[u8], at: usize) -> String {
     String::from_utf8(b[at..end].to_vec()).unwrap()
 }
 
-/// Parses and validates a PE32+ image as the Windows loader would need it;
-/// returns the sections and the entry point RVA. The last `data_tail` bytes
-/// of `.text` are read-only data, not code.
-fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
+const IMAGE_BASE: u64 = 0x1_4000_0000;
+
+/// What `validate_pe` found: sections, entry point RVA, and the RVAs patched
+/// by IMAGE_REL_BASED_DIR64 base relocations (`None`: fixed-base image).
+struct Pe {
+    sections: Vec<Section>,
+    entry: u32,
+    relocs: Option<Vec<u32>>,
+}
+
+/// Parses and validates a PE32+ image as the Windows loader would need it.
+/// The last `data_tail` bytes of `.text` are read-only data, not code. Two
+/// kinds are accepted: fixed (2 sections, RELOCS_STRIPPED, no ASLR) and
+/// relocatable (3 sections, `.reloc` covering every absolute address).
+fn validate_pe(b: &[u8], data_tail: usize) -> Pe {
     assert_eq!(&b[..2], b"MZ");
     let pe = u32_at(b, 0x3c) as usize;
     assert_eq!(&b[pe..pe + 4], b"PE\0\0");
     let coff = pe + 4;
     assert_eq!(u16_at(b, coff), 0x8664, "machine AMD64");
     let sections = u16_at(b, coff + 2) as usize;
-    assert_eq!(sections, 2);
+    assert!(sections == 2 || sections == 3, "{sections} sections");
+    let relocatable = sections == 3;
     let opt_size = u16_at(b, coff + 16) as usize;
     assert_eq!(opt_size, 240);
     let characteristics = u16_at(b, coff + 18);
     assert_ne!(characteristics & 0x0002, 0, "EXECUTABLE_IMAGE");
-    // No relocation directory: the image must say so.
-    assert_ne!(characteristics & 0x0001, 0, "RELOCS_STRIPPED");
+    assert_ne!(characteristics & 0x0020, 0, "LARGE_ADDRESS_AWARE");
+    // RELOCS_STRIPPED exactly when there is no relocation directory.
+    assert_eq!(
+        characteristics & 0x0001 != 0,
+        !relocatable,
+        "RELOCS_STRIPPED"
+    );
     let opt = coff + 20;
     assert_eq!(u16_at(b, opt), 0x20b, "PE32+ magic");
     let entry = u32_at(b, opt + 16);
-    assert_eq!(u64_at(b, opt + 24), 0x1_4000_0000, "image base");
+    assert_eq!(u64_at(b, opt + 24), IMAGE_BASE, "image base");
     let section_align = u32_at(b, opt + 32);
     let file_align = u32_at(b, opt + 36);
     assert_eq!(section_align, 0x1000);
@@ -98,18 +115,20 @@ fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
     assert_eq!(u16_at(b, opt + 68), 3, "console subsystem");
     let dll_characteristics = u16_at(b, opt + 70);
     assert_eq!(dll_characteristics & 0x0100, 0x0100, "NX_COMPAT");
-    assert_eq!(
-        dll_characteristics & 0x0040,
-        0,
-        "no DYNAMIC_BASE without relocations"
-    );
-    assert_eq!(dll_characteristics & 0x0020, 0, "no HIGH_ENTROPY_VA");
+    // DYNAMIC_BASE and HIGH_ENTROPY_VA only with relocations; no other bit.
+    let aslr = if relocatable { 0x0060 } else { 0 };
+    assert_eq!(dll_characteristics, 0x0100 | aslr, "DllCharacteristics");
     // No stack probes are emitted: the whole 8 MiB stack is committed.
     assert_eq!(u64_at(b, opt + 72), 0x80_0000, "SizeOfStackReserve");
     assert_eq!(u64_at(b, opt + 80), 0x80_0000, "SizeOfStackCommit");
     assert_eq!(u32_at(b, opt + 108), 16, "data directories");
     let dir = |i: usize| (u32_at(b, opt + 112 + 8 * i), u32_at(b, opt + 116 + 8 * i));
-    assert_eq!(dir(5), (0, 0), "no base relocations");
+    if !relocatable {
+        assert_eq!(dir(5), (0, 0), "no base relocations");
+    }
+    for d in [0, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13, 14, 15] {
+        assert_eq!(dir(d), (0, 0), "data directory {d}");
+    }
     assert_eq!(headers_size % file_align, 0);
     assert!(headers_size as usize >= opt + opt_size + 40 * sections);
 
@@ -211,7 +230,90 @@ fn validate_pe(b: &[u8], data_tail: usize) -> (Vec<Section>, u32) {
         }
     }
     assert!(calls > 0, "no import call");
-    (parsed, entry)
+    let relocs = relocatable.then(|| validate_relocs(b, &parsed, dir(5), image_size, code_end));
+    Pe {
+        sections: parsed,
+        entry,
+        relocs,
+    }
+}
+
+/// Parses `.reloc` and checks it the way the loader applies it: 4 KiB page
+/// blocks inside the image, only DIR64 (10) and padding ABSOLUTE (0)
+/// entries, each DIR64 target inside the code of `.text` and holding an
+/// address of this image at its preferred base, no two targets overlapping.
+/// Conversely, every MOVABS r64, imm64 in the code whose immediate is an
+/// address of the image must be relocated. Returns the DIR64 target RVAs.
+fn validate_relocs(
+    b: &[u8],
+    sections: &[Section],
+    (rva, size): (u32, u32),
+    image_size: u32,
+    code_end: usize,
+) -> Vec<u32> {
+    let (text, idata, reloc) = (&sections[0], &sections[1], &sections[2]);
+    assert_eq!(reloc.name, ".reloc");
+    assert_eq!(
+        reloc.flags, 0x4200_0040,
+        "initialized data, discardable, read"
+    );
+    assert_eq!((rva, size), (reloc.rva, reloc.virtual_size), "reloc dir");
+    assert!(reloc.rva > idata.rva, ".reloc follows .idata");
+    let in_image = |v: u64| v >= IMAGE_BASE && v < IMAGE_BASE + u64::from(image_size);
+    let code_rva_end = text.rva + (code_end - text.raw_offset as usize) as u32;
+    let mut targets = Vec::new();
+    let mut at = reloc.raw_offset as usize;
+    let end = at + size as usize;
+    let mut last_page = None;
+    while at < end {
+        let page = u32_at(b, at);
+        let block = u32_at(b, at + 4) as usize;
+        assert_eq!(page % 0x1000, 0, "page aligned");
+        assert!(last_page.is_none_or(|p| page > p), "pages increase");
+        last_page = Some(page);
+        assert!(
+            block >= 12 && block.is_multiple_of(4) && at + block <= end,
+            "block {block}"
+        );
+        for k in (at + 8..at + block).step_by(2) {
+            let entry = u16_at(b, k);
+            match entry >> 12 {
+                0 => assert_eq!(entry, 0, "padding"),
+                10 => {
+                    let target = page + (entry & 0xfff);
+                    assert!(
+                        target >= text.rva && target + 8 <= code_rva_end,
+                        "{target:#x}"
+                    );
+                    let value = u64_at(b, text.file_offset(target));
+                    assert!(in_image(value), "{target:#x} holds {value:#x}");
+                    targets.push(target);
+                }
+                kind => panic!("relocation type {kind}"),
+            }
+        }
+        at += block;
+    }
+    assert_eq!(at, end, "blocks fill the directory");
+    let mut sorted = targets.clone();
+    sorted.sort_unstable();
+    assert!(
+        sorted.windows(2).all(|w| w[1] >= w[0] + 8),
+        "overlapping relocations"
+    );
+    let code = &b[text.raw_offset as usize..code_end];
+    for k in 0..code.len().saturating_sub(9) {
+        if code[k] & 0xf8 == 0x48 && (0xb8..0xc0).contains(&code[k + 1]) {
+            let value = u64_at(code, k + 2);
+            if in_image(value) {
+                assert!(
+                    targets.contains(&(text.rva + k as u32 + 2)),
+                    "MOVABS at {k:#x} holds image address {value:#x} without relocation"
+                );
+            }
+        }
+    }
+    targets
 }
 
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -232,8 +334,14 @@ fn demo_writes_a_valid_pe32_plus_that_runs_on_windows() {
         String::from_utf8_lossy(&out.stderr)
     );
     let bytes = fs::read(&image).unwrap();
-    let (sections, entry) = validate_pe(&bytes, DEMO_MESSAGE.len());
+    let Pe {
+        sections,
+        entry,
+        relocs,
+    } = validate_pe(&bytes, DEMO_MESSAGE.len());
     assert_eq!(entry, sections[0].rva);
+    // The demo addresses its message RIP-relative: a fixed-base image.
+    assert!(relocs.is_none());
     // The message is read-only data at the end of .text.
     let text = &sections[0];
     let code = &bytes[text.raw_offset as usize..(text.raw_offset + text.virtual_size) as usize];
@@ -267,12 +375,96 @@ fn deep_maximum_frames_run_within_the_committed_stack() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    validate_pe(&fs::read(&image).unwrap(), 0);
+    assert!(validate_pe(&fs::read(&image).unwrap(), 0).relocs.is_none());
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
         let (code, stdout) = execute(&image);
         assert!(stdout.is_empty());
         assert_eq!(code, Some(43));
+    }
+}
+
+fn reloc_probe(flag: &str, name: &str) -> (PathBuf, Pe) {
+    let image = temp(name);
+    let _ = fs::remove_file(&image);
+    let out = Command::new(demo()).arg(flag).arg(&image).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bytes = fs::read(&image).unwrap();
+    let pe = validate_pe(&bytes, 1);
+    (image, pe)
+}
+
+/// A relocatable image (DYNAMIC_BASE | HIGH_ENTROPY_VA) compares a code
+/// address taken RIP-relative with the same address stored as a 64-bit
+/// absolute covered by a DIR64 relocation. Exit 0 means the loader placed
+/// the image away from its preferred base AND the relocated value is exact;
+/// 1 would mean it was not moved (the run proved nothing), 2 a stale value.
+#[test]
+fn relocatable_image_is_moved_by_the_loader_and_relocated_exactly() {
+    let (_image, pe) = reloc_probe("--relocated", "reloc-probe.exe");
+    let relocs = pe.relocs.expect("relocatable image");
+    assert_eq!(relocs.len(), 1, "{relocs:x?}");
+    // The relocated MOVABS immediate follows the 7-byte LEA and 48 B9.
+    assert_eq!(relocs[0], pe.sections[0].rva + 9);
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    for _ in 0..3 {
+        let (code, stdout) = execute(&_image);
+        assert!(stdout.is_empty());
+        assert_eq!(code, Some(0), "1: not moved by ASLR, 2: stale address");
+    }
+}
+
+/// Negative control: the same code and DYNAMIC_BASE header but the MOVABS
+/// gets no relocation. The loader still moves the image and the program
+/// sees the stale preferred-base address (exit 2). This is what any CFG
+/// image with Text literals would do if the writer missed one of them; the
+/// validator also rejects it statically.
+#[test]
+fn relocatable_image_without_its_relocation_sees_a_stale_address() {
+    let image = temp("reloc-missing.exe");
+    let _ = fs::remove_file(&image);
+    let out = Command::new(demo())
+        .arg("--relocated-missing")
+        .arg(&image)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let bytes = fs::read(&image).unwrap();
+    let caught = std::panic::catch_unwind(|| validate_pe(&bytes, 1));
+    assert!(caught.is_err(), "validator accepted an unrelocated MOVABS");
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        let (code, stdout) = execute(&image);
+        assert!(stdout.is_empty());
+        assert_eq!(code, Some(2));
+    }
+}
+
+/// Text literals are the CFG backend's only absolute addresses: on PE32+
+/// each one gets a DIR64 relocation, so the images run under ASLR.
+#[test]
+fn cfg_text_literals_are_relocated_under_aslr() {
+    for (fixture, literals, stdout, status) in [
+        ("native_cfg_text_literal_ok", 2, "hi\n\n", 0),
+        ("native_cfg_text_append_by_value_ok", 0, "42\n", 0),
+        ("native_cfg_branch", 0, "", 42),
+    ] {
+        let lir = root().join(format!("examples/{fixture}.lir"));
+        let image = cfg_pe(&lir, &format!("aslr-{fixture}"));
+        let pe = validate_pe(&fs::read(&image).unwrap(), 0);
+        let relocs = pe.relocs.expect("CFG images are relocatable");
+        assert_eq!(relocs.len(), literals, "{fixture}: {relocs:x?}");
+        let _ = (stdout, status);
+        #[cfg(all(windows, target_arch = "x86_64"))]
+        {
+            let (code, out) = execute(&image);
+            assert_eq!(String::from_utf8(out).unwrap(), stdout, "{fixture}");
+            assert_eq!(code, Some(status), "{fixture}");
+        }
     }
 }
 
@@ -312,6 +504,21 @@ writer_fixups_ok=0
 writer_bad_alignment=4
 writer_ok=0
 writer_ok.length=1536
+reloc_layout=0
+reloc_layout.reloc_rva=12288
+reloc_layout.image_size=16384
+reloc_layout.file_size=5632
+reloc_layout_negative=5
+reloc_ok=0
+reloc_ok.length=2048
+reloc_none_ok=0
+reloc_negative=8
+reloc_out_of_code=8
+reloc_overlap=8
+reloc_duplicate=8
+reloc_outside_image=8
+reloc_past_image=8
+reloc_on_import=8
 ";
     assert_eq!(String::from_utf8(out.stdout).unwrap(), expected);
 }
@@ -345,7 +552,7 @@ fn cfg_pe(lir: &Path, name: &str) -> PathBuf {
         "{name}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    validate_pe(&fs::read(&image).unwrap(), 0);
+    assert!(validate_pe(&fs::read(&image).unwrap(), 0).relocs.is_some());
     image
 }
 
@@ -453,7 +660,7 @@ fn cfg_pe32_plus_executes_owned_text_and_lists() {
         );
         assert!(image.exists(), "{fixture} no image written");
         let bytes = fs::read(&image).unwrap();
-        validate_pe(&bytes, 0);
+        assert!(validate_pe(&bytes, 0).relocs.is_some());
         #[cfg(all(windows, target_arch = "x86_64"))]
         {
             let (code, stdout) = execute(&image);
@@ -523,7 +730,7 @@ fn cfg_pe32_plus_memory_runtime_security_and_traps() {
             String::from_utf8_lossy(&out.stderr)
         );
         let bytes = fs::read(&image).unwrap();
-        validate_pe(&bytes, 0);
+        assert!(validate_pe(&bytes, 0).relocs.is_some());
         #[cfg(all(windows, target_arch = "x86_64"))]
         {
             let (code, _) = execute(&image);
