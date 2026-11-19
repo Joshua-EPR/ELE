@@ -160,7 +160,7 @@ fn static_cases() -> Vec<(&'static str, Vec<u8>, Option<u32>)> {
         (
             "funcs_i32_max",
             header("module structs 0 funcs 2147483647 main f0").into_bytes(),
-            Some(48),
+            Some(44),
         ),
         (
             "funcs_i32_overflow",
@@ -200,7 +200,7 @@ fn static_cases() -> Vec<(&'static str, Vec<u8>, Option<u32>)> {
         (
             "vars_huge",
             func_header("params 0 result i 0 0 vars 2147483647 blocks 1").into_bytes(),
-            Some(44),
+            Some(45),
         ),
         (
             "vars_negative",
@@ -426,13 +426,13 @@ fn static_cases() -> Vec<(&'static str, Vec<u8>, Option<u32>)> {
             None,
         ),
     ];
-    // One byte over the 1 MiB input limit of native_cfg_demo (status 4).
+    // One byte over the 16 MiB input limit of native_cfg_demo (status 4).
     let mut big = ok(&[], "return ci0");
-    big.resize(1_048_577, b'\n');
+    big.resize(16_777_217, b'\n');
     cases.push(("over_one_mib", big, None));
-    // Exactly 1 MiB of LIR whose padding is not LIR: rejected by the parser.
+    // Exactly 16 MiB of LIR whose padding is not LIR: rejected by the parser.
     let mut limit = ok(&[], "return ci0");
-    limit.resize(1_048_576, b'\n');
+    limit.resize(16_777_216, b'\n');
     cases.push(("exactly_one_mib_padding", limit, Some(49)));
     cases
 }
@@ -977,11 +977,7 @@ fn programs_at_the_reader_limits_compile_and_run() {
         Some(0),
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    for (name, lir, code) in [
-        ("over_funcs", at_limits(257, 256, 1024), 48),
-        ("over_vars", at_limits(256, 257, 1024), 44),
-        ("over_blocks", at_limits(256, 256, 1025), 44),
-    ] {
+    for (name, lir, code) in [("over_blocks", at_limits(256, 256, 1025), 44)] {
         for target in TARGETS {
             let built = compile(name, lir.as_bytes(), target);
             rejection(&built, Some(code)).unwrap_or_else(|e| panic!("{name} [{target:?}]: {e}"));

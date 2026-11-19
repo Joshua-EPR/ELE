@@ -391,6 +391,19 @@ flow main() => Int {
     change otable: List of[Int] = List[]
     change flag_root: List of[Int] = List[]
     change flag_place: List of[Int] = List[]
+    change leaf_var: List of[Int] = List[]
+    change leaf_first: List of[Int] = List[]
+    change leaf_len: List of[Int] = List[]
+    change leaf_path: List of[Int] = List[]
+    change lown: List of[Bool] = List[]
+    change lgone: List of[Bool] = List[]
+    change lotable: List of[Bool] = List[]
+    change lgtable: List of[Bool] = List[]
+    change org_ref: List of[Int] = List[]
+    change org_root: List of[Int] = List[]
+    change org_place: List of[Int] = List[]
+    change stale: List of[Bool] = List[]
+    change stable: List of[Bool] = List[]
     change v: LirVerifier = LirVerifier(
         defined: defined,
         table: table,
@@ -406,7 +419,21 @@ flow main() => Int {
         otable: otable,
         flag_root: flag_root,
         flag_place: flag_place,
-        has_flags: false
+        has_flags: false,
+        leaf_var: leaf_var,
+        leaf_first: leaf_first,
+        leaf_len: leaf_len,
+        leaf_path: leaf_path,
+        lown: lown,
+        lgone: lgone,
+        lotable: lotable,
+        lgtable: lgtable,
+        org_ref: org_ref,
+        org_root: org_root,
+        org_place: org_place,
+        stale: stale,
+        stable: stable,
+        leaked: false,
     )
     // The helper test starts with no guarded drops; new F1 dataflow
     // tables must be empty and disabled until the verifier activates them.

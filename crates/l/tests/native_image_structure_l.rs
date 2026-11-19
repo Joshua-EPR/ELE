@@ -197,8 +197,8 @@ fn stage1_example_images_are_structurally_valid() {
         fs::write(&lir, &emitted.stdout).unwrap();
         check_lir(name, &lir, &dir, &mut accepted, &mut violations);
     }
-    // The platform example has no PE32+ runtime (code 133): 10 ELF, 9 PE.
-    assert_eq!(accepted, [10, 9]);
+    // Every example builds cleanly on both ELF and PE: 10 ELF, 10 PE.
+    assert_eq!(accepted, [10, 10]);
     assert!(
         violations.is_empty(),
         "{} violations:\n{}",
