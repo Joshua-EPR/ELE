@@ -177,10 +177,10 @@ fn loadModuleRecursive(
                     // inside the nested match/for left owned path temporaries
                     // live in Stage 1's emitted LIR (L0007 in build-lir).
                     // Once an import fails, do not load any subsequent import.
-                    var import_error = 0
+                    change import_error = 0
                     let std_io = "std.io.print"
                     for d in 0..temp_tree.declarations.length {
-                        if import_error == 0 {
+                        when import_error == 0 {
                             let decl = &temp_tree.declarations[d]
                             match decl.kind {
                                 AstDeclKind.Import => {
@@ -188,13 +188,13 @@ fn loadModuleRecursive(
                                         let imp_name = pathSubstring(mod_source, decl.a, decl.b)
                                         let dep_path = "{own_dir}/{importRelativePath(&imp_name)}"
                                         let res = loadModuleRecursive(&dep_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
-                                        if res != 0 {
+                                        when res != 0 {
                                             import_error = res
-                                        } else {
+                                        } otherwise {
                                             let dep_id = listTextIndexOf(loaded_paths, &dep_path)
-                                            if dep_id < 0 {
+                                            when dep_id < 0 {
                                                 import_error = 3
-                                            } else {
+                                            } otherwise {
                                                 var seen = false
                                                 for j in 0..direct_deps.length {
                                                     if direct_deps[j] == dep_id { seen = true }
@@ -210,7 +210,7 @@ fn loadModuleRecursive(
                     }
 
                     loading_stack.pop()
-                    if import_error != 0 { return import_error }
+                    when import_error != 0 { give import_error }
                     let loaded_path = "{path}"
                     loaded_paths.push(loaded_path)
 
