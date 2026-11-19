@@ -7,7 +7,7 @@ import sys
 def verify_hashes(manifest: pathlib.Path) -> int:
     try:
         entries = manifest.read_text(encoding="utf-8-sig").splitlines()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"Cannot read manifest: {exc}", file=sys.stderr)
         return 1
     if not entries:
