@@ -176,9 +176,9 @@ fn stage1_platform_program_runs_like_stage0() {
     }
 }
 
-/// processArg and readText through hand-written LIR (Stage 1 always drops
-/// the whole Result<Text,Int> in an `Err` arm, and whole-union drop is not
-/// lowered yet): every Ok and Err code of the Stage 0 contract.
+/// processArg and readText through hand-written LIR (written before
+/// whole-union drop glue existed, so it never drops a whole Result<Text,Int>;
+/// see native_union_drop_l.rs): every Ok and Err code of the Stage 0 contract.
 #[test]
 fn process_arg_and_read_text_follow_the_platform_contract() {
     let image = temp("args.elf");

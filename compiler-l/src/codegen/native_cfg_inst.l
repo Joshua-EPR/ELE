@@ -187,9 +187,13 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars {
             p.error = 92
         } otherwise {
-            // `append` writes a Text buffer; `drop` releases a Text or a list.
+            // `append` writes a Text buffer; `drop` releases a Text, a list or
+            // a whole union whose variants own heap storage (union drop glue
+            // in native_cfg_list_emit). A whole shape, or a union that owns
+            // nothing, is still rejected.
             hold owner = p.types_code[p.functions[f].first_var + inst.place_var]
-            when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
+            hold union_owner = inst.kind == 13 && cfgOwningUnion(p, owner)
+            when owner != cfgTextType() && !union_owner && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
         }
         // Appending a buffer to itself would read storage that growth moves.
         when inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
