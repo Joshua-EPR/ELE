@@ -20,7 +20,8 @@ This document provides transparent, verified engineering disclosure regarding cu
   - Executable latency is comparable to unoptimized debug builds of C and Rust.
   - Highly optimized C/Rust (`-O3`) code utilizing AVX2/SSE SIMD instructions or loop unrolling achieves higher throughput on tight mathematical kernels.
 - **Code & Capacity Limits:**
-  - Maximum generated code size: **32 MiB** (`ELF64_MAX_CODE` / `PE64_MAX_CODE = 33554432`).
+  - Maximum generated code size: **32 MiB** (`ELF64_MAX_CODE` / `PE64_MAX_CODE = 33554432`). Binaries strictly exceeding 32 MiB (`size > 33554432`, tested at 33,554,433 bytes) fail-closed with clear error diagnostics.
+  - Dynamic heap allocator boundary: accepts allocations up to and including **exactly 32 MiB** (`NATIVE_HEAP_MAX = 33554432`), rejecting strictly larger requests (`size > 33554432`) via `heapDynSizeGuard`.
   - Maximum stack frame layout for aggregates: **1 MiB** (`NATIVE_LAYOUT_MAX_BYTES = 1048576`).
   - PE32+ heap reservation: **64 MiB** (`SizeOfHeapReserve = 67108864`).
 

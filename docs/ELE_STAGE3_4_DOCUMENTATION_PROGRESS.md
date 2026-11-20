@@ -87,3 +87,10 @@ READY_FOR_REVIEW: YES
   - JSON benchmark schema integrity.
   - Deterministic SVG regeneration without drift (`git diff --exit-code`).
   - Rust formatting, clippy quality gates, and syntax ratchet tests.
+
+### 7. Synchronization with Origin CI Hardening & Boundary Fixes
+- Fully reconciled and documented all CI hardening changes merged into `origin/main` (commits `b22fdb0` through `ec1ccfe`):
+  1. **Heap Dynamic Size Guard (Exact 32 MiB Acceptance):** The guard in `native_heap_dynamic.l` explicitly accepts allocations up to and including **exactly 32 MiB** (`size <= 33554432`), rejecting strictly greater allocations (`size > 33554432`). Reflected in `docs/limitations.md` and `docs/architecture.md`.
+  2. **Canonical ELE v2 Migration of Heap Fixtures:** Documented the migration of `compiler-l/src/native_heap_cases.l` from legacy keywords (`var`/`let`) to canonical v2 (`change`/`hold`), and the corresponding zero-ratchet reduction in `docs/ele_v2_legacy_baseline.tsv`.
+  3. **Adversarial & Boundary Fixtures at 32 MiB + 1:** Documented the boundary validation at 33,554,433 bytes across `native_heap_dynamic_cases.l`, `native_heap_resize_cases.l`, `native_adversarial_lir_l.rs`, and `native_pe_demo.l`.
+  4. **Linguist Git Attributes Alignment:** Maintained `.gitattributes` mapping `*.l linguist-language=Text` while documenting the official TextMate grammar in `syntaxes/ele.tmLanguage.json`.

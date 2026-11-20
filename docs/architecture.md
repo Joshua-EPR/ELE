@@ -89,6 +89,9 @@ ELE executables are **100% self-contained**:
 - **Direct System Calls & Platform Wrappers:**
   - **Windows:** Resolves `ExitProcess`, `GetStdHandle`, and `WriteFile` dynamically or through minimal direct import tables.
   - **Linux:** Emits direct `syscall` instructions (`sys_write` [1], `sys_exit` [60], `sys_mmap` [9], `sys_munmap` [11]).
+- **Dynamic Heap Allocator & Capacity Guards:**
+  - Dynamic heap operations in `compiler-l/src/codegen/native_heap_dynamic.l` enforce `NATIVE_HEAP_MAX = 33554432` (32 MiB).
+  - The size guard (`heapDynSizeGuard`) accepts allocations up to and including **exactly 32 MiB** (`size <= 33554432`), rejecting strictly larger requests (`size > 33554432`) without heap corruption.
 - **Binary Footprint:** A standard compiled binary is typically between **4.5 KiB and 6.0 KiB**, compared to ~5 MiB for compilers that bundle a standard runtime library.
 
 ---
