@@ -17,10 +17,10 @@ take native_cfg_returnref
 // cfgPlatformBase() (code 48 here, 74 in native_cfg_emit). A declared count
 // larger than the declarations that follow fails on the first missing line.
 
-// Largest ELE-LIR input: the 16 MiB per-file limit with which the Stage 1
+// Largest ELE-LIR input: the 32 MiB per-file limit with which the Stage 1
 // front end (modules_l) reads the sources that produce it.
 expose flow cfgMaxSource() => Int {
-    give 16777216
+    give 33554432
 }
 
 flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int, b: Int) {
@@ -28,7 +28,7 @@ flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeRead
     hold id = nativeNumber(source, edit reader)
     hold count = nativeNumber(source, edit reader)
     nativeEndLine(source, edit reader)
-    when reader.error != 0 || id != b || count < 0 || count > 100000 {
+    when reader.error != 0 || id != b || count < 0 || count > 250000 {
         p.error = 38
         give
     }
