@@ -49,4 +49,4 @@ All benchmarks recorded in this suite were executed in the following environment
 - **Linux Subsystem:** Ubuntu 24.04 LTS on WSL2 (Kernel 5.15)
 - **Rust Compiler:** `rustc 1.99.1 (58cf8f9c3 2026-10-13)`
 - **C Compiler:** `gcc (Ubuntu 9.4.0-1ubuntu1~20.04.2) 9.4.0`
-- **ELE Compiler:** Autonomous driver v0.3.0 (Commit `33b4a3f4879313c26050920f3441d6eab953e789` / `31add1b`)
+- **ELE Compiler (Windows Stage 3.5 benchmark dataset):** Autonomous driver v0.3.0, recorded at commit `56f34fb437e20ca2b6b5613106f96ec153f36969`. The earlier Stage 3.4 report used pre-Stage-3.5 revisions (`33b4a3f` / `31add1b`) for some historical experiments; their measurements must not be mixed with the newer Windows dataset. These values have not been remeasured on the post-merge HEAD.
