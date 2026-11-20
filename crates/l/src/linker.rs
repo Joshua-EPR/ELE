@@ -154,7 +154,17 @@ pub fn link_with_objects(
     ]);
     command.arg(format!("/OUT:{}", executable.display()));
     command.arg(object).args(objects);
-    command.arg("kernel32.lib").args(libraries);
+    command.arg("kernel32.lib");
+    // Stage 0's temporary Win64 platform object uses BCryptGenRandom
+    // for collision-resistant temporary names. Rustc emits this as a raw
+    // .obj, so the bcrypt import library must be supplied explicitly here.
+    // Do not impose the dependency on native ELE outputs without that object.
+    if objects.iter().any(|path| {
+        path.file_name() == Some(std::ffi::OsStr::new("l_platform.obj"))
+    }) {
+        command.arg("bcrypt.lib");
+    }
+    command.args(libraries);
     for dir in &toolchain.libpaths {
         command.arg(format!("/LIBPATH:{}", dir.display()));
     }
