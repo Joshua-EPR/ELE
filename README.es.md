@@ -34,7 +34,16 @@ A diferencia de los lenguajes que dependen de capas de runtime pesadas o enlazad
 
 ## Inicio Rápido
 
-### 1. Programa Mínimo (`hello.l`)
+### 1. Instalación
+
+Instala ELE mediante los instaladores nativos sin dependencias externas:
+
+- **En Windows:** Ejecuta `.\install.ps1` (instala en `$env:LOCALAPPDATA\ele\bin` y configura el PATH de usuario).
+- **En Linux:** Ejecuta `./scripts/install.sh` (instala en `~/.ele/bin` y configura el PATH del shell).
+
+Los paquetes de distribución independientes (`ele-windows-x86_64.zip` y `ele-linux-x86_64.tar.gz`) contienen el compilador autónomo sin requerir Rust, Cargo ni CRT.
+
+### 2. Programa Mínimo (`hello.l`)
 
 ```ele
 // hello.l: Punto de entrada estándar en sintaxis ELE v2
@@ -43,7 +52,7 @@ flow main() {
 }
 ```
 
-### 2. Compilación con el Driver Autónomo
+### 3. Compilación con el Driver Autónomo
 
 Una vez realizado el bootstrap inicial, ELE compila archivos fuente directamente a binarios ejecutables:
 

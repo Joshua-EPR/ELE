@@ -34,7 +34,16 @@ Unlike languages that rely on large runtime layers or external linkers, ELE feat
 
 ## Quick Start
 
-### 1. Minimal Program (`hello.l`)
+### 1. Installation
+
+Install ELE using the zero-dependency user installers:
+
+- **Windows:** Run `.\install.ps1` (installs to `$env:LOCALAPPDATA\ele\bin` and configures User PATH).
+- **Linux:** Run `./scripts/install.sh` (installs to `~/.ele/bin` and configures shell PATH).
+
+Standalone release packages (`ele-windows-x86_64.zip` and `ele-linux-x86_64.tar.gz`) contain the autonomous compiler binary with zero external toolchain dependencies.
+
+### 2. Minimal Program (`hello.l`)
 
 ```ele
 // hello.l: Standard entry point in ELE v2 syntax
@@ -43,7 +52,7 @@ flow main() {
 }
 ```
 
-### 2. Compiling with the Autonomous Driver
+### 3. Compiling with the Autonomous Driver
 
 Once bootstrapped, ELE compiles source files directly to native executables:
 
