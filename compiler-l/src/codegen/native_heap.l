@@ -12,7 +12,7 @@ import x86_64
 const NATIVE_HEAP_PAGE = 4096
 const NATIVE_HEAP_MAX = 33554432
 
-// Fail closed for zero/negative inputs or beyond this initial 1 MiB bound.
+// Fail closed for zero/negative inputs or beyond the current 32 MiB bound.
 // Rounded allocations are page-aligned, so munmap can reuse this size.
 pub fn heapPageRound(bytes: Int) -> Int {
     if bytes <= 0 || bytes > NATIVE_HEAP_MAX { return -1 }
