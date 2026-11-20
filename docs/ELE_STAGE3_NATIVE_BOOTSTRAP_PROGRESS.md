@@ -34,7 +34,7 @@
 ### Bloqueo 92 (Drop Glue Recursivo para Agregados)
 - **Implementación:** Archivos `native_cfg_emit.l`, `native_cfg_fields.l` y `native_cfg_paths.l`.
 - **Comportamiento:** Cuando una instrucción `dropfield` actúa sobre un campo de tipo `shape` o `union`, se invoca la rutina de drop glue correspondiente (`cfgDropAt`, `cfgEmitShapeGlue`, `cfgEmitUnionGlue`). Se respeta estrictamente el discriminante activo y las banderas de movimiento parcial.
-- **Validación:** Probado en [native_struct_field_drop_l.rs](crates/l/tests/native_struct_field_drop_l.rs) (5/5 PASS) tanto en Linux ELF64 como en Windows PE32+.
+- **Validación:** Probado en [native_struct_field_drop_l.rs](../crates/l/tests/native_struct_field_drop_l.rs) (5/5 PASS) tanto en Linux ELF64 como en Windows PE32+.
 
 ### Bloqueo 95 (Stores mediante Referencias)
 - **Implementación:** Archivo `native_cfg_inst.l` (`cfgStoreField`).
