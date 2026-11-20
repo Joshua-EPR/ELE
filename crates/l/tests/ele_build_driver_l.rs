@@ -438,8 +438,10 @@ fn driver_default_target_windows_is_pe() {
 fn driver_builds_self_rebuild_windows_fixpoint() {
     let dir = work("self_rebuild_win");
     let gen2_exe = dir.join("ele_gen2.exe");
+    #[cfg(windows)]
     let gen3_exe = dir.join("ele_gen3.exe");
     let hello_src = dir.join("hello.l");
+    #[cfg(windows)]
     let hello_bin = dir.join("hello_by_gen3.exe");
     fs::write(
         &hello_src,
