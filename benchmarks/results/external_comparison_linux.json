@@ -10,8 +10,8 @@
     "optimization": "native-direct-emit (no SSA opt)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/fibonacci_recursive.l",
-    "median_compile_ms": 913.0,
+    "source_file": "benchmarks/sources/comparisons/fibonacci_recursive.l",
+    "median_compile_ms": 913,
     "compile_times_ms": [
       874.4493000000011,
       1103.4878999999994,
@@ -34,7 +34,8 @@
     ],
     "binary_size_bytes": 5957,
     "status": "PASSED",
-    "notes": "ELE Linux ELF64 (fibonacci_recursive)"
+    "notes": "ELE Linux ELF64 (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_fibonacci_recursive_gcc_debug",
@@ -47,7 +48,7 @@
     "optimization": "debug (unoptimized -O0)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/fibonacci_recursive.c",
+    "source_file": "benchmarks/sources/comparisons/fibonacci_recursive.c",
     "median_compile_ms": 1118.51,
     "compile_times_ms": [
       4687.898999999999,
@@ -71,7 +72,8 @@
     ],
     "binary_size_bytes": 16744,
     "status": "PASSED",
-    "notes": "GCC unoptimized -O0 (fibonacci_recursive)"
+    "notes": "GCC unoptimized -O0 (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_fibonacci_recursive_gcc_opt",
@@ -84,7 +86,7 @@
     "optimization": "release (-O2)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/fibonacci_recursive.c",
+    "source_file": "benchmarks/sources/comparisons/fibonacci_recursive.c",
     "median_compile_ms": 1118.88,
     "compile_times_ms": [
       1118.8798999999997,
@@ -108,7 +110,8 @@
     ],
     "binary_size_bytes": 16744,
     "status": "PASSED",
-    "notes": "GCC optimized -O2 (fibonacci_recursive)"
+    "notes": "GCC optimized -O2 (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_ele_linux",
@@ -121,7 +124,7 @@
     "optimization": "native-direct-emit (no SSA opt)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/arithmetic_loop.l",
+    "source_file": "benchmarks/sources/comparisons/arithmetic_loop.l",
     "median_compile_ms": 393.03,
     "compile_times_ms": [
       294.91159999999894,
@@ -145,7 +148,8 @@
     ],
     "binary_size_bytes": 5978,
     "status": "PASSED",
-    "notes": "ELE Linux ELF64 (arithmetic_loop)"
+    "notes": "ELE Linux ELF64 (arithmetic_loop)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_gcc_debug",
@@ -158,7 +162,7 @@
     "optimization": "debug (unoptimized -O0)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/arithmetic_loop.c",
+    "source_file": "benchmarks/sources/comparisons/arithmetic_loop.c",
     "median_compile_ms": 909.67,
     "compile_times_ms": [
       1375.4520000000027,
@@ -182,7 +186,8 @@
     ],
     "binary_size_bytes": 16744,
     "status": "PASSED",
-    "notes": "GCC unoptimized -O0 (arithmetic_loop)"
+    "notes": "GCC unoptimized -O0 (arithmetic_loop)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_gcc_opt",
@@ -195,7 +200,7 @@
     "optimization": "release (-O2)",
     "iterations": 10,
     "warmups": 1,
-    "source_file": "/mnt/c/Users/Usuario/Desktop/ELE-wt/stage3-4-docs-benchmarks/benchmarks/sources/comparisons/arithmetic_loop.c",
+    "source_file": "benchmarks/sources/comparisons/arithmetic_loop.c",
     "median_compile_ms": 1166.87,
     "compile_times_ms": [
       1269.670000000005,
@@ -219,6 +224,7 @@
     ],
     "binary_size_bytes": 16744,
     "status": "PASSED",
-    "notes": "GCC optimized -O2 (arithmetic_loop)"
+    "notes": "GCC optimized -O2 (arithmetic_loop)",
+    "compile_iterations": 5
   }
 ]
