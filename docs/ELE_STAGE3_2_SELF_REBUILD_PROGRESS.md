@@ -1,7 +1,8 @@
 # ELE STAGE 3.2 — AUTORRECONSTRUCCIÓN DEL COMPILADOR, AUTONOMÍA GENERACIONAL Y ENDURECIMIENTO DE LA TOOLCHAIN
-## Informe de Implementación, Verificación y Demostración Generacional
+## Informe de Implementación, Verificación, Endurecimiento Pre-Merge y Demostración Generacional
 
 **Repositorio:** https://github.com/Joshua-EPR/ELE  
+**PR activo:** https://github.com/Joshua-EPR/ELE/pull/118  
 **Rama:** `feat/stage3-2-autonomous-self-rebuild`  
 **Commit base:** `1d8120301ff1a679726f3b9ad7996e022fdea273` (Merge pull request #117)  
 **Fecha:** 2026-11-20  
@@ -14,25 +15,23 @@
 ```text
 BASE_SHA: 1d8120301ff1a679726f3b9ad7996e022fdea273
 BRANCH: feat/stage3-2-autonomous-self-rebuild
-HEAD_SHA: d66bfc233de8d97099f2a732daa38ee1dc216a95
-PR: https://github.com/Joshua-EPR/ELE/pull/new/feat/stage3-2-autonomous-self-rebuild
-GEN1_WINDOWS: COMPLETE (ele_gen1.exe, PE32+, 1,484,800 bytes)
-GEN2_WINDOWS: COMPLETE (ele_gen2.exe, PE32+, 1,484,800 bytes)
-GEN3_WINDOWS: COMPLETE (ele_gen3.exe, PE32+, 1,484,800 bytes)
-GEN1_LINUX: COMPLETE (ele_gen1.elf, ELF64, 1,486,848 bytes)
-GEN2_LINUX: COMPLETE (ele_gen2.elf, ELF64, 1,486,848 bytes)
-GEN3_LINUX: COMPLETE (ele_gen3.elf, ELF64, 1,486,848 bytes)
-GEN2_SHA256_WINDOWS: 8E320E706E3C96280129BE04F76D3058AFF0550BCC646DE86294BC0350DF90BA
-GEN3_SHA256_WINDOWS: 8E320E706E3C96280129BE04F76D3058AFF0550BCC646DE86294BC0350DF90BA
-GEN1_SHA256_LINUX: D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728
-GEN2_SHA256_LINUX: D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728
-GEN3_SHA256_LINUX: D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728
-BITWISE_EQUAL: YES (Gen 2 == Gen 3 en Windows PE32+; Gen 1 == Gen 2 == Gen 3 en Linux ELF64)
+PR: https://github.com/Joshua-EPR/ELE/pull/118
+GEN1_WINDOWS: COMPLETE (ele_gen1.exe, PE32+, 1,489,408 bytes)
+GEN2_WINDOWS: COMPLETE (ele_gen2.exe, PE32+, 1,489,408 bytes)
+GEN3_WINDOWS: COMPLETE (ele_gen3.exe, PE32+, 1,489,408 bytes)
+GEN1_LINUX: COMPLETE (ele_gen1.elf, ELF64, 1,491,456 bytes)
+GEN2_LINUX: COMPLETE (ele_gen2.elf, ELF64, 1,491,456 bytes)
+GEN3_LINUX: COMPLETE (ele_gen3.elf, ELF64, 1,491,456 bytes)
+GEN2_SHA256_WINDOWS: C79E46691DBBFFAA43AF19090E736991708AFCC3F9BA4099D25A4A2C5FE954BF
+GEN3_SHA256_WINDOWS: C79E46691DBBFFAA43AF19090E736991708AFCC3F9BA4099D25A4A2C5FE954BF
+GEN2_SHA256_LINUX: C9995E71315385A165E934A2E0C2F5E331692C0C1068A7564439538979F4AEB8
+GEN3_SHA256_LINUX: C9995E71315385A165E934A2E0C2F5E331692C0C1068A7564439538979F4AEB8
+BITWISE_EQUAL: YES (Gen 2 == Gen 3 en Windows PE32+; Gen 2 == Gen 3 en Linux ELF64)
 FUNCTIONAL_EQUAL: YES (todas las generaciones compilan y ejecutan programas de forma idéntica)
 EXTERNAL_COMPILER_INVOCATIONS: 0 (en Gen 2 y Gen 3; cero llamadas a rustc, cargo, l.exe, cl.exe, link.exe, gcc, clang o ld)
-TESTS: 15 passed; 0 failed (crates/l/tests/ele_build_driver_l.rs)
-CI: PASSED
-FIRST_REMAINING_BLOCKER: NONE (Objetivo P0 de autorreconstrucción y autonomía generacional alcanzado)
+TESTS: 19 passed; 0 failed (crates/l/tests/ele_build_driver_l.rs)
+CI_GATES: PASSED (fmt, clippy -D warnings, ele_v2_legacy_ratchet, self_coverage, ele_build_driver_l)
+FIRST_REMAINING_BLOCKER: NONE (PR #118 completamente estabilizado y verificado para merge)
 ```
 
 ---
@@ -43,54 +42,76 @@ Se ejecutó con éxito el ciclo de compilación circular sobre el propio código
 
 ### Cadena Windows PE32+ (x86-64)
 1. **Generación 0:** `target/debug/l.exe` (Stage 0).
-2. **Generación 1:** Compilado por Gen 0 a `target/stage3-2/ele_gen1.exe` (PE32+, 1,484,800 bytes).
+2. **Generación 1:** Compilado por Gen 0 a `ele_gen1.exe` (PE32+, 1,489,408 bytes).
 3. **Generación 2:** Compilado por Gen 1:
    ```powershell
-   .\target\stage3-2\ele_gen1.exe build compiler-l/src/main_driver.l --target pe --output target/stage3-2/ele_gen2.exe
+   .\ele_gen1.exe build compiler-l/src/main_driver.l --target pe --output ele_gen2.exe
    ```
-   - SHA256: `8E320E706E3C96280129BE04F76D3058AFF0550BCC646DE86294BC0350DF90BA`
-   - Ejecución funcional: compiló `hello.l` produciendo `hello_by_gen2.exe` que imprimió `Hola desde ELE Gen 2` con código 0.
+   - SHA256: `C79E46691DBBFFAA43AF19090E736991708AFCC3F9BA4099D25A4A2C5FE954BF`
+   - Ejecución funcional: compiló `hello.l` produciendo `hello_by_gen2.exe` que imprimió `Autonomy Gen 3` con código 0.
 4. **Generación 3:** Compilado por Gen 2:
    ```powershell
-   .\target\stage3-2\ele_gen2.exe build compiler-l/src/main_driver.l --target pe --output target/stage3-2/ele_gen3.exe
+   .\ele_gen2.exe build compiler-l/src/main_driver.l --target pe --output ele_gen3.exe
    ```
-   - SHA256: `8E320E706E3C96280129BE04F76D3058AFF0550BCC646DE86294BC0350DF90BA`
+   - SHA256: `C79E46691DBBFFAA43AF19090E736991708AFCC3F9BA4099D25A4A2C5FE954BF`
    - **Resultado:** `Gen 2 SHA256 == Gen 3 SHA256` (Punto fijo determinista bit a bit).
 
 ### Cadena Linux ELF64 (x86-64 en WSL Ubuntu)
-1. **Generación 1:** `target/stage3-2/ele_gen1.elf` (ELF64, 1,486,848 bytes).
-   - SHA256: `D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728`
+1. **Generación 1:** `ele_gen1.elf` (ELF64, 1,491,456 bytes).
 2. **Generación 2:** Compilado por Gen 1 dentro de WSL Ubuntu:
    ```bash
-   ./target/stage3-2/ele_gen1.elf build compiler-l/src/main_driver.l --target elf --output target/stage3-2/ele_gen2.elf
+   ./ele_gen1.elf build compiler-l/src/main_driver.l --target elf --output ele_gen2.elf
    ```
-   - SHA256: `D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728`
+   - SHA256: `C9995E71315385A165E934A2E0C2F5E331692C0C1068A7564439538979F4AEB8`
 3. **Generación 3:** Compilado por Gen 2 dentro de WSL Ubuntu:
    ```bash
-   ./target/stage3-2/ele_gen2.elf build compiler-l/src/main_driver.l --target elf --output target/stage3-2/ele_gen3.elf
+   ./ele_gen2.elf build compiler-l/src/main_driver.l --target elf --output ele_gen3.elf
    ```
-   - SHA256: `D9D547BBB06C55E05A00EB98DA450D85B4700DCDA69206D2E8C7A01A20008728`
-   - **Resultado:** `Gen 1 == Gen 2 == Gen 3` idénticos bit a bit (`D9D547BBB...`).
+   - SHA256: `C9995E71315385A165E934A2E0C2F5E331692C0C1068A7564439538979F4AEB8`
+   - **Resultado:** `Gen 2 == Gen 3` idénticos bit a bit (`C9995E71315385A165E934A2E0C2F5E331692C0C1068A7564439538979F4AEB8`).
+4. **Validación Funcional de Gen 3:**
+   - Gen 3 compiló `hello.l` produciendo `hello_by_gen3.elf`.
+   - Se ejecutó `hello_by_gen3.elf` en Linux/WSL imprimiendo `Autonomy Gen 3 Linux` con código de salida 0.
 
 ---
 
-## 2. ENDURECIMIENTO DEL DRIVER IMPLEMENTADO
+## 2. ENDURECIMIENTO PRE-MERGE IMPLEMENTADO (PR #118)
 
-1. **Detección Automática de Host (`isLinuxHost`):**
-   - Resuelto mediante la comprobación segura de `/proc/version` usando exclusivamente la primitiva `readText(proc_path, 4096)`.
-   - Si `/proc/version` está presente y es legible (Linux/WSL), el formato predeterminado es ELF64 (`target = 0`) y la extensión por defecto es sin sufijo.
-   - Si `/proc/version` no existe (Windows), el formato predeterminado es PE32+ (`target = 1`) y la extensión por defecto es `.exe`.
-   - Se mantiene intacta la selección explícita mediante `--target elf`, `--target pe`, `--elf64` y `--pe64`.
-2. **Protección contra Sobrescritura del Archivo de Entrada:**
-   - Si la ruta de salida coincide exactamente con el archivo fuente de entrada (`ele build prog.l -o prog.l`), el driver aborta inmediatamente diagnosticando:
-     `error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada 'prog.l'` con código de salida 2.
+### ALPHA — Gating Multiplataforma en Pruebas de Integración (`crates/l/tests/ele_build_driver_l.rs`)
+- **Gating de Ejecución PE32+:** La prueba `driver_builds_self_rebuild_windows_fixpoint` compila la imagen PE32+ en cualquier host, pero restringe la invocación directa de `Command::new(&gen2_exe)` a `#[cfg(windows)]`. Esto elimina el fallo de `os error 8` (Exec format error) que ocurría al correr pruebas en ejecutores Linux de GitHub Actions.
+- **Soporte Nativo Linux x86-64:** La prueba `driver_builds_self_rebuild_linux_fixpoint` detecta si se ejecuta nativamente en Linux (`cfg!(all(target_os = "linux", target_arch = "x86_64"))`) y ejecuta `ele_gen2.elf` y `ele_gen3.elf` directamente tras aplicar `chmod 755`, sin depender de que `ELE_TEST_WSL_DISTRO` esté configurado. Si se ejecuta en Windows, recurre a WSL.
+
+### BETA — Normalización Canónica de Rutas y Prevención de Sobrescritura Destructiva (`compiler-l/src/main_driver.l`)
+- **Implementación Canónica en ELE v2:** Se introdujo `normalizePath(path: view Text) => Text`:
+  - Unificación de separadores (`\` convertido a `/`).
+  - Colapso de barras múltiples consecutivas (`//` a `/`).
+  - Omisión de segmentos redundantes de directorio actual (`.` y `/./`).
+  - Resolución y cancelación de segmentos de directorio padre (`..`) mediante pila de segmentos activos.
+  - Preservación de la barra inicial `/` para rutas absolutas.
+- **Comparación Sensible/Insensible según Plataforma:** La función `pathsEquivalent(path_a: view Text, path_b: view Text) => Bool` normaliza ambas rutas y:
+  - En Linux compara bytes exactos.
+  - En Windows realiza comparación insensible a mayúsculas/minúsculas (A-Z plegado a a-z), respetando la semántica de NTFS/FAT.
+- **Pruebas de Regresión Añadidas en `ele_build_driver_l.rs`:**
+  - `driver_cli_self_overwrite_rejected`: rechazo de `build prog.l -o prog.l`.
+  - `driver_cli_self_overwrite_relative_dot_slash`: rechazo de `build self.l -o ./self.l`.
+  - `driver_cli_self_overwrite_parent_traversal`: rechazo de `build self.l -o sub/../self.l`.
+  - `driver_cli_self_overwrite_slash_backslash`: rechazo de `build sub/self.l -o sub\self.l`.
+  - `driver_cli_self_overwrite_case_windows`: rechazo de `build self.l -o SELF.L` en Windows.
+
+### GAMMA — Resiliencia en la Detección del Host y Prevalencia de Flags Explícitas
+- **Detección Multi-Capa en `isLinuxHost`:**
+  1. Intento de lectura de `/proc/version` (límite 4096 bytes).
+  2. En caso de fallo (contenedores aislados o chroots sin `/proc`), intento sobre `/etc/os-release` (4096 bytes).
+  3. En caso de fallo, intento sobre `/dev/null` (16 bytes).
+  4. Si todos fallan o en Windows, reporta `false`.
+- **Prevalencia de Flags Explícitas:** Las opciones `--target elf`, `--target pe`, `--elf64` y `--pe64` continúan teniendo precedencia absoluta sobre la detección del host.
 
 ---
 
-## 3. GATES DE CALIDAD EJECUTADOS
+## 3. GATES DE CALIDAD EJECUTADOS Y VERIFICADOS
 
-- `cargo fmt --all --check` -> PASS (código 0)
+- `cargo fmt --all --check` -> PASS (código 0, árbol limpio y formateado)
 - `cargo clippy --workspace --all-targets -- -D warnings` -> PASS (0 advertencias, código 0)
-- `cargo test -p project-l --test ele_v2_legacy_ratchet` -> PASS (5 passed, 0 legacy tokens)
-- `cargo test -p project-l --test self_coverage` -> PASS (3 passed, 19/102 backend)
-- `cargo test -p project-l --test ele_build_driver_l` -> PASS (15 passed; 0 failed)
+- `cargo test -p project-l --test ele_v2_legacy_ratchet` -> PASS (5 passed; 0 legacy tokens en `main_driver.l`)
+- `cargo test -p project-l --test self_coverage` -> PASS (3 passed; 19/102 backend de main)
+- `cargo test -p project-l --test ele_build_driver_l` -> PASS (19 passed; 0 failed)

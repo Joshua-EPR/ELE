@@ -151,6 +151,24 @@ flow charByteToText(b: Int) => Text {
     when b == 95 { give "_" }
     when b == 45 { give "-" }
     when b == 58 { give ":" }
+    when b == 32 { give " " }
+    when b == 126 { give "~" }
+    when b == 43 { give "+" }
+    when b == 61 { give "=" }
+    when b == 64 { give "@" }
+    when b == 35 { give "#" }
+    when b == 36 { give "$" }
+    when b == 37 { give "%" }
+    when b == 38 { give "&" }
+    when b == 40 { give "(" }
+    when b == 41 { give ")" }
+    when b == 91 { give "[" }
+    when b == 93 { give "]" }
+    when b == 123 { give "{{" }
+    when b == 125 { give "}}" }
+    when b == 33 { give "!" }
+    when b == 59 { give ";" }
+    when b == 44 { give "," }
     give ""
 }
 
@@ -174,11 +192,125 @@ flow driverPathStem(path: view Text) => Text {
     give out
 }
 
+flow normalizePath(path: view Text) => Text {
+    when path.byteLength == 0 { give "" }
+
+    change seg_starts: List of[Int] = List[]
+    change seg_lens: List of[Int] = List[]
+    change seg_is_dotdot: List of[Int] = List[]
+    change seg_active: List of[Int] = List[]
+
+    change i = 0
+    during i < path.byteLength {
+        during i < path.byteLength && (path@byteAt(i) == 47 || path@byteAt(i) == 92) {
+            i = i + 1
+        }
+        when i < path.byteLength {
+            hold start = i
+            during i < path.byteLength && path@byteAt(i) != 47 && path@byteAt(i) != 92 {
+                i = i + 1
+            }
+            hold len = i - start
+            when len > 0 {
+                when len == 1 && path@byteAt(start) == 46 {
+                    // Skip dot segment "."
+                } otherwise {
+                    when len == 2 && path@byteAt(start) == 46 && path@byteAt(start + 1) == 46 {
+                        // Look backwards for an active non-".." segment to cancel
+                        change cancelled = false
+                        change k = seg_starts.length - 1
+                        during k >= 0 && !cancelled {
+                            when seg_active[k] == 1 {
+                                when seg_is_dotdot[k] == 0 {
+                                    seg_active[k] = 0
+                                    cancelled = true
+                                }
+                            }
+                            k = k - 1
+                        }
+                        when !cancelled {
+                            seg_starts@push(start)
+                            seg_lens@push(len)
+                            seg_is_dotdot@push(1)
+                            seg_active@push(1)
+                        }
+                    } otherwise {
+                        seg_starts@push(start)
+                        seg_lens@push(len)
+                        seg_is_dotdot@push(0)
+                        seg_active@push(1)
+                    }
+                }
+            }
+        }
+    }
+
+    hold first_b = path@byteAt(0)
+    change out = ""
+    when first_b == 47 || first_b == 92 {
+        out = "/"
+    }
+
+    each seg_idx among 0..seg_starts.length {
+        when seg_active[seg_idx] == 1 {
+            when out.byteLength > 0 && out@byteAt(out.byteLength - 1) != 47 {
+                out = "{out}/"
+            }
+            hold s = seg_starts[seg_idx]
+            hold l = seg_lens[seg_idx]
+            each ch_idx among s..(s + l) {
+                hold ch = charByteToText(path@byteAt(ch_idx))
+                out = "{out}{ch}"
+            }
+        }
+    }
+
+    when out.byteLength == 0 {
+        give "."
+    }
+    give out
+}
+
 flow isLinuxHost() => Bool {
     hold proc_path = "/proc/version"
     choose readText(proc_path, 4096) {
         Ok(s): { give true }
-        Err(e): { give false }
+        Err(e): {
+            hold os_release = "/etc/os-release"
+            choose readText(os_release, 4096) {
+                Ok(s2): { give true }
+                Err(e2): {
+                    hold dev_null = "/dev/null"
+                    choose readText(dev_null, 16) {
+                        Ok(s3): { give true }
+                        Err(e3): { give false }
+                    }
+                }
+            }
+        }
+    }
+}
+
+flow pathsEquivalent(path_a: view Text, path_b: view Text) => Bool {
+    hold norm_a = normalizePath(path_a)
+    hold norm_b = normalizePath(path_b)
+    when norm_a.byteLength != norm_b.byteLength {
+        give false
+    }
+    when isLinuxHost() {
+        each i among 0..norm_a.byteLength {
+            when norm_a@byteAt(i) != norm_b@byteAt(i) { give false }
+        }
+        give true
+    } otherwise {
+        each i among 0..norm_a.byteLength {
+            change ba = norm_a@byteAt(i)
+            change bb = norm_b@byteAt(i)
+            when ba >= 65 && ba <= 90 { ba = ba + 32 }
+            when bb >= 65 && bb <= 90 { bb = bb + 32 }
+            when ba != bb { give false }
+        }
+        give true
     }
 }
 
@@ -433,7 +565,7 @@ flow main() => Int {
     }
 
     // Safety check: output path cannot overwrite input source file
-    when textMatches(view source_file, view output_file) {
+    when pathsEquivalent(view source_file, view output_file) {
         printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}'")
         give 2
     }
