@@ -39,30 +39,7 @@ jobs:
           git diff --exit-code assets/benchmarks/
 
       - name: Verify Documentation Links and Assets
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          root = Path('.')
-          doc_files = list(root.glob('docs/**/*.md')) + [root / 'README.md', root / 'README.es.md']
-          errors = 0
-
-          for doc in doc_files:
-              if not doc.exists():
-                  continue
-              text = doc.read_text(encoding='utf-8')
-              # Find markdown image links ![alt](path)
-              images = re.findall(r'!\[.*?\]\((.*?)\)', text)
-              for img in images:
-                  img_path = (doc.parent / img).resolve()
-                  if not img_path.exists():
-                      print(f"BROKEN IMAGE in {doc}: {img} (resolved: {img_path})")
-                      errors += 1
-          if errors > 0:
-              raise SystemExit(f"Found {errors} broken image links in documentation.")
-          print("✓ All documentation image references verified successfully on disk.")
-          PY
+        run: python benchmarks/scripts/validate_doc_links.py
 
       - name: Check Formatting & Clippy Quality Gates
         run: |
