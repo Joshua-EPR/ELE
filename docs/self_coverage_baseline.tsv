@@ -60,6 +60,7 @@ lir_write.l	lir
 loans_check.l	lir
 loans_l.l	lir
 main.l	backend
+main_driver.l	backend
 main_parser.l	backend
 main_sema.l	backend
 module_graph_l.l	lir
