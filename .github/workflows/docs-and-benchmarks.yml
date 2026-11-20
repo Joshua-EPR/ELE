@@ -48,6 +48,11 @@ jobs:
       - name: Verify Documentation Links and Assets
         run: python benchmarks/scripts/validate_doc_links.py
 
+      - name: Validate ELE v2 grammar and optional color theme
+        run: |
+          python tests/test_syntax_grammar.py
+          node editors/vscode/test.js
+
       - name: Check Formatting & Clippy Quality Gates
         run: |
           cargo fmt --all --check
