@@ -94,3 +94,14 @@ READY_FOR_REVIEW: YES
   2. **Canonical ELE v2 Migration of Heap Fixtures:** Documented the migration of `compiler-l/src/native_heap_cases.l` from legacy keywords (`var`/`let`) to canonical v2 (`change`/`hold`), and the corresponding zero-ratchet reduction in `docs/ele_v2_legacy_baseline.tsv`.
   3. **Adversarial & Boundary Fixtures at 32 MiB + 1:** Documented the boundary validation at 33,554,433 bytes across `native_heap_dynamic_cases.l`, `native_heap_resize_cases.l`, `native_adversarial_lir_l.rs`, and `native_pe_demo.l`.
   4. **Linguist Git Attributes Alignment:** Maintained `.gitattributes` mapping `*.l linguist-language=Text` while documenting the official TextMate grammar in `syntaxes/ele.tmLanguage.json`.
+
+### 8. Post-Synchronization Review — PR #120
+- Confirmed the branch is based on merge commit `33b4a3f` (Stage 3.3); no additional `main` commits were missing at review time.
+- Opened Draft PR #120 for review rather than treating the compare URL as a submitted PR.
+- Fixed the documentation workflow to invoke a cross-platform link validator and force UTF-8 Python output on Windows. Added validation for local Markdown links and HTML-based README images, excluding inline/fenced code examples.
+- Corrected an existing historical documentation link into `crates/l/tests/native_struct_field_drop_l.rs`.
+- Separated compilation sample counts (5) from runtime sample counts (10) in external comparison JSON, validated reported medians against the sample arrays, and replaced machine-specific Linux source paths with repository-relative paths. Measured values were not changed.
+- Removed MIT license claims because no root LICENSE file was present in the repository; licensing must be decided and published separately.
+- Clarified that the current filesystem write path is **not atomic**: the driver writes to a temporary file, then separately writes to the final destination, without atomic rename or reliable hardlink identity checks.
+- Clarified backend coverage as **20/102 total source files** and **20/20 standalone entrypoints**, avoiding an implication of 100% backend coverage of all sources.
+- **Remote PR CI:** results must be read from GitHub Actions for the latest PR head; earlier local PASS reports do not certify the follow-up commits.
