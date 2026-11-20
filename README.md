@@ -122,6 +122,8 @@ All performance claims in ELE are backed by auditable, automated benchmarks exec
 
 For complete methodology, raw data, and statistical distributions, see [Performance Report](docs/performance.md) and [Benchmark Methodology](docs/benchmarks/methodology.md).
 
+**Measurement provenance:** The Windows results below were recorded on commit [`56f34fb`](https://github.com/Joshua-EPR/ELE/commit/56f34fb437e20ca2b6b5613106f96ec153f36969) (November 20, 2026), **before** the Stage 3.5 merges. They are historical measurements, not fresh measurements of the current `main`. Re-run benchmarks on the integrated compiler before attributing these results to it. The external-comparison suite and standalone runtime suite are separate runs; the runtime table uses the comparison dataset.
+
 ### Compilation Latency
 
 ELE compiles small and medium programs in tens of milliseconds:
@@ -132,13 +134,13 @@ ELE compiles small and medium programs in tens of milliseconds:
 
 | Workload | Source Lines | Median Compile Time | Compiler Peak RSS | Output Size |
 |---|---|---|---|---|
-| `hello.l` | 5 | **31.4 ms** | 24.50 MiB | 4,608 B |
-| `arithmetic.l` | 10 | **36.1 ms** | 24.52 MiB | 5,120 B |
-| `fibonacci.l` | 13 | **38.7 ms** | 24.52 MiB | 5,120 B |
-| `text_processing.l` | 10 | **39.2 ms** | 24.52 MiB | 5,120 B |
-| `multimodule (main.l)` | 10 | **54.7 ms** | 40.59 MiB | 5,120 B |
-| `main_sema.l` (Compiler) | 274 | **15.64 s** | 525.11 MiB | 909,824 B |
-| `main_driver.l` (Self-Host) | 665 | **31.30 s** | 855.04 MiB | 1,508,352 B |
+| `hello.l` | 5 | **32.05 ms** | 1.18 MiB | 4,608 B |
+| `arithmetic.l` | 10 | **32.90 ms** | 1.21 MiB | 5,120 B |
+| `fibonacci.l` | 13 | **35.75 ms** | 1.21 MiB | 5,120 B |
+| `text_processing.l` | 10 | **35.24 ms** | 1.20 MiB | 5,120 B |
+| `multimodule (main.l)` | 10 | **33.36 ms** | 1.22 MiB | 5,120 B |
+| `main_sema.l` (Compiler) | 278 | **3.16 s** | 52.46 MiB | 913,408 B |
+| `main_driver.l` (Self-Host) | 692 | **5.23 s** | 87.53 MiB | 1,514,496 B |
 
 ---
 
@@ -162,15 +164,15 @@ We evaluate identical algorithms across **ELE**, **Rust (`rustc 1.99.1`)**, and 
 
 | Benchmark | Language | Optimization Level | Compile Time | Runtime (ms) | Binary Size |
 |---|---|---|---|---|---|
-| **Fibonacci(25)** | **ELE** | `native-direct-emit` | **40.6 ms** | **28.37 ms** | **5,120 B** |
-| Fibonacci(25) | Rust | Debug (`-O0`) | 657.6 ms | 20.72 ms | 5,086,801 B |
-| Fibonacci(25) | Rust | Release (`-O3`) | 718.6 ms | 21.02 ms | 5,085,050 B |
-| **Loop(10M)** | **ELE** | `native-direct-emit` | **48.9 ms** | **101.42 ms** | **5,120 B** |
-| Loop(10M) | Rust | Debug (`-O0`) | 674.9 ms | 103.11 ms | 5,086,761 B |
-| Loop(10M) | Rust | Release (`-O3`) | 692.6 ms | 21.40 ms | 5,084,972 B |
+| **Fibonacci(25)** | **ELE** | `native-direct-emit` | 32.79 ms | 53.49 ms | 5,120 B |
+| Fibonacci(25) | Rust | Debug (`-O0`) | 670.88 ms | 22.63 ms | 5,086,801 B |
+| Fibonacci(25) | Rust | Release (`-O3`) | 716.37 ms | 24.92 ms | 5,085,050 B |
+| **Loop(10M)** | **ELE** | `native-direct-emit` | 38.12 ms | 101.34 ms | 5,120 B |
+| Loop(10M) | Rust | Debug (`-O0`) | 649.07 ms | 94.34 ms | 5,086,761 B |
+| Loop(10M) | Rust | Release (`-O3`) | 690.35 ms | 21.47 ms | 5,084,972 B |
 
 > [!NOTE]
-> ELE's native backend emits direct machine code from CFG blocks without SSA optimization passes. Its execution speed is directly comparable to unoptimized debug builds of C and Rust, while compiling in a fraction of the time.
+> ELE's native backend emits direct machine code from CFG blocks without SSA optimization passes. Performance varies by workload and settings; these results describe the recorded comparison runs, not an overall ranking of languages.
 
 ---
 
