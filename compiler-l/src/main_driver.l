@@ -380,8 +380,9 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
             each m_idx among 0..prog.module_paths.length {
-                hold m_path = view prog.module_paths[m_idx]
-                when pathsEquivalent(m_path, view output_path) {
+                hold m_path_view = view prog.module_paths[m_idx]
+                hold m_path = "{m_path_view}"
+                when pathsEquivalent(view m_path, view output_path) {
                     printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}'")
                     give 2
                 }
@@ -389,10 +390,16 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
 
             // Safety check: true filesystem identity / alias detection against all project source modules
             each m_idx among 0..prog.module_paths.length {
-                hold m_path = view prog.module_paths[m_idx]
-                when sameFile(view output_path, m_path) {
+                hold m_path_view = view prog.module_paths[m_idx]
+                hold m_path = "{m_path_view}"
+                hold identity = sameFile(output_path, m_path)
+                when identity == 1 {
                     printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}' (alias detectado)")
                     give 2
+                }
+                when identity == 2 {
+                    printError("error[IO]: no se pudo verificar la identidad del archivo de salida frente a '{m_path}'")
+                    give 4
                 }
             }
 
@@ -622,11 +629,7 @@ flow main() => Int {
         give 2
     }
 
-    // Safety check: true filesystem identity / alias detection for input source file
-    when sameFile(view output_file, view source_file) {
-        printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}' (alias detectado)")
-        give 2
-    }
-
+    // compileProgram verifies the loaded main source and every imported
+    // module against the destination after readText establishes they exist.
     give compileProgram(source_file, output_file, target)
 }

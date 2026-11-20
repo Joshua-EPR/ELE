@@ -371,8 +371,9 @@ expose flow semaSameFile(ctx: edit SemaContext, start: Int, end: Int, path_a_ty:
     args@push(a_arg)
     hold b_arg = lirArg(edit ctx.lir, true, path_b, false)
     args@push(b_arg)
-    semaPlatformEmit(edit ctx, 5, view args, 4, true)
-    give 4
+    // 0 = different, 1 = same, 2 = identity could not be established.
+    semaPlatformEmit(edit ctx, 5, view args, 1, true)
+    give 1
 }
 
 pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {

@@ -78,8 +78,7 @@ impl FnGen<'_> {
                     platform.same_file,
                     &[path_a[0], path_a[1], path_b[0], path_b[1]],
                 );
-                let is_same = b.ins().icmp_imm_s(IntCC::NotEqual, result[0], 0);
-                Ok(vec![is_same])
+                Ok(result)
             }
             PlatformOp::ArgCount => Ok(h.call(b, platform.arg_count, &[])),
             PlatformOp::Arg | PlatformOp::ReadText => {

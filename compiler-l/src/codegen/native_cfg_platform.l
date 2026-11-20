@@ -114,7 +114,7 @@ expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
     when (inst.op == 0 || inst.op == 4) && dest != 0 { give 132 }
     when inst.op == 3 && dest != cfgUnitType() { give 132 }
-    when inst.op == 5 && dest != 1 { give 132 }
+    when inst.op == 5 && dest != 0 { give 132 }
     when (inst.op == 1 || inst.op == 2) && !cfgIsTextResult(p, dest) { give 132 }
     give 0
 }

@@ -438,6 +438,14 @@ expose flow x64CallRipPlaceholder(code: edit X64Code) => Int {
     give at
 }
 
+// CALL r64 (FF /2), used for an OS function resolved at runtime.
+expose flow x64CallReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    when reg >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 255)
+    x64Put(edit code, 208 + reg % 8)
+}
+
 // LEA r64,[RIP+disp32] (REX.W 8D, ModRM mod=00 r/m=101). Returns the
 // displacement position; it ends the instruction, so x64PatchRelative can
 // point it at a later byte of the same code buffer.

@@ -42,7 +42,7 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
         if result != 6 { return 3 }
     } else {
         when op == LIR_PLATFORM_SAME_FILE {
-            when result != 4 { give 3 }
+            when result != 1 { give 3 }
         } otherwise {
             // processArg/readText produce Result<Text,Int>: an owned union
             // whose active Text is dropped once (or moved out by a match).

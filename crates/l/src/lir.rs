@@ -342,7 +342,7 @@ pub enum PlatformOp {
     /// writeBytes(path: Text, bytes: List<Int>) -> Int; zero on success.
     /// The list is borrowed, not consumed. Each element must be in 0..=255.
     WriteBytes,
-    /// sameFile(path_a: Text, path_b: Text) -> Bool; true if both refer to the same file entity.
+    /// sameFile(path_a: Text, path_b: Text) -> Int: 0 different, 1 same, 2 identity error.
     SameFile,
 }
 

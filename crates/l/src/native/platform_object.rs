@@ -93,6 +93,7 @@ unsafe extern "system" {
     ) -> i32;
     fn CloseHandle(handle: Handle) -> i32;
     fn GetFileInformationByHandle(handle: Handle, info: *mut ByHandleFileInformation) -> i32;
+    fn GetFileAttributesW(path: *const u16) -> u32;
     fn FlushFileBuffers(handle: Handle) -> i32;
     fn MoveFileExW(existing: *const u16, new_file: *const u16, flags: u32) -> i32;
     fn DeleteFileW(path: *const u16) -> i32;
@@ -540,26 +541,42 @@ pub unsafe extern "system" fn l_platform_same_file(
     len_b: usize,
 ) -> i64 {
     if len_a == 0 || len_a > L_MAX_PATH_BYTES || len_b == 0 || len_b > L_MAX_PATH_BYTES {
-        return 0;
+        return 2;
     }
     let bytes_a = unsafe { core::slice::from_raw_parts(path_a, len_a) };
     let bytes_b = unsafe { core::slice::from_raw_parts(path_b, len_b) };
     if !l_platform_path_valid(bytes_a) || !l_platform_path_valid(bytes_b) {
-        return 0;
+        return 2;
     }
     let mut wide_a = Buffer::new();
     wide_a.grow((len_a + 1) * 2);
     let dest_a = wide_a.data.cast::<u16>();
     let size_a = unsafe { MultiByteToWideChar(UTF8, INVALID_UTF8, path_a, len_a as i32, dest_a, len_a as i32) };
-    if size_a <= 0 { return 0; }
+    if size_a <= 0 { return 2; }
     unsafe { dest_a.add(size_a as usize).write(0) };
 
     let mut wide_b = Buffer::new();
     wide_b.grow((len_b + 1) * 2);
     let dest_b = wide_b.data.cast::<u16>();
     let size_b = unsafe { MultiByteToWideChar(UTF8, INVALID_UTF8, path_b, len_b as i32, dest_b, len_b as i32) };
-    if size_b <= 0 { return 0; }
+    if size_b <= 0 { return 2; }
     unsafe { dest_b.add(size_b as usize).write(0) };
+
+    // Establish the source identity before accepting an absent destination.
+    let handle_b = unsafe {
+        CreateFileW(
+            dest_b,
+            GENERIC_READ,
+            SHARE_READ_WRITE_DELETE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            ptr::null_mut(),
+        )
+    };
+    if handle_b as usize == usize::MAX {
+        return 2;
+    }
 
     let handle_a = unsafe {
         CreateFileW(
@@ -573,23 +590,11 @@ pub unsafe extern "system" fn l_platform_same_file(
         )
     };
     if handle_a as usize == usize::MAX {
-        return 0;
-    }
-
-    let handle_b = unsafe {
-        CreateFileW(
-            dest_b,
-            GENERIC_READ,
-            SHARE_READ_WRITE_DELETE,
-            ptr::null_mut(),
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            ptr::null_mut(),
-        )
-    };
-    if handle_b as usize == usize::MAX {
-        unsafe { CloseHandle(handle_a) };
-        return 0;
+        let error = unsafe { GetLastError() };
+        let attributes = unsafe { GetFileAttributesW(dest_a) };
+        unsafe { CloseHandle(handle_b) };
+        // ERROR_FILE_NOT_FOUND with no reparse point is a different file.
+        return if error == 2 && attributes == u32::MAX { 0 } else { 2 };
     }
 
     let mut info_a = core::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
@@ -604,7 +609,7 @@ pub unsafe extern "system" fn l_platform_same_file(
     }
 
     if ok_a == 0 || ok_b == 0 {
-        return 0;
+        return 2;
     }
 
     let info_a = unsafe { info_a.assume_init() };
