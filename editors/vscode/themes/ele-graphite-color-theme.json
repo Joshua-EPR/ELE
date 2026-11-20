@@ -132,11 +132,49 @@
     {
       "name": "Variables",
       "scope": [
-        "variable",
-        "variable.parameter"
+        "variable"
       ],
       "settings": {
-        "foreground": "#D8E2EB"
+        "foreground": "#B7D6D2"
+      }
+    },
+    {
+      "name": "ELE local variables",
+      "scope": [
+        "variable.other.declaration.ele",
+        "variable.other.readwrite.ele"
+      ],
+      "settings": {
+        "foreground": "#B6D7C7"
+      }
+    },
+    {
+      "name": "ELE parameters",
+      "scope": [
+        "variable.parameter.ele"
+      ],
+      "settings": {
+        "foreground": "#AEC9E6"
+      }
+    },
+    {
+      "name": "ELE member fields",
+      "scope": [
+        "variable.other.member.ele"
+      ],
+      "settings": {
+        "foreground": "#CECEAB"
+      }
+    },
+    {
+      "name": "ELE named constants",
+      "scope": [
+        "variable.other.constant.declaration.ele",
+        "constant.other.identifier.ele"
+      ],
+      "settings": {
+        "foreground": "#E8B68D",
+        "fontStyle": "bold"
       }
     },
     {
