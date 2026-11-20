@@ -378,6 +378,34 @@ flow assembleLir(lines: view List of[Text]) => Text {
 flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
     choose loadProgram(view source_path) {
         Ok(prog): {
+            // Safety check: output path cannot overwrite any source module in the project
+            each m_idx among 0..prog.module_paths.length {
+                hold m_path = view prog.module_paths[m_idx]
+                when pathsEquivalent(m_path, view output_path) {
+                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}'")
+                    give 2
+                }
+            }
+
+            // Safety check: alias / link detection against all project source modules
+            choose readText(output_path, 67108864) {
+                Ok(out_content): {
+                    each m_idx among 0..prog.module_paths.length {
+                        hold m_path = view prog.module_paths[m_idx]
+                        choose readText(m_path, 67108864) {
+                            Ok(mod_content): {
+                                when textMatches(view out_content, view mod_content) {
+                                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}' (alias detectado)")
+                                    give 2
+                                }
+                            }
+                            Err(e_mod): {}
+                        }
+                    }
+                }
+                Err(e_out): {}
+            }
+
             hold source = view prog.source
             when prog.tree.errors.length > 0 {
                 each i among 0..prog.tree.errors.length {
@@ -411,7 +439,20 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
                 give 3
             }
 
-            // Write output binary
+            // Atomic / Safe write flow:
+            // 1. Stage output image in a temporary file to verify write viability
+            hold tmp_output = "{output_path}.tmp.ele"
+            hold status_tmp = writeBytes(tmp_output, compiled.image)
+            when status_tmp != 0 {
+                when target == 1 {
+                    printError("error[IO]: fallo al escribir archivo temporal PE64 en {tmp_output} (código {status_tmp})")
+                } otherwise {
+                    printError("error[IO]: fallo al escribir archivo temporal ELF64 en {tmp_output} (código {status_tmp})")
+                }
+                give 5
+            }
+
+            // 2. Finalize output to target destination
             hold status = writeBytes(output_path, compiled.image)
             when status != 0 {
                 when target == 1 {
@@ -602,6 +643,22 @@ flow main() => Int {
     when pathsEquivalent(view source_file, view output_file) {
         printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}'")
         give 2
+    }
+
+    // Safety check: alias / link detection for input source file
+    choose readText(output_file, 67108864) {
+        Ok(out_content): {
+            choose readText(source_file, 67108864) {
+                Ok(src_content): {
+                    when textMatches(view out_content, view src_content) {
+                        printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}' (alias detectado)")
+                        give 2
+                    }
+                }
+                Err(e_src): {}
+            }
+        }
+        Err(e_out): {}
     }
 
     give compileProgram(source_file, output_file, target)
