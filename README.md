@@ -198,7 +198,7 @@ For the full architectural report, read [Self-Hosting Documentation](docs/self-h
 </p>
 
 - **102 / 102 source files (100%)** in `compiler-l/src/` pass the Lexer, Parser, and Semantic Analysis phases.
-- **20 / 20 standalone executables (100%)** reach full native machine code emission (ELF64 & PE32+).
+- **20 / 102 source files (~19.6%)** reach native backend emission; these are the **20 / 20 standalone compiler entry points** in the current coverage matrix. This is not 100% full-source backend coverage.
 
 ---
 
