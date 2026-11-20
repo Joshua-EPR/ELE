@@ -1,0 +1,16 @@
+{
+  "$schema": "vscode://schemas/icon-theme",
+  "iconDefinitions": {
+    "_ele_source": {
+      "iconPath": "../images/ele-file.png"
+    }
+  },
+  "fileExtensions": {
+    "l": "_ele_source"
+  },
+  "languageIds": {
+    "ele": "_ele_source"
+  },
+  "showLanguageModeIcons": true,
+  "hidesExplorerArrows": false
+}
