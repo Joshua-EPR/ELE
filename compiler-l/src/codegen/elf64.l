@@ -6,7 +6,7 @@
 
 fixed ELF64_CODE_OFFSET = 4096
 fixed ELF64_LOAD_ADDRESS = 4194304
-fixed ELF64_MAX_CODE = 16777216
+fixed ELF64_MAX_CODE = 33554432
 
 flow elfPut(out: edit List of[Int], b: Int) {
     out@push(b)

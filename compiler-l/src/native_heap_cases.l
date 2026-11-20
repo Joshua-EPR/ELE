@@ -14,7 +14,12 @@ fn main() -> Int {
     if heapPageRound(1048576) != 1048576 { return 13 }
     if heapPageRound(0) != -1 { return 14 }
     if heapPageRound(-1) != -1 { return 15 }
-    if heapPageRound(1048577) != -1 { return 16 }
+    // The Stage 3.3 heap limit is 32 MiB; sizes above the former 1 MiB
+    // limit must round correctly, while out-of-range sizes still fail closed.
+    when heapPageRound(1048577) != 1052672 { give 16 }
+    when heapPageRound(33554431) != 33554432 { give 20 }
+    when heapPageRound(33554432) != 33554432 { give 21 }
+    when heapPageRound(33554433) != -1 { give 22 }
     var invalid = x64New()
     if heapEmitCheckedMap(&mut invalid, 0) { return 17 }
     if heapEmitCheckedUnmap(&mut invalid, -1) { return 18 }

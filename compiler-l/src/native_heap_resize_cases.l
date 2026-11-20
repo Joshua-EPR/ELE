@@ -6,7 +6,7 @@ take codegen.native_heap_owner
 // g: 8 -> 4097 bytes, preserved 40 + second page 2 => 42
 // s: 4097 -> 8 bytes, preserved first 42 => 42
 // t: move owner, then grow and free => 42
-// z/h: resize to zero or >1 MiB => exit 122 (original owner intact)
+// z/h: resize to zero or >32 MiB => exit 122 (original owner intact)
 // m: resize a moved-from owner => exit 121
 flow main() => Int {
     change invalid = x64New()
@@ -39,7 +39,7 @@ flow main() => Int {
                 heapOwnerMove(edit code, 0, 1, 2, 3, 4, 5)
             }
             when kind == 122 { x64MovImm64(edit code, 7, 0) }
-            when kind == 104 { x64MovImm64(edit code, 7, 1048577) }
+            when kind == 104 { x64MovImm64(edit code, 7, 33554433) }
             when kind == 115 { x64MovImm64(edit code, 7, 8) }
             when kind == 103 || kind == 116 || kind == 109 {
                 x64MovImm64(edit code, 7, 4097)

@@ -426,14 +426,14 @@ fn static_cases() -> Vec<(&'static str, Vec<u8>, Option<u32>)> {
             None,
         ),
     ];
-    // One byte over the 16 MiB input limit of native_cfg_demo (status 4).
+    // One byte over the 32 MiB input limit of native_cfg_demo (status 4).
     let mut big = ok(&[], "return ci0");
-    big.resize(16_777_217, b'\n');
-    cases.push(("over_one_mib", big, None));
-    // Exactly 16 MiB of LIR whose padding is not LIR: rejected by the parser.
+    big.resize(33_554_433, b'\n');
+    cases.push(("over_32_mib", big, None));
+    // Exactly 32 MiB of LIR whose padding is not LIR: rejected by the parser.
     let mut limit = ok(&[], "return ci0");
-    limit.resize(16_777_216, b'\n');
-    cases.push(("exactly_one_mib_padding", limit, Some(49)));
+    limit.resize(33_554_432, b'\n');
+    cases.push(("exactly_32_mib_padding", limit, Some(49)));
     cases
 }
 

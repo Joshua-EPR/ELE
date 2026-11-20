@@ -78,7 +78,7 @@ native_layout_cases.l	backend
 native_lir_demo.l	backend
 native_list_cases.l	backend
 native_memory_cases.l	backend
-native_pe_demo.l	parser
+native_pe_demo.l	backend
 native_stack_aggregate_demo.l	backend
 ownership_l.l	lir
 parse_util.l	lir

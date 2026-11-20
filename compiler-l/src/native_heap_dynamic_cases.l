@@ -4,7 +4,7 @@ take codegen.native_heap_dynamic
 
 // Stage-0-compiled ELE generator of standalone Linux ELF64 tests.
 // Modes: t=two-page success(42), z=zero length(122), n=negative(122),
-// h=over 1 MiB(122), u=unaligned munmap(124).
+// h=over 32 MiB(122), u=unaligned munmap(124).
 // Unlike the previous fixed-size fixture, length enters machine code as a
 // register at runtime and is rounded to pages by the emitted instructions.
 flow main() => Int {
@@ -49,7 +49,7 @@ flow main() => Int {
             } otherwise {
                 when kind == 122 { x64MovImm64(edit code, 7, 0) }
                 when kind == 110 { x64MovImm64(edit code, 7, -1) }
-                when kind == 104 { x64MovImm64(edit code, 7, 1048577) }
+                when kind == 104 { x64MovImm64(edit code, 7, 33554433) }
                 when !heapEmitDynamicMap(edit code) { give 7 }
                 x64MovImm64(edit code, 7, 90)
                 x64MovImm64(edit code, 0, 60)
