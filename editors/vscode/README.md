@@ -104,7 +104,7 @@ This extension now also provides the optional **ELE Graphite Dark** theme, inten
 
 **Enable it:** Press `Ctrl+Shift+P`, select **Preferences: Color Theme**, and choose **ELE Graphite Dark**. Use the same menu to switch back to your previous theme. The choice affects editor/UI appearance, not compiler behavior, syntax, or generated code.
 
-**Development mode:** if you are testing the extension from `editors/vscode`, open the folder in VS Code and press `F5` to start an Extension Development Host. Select the theme in that host; simply changing the theme JSON may require reloading the host. For an installed VSIX, package and reinstall the updated extension.
+**Development mode:** from `editors/vscode`, run `code --extensionDevelopmentPath=. --new-window` to open an Extension Development Host with the local extension loaded; select **ELE Graphite Dark** there. If you change the JSON afterward, reload the development window. For an installed VSIX, package and reinstall the updated extension.
 
 ---
 
