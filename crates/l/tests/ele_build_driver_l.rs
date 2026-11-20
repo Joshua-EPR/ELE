@@ -292,3 +292,400 @@ fn driver_builds_and_executes_multimodule_project() {
         assert_eq!(stdout.trim(), "Resultado: 84");
     }
 }
+
+#[test]
+fn driver_cli_self_overwrite_rejected() {
+    let dir = work("self_overwrite");
+    let src = dir.join("self.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+
+    let out = Command::new(driver())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--output",
+            src.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no puede sobrescribir el archivo de entrada"));
+}
+
+#[test]
+fn driver_cli_self_overwrite_relative_dot_slash() {
+    let dir = work("self_overwrite_dotslash");
+    let src = dir.join("self.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "self.l", "--output", "./self.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no puede sobrescribir el archivo de entrada"));
+}
+
+#[test]
+fn driver_cli_self_overwrite_parent_traversal() {
+    let dir = work("self_overwrite_parent");
+    let sub = dir.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    let src = dir.join("self.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "self.l", "--output", "sub/../self.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no puede sobrescribir el archivo de entrada"));
+}
+
+#[test]
+fn driver_cli_self_overwrite_slash_backslash() {
+    let dir = work("self_overwrite_slashes");
+    let sub = dir.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    let src = sub.join("self.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "sub/self.l", "--output", r"sub\self.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no puede sobrescribir el archivo de entrada"));
+}
+
+#[test]
+#[cfg(windows)]
+fn driver_cli_self_overwrite_case_windows() {
+    let dir = work("self_overwrite_case");
+    let src = dir.join("self.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "self.l", "--output", "SELF.L"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no puede sobrescribir el archivo de entrada"));
+}
+
+#[test]
+fn driver_default_target_windows_is_pe() {
+    let dir = work("default_target");
+    let src = dir.join("prog.l");
+    let expected_exe = dir.join("prog.exe");
+    let _ = fs::remove_file(&expected_exe);
+    fs::write(
+        &src,
+        "flow main() => Int { print(\"Default target test\"); give 0 }\n",
+    )
+    .unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "prog.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    #[cfg(windows)]
+    {
+        assert!(expected_exe.exists());
+        let run = Command::new(&expected_exe)
+            .output()
+            .expect("failed to run exe");
+        assert!(run.status.success());
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert_eq!(stdout.trim(), "Default target test");
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        let expected_bin = dir.join("prog");
+        assert!(expected_bin.exists());
+        let run = Command::new(&expected_bin)
+            .output()
+            .expect("failed to run elf");
+        assert!(run.status.success());
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert_eq!(stdout.trim(), "Default target test");
+    }
+}
+
+#[test]
+fn driver_builds_self_rebuild_windows_fixpoint() {
+    let dir = work("self_rebuild_win");
+    let gen2_exe = dir.join("ele_gen2.exe");
+    #[cfg(windows)]
+    let gen3_exe = dir.join("ele_gen3.exe");
+    let hello_src = dir.join("hello.l");
+    #[cfg(windows)]
+    let hello_bin = dir.join("hello_by_gen3.exe");
+    fs::write(
+        &hello_src,
+        "flow main() => Int { print(\"Autonomy Gen 3\"); give 0 }\n",
+    )
+    .unwrap();
+
+    let driver_src = root().join("compiler-l/src/main_driver.l");
+
+    // Gen 1 (driver()) builds Gen 2
+    let out_gen2 = Command::new(driver())
+        .current_dir(root())
+        .args([
+            "build",
+            driver_src.to_str().unwrap(),
+            "--target",
+            "pe",
+            "--output",
+            gen2_exe.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to build Gen 2");
+    assert!(
+        out_gen2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out_gen2.stderr)
+    );
+    assert!(gen2_exe.exists());
+
+    let bytes_gen2 = fs::read(&gen2_exe).unwrap();
+    assert!(bytes_gen2.starts_with(b"MZ"), "PE header MZ magic required");
+
+    #[cfg(windows)]
+    {
+        // Gen 2 builds Gen 3
+        let out_gen3 = Command::new(&gen2_exe)
+            .current_dir(root())
+            .args([
+                "build",
+                driver_src.to_str().unwrap(),
+                "--target",
+                "pe",
+                "--output",
+                gen3_exe.to_str().unwrap(),
+            ])
+            .output()
+            .expect("failed to build Gen 3");
+        assert!(
+            out_gen3.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out_gen3.stderr)
+        );
+        assert!(gen3_exe.exists());
+
+        // Assert bitwise identical fixpoint
+        let bytes_gen3 = fs::read(&gen3_exe).unwrap();
+        assert_eq!(
+            bytes_gen2, bytes_gen3,
+            "Gen 2 and Gen 3 binaries must be bitwise identical fixpoint"
+        );
+
+        // Gen 3 compiles and runs hello
+        let out_hello = Command::new(&gen3_exe)
+            .current_dir(&dir)
+            .args(["build", "hello.l", "--output", "hello_by_gen3.exe"])
+            .output()
+            .expect("Gen 3 failed to compile hello.l");
+        assert!(
+            out_hello.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out_hello.stderr)
+        );
+
+        let run = Command::new(&hello_bin)
+            .output()
+            .expect("failed to run hello_by_gen3");
+        assert!(run.status.success());
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert_eq!(stdout.trim(), "Autonomy Gen 3");
+    }
+}
+
+#[test]
+fn driver_builds_self_rebuild_linux_fixpoint() {
+    let dir = work("self_rebuild_linux");
+    let gen2_elf = dir.join("ele_gen2.elf");
+    let gen3_elf = dir.join("ele_gen3.elf");
+    let hello_src = dir.join("hello.l");
+    let hello_elf = dir.join("hello_by_gen3.elf");
+    fs::write(
+        &hello_src,
+        "flow main() => Int { print(\"Autonomy Gen 3 Linux\"); give 0 }\n",
+    )
+    .unwrap();
+    let driver_src = root().join("compiler-l/src/main_driver.l");
+
+    // Gen 1 (driver()) builds Gen 2 ELF64
+    let out_gen2 = Command::new(driver())
+        .current_dir(root())
+        .args([
+            "build",
+            driver_src.to_str().unwrap(),
+            "--target",
+            "elf",
+            "--output",
+            gen2_elf.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to build Gen 2 ELF64");
+    assert!(
+        out_gen2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out_gen2.stderr)
+    );
+    assert!(gen2_elf.exists());
+
+    let bytes_gen2 = fs::read(&gen2_elf).unwrap();
+    assert_eq!(
+        &bytes_gen2[..7],
+        b"\x7fELF\x02\x01\x01",
+        "ELF64 header magic required"
+    );
+
+    // If native Linux x86-64, execute directly
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        let chmod = Command::new("chmod")
+            .args(["755", gen2_elf.to_str().unwrap()])
+            .status()
+            .expect("failed to chmod gen2_elf");
+        assert!(chmod.success());
+
+        // Gen 2 builds Gen 3
+        let out_gen3 = Command::new(&gen2_elf)
+            .current_dir(root())
+            .args([
+                "build",
+                driver_src.to_str().unwrap(),
+                "--target",
+                "elf",
+                "--output",
+                gen3_elf.to_str().unwrap(),
+            ])
+            .output()
+            .expect("Gen 2 failed to build Gen 3 on native Linux");
+        assert!(
+            out_gen3.status.success(),
+            "Gen 2 ELF64 build failed: {}",
+            String::from_utf8_lossy(&out_gen3.stderr)
+        );
+        assert!(gen3_elf.exists());
+
+        let bytes_gen3 = fs::read(&gen3_elf).unwrap();
+        assert_eq!(
+            bytes_gen2, bytes_gen3,
+            "Gen 2 and Gen 3 ELF64 binaries must be bitwise identical fixpoint on Linux"
+        );
+
+        let chmod3 = Command::new("chmod")
+            .args(["755", gen3_elf.to_str().unwrap()])
+            .status()
+            .expect("failed to chmod gen3_elf");
+        assert!(chmod3.success());
+
+        // Gen 3 builds hello
+        let out_hello = Command::new(&gen3_elf)
+            .current_dir(&dir)
+            .args([
+                "build",
+                hello_src.to_str().unwrap(),
+                "--target",
+                "elf",
+                "--output",
+                hello_elf.to_str().unwrap(),
+            ])
+            .output()
+            .expect("Gen 3 failed to build hello on native Linux");
+        assert!(
+            out_hello.status.success(),
+            "Gen 3 hello build failed: {}",
+            String::from_utf8_lossy(&out_hello.stderr)
+        );
+        assert!(hello_elf.exists());
+
+        let chmod_h = Command::new("chmod")
+            .args(["755", hello_elf.to_str().unwrap()])
+            .status()
+            .expect("failed to chmod hello_elf");
+        assert!(chmod_h.success());
+
+        let run = Command::new(&hello_elf)
+            .output()
+            .expect("failed to run hello_elf");
+        assert!(run.status.success());
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert_eq!(stdout.trim(), "Autonomy Gen 3 Linux");
+    } else if let Ok(distro) = std::env::var("ELE_TEST_WSL_DISTRO") {
+        let canonical_dir = dir.canonicalize().unwrap();
+        let windows_dir = canonical_dir
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/");
+        let (drive, rest) = windows_dir.split_once(":/").expect("absolute path");
+        let linux_dir = format!("/mnt/{}/{rest}", drive.to_ascii_lowercase());
+
+        let canonical_root = root().canonicalize().unwrap();
+        let windows_root = canonical_root
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .replace('\\', "/");
+        let (root_drive, root_rest) = windows_root.split_once(":/").expect("absolute path");
+        let linux_root = format!("/mnt/{}/{root_rest}", root_drive.to_ascii_lowercase());
+
+        let script = format!(
+            "chmod 755 \"{linux_dir}/ele_gen2.elf\" && \
+             \"{linux_dir}/ele_gen2.elf\" build \"{linux_root}/compiler-l/src/main_driver.l\" --target elf --output \"{linux_dir}/ele_gen3.elf\" && \
+             chmod 755 \"{linux_dir}/ele_gen3.elf\" && \
+             \"{linux_dir}/ele_gen3.elf\" build \"{linux_dir}/hello.l\" --target elf --output \"{linux_dir}/hello_by_gen3.elf\" && \
+             chmod 755 \"{linux_dir}/hello_by_gen3.elf\" && \
+             \"{linux_dir}/hello_by_gen3.elf\""
+        );
+        let run_wsl = Command::new("wsl")
+            .args(["-d", &distro, "--exec", "sh", "-c", &script])
+            .output()
+            .unwrap();
+        assert!(
+            run_wsl.status.success(),
+            "Gen 2 / Gen 3 execution failed in WSL: {}",
+            String::from_utf8_lossy(&run_wsl.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&run_wsl.stdout);
+        assert_eq!(stdout.trim(), "Autonomy Gen 3 Linux");
+        assert!(gen3_elf.exists());
+
+        let bytes_gen3 = fs::read(&gen3_elf).unwrap();
+        assert_eq!(
+            bytes_gen2, bytes_gen3,
+            "Gen 2 and Gen 3 ELF64 binaries must be bitwise identical fixpoint in WSL"
+        );
+    } else {
+        if std::env::var_os("ELE_REQUIRE_NATIVE_EXEC").is_some_and(|v| v == "1") {
+            panic!(
+                "ELE_REQUIRE_NATIVE_EXEC=1 but host cannot run ELF64 (neither native Linux x86_64 nor ELE_TEST_WSL_DISTRO available)"
+            );
+        }
+        eprintln!("[INFO] Skipping ELF64 Gen 2 execution on Windows without WSL configured");
+    }
+}
