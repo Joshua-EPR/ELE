@@ -45,7 +45,8 @@
     "binary_sha256": "249177d5fb90fef967f96ea088b637027d15e2ba38b2ca88489b8ff71e1655c2",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "ELE direct native PE32+ generation (fibonacci_recursive)"
+    "notes": "ELE direct native PE32+ generation (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_fibonacci_recursive_rust_debug",
@@ -93,7 +94,8 @@
     "binary_sha256": "f0a5d4cb47287808279f40e2d4b7eb09521585590ec2f0ed3ae01e930072bd3a",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "Rust unoptimized debug build (fibonacci_recursive)"
+    "notes": "Rust unoptimized debug build (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_fibonacci_recursive_rust_opt",
@@ -141,7 +143,8 @@
     "binary_sha256": "f7f6faeeb5685860f5545e58a95e0cd883b7bd9455217ec390980ff7b136a2a1",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "Rust optimized release build (fibonacci_recursive)"
+    "notes": "Rust optimized release build (fibonacci_recursive)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_ele",
@@ -189,7 +192,8 @@
     "binary_sha256": "579e9cc5703abba4c4a990c035f90a2fcb730918b0aab32bd6285a1b4d78dc65",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "ELE direct native PE32+ generation (arithmetic_loop)"
+    "notes": "ELE direct native PE32+ generation (arithmetic_loop)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_rust_debug",
@@ -237,7 +241,8 @@
     "binary_sha256": "fcc35dcbee59e961cb6a1af6e33b423e13d04edaf3116e125f747fa7bd924817",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "Rust unoptimized debug build (arithmetic_loop)"
+    "notes": "Rust unoptimized debug build (arithmetic_loop)",
+    "compile_iterations": 5
   },
   {
     "benchmark_id": "comparison_arithmetic_loop_rust_opt",
@@ -285,6 +290,7 @@
     "binary_sha256": "3f6e54b0d17e91b5017f8528d3e82679398299d02b716c38832bfc70343baf3c",
     "exit_code": 0,
     "status": "PASSED",
-    "notes": "Rust optimized release build (arithmetic_loop)"
+    "notes": "Rust optimized release build (arithmetic_loop)",
+    "compile_iterations": 5
   }
 ]
