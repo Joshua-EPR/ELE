@@ -92,9 +92,9 @@ jobs:
               $filename = $parts[1]
               $actualHash = (Get-FileHash -Algorithm SHA256 "dist/$filename").Hash.ToLower()
               if ($actualHash -ne $expectedHash.ToLower()) {
-                  throw "Checksum mismatch for $filename: expected $expectedHash, got $actualHash"
+                  throw "Checksum mismatch for ${filename}: expected $expectedHash, got $actualHash"
               }
-              Write-Host "Verified checksum for $filename: OK"
+              Write-Host "Verified checksum for ${filename}: OK"
           }
 
       - name: Verify SHA256 Checksum Manifest (Linux)
