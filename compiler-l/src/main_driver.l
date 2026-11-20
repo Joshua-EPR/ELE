@@ -336,9 +336,76 @@ flow printVersion() {
     print("ele 0.3.0 (Stage 3 self-hosted native driver)")
 }
 
+flow assembleLir(lines: view List of[Text]) => Text {
+    when lines.length == 0 { give "end\n" }
+
+    // Radix-32 hierarchical accumulator:
+    // eliminates O(N^2) buffer reallocations during monolithic LIR materialization
+    change s0 = ""
+    change c0 = 0
+    change s1 = ""
+    change c1 = 0
+    change s2 = ""
+    change c2 = 0
+    change s3 = ""
+
+    each i among 0..lines.length {
+        hold l = view lines[i]
+        s0 = "{s0}{l}\n"
+        c0 = c0 + 1
+        when c0 == 32 {
+            s1 = "{s1}{s0}"
+            s0 = ""
+            c0 = 0
+            c1 = c1 + 1
+            when c1 == 32 {
+                s2 = "{s2}{s1}"
+                s1 = ""
+                c1 = 0
+                c2 = c2 + 1
+                when c2 == 32 {
+                    s3 = "{s3}{s2}"
+                    s2 = ""
+                    c2 = 0
+                }
+            }
+        }
+    }
+
+    give "{s3}{s2}{s1}{s0}end\n"
+}
+
 flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
     choose loadProgram(view source_path) {
         Ok(prog): {
+            // Safety check: output path cannot overwrite any source module in the project
+            each m_idx among 0..prog.module_paths.length {
+                hold m_path = view prog.module_paths[m_idx]
+                when pathsEquivalent(m_path, view output_path) {
+                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}'")
+                    give 2
+                }
+            }
+
+            // Safety check: alias / link detection against all project source modules
+            choose readText(output_path, 67108864) {
+                Ok(out_content): {
+                    each m_idx among 0..prog.module_paths.length {
+                        hold m_path = view prog.module_paths[m_idx]
+                        choose readText(m_path, 67108864) {
+                            Ok(mod_content): {
+                                when textMatches(view out_content, view mod_content) {
+                                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}' (alias detectado)")
+                                    give 2
+                                }
+                            }
+                            Err(e_mod): {}
+                        }
+                    }
+                }
+                Err(e_out): {}
+            }
+
             hold source = view prog.source
             when prog.tree.errors.length > 0 {
                 each i among 0..prog.tree.errors.length {
@@ -361,13 +428,8 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
                 give 1
             }
 
-            // Construct full ELE-LIR text in memory
-            change lir_text = ""
-            each i among 0..semaCtx.lir_lines.length {
-                hold line = view semaCtx.lir_lines[i]
-                lir_text = "{lir_text}{line}\n"
-            }
-            lir_text = "{lir_text}end\n"
+            // Construct full ELE-LIR text in memory via hierarchical accumulator
+            hold lir_text = assembleLir(view semaCtx.lir_lines)
 
             // Invoke native backend code generator
             hold compiled = cfgCompileFor(view lir_text, target)
@@ -377,7 +439,20 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
                 give 3
             }
 
-            // Write output binary
+            // Atomic / Safe write flow:
+            // 1. Stage output image in a temporary file to verify write viability
+            hold tmp_output = "{output_path}.tmp.ele"
+            hold status_tmp = writeBytes(tmp_output, compiled.image)
+            when status_tmp != 0 {
+                when target == 1 {
+                    printError("error[IO]: fallo al escribir archivo temporal PE64 en {tmp_output} (código {status_tmp})")
+                } otherwise {
+                    printError("error[IO]: fallo al escribir archivo temporal ELF64 en {tmp_output} (código {status_tmp})")
+                }
+                give 5
+            }
+
+            // 2. Finalize output to target destination
             hold status = writeBytes(output_path, compiled.image)
             when status != 0 {
                 when target == 1 {
@@ -568,6 +643,22 @@ flow main() => Int {
     when pathsEquivalent(view source_file, view output_file) {
         printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}'")
         give 2
+    }
+
+    // Safety check: alias / link detection for input source file
+    choose readText(output_file, 67108864) {
+        Ok(out_content): {
+            choose readText(source_file, 67108864) {
+                Ok(src_content): {
+                    when textMatches(view out_content, view src_content) {
+                        printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}' (alias detectado)")
+                        give 2
+                    }
+                }
+                Err(e_src): {}
+            }
+        }
+        Err(e_out): {}
     }
 
     give compileProgram(source_file, output_file, target)

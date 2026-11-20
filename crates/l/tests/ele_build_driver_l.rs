@@ -689,3 +689,135 @@ fn driver_builds_self_rebuild_linux_fixpoint() {
         eprintln!("[INFO] Skipping ELF64 Gen 2 execution on Windows without WSL configured");
     }
 }
+
+#[test]
+fn driver_cli_rejects_overwrite_of_imported_module() {
+    let dir = work("reject_overwrite_imported_mod");
+    let main_src = dir.join("main.l");
+    let helper_src = dir.join("helper.l");
+    let helper_content = "flow helperValue() => Int { give 42 }\n";
+    fs::write(
+        &main_src,
+        "take helper\nflow main() => Int { give helperValue() }\n",
+    )
+    .unwrap();
+    fs::write(&helper_src, helper_content).unwrap();
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "main.l", "--output", "helper.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no puede sobrescribir el módulo fuente")
+            || stderr.contains("no puede sobrescribir"),
+        "unexpected stderr: {stderr}"
+    );
+
+    // Verify imported source file remains completely intact
+    let preserved = fs::read_to_string(&helper_src).unwrap();
+    assert_eq!(preserved, helper_content);
+}
+
+#[test]
+fn driver_cli_source_intact_on_failed_compilation_and_overwrite() {
+    let dir = work("source_intact_safety");
+    let src = dir.join("prog.l");
+    let src_content = "flow main() => Int { give 100 }\n";
+    fs::write(&src, src_content).unwrap();
+
+    // 1. Direct overwrite rejection
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "prog.l", "--output", "prog.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(&src).unwrap(), src_content);
+
+    // 2. Syntax error in another file with --output prog.l
+    let bad_src = dir.join("bad.l");
+    fs::write(&bad_src, "flow main() => Int { hold x = \n").unwrap();
+    let out_bad = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "bad.l", "--output", "prog.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out_bad.status.success());
+    assert_eq!(fs::read_to_string(&src).unwrap(), src_content);
+}
+
+#[test]
+fn driver_cli_rejects_overwrite_of_hardlink_source() {
+    let dir = work("reject_overwrite_hardlink");
+    let src = dir.join("main.l");
+    let link = dir.join("main_alias.l");
+    let src_content = "flow main() => Int { give 0 }\n";
+    let _ = fs::remove_file(&link);
+    fs::write(&src, src_content).unwrap();
+
+    // Attempt to create hardlink
+    if fs::hard_link(&src, &link).is_err() {
+        eprintln!("[INFO] hardlink creation unsupported on this filesystem, skipping test");
+        return;
+    }
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "main.l", "--output", "main_alias.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("alias detectado") || stderr.contains("no puede sobrescribir"),
+        "unexpected stderr: {stderr}"
+    );
+
+    // Verify source and link are untouched and still contain source code
+    assert_eq!(fs::read_to_string(&src).unwrap(), src_content);
+    assert_eq!(fs::read_to_string(&link).unwrap(), src_content);
+}
+
+#[test]
+fn driver_cli_rejects_overwrite_of_imported_module_hardlink() {
+    let dir = work("reject_overwrite_imported_hardlink");
+    let main_src = dir.join("main.l");
+    let helper_src = dir.join("helper.l");
+    let helper_link = dir.join("helper_alias.l");
+    let helper_content = "flow helperValue() => Int { give 99 }\n";
+    let _ = fs::remove_file(&helper_link);
+    fs::write(
+        &main_src,
+        "take helper\nflow main() => Int { give helperValue() }\n",
+    )
+    .unwrap();
+    fs::write(&helper_src, helper_content).unwrap();
+
+    if fs::hard_link(&helper_src, &helper_link).is_err() {
+        eprintln!("[INFO] hardlink creation unsupported on this filesystem, skipping test");
+        return;
+    }
+
+    let out = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "main.l", "--output", "helper_alias.l"])
+        .output()
+        .expect("failed to run driver");
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("alias detectado") || stderr.contains("no puede sobrescribir"),
+        "unexpected stderr: {stderr}"
+    );
+
+    // Verify helper and alias remain intact
+    assert_eq!(fs::read_to_string(&helper_src).unwrap(), helper_content);
+    assert_eq!(fs::read_to_string(&helper_link).unwrap(), helper_content);
+}
