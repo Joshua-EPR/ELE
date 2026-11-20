@@ -53,6 +53,8 @@ def main():
             errors.append(f"Missing required document: {doc.relative_to(ROOT)}")
             continue
         source = FENCED.sub("", doc.read_text(encoding="utf-8"))
+        # Inline code examples are not documentation hyperlinks.
+        source = re.sub(r"`[^`\n]*`", "", source)
         html = HtmlReferences()
         html.feed(source)
         urls = MARKDOWN_LINK.findall(source) + html.urls
