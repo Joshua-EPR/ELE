@@ -6,18 +6,22 @@ This document reports verifiable, reproducible performance benchmarks for the **
 
 ## 1. Executive Summary
 
-| Metric | Measurement (Small/Medium Program) | Measurement (Large Compiler Source) |
+The Windows results below were measured on **commit `56f34fb437e20ca2b6b5613106f96ec153f36969`**, prior to the Stage 3.5 merges. They are not post-merge benchmarks of the current `main`. The individual observations and provenance are preserved in `benchmarks/results/compilation_benchmarks_windows.json`, `runtime_benchmarks_windows.json` and `external_comparison_windows.json`.
+
+| Metric | Small/medium workload (Windows dataset) | Large compiler source (Windows dataset) |
 |---|---|---|
-| **Compilation Latency** | **31.4 ms – 54.7 ms** | 15.6 s (`main_sema.l`) / 31.3 s (`main_driver.l`) |
-| **Compiler Memory (Peak RSS)** | **24.5 MiB – 40.6 MiB** | 525.1 MiB (`main_sema.l`) / 855.0 MiB (`main_driver.l`) |
-| **Compiled Binary Footprint** | **4.6 KiB – 5.1 KiB** (PE32+) | 909 KiB (`main_sema.exe`) / 1.50 MiB (`ele_gen3.exe`) |
-| **External Runtime Dependencies** | **0** (No CRT, no libc, no stdlib) | **0** |
+| **Compilation latency** | **32.05–35.75 ms** | 3.16 s (`main_sema.l`) / 5.23 s (`main_driver.l`) |
+| **Compiler peak memory** | **1.18–1.22 MiB** (recorded) | 52.46 MiB (`main_sema.l`) / 87.53 MiB (`main_driver.l`) |
+| **Compiled binary size** | **4,608–5,120 B** (PE32+) | 913,408 B (`main_sema.l`) / 1,514,496 B (`main_driver.l`) |
+| **Runtime dependencies** | **No CRT** for the tested ELE executables | **No CRT** in the tested autonomous driver |
+
+Reproduce these workloads on the integrated HEAD before claiming that the measurements represent its performance.
 
 ---
 
 ## 2. Compilation Performance
 
-All measurements reflect the median of 10 timed iterations following a 1-run untimed warmup on an Intel x86-64 host (Windows 10, AMD64).
+The compilation dataset uses 10 timed iterations for small programs and 5 for `main_sema.l` and `main_driver.l`, each after one warmup, on the documented Windows x86-64 host. Charts are generated from the versioned datasets; no new measurements were produced by this documentation edit.
 
 ![Compilation Time](../assets/benchmarks/compilation-time.svg)
 
@@ -25,13 +29,13 @@ All measurements reflect the median of 10 timed iterations following a 1-run unt
 
 | Workload | Source Lines | Source Size | Median Compile Time | Peak RSS (Job Object) | Binary Size | Exit Status |
 |---|---|---|---|---|---|---|
-| `hello.l` | 5 | 94 B | **31.4 ms** | 24.50 MiB | 4,608 B | PASSED |
-| `arithmetic.l` | 10 | 215 B | **36.1 ms** | 24.52 MiB | 5,120 B | PASSED |
-| `fibonacci.l` | 13 | 297 B | **38.7 ms** | 24.52 MiB | 5,120 B | PASSED |
-| `text_processing.l` | 10 | 235 B | **39.2 ms** | 24.52 MiB | 5,120 B | PASSED |
-| `multimodule (main.l)` | 10 | 231 B | **54.7 ms** | 40.59 MiB | 5,120 B | PASSED |
-| `main_sema.l` (Compiler) | 274 | 10,600 B | **15.64 s** | 525.11 MiB | 909,824 B | PASSED |
-| `main_driver.l` (Self-Host) | 665 | 24,896 B | **31.30 s** | 855.04 MiB | 1,508,352 B | PASSED |
+| `hello.l` | 5 | 99 B | **32.05 ms** | 1.18 MiB | 4,608 B | PASSED |
+| `arithmetic.l` | 10 | 225 B | **32.90 ms** | 1.21 MiB | 5,120 B | PASSED |
+| `fibonacci.l` | 13 | 310 B | **35.75 ms** | 1.21 MiB | 5,120 B | PASSED |
+| `text_processing.l` | 10 | 245 B | **35.24 ms** | 1.20 MiB | 5,120 B | PASSED |
+| `multimodule (main.l)` | 10 | 241 B | **33.36 ms** | 1.22 MiB | 5,120 B | PASSED |
+| `main_sema.l` (Compiler) | 278 | 10,779 B | **3.16 s** | 52.46 MiB | 913,408 B | PASSED |
+| `main_driver.l` (Self-Host) | 692 | 25,720 B | **5.23 s** | 87.53 MiB | 1,514,496 B | PASSED |
 
 ---
 
@@ -41,9 +45,10 @@ Peak Resident Set Size (RSS) is measured continuously across the entire executio
 
 ![Peak Memory Usage](../assets/benchmarks/peak-memory.svg)
 
-- **Standard programs (`hello`, `arithmetic`, `text`, `fibonacci`):** Consume a steady baseline of **~24.5 MiB**.
-- **Multi-module compilation:** Increases memory to **40.6 MiB** due to AST caching and symbol resolution across file boundaries.
-- **Full self-hosting driver (`main_driver.l`):** Generates more than 72,000 lines of ELE-LIR intermediate representation, peaking at **855.0 MiB** during monolithic semantic verification and basic block layout.
+- **Small programs (`hello`, `arithmetic`, `text`, `fibonacci`):** The recorded peak range is **1.18–1.21 MiB**.
+- **Multi-module compilation:** The dataset records **1.22 MiB** peak.
+- **Compiler source (`main_sema.l`):** **52.46 MiB** peak.
+- **Full compiler driver (`main_driver.l`):** **87.53 MiB** peak for the sampled revision. These are dataset values, not independent measurements of the current `main`.
 
 ---
 
@@ -85,12 +90,12 @@ To ensure fairness:
 
 | Benchmark | Language | Mode / Flags | Compile Time (ms) | Runtime (ms) | Binary Size |
 |---|---|---|---|---|---|
-| **Fibonacci(25)** | **ELE** | `native-direct-emit` | **40.6 ms** | **28.37 ms** | **5,120 B** |
-| Fibonacci(25) | Rust | Debug (`-O0`) | 657.6 ms | 20.72 ms | 5,086,801 B |
-| Fibonacci(25) | Rust | Release (`-O3`) | 718.6 ms | 21.02 ms | 5,085,050 B |
-| **Loop(10M)** | **ELE** | `native-direct-emit` | **48.9 ms** | **101.42 ms** | **5,120 B** |
-| Loop(10M) | Rust | Debug (`-O0`) | 674.9 ms | 103.11 ms | 5,086,761 B |
-| Loop(10M) | Rust | Release (`-O3`) | 692.6 ms | 21.40 ms | 5,084,972 B |
+| **Fibonacci(25)** | **ELE** | `native-direct-emit` | 32.79 | 53.49 | 5,120 B |
+| Fibonacci(25) | Rust | Debug (`-O0`) | 670.88 | 22.63 | 5,086,801 B |
+| Fibonacci(25) | Rust | Release (`-O3`) | 716.37 | 24.92 | 5,085,050 B |
+| **Loop(10M)** | **ELE** | `native-direct-emit` | 38.12 | 101.34 | 5,120 B |
+| Loop(10M) | Rust | Debug (`-O0`) | 649.07 | 94.34 | 5,086,761 B |
+| Loop(10M) | Rust | Release (`-O3`) | 690.35 | 21.47 | 5,084,972 B |
 
 ### Linux x86-64 Comparison: ELE vs GCC (`gcc 9.4.0` in WSL2 Ubuntu)
 
