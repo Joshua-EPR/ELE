@@ -241,7 +241,7 @@ pub struct Pe {
 
 /// KERNEL32 functions the ELE Windows runtime (codegen/win64_rt.l,
 /// codegen/win64_heap.l, codegen/win64_rt_platform.l) is allowed to import. Anything else is a violation.
-pub const ALLOWED_KERNEL32: [&str; 13] = [
+pub const ALLOWED_KERNEL32: [&str; 21] = [
     "GetStdHandle",
     "WriteFile",
     "ExitProcess",
@@ -255,6 +255,16 @@ pub const ALLOWED_KERNEL32: [&str; 13] = [
     "CloseHandle",
     "GetFileType",
     "GetLastError",
+    // Stage 3.5 native filesystem identity, safe publication, and OS entropy.
+    // The PE validator continues to reject every other import and DLL.
+    "GetFileInformationByHandle",
+    "FlushFileBuffers",
+    "MoveFileExW",
+    "DeleteFileW",
+    "GetFileAttributesW",
+    "LoadLibraryExW",
+    "GetProcAddress",
+    "FreeLibrary",
 ];
 
 const SCN_CODE: u32 = 0x20;
