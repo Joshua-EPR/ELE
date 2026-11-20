@@ -1,5 +1,11 @@
 # ELE Language Support for Visual Studio Code
 
+![ELE language emblem](images/ele-logo.png)
+
+The ELE emblem is the extension icon; the matching document icon identifies `.l` source files.
+
+![ELE .l source icon](images/ele-file.png)
+
 Official Visual Studio Code extension providing first-class developer tooling for the **ELE** programming language (ELE v2 syntax).
 
 ## Features
@@ -114,6 +120,16 @@ This extension now also provides the optional **ELE Graphite Dark** theme, inten
 
 ---
 
+## ELE branded icons
+
+- **Extension icon:** The ELE emblem is shown in VS Code's Extensions view through the `icon` field in `package.json`.
+- **File icon:** ELE contributes `images/ele-file.png` as the default file icon for language ID `ele`, in both light and dark themes. VS Code uses it only when your selected file-icon theme allows language icons and does not already assign a higher-priority icon to `.l`. <https://code.visualstudio.com/api/extension-guides/file-icon-theme>
+- **Guaranteed visual choice:** To select the included icon set, open **Preferences: File Icon Theme** from the Command Palette and choose **ELE File Icons**. This is an optional *whole file icon theme*, so it may change the appearance of other file types. To keep your current file-icon theme, leave it selected and use the ELE language fallback when supported.
+
+These icons do not change file associations, syntax, the `.l` extension, or the compiler.
+
+---
+
 ## Local Installation
 
 ### Method 1: Extension Folder Link (Development Mode)
@@ -126,7 +142,7 @@ Using `@vscode/vsce`:
 ```bash
 cd editors/vscode
 npx @vscode/vsce package
-code --install-extension ele-vscode-0.1.2.vsix
+code --install-extension ele-vscode-0.1.3.vsix
 ```
 
 ---
