@@ -32,6 +32,7 @@ flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeRead
         p.error = 38
         give
     }
+    p.insts@reserve(count)
     hold first = p.insts.length
     each i among 0..count {
         when p.error != 0 { leave }
@@ -98,6 +99,10 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         p.error = 44
         give
     }
+    // Every declared variable needs at least one source byte (a "var" line).
+    // Reject impossible counts BEFORE any List@reserve: an adversarial header
+    // must never turn into a multi-gigabyte allocation or a process abort.
+    when vars > source.byteLength { p.error = 45; give }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     // Aggregate results travel through a hidden pointer (see native_cfg_emit).
@@ -106,6 +111,16 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
     change value_type = result_type
     when ref_mode >= 0 { value_type = 0 }
     p.functions@push(CfgFunc(first_var: p.types_bool.length, vars: vars, first_block: p.blocks.length, blocks: blocks, params: params, result_bool: value_type == 1, result_unit: value_type == cfgUnitType(), result_text: value_type == cfgTextType(), result_type: value_type, result_ref: ref_mode, result_ref_type: result_type))
+    p.types_bool@reserve(vars)
+    p.types_code@reserve(vars)
+    p.var_ref@reserve(vars)
+    p.ref_root@reserve(vars)
+    p.ref_field@reserve(vars)
+    p.ref_sub@reserve(vars)
+    p.ref_mut@reserve(vars)
+    p.slot_start@reserve(vars)
+    p.slot_count@reserve(vars)
+    p.blocks@reserve(blocks)
     change next_slot = 0
     each i among 0..vars {
         nativeExpect(source, edit reader, "var")
@@ -184,10 +199,18 @@ expose flow cfgParse(source: view Text) => CfgProgram {
         p.error = 48
         give p
     }
+    // Each function requires at least one source byte (a "func" record).
+    // Preflight against source length before reserving function descriptors.
+    // This is a structural lower bound, not a fixed compiler capacity limit.
+    when functions > source.byteLength { p.error = 44; give p }
     p.main = main
     p.decl_structs = structs
     p.decl_enums = enums
     p.decl_lists = lists
+    p.structs@reserve(structs)
+    p.enums@reserve(enums)
+    p.list_elem@reserve(lists)
+    p.functions@reserve(functions)
     each i among 0..structs {
         when p.error != 0 { leave }
         cfgReadStruct(edit p, source, edit r, i)

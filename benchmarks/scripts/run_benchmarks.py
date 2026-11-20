@@ -476,7 +476,8 @@ def benchmark_comparisons_windows(root: Path, ele_driver: Path, results_dir: Pat
             "binary_sha256": sha256_file(ele_bin) if ele_bin.exists() else None,
             "exit_code": 0,
             "status": "PASSED",
-            "notes": f"ELE direct native PE32+ generation ({name})"
+            "notes": f"ELE direct native PE32+ generation ({name})",
+            "compile_iterations": len(ele_c_times)
         })
 
         # 2. Rust (Debug / unoptimized)
@@ -528,7 +529,8 @@ def benchmark_comparisons_windows(root: Path, ele_driver: Path, results_dir: Pat
             "binary_sha256": sha256_file(rs_bin_debug) if rs_bin_debug.exists() else None,
             "exit_code": 0,
             "status": "PASSED",
-            "notes": f"Rust unoptimized debug build ({name})"
+            "notes": f"Rust unoptimized debug build ({name})",
+            "compile_iterations": len(rs_d_c_times)
         })
 
         # 3. Rust (Release / optimized -O)
@@ -580,7 +582,8 @@ def benchmark_comparisons_windows(root: Path, ele_driver: Path, results_dir: Pat
             "binary_sha256": sha256_file(rs_bin_opt) if rs_bin_opt.exists() else None,
             "exit_code": 0,
             "status": "PASSED",
-            "notes": f"Rust optimized release build ({name})"
+            "notes": f"Rust optimized release build ({name})",
+            "compile_iterations": len(rs_o_c_times)
         })
 
         print(f"  ELE:   compile {ele_med_c} ms, runtime {ele_med_r} ms, size {ele_size:,} B")

@@ -336,8 +336,8 @@ flow printVersion() {
     print("ele 0.3.0 (Stage 3 self-hosted native driver)")
 }
 
-flow assembleLir(lines: view List of[Text]) => Text {
-    when lines.length == 0 { give "end\n" }
+flow assembleLir(headers: view List of[Text], functions: view List of[Text]) => Text {
+    when headers.length == 0 && functions.length == 0 { give "end\n" }
 
     // Radix-32 hierarchical accumulator:
     // eliminates O(N^2) buffer reallocations during monolithic LIR materialization
@@ -349,8 +349,31 @@ flow assembleLir(lines: view List of[Text]) => Text {
     change c2 = 0
     change s3 = ""
 
-    each i among 0..lines.length {
-        hold l = view lines[i]
+    each i among 0..headers.length {
+        hold l = view headers[i]
+        s0 = "{s0}{l}\n"
+        c0 = c0 + 1
+        when c0 == 32 {
+            s1 = "{s1}{s0}"
+            s0 = ""
+            c0 = 0
+            c1 = c1 + 1
+            when c1 == 32 {
+                s2 = "{s2}{s1}"
+                s1 = ""
+                c1 = 0
+                c2 = c2 + 1
+                when c2 == 32 {
+                    s3 = "{s3}{s2}"
+                    s2 = ""
+                    c2 = 0
+                }
+            }
+        }
+    }
+
+    each i among 0..functions.length {
+        hold l = view functions[i]
         s0 = "{s0}{l}\n"
         c0 = c0 + 1
         when c0 == 32 {
@@ -426,7 +449,11 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
             }
 
             // Construct full ELE-LIR text in memory via hierarchical accumulator
-            hold lir_text = assembleLir(view semaCtx.lir_lines)
+            hold lir_text = assembleLir(view semaCtx.lir_lines, view semaCtx.lir_functions)
+
+            // Reclaim sema memory before backend compilation to reduce peak RSS
+            semaCtx.lir_lines = List[]
+            semaCtx.lir_functions = List[]
 
             // Invoke native backend code generator
             hold compiled = cfgCompileFor(view lir_text, target)

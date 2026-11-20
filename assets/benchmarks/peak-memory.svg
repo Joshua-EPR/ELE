@@ -50,25 +50,25 @@
 <text x="660.0" y="397" text-anchor="middle" class="text-muted">1000 MiB</text>
 <line x1="200" y1="75" x2="200" y2="379" class="axis"/>
 <text x="185" y="103" text-anchor="end" class="text-label">hello.l</text>
-<rect x="200" y="85" width="11.3" height="26" rx="4" class="bar-ele"/>
-<text x="221.3" y="103" class="text-val">24.50 MiB</text>
+<rect x="200" y="85" width="0.5" height="26" rx="4" class="bar-ele"/>
+<text x="210.5" y="103" class="text-val">1.18 MiB</text>
 <text x="185" y="145" text-anchor="end" class="text-label">arithmetic.l</text>
-<rect x="200" y="127" width="11.3" height="26" rx="4" class="bar-ele"/>
-<text x="221.3" y="145" class="text-val">24.52 MiB</text>
+<rect x="200" y="127" width="0.6" height="26" rx="4" class="bar-ele"/>
+<text x="210.6" y="145" class="text-val">1.21 MiB</text>
 <text x="185" y="187" text-anchor="end" class="text-label">fibonacci.l</text>
-<rect x="200" y="169" width="11.3" height="26" rx="4" class="bar-ele"/>
-<text x="221.3" y="187" class="text-val">24.52 MiB</text>
+<rect x="200" y="169" width="0.6" height="26" rx="4" class="bar-ele"/>
+<text x="210.6" y="187" class="text-val">1.21 MiB</text>
 <text x="185" y="229" text-anchor="end" class="text-label">text_processing.l</text>
-<rect x="200" y="211" width="11.3" height="26" rx="4" class="bar-ele"/>
-<text x="221.3" y="229" class="text-val">24.52 MiB</text>
+<rect x="200" y="211" width="0.6" height="26" rx="4" class="bar-ele"/>
+<text x="210.6" y="229" class="text-val">1.20 MiB</text>
 <text x="185" y="271" text-anchor="end" class="text-label">multimodule</text>
-<rect x="200" y="253" width="18.7" height="26" rx="4" class="bar-ele"/>
-<text x="228.7" y="271" class="text-val">40.59 MiB</text>
+<rect x="200" y="253" width="0.6" height="26" rx="4" class="bar-ele"/>
+<text x="210.6" y="271" class="text-val">1.22 MiB</text>
 <text x="185" y="313" text-anchor="end" class="text-label">main_sema.l (45k LIR)</text>
-<rect x="200" y="295" width="241.6" height="26" rx="4" class="bar-neutral"/>
-<text x="451.6" y="313" class="text-val">525.11 MiB</text>
+<rect x="200" y="295" width="24.1" height="26" rx="4" class="bar-ele"/>
+<text x="234.1" y="313" class="text-val">52.46 MiB</text>
 <text x="185" y="355" text-anchor="end" class="text-label">main_driver.l (72k LIR)</text>
-<rect x="200" y="337" width="393.3" height="26" rx="4" class="bar-neutral"/>
-<text x="603.3" y="355" class="text-val">855.04 MiB</text>
+<rect x="200" y="337" width="40.3" height="26" rx="4" class="bar-ele"/>
+<text x="250.3" y="355" class="text-val">87.53 MiB</text>
 <text x="30" y="405" class="text-muted">Standard programs compile in ~24.5 MiB. Monolithic self-hosting compilation peaks at 855 MiB (72,000+ LIR lines).</text>
 </svg>

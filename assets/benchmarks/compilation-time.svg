@@ -52,19 +52,19 @@
 <text x="594.2857142857142" y="328" text-anchor="middle" class="text-muted">60 ms</text>
 <line x1="200" y1="75" x2="200" y2="310" class="axis"/>
 <text x="185" y="105" text-anchor="end" class="text-label">hello.l (minimal)</text>
-<rect x="200" y="85" width="206.1" height="30" rx="4" class="bar-ele"/>
-<text x="416.1" y="105" class="text-val">31.4 ms</text>
+<rect x="200" y="85" width="210.6" height="30" rx="4" class="bar-ele"/>
+<text x="420.6" y="105" class="text-val">32.0 ms</text>
 <text x="185" y="150" text-anchor="end" class="text-label">arithmetic.l</text>
-<rect x="200" y="130" width="237.4" height="30" rx="4" class="bar-ele"/>
-<text x="447.4" y="150" class="text-val">36.1 ms</text>
+<rect x="200" y="130" width="216.2" height="30" rx="4" class="bar-ele"/>
+<text x="426.2" y="150" class="text-val">32.9 ms</text>
 <text x="185" y="195" text-anchor="end" class="text-label">fibonacci.l</text>
-<rect x="200" y="175" width="254.6" height="30" rx="4" class="bar-ele"/>
-<text x="464.6" y="195" class="text-val">38.7 ms</text>
+<rect x="200" y="175" width="234.9" height="30" rx="4" class="bar-ele"/>
+<text x="444.9" y="195" class="text-val">35.8 ms</text>
 <text x="185" y="240" text-anchor="end" class="text-label">text_processing.l</text>
-<rect x="200" y="220" width="257.4" height="30" rx="4" class="bar-ele"/>
-<text x="467.4" y="240" class="text-val">39.2 ms</text>
+<rect x="200" y="220" width="231.6" height="30" rx="4" class="bar-ele"/>
+<text x="441.6" y="240" class="text-val">35.2 ms</text>
 <text x="185" y="285" text-anchor="end" class="text-label">multimodule (main.l)</text>
-<rect x="200" y="265" width="359.7" height="30" rx="4" class="bar-ele"/>
-<text x="569.7" y="285" class="text-val">54.7 ms</text>
-<text x="30" y="340" class="text-muted">Large self-hosting compiler sources: main_sema.l (45k lines LIR) = 15.6s · main_driver.l (72k lines LIR) = 31.3s</text>
+<rect x="200" y="265" width="219.2" height="30" rx="4" class="bar-ele"/>
+<text x="429.2" y="285" class="text-val">33.4 ms</text>
+<text x="30" y="340" class="text-muted">Large self-hosting compiler sources: main_sema.l (45k lines LIR) = 3.2s · main_driver.l (72k lines LIR) = 5.2s</text>
 </svg>
