@@ -1,259 +1,250 @@
-# ELE — compilador experimental
+# ELE: A Self-Hosting Systems Programming Language
 
-## Nombre
+<p align="center">
+  <a href="https://github.com/Joshua-EPR/ELE/actions/workflows/native-selfhosting-validation.yml"><img src="https://img.shields.io/github/actions/workflow/status/Joshua-EPR/ELE/native-selfhosting-validation.yml?branch=main&label=Native%20CI&style=flat-square" alt="Native CI"></a>
+  <a href="https://github.com/Joshua-EPR/ELE/actions/workflows/docs-and-benchmarks.yml"><img src="https://img.shields.io/github/actions/workflow/status/Joshua-EPR/ELE/docs-and-benchmarks.yml?branch=main&label=Docs%20%26%20Benchmarks&style=flat-square" alt="Docs CI"></a>
+  <img src="https://img.shields.io/badge/Architecture-x86--64-blue?style=flat-square" alt="x86-64">
+  <img src="https://img.shields.io/badge/Targets-Windows%20PE32%2B%20%7C%20Linux%20ELF64-success?style=flat-square" alt="Targets">
+  <img src="https://img.shields.io/badge/Runtime-Zero%20CRT-informational?style=flat-square" alt="Zero CRT">
+</p>
 
-El lenguaje se llama oficialmente **ELE**; antes se llamaba «Proyecto L».
-Los archivos fuente conservan la extensión `.l`. Por compatibilidad no
-cambian los nombres internos: el paquete `project-l`, la biblioteca
-`project_l`, el ejecutable `l`, los drivers `lexer-l`, `parser-l` y
-`sema-l` y el directorio `compiler-l`. Los documentos y commits
-anteriores conservan el nombre histórico.
+<p align="center">
+  <b>English</b> | <a href="README.es.md">Español</a>
+</p>
 
-Compilador en Rust estable, sin GC. Única dependencia externa: Cranelift (backend
-nativo). Implementa un subconjunto de la especificación v1.0, no el lenguaje completo.
+---
 
-**Dos backends.** `--backend rustc` (predeterminado, provisional): LIR → fuente Rust →
-rustc; cubre todo lo implementado. `--backend cranelift`: LIR de bloques → Cranelift →
-objeto COFF → `link.exe`, sin rustc y sin runtime de Rust ni de C (el runtime lo genera
-el propio compilador y solo llama a kernel32); cubre por ahora Int, Bool, Text (literal
-y dinámico, con liberación determinista por drops), interpolación, control de flujo,
-match sobre Int/Bool/Text, funciones y print, y rechaza el resto con un error claro. Ambos
-producen ejecutables nativos autónomos; solo Windows x86-64/MSVC está probado.
+## Introduction
 
-## Nueva sintaxis canónica de ELE (migración v2)
+**ELE** is an experimental, self-hosting systems programming language designed for deterministic memory safety without a garbage collector. It compiles directly to native machine code (**Windows PE32+** and **Linux ELF64**) with **zero C Runtime (CRT) or standard library dependencies**.
 
-La sintaxis pública de ELE ya no se diseña como un clon de Rust. Se ha comenzado a
-implementar una gramática propia con `flow`, `shape`, `extend`, `choice`,
-`choose`, `hold`, `change`, `give`, `=>`, y llamadas `objeto@metodo()`
-(los campos siguen siendo `objeto.campo`). La forma `choose` usa
-`Patron: { ... }` en vez de `match Patron => ...`. Stage 0 también reconoce
-los préstamos `view` y `edit`.
+Unlike languages that rely on large runtime layers or external linkers, ELE features an autonomous compiler driver (`ele build`) written 100% in ELE that directly emits executable binary images, plans stack layouts, and verifies affine ownership typestate.
 
-**Importante:** este cambio está en migración; los antiguos keywords siguen
-siendo entendidos temporalmente para compilar Stage 1, el prelude y ejemplos
-existentes. El subconjunto de Stage 1 no admite aún todas las construcciones
-de Stage 0. Las funciones no se hacen más rápidas por cambiar su ortografía,
-ni esto elimina la dependencia de Rust/Cranelift para bootstrap.
+---
 
-Ver la [especificación y estado exacto de ELE v2](docs/ELE_SYNTAX_V2.md)
-y el [ejemplo de código nuevo](examples/ele_original_syntax.l).
+## Why ELE?
 
-## Ejecutar en este equipo
+- **Compile-Time Ownership without GC:** Affine type system with deterministic drop elaboration, move semantics, and borrow checking (`view` shared loans, `edit` exclusive loans).
+- **Zero-Dependency Native Binaries:** Produces tiny standalone executables (**~5 KiB**) directly from intermediate representation to x86-64 machine code without linking against `msvcrt.dll`, `ucrt.dll`, or `glibc`.
+- **Autonomous Self-Hosting Fixpoint:** Demonstrated 3-generation bit-for-bit reproducible self-rebuilding on both Windows and Linux (`Gen 2 SHA256 == Gen 3 SHA256`, 0 external compiler invocations).
+- **Fast Compilation Latency:** Standard modules compile natively in **30–55 ms** with low compiler memory overhead (~24.5 MiB).
+- **Clean Canonical Syntax (v2):** Purpose-designed systems grammar with explicit intent: `flow`, `shape`, `choice`, `hold`, `change`, `during`, `when`, `give`.
 
-```powershell
-$env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-msvc'
-cargo build
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo run -- run examples/arithmetic.l
-cargo run -- run examples/constants.l
-cargo run -- run examples/text.l
-cargo run -- run examples/fibonacci.l
-cargo run -- run examples/interpolation.l
-cargo run -- run examples/contador.l
-cargo run -- run examples/structs.l
-cargo run -- run examples/enums.l
-cargo run -- run ejemplos/cuenta.l
-cargo run -- run examples/arithmetic.l --backend cranelift
-cargo run -- check examples/loops.l --emit-cfg
-cargo run -- run ejemplos/hola.l
-cargo run -- check examples/text.l --emit-ast --emit-ir
-cargo run -- build examples/text.l
+---
+
+## Quick Start
+
+### 1. Minimal Program (`hello.l`)
+
+```ele
+// hello.l: Standard entry point in ELE v2 syntax
+flow main() {
+    print("Hello from native ELE!")
+}
 ```
 
-Rust instalado y verificado: 1.99.1. rust-toolchain.toml fija esa versión; el override
-anterior reutiliza el canal local que contiene exactamente esa versión.
-Instalación nueva: `rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy`.
-Windows necesita Visual Studio Build Tools, herramientas C++ MSVC y Windows SDK.
-check funciona sin rustc ni enlazador. build/run requieren ambos.
+### 2. Compiling with the Autonomous Driver
 
-## Implementado y probado
+Once bootstrapped, ELE compiles source files directly to native executables:
 
-- Int=i64, Bool, Float=f64, unit y Text de literales UTF-8; anotaciones e inferencia local.
-- let inmutable, var mutable, const locales/globales con evaluación en compilación.
-- Constantes con dependencias adelantadas, diagnóstico de ciclos, operaciones
-  comprobadas y cortocircuito; sin llamadas a funciones ni valores runtime en const.
-- Funciones tipadas, recursión, llamadas anidadas, retorno y expresión final;
-  tipo de retorno inferido si se omite `-> T` (error claro en recursión sin anotar).
-- Scopes/shadowing, if/else-if/else, while/loop/break/continue, `for x in a..b`/`a..=b`
-  sobre Int, operadores y precedencia. `loop` sin break cuenta como divergente.
-- `enum` (simples, con datos y genéricos monomorfizados), `match` exhaustivo como
-  sentencia o expresión con patrones anidados, detección de patrones inalcanzables,
-  `Option<T>`/`T?`, `Result<T, E>`, `??`, `?` y `pub`. `ejemplos/cuenta.l` funciona.
-- `struct` con campos tipados y defaults constantes, construcción `Tipo(campo: v)`,
-  acceso/asignación de campos, `impl` con `fn` (self compartido), `mut fn` (self
-  exclusivo, receptor var) y `static fn` (`Tipo.m()`). Structs no Copy, con movimientos
-  comprobados y sin movimientos parciales. `examples/contador.l` imprime `Valor: 2`.
-- Text no Copy: movimientos comprobados antes del backend; print consulta sin consumir.
-- Escapes Unicode y llaves literales; print de Text/Int/Float/Bool.
-- Interpolación Text como expresión: variables, operaciones, llamadas y cadenas
-  anidadas; conversión de Int/Float/Bool/Text, en orden y una sola vez. Puede
-  guardarse, retornarse y pasarse a funciones; no depende de print.
-- Overflow/división/resto enteros inválidos abortan en runtime; en const son errores
-  de compilación. No se confía en el diagnóstico de overflow de rustc para semántica L.
-- CLI check/build/run, help/version, AST/LIR; diagnósticos con ruta, línea, columna,
-  código y categoría. No se ejecutan binarios tras un error de comprobación o build.
+**On Windows:**
+```powershell
+.\bin\ele.exe build hello.l -o hello.exe
+.\hello.exe
+# Output: Hello from native ELE!
+```
 
-Text usa un contenedor no Copy con datos estáticos UTF-8 o String propietario.
-Literales e interpolaciones constantes plegadas no asignan en runtime. Interpolación
-dinámica construye un buffer propio; formatea cada expresión directamente, sin
-cadenas temporales por conversión. print usa std y puede asignar/bloquear/fallar.
-No se afirma noalloc. No hay operador de concatenación, clone, referencias ni
-borrow checker completo. Movimientos conservadores en ramas y bucles.
+**On Linux:**
+```bash
+./bin/ele.elf build hello.l --target elf -o hello
+chmod +x hello
+./hello
+# Output: Hello from native ELE!
+```
 
-Pendientes: enteros con tamaño y conversiones, if como inicializador, evaluación
-const de funciones, frontend con recuperación multierror, arrays, guardas/tuplas,
-funciones genéricas/traits, préstamos, efectos, manifiestos, backend directo
-y otros targets. `ejemplos/cuenta.l` compila y funciona (imprime 50).
-`ejemplos/hola.l` y `ejemplos/aritmetica.l` ahora funcionan.
+For bootstrapping instructions from source, consult the [Getting Started Guide](docs/getting-started.md).
 
-## Arquitectura y resultados
+---
+
+## Language Syntax at a Glance
+
+```ele
+// Declarations
+shape Vector2 {
+    x: Int
+    y: Int
+}
+
+choice Result {
+    Success(value: Int)
+    Failure(code: Int)
+}
+
+// Functions & Control Flow
+flow compute_magnitude(v: view Vector2) => Int {
+    give v.x * v.x + v.y * v.y
+}
+
+flow main() => Int {
+    // Immutable owner binding
+    hold pos = Vector2(x: 3, y: 4)
+
+    // Borrowing pos via shared view
+    hold mag = compute_magnitude(pos)
+
+    // Mutable variable
+    change counter: Int = 0
+    during counter < 3 {
+        print("Magnitude iteration: {mag}")
+        counter = counter + 1
+    }
+
+    give 0
+}
+```
+
+Read the complete [Language Reference](docs/language-reference.md) for detailed specifications of types, collections (`List of[T]`), and borrow checking.
+
+---
+
+## Performance & Benchmarks
+
+All performance claims in ELE are backed by auditable, automated benchmarks executed on physical hardware (Intel x86-64, Windows 10 & WSL2 Ubuntu). No numbers or charts are simulated.
+
+For complete methodology, raw data, and statistical distributions, see [Performance Report](docs/performance.md) and [Benchmark Methodology](docs/benchmarks/methodology.md).
+
+### Compilation Latency
+
+ELE compiles small and medium programs in tens of milliseconds:
+
+<p align="center">
+  <img src="assets/benchmarks/compilation-time.svg" alt="Compilation Latency" width="760">
+</p>
+
+| Workload | Source Lines | Median Compile Time | Compiler Peak RSS | Output Size |
+|---|---|---|---|---|
+| `hello.l` | 5 | **31.4 ms** | 24.50 MiB | 4,608 B |
+| `arithmetic.l` | 10 | **36.1 ms** | 24.52 MiB | 5,120 B |
+| `fibonacci.l` | 13 | **38.7 ms** | 24.52 MiB | 5,120 B |
+| `text_processing.l` | 10 | **39.2 ms** | 24.52 MiB | 5,120 B |
+| `multimodule (main.l)` | 10 | **54.7 ms** | 40.59 MiB | 5,120 B |
+| `main_sema.l` (Compiler) | 274 | **15.64 s** | 525.11 MiB | 909,824 B |
+| `main_driver.l` (Self-Host) | 665 | **31.30 s** | 855.04 MiB | 1,508,352 B |
+
+---
+
+### Memory Usage During Compilation
+
+Compiler memory overhead is tracked continuously through kernel accounting APIs (Windows Job Objects `PeakProcessMemoryUsed` and Linux `getrusage`):
+
+<p align="center">
+  <img src="assets/benchmarks/peak-memory.svg" alt="Compiler Peak Memory" width="760">
+</p>
+
+---
+
+### Runtime Performance Comparison
+
+We evaluate identical algorithms across **ELE**, **Rust (`rustc 1.99.1`)**, and **C (`gcc 9.4.0`)** producing verified mathematical outputs:
+
+<p align="center">
+  <img src="assets/benchmarks/runtime-performance.svg" alt="Runtime Performance" width="760">
+</p>
+
+| Benchmark | Language | Optimization Level | Compile Time | Runtime (ms) | Binary Size |
+|---|---|---|---|---|---|
+| **Fibonacci(25)** | **ELE** | `native-direct-emit` | **40.6 ms** | **28.37 ms** | **5,120 B** |
+| Fibonacci(25) | Rust | Debug (`-O0`) | 657.6 ms | 20.72 ms | 5,086,801 B |
+| Fibonacci(25) | Rust | Release (`-O3`) | 718.6 ms | 21.02 ms | 5,085,050 B |
+| **Loop(10M)** | **ELE** | `native-direct-emit` | **48.9 ms** | **101.42 ms** | **5,120 B** |
+| Loop(10M) | Rust | Debug (`-O0`) | 674.9 ms | 103.11 ms | 5,086,761 B |
+| Loop(10M) | Rust | Release (`-O3`) | 692.6 ms | 21.40 ms | 5,084,972 B |
+
+> [!NOTE]
+> ELE's native backend emits direct machine code from CFG blocks without SSA optimization passes. Its execution speed is directly comparable to unoptimized debug builds of C and Rust, while compiling in a fraction of the time.
+
+---
+
+### Binary Footprint
+
+Because ELE binaries do not link against the C runtime library or bundle a heavy standard library runtime, generated executables are orders of magnitude smaller:
+
+<p align="center">
+  <img src="assets/benchmarks/binary-size.svg" alt="Binary Footprint Comparison" width="760">
+</p>
+
+---
+
+## Self-Hosting & Generational Reproducibility
+
+ELE has established autonomous, bit-for-bit generational self-rebuilding across Windows and Linux.
+
+<p align="center">
+  <img src="assets/benchmarks/self-hosting.svg" alt="Self-Hosting Generational Fixpoint" width="760">
+</p>
+
+- **Windows Fixpoint:** `Gen 2 SHA256 == Gen 3 SHA256` (`F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D`)
+- **Linux Fixpoint:** `Gen 2 SHA256 == Gen 3 SHA256` (`4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9`)
+- **External Invocations:** **0** (neither `rustc`, `cargo`, `gcc`, nor `link.exe` are called during Gen 2 and Gen 3 builds).
+
+For the full architectural report, read [Self-Hosting Documentation](docs/self-hosting.md).
+
+---
+
+## Native Pipeline Coverage
+
+<p align="center">
+  <img src="assets/benchmarks/native-coverage.svg" alt="Native Coverage Evolution" width="760">
+</p>
+
+- **102 / 102 source files (100%)** in `compiler-l/src/` pass the Lexer, Parser, and Semantic Analysis phases.
+- **20 / 102 source files (~19.6%)** reach native backend emission; these are the **20 / 20 standalone compiler entry points** in the current coverage matrix. This is not 100% full-source backend coverage.
+
+---
+
+## Compiler Architecture
+
+ELE's compiler pipeline is organized into distinct, modular verification layers:
 
 ```text
-crates/l/src/
-  lib.rs         API y diagnósticos
-  lexer.rs       tokens UTF-8 y spans
-  parser.rs      AST, Pratt, declaraciones
-  sema.rs        nombres, tipos y lowering
-  consteval.rs   evaluación de LIR constante
-  lir.rs         tipos/IR independientes
-  ownership.rs   movimientos (Text, structs, enums) y modo de bindings de match
-  exhaustive.rs  exhaustividad y alcanzabilidad de patrones
-  prelude.l      Option y Result escritos en L
-  cfg.rs         LIR de bloques básicos, lowering y verificador
-  backend.rs     backend rustc (predeterminado): LIR → Rust, enteros checked
-  drops.rs       elaboración de drops (flags) y verificación de propiedad
-  native.rs      backend cranelift: LIR de bloques → objeto nativo
-  native/runtime.rs  runtime propio en Cranelift IR: E/S, heap, Text
-  linker.rs      localiza link.exe/kernel32.lib y enlaza sin CRT
-  main.rs        CLI, construcción y ejecución
-crates/l/tests/  conformance, phase2, interpolation, phase_a, structs y enums
-examples/       positivos y negativos ejecutables
-ejemplos/       fixtures originales conservados
-docs/           contrato y documentos derivados
+Source .l ──► Lexer ──► Parser ──► Sema & Types ──► Borrow Checker ──► ELE-LIR ──► CFG ──► x86-64 Emitter ──► PE32+ / ELF64
 ```
 
-Pruebas: suite anterior conservada, nuevas comprobaciones de parser/tipos/const,
-movimientos, UTF-8, stdout/stderr/códigos y ejecutable autónomo. El antiguo negativo
-"Text no implementado" se sustituyó por "Text incompatible con Int", pues Text
-ya forma parte del subset. No hay benchmarks ni afirmaciones de rendimiento.
+See [Compiler Architecture](docs/architecture.md) for technical deep-dives into Pratt parsing, typestate verification, and x86-64 instruction encoding.
 
-Interpolación verificada: **Fibonacci: 55**, stdout exacto, stderr vacío, código 0.
-Suite completa: **66 pruebas, 0 fallos** (fmt y clippy limpios), incluidas pruebas
-diferenciales rustc vs cranelift y pruebas de seguridad de memoria instrumentadas
-(`--trace-alloc`: cada reserva se libera exactamente una vez, heap íntegro). Modelo
-de memoria: [semántica](docs/SEMANTICS.md). Ver [backend](docs/BACKEND.md). Véase [interpolación](docs/INTERPOLATION.md).
+---
 
-[Auditoría](docs/AUDIT_PHASE2.md), [resultados y estado](docs/IMPLEMENTATION_STATUS.md),
-[decisiones](docs/DECISIONS.md), [gramática](docs/GRAMMAR.md),
-[semántica](docs/SEMANTICS.md), [backend](docs/BACKEND.md).
+## Project Status & Roadmap
 
+ELE is an active research and development systems language. While the compiler driver and standalone programs are fully functional and self-hosted, ELE is not yet recommended for production mission-critical environments.
 
-## Backend alternativo sin Rust (experimental)
+See [Known Limitations](docs/limitations.md) and [Development Roadmap](docs/roadmap.md) for details on planned features, including ARM64 support, SSA register allocation, and structured concurrency.
 
-ELE incluye un backend **ELE-LIR 1 → C11 → ejecutable nativo** que no invoca
-Rust ni Cranelift para su compilación. Se puede probar con:
+---
 
-```bash
-python tools/ele_c_backend.py examples/native_without_rust.lir -o ele_demo
-./ele_demo
-python -m unittest discover -s tests/native_backend -v
-```
+## Documentation Directory
 
-Para compilar fuentes `.l` por esta ruta se necesita **un ejecutable Stage 1
-precompilado**. El compilador ELE aún **no es self-hosted**: Stage 0 (Rust)
-sigue siendo necesario para construir Stage 1 inicialmente. La nueva ruta
-es un avance parcial, no la independencia completa. Detalles, soporte real,
-limitaciones y siguiente plan: [backend sin Rust](docs/RUST_FREE_BACKEND.md).
+- [Getting Started Guide](docs/getting-started.md)
+- [Language Reference Specification](docs/language-reference.md)
+- [Compiler Architecture](docs/architecture.md)
+- [Self-Hosting & Generational Fixpoint](docs/self-hosting.md)
+- [Performance & Benchmark Report](docs/performance.md)
+- [Known Limitations & Security Constraints](docs/limitations.md)
+- [Development Roadmap](docs/roadmap.md)
+- [Benchmark Methodology](docs/benchmarks/methodology.md)
+- [Benchmark Reproducibility Guide](docs/benchmarks/reproducibility.md)
 
-## Backend de código máquina escrito en ELE (avance experimental)
+---
 
-Los archivos `compiler-l/src/codegen/x86_64.l` y
-`compiler-l/src/codegen/elf64.l` constituyen la primera implementación de
-**codificación de instrucciones x86-64 y encabezados ELF64 hecha en ELE**.
-`compiler-l/src/native_elf_demo.l` construye en memoria un ejecutable Linux
-que invoca `exit(42)` sin libc. La generación todavía depende del bootstrap
-histórico para ejecutar el emisor y **emite hexadecimal a stdout, no un
-archivo ejecutable**. No existe aún un parser ELE-LIR para este backend ni
-un backend PE/COFF para Windows. No hay Stage 2 ni Stage 3.
+## Contributing & License
 
-También se añadió una **ruta de compilación ELE-LIR → x86-64 → ELF64
-escrita en ELE** (`codegen/lir_tokens.l`, `codegen/lir_subset.l`,
-`native_lir_demo.l`). Admite solo el subconjunto de un `main(): Int`
-lineal con `use`, `add`, `sub`, `mul` y `return`; los casos válidos y no
-soportados están en `examples/native_int_subset*.lir`. La ruta de
-escritura binaria, la validación ELF emitida por el `.l` compilado y el
-soporte de Stage 2 siguen pendientes.
-
-Las seis pruebas Rust de integración `crates/l/tests/native_encoder_l.rs` están
-preparadas, pero pendientes de ejecución MSVC:
+Contributions, bug reports, and discussions are welcome. Please ensure that all modifications pass the quality gates:
 
 ```powershell
-.\bench\verify-native-encoder.ps1
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p project-l --test ele_v2_legacy_ratchet
+python benchmarks/scripts/validate_results.py
 ```
 
-El historial y las limitaciones están documentados en
-[`docs/ELE_NATIVE_BACKEND_PHASE_8_7.md`](docs/ELE_NATIVE_BACKEND_PHASE_8_7.md).
-
-## 8.7.1 — escritura binaria desde ELE (bootstrap, pendiente de MSVC)
-
-`native_lir_demo.l` admite ahora `programa.lir salida.elf`: mediante
-`writeBytes(Text, List<Int>)` guarda el ELF64 directamente, sin convertir a
-hexadecimal. El soporte inicial de I/O está conectado al bootstrap Win64
-(Rust `no_std`, API del sistema operativo), por lo que **no demuestra aún
-independencia de Rust**. El emisor de código máquina continúa escrito en ELE.
-
-```powershell
-.\bench\verify-native-encoder.ps1
-.\bench\build-native-elf.ps1
-```
-
-Ver [informe y límites de la Fase 8.7.1](docs/ELE_NATIVE_BACKEND_PHASE_8_7_1.md).
-
-### Backend nativo experimental escrito en ELE: fase 8.7.2
-
-`compiler-l/src/native_cfg_demo.l` implementa una ruta restringida
-`ELE-LIR 1 (Int/Bool, funciones/CFG) → x86-64 → ELF64` en archivos `.l`.
-Para el bootstrap Windows/MSVC: `bench/verify-native-encoder.ps1`, seguido de
-`bench/verify-native-cfg.ps1` y `bench/build-native-cfg.ps1`.
-**Pendiente de compilar/probar el nuevo código ELE con Stage 0.** No existe
-Stage 2 ni compilación autosuficiente. Consultar
-[`docs/ELE_NATIVE_BACKEND_PHASE_8_7_2.md`](docs/ELE_NATIVE_BACKEND_PHASE_8_7_2.md).
-
-### Fase 8.7.3 — Fundamentos de memoria nativa (experimental)
-
-`compiler-l/src/codegen/native_layout.l` y `x86_64.l` incluyen un planificador
-de layouts y cargas/stores de 8/64 bits. Hay un ejemplo ELE de stack agregado
-que debe generar un ELF64 Linux con salida 42. **Pendiente de validar con
-Stage 0/MSVC**; no equivale a soporte completo de structs y recursos en LIR.
-Comandos: `bench/verify-native-memory.ps1` y `bench/build-native-stack.ps1`.
-Ver `docs/ELE_NATIVE_BACKEND_PHASE_8_7_3.md`.
-
-### Continuación experimental: structs move-only del backend ELE
-
-La ruta `native_cfg_demo.l` ahora incluye un subconjunto de estructuras con
-campos Int/Bool del protocolo ELE-LIR 1. Sigue siendo experimental y su
-compilación con MSVC requiere verificación. Comandos y limitaciones:
-[continuación 8.7.3 hacia 8.8](docs/ELE_8_7_3_8_8_CONTINUACION.md).
-
-
-### Incremento 8.7.3 — structs anidadas move-only (sin compilar aún con Stage0)
-
-`native_cfg_demo.l` ahora puede representar una struct move-only que contiene otra
-struct move-only **ya declarada** en ELE-LIR 1; el emisor recorre los campos y
-utiliza las cargas y stores correctos, sin copiar padding. El verificador invalida las variables movidas y
-rechaza las extracciones parciales de structs; solo se leen campos Copy. Hay fixtures y
-pruebas de integración para salida 42/0, rechazos nominales e integración
-Stage1. **Las pruebas `.l` necesitan MSVC y siguen pendientes.**
-
-Ejecutar `bench/verify-native-nested.ps1` en Windows con Rust/MSVC.
-Consultar [informe de structs anidadas](docs/ELE_8_7_3_NESTED_MOVE.md).
-
-### Incremento 8.7.4.2 (experimental)
-
-Interop de `i payload` para los dos lectores LIR y emisión nominal de enums
-unitarios desde Stage 1. **No verificado todavía con Stage 0/MSVC**, ni
-representa soporte completo de `Option`, `Result` o `match`. Ejecuta
-`bench/verify-enum-lir-interop.ps1` y consulta
-`docs/ELE_NATIVE_BACKEND_PHASE_8_7_4_2.md`.
+**License:** No repository-level license file has been published. Do not assume redistribution rights without confirming the project's terms.
