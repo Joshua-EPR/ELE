@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Windows runners may default Python stdout to a legacy charmap.
+  PYTHONIOENCODING: utf-8
+
 jobs:
   validate-docs-and-benchmarks:
     name: Validate Docs, Benchmarks & SVG Charts (${{ matrix.os }})
