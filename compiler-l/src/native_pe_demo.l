@@ -159,7 +159,7 @@ flow selfCheck() => Int {
     print("ok.file_size={ok.file_size}")
     hold e_empty_code = pe64Layout(0, 100, 4096, 512)
     selfCheckLine("empty_code", e_empty_code.error)
-    hold e_code_too_large = pe64Layout(16777217, 100, 4096, 512)
+    hold e_code_too_large = pe64Layout(33554433, 100, 4096, 512)
     selfCheckLine("code_too_large", e_code_too_large.error)
     hold e_code_huge = pe64Layout(4611686018427387904, 100, 4096, 512)
     selfCheckLine("code_huge", e_code_huge.error)
