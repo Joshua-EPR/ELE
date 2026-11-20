@@ -99,6 +99,10 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         p.error = 44
         give
     }
+    // Every declared variable needs at least one source byte (a "var" line).
+    // Reject impossible counts BEFORE any List@reserve: an adversarial header
+    // must never turn into a multi-gigabyte allocation or a process abort.
+    when vars > source.byteLength { p.error = 45; give }
     // Calls and returns of aggregates require ABI-specific lowering. Keep
     // those unsupported until the by-value calling convention is verified.
     // Aggregate results travel through a hidden pointer (see native_cfg_emit).
@@ -195,6 +199,10 @@ expose flow cfgParse(source: view Text) => CfgProgram {
         p.error = 48
         give p
     }
+    // Each function requires at least one source byte (a "func" record).
+    // Preflight against source length before reserving function descriptors.
+    // This is a structural lower bound, not a fixed compiler capacity limit.
+    when functions > source.byteLength { p.error = 44; give p }
     p.main = main
     p.decl_structs = structs
     p.decl_enums = enums
