@@ -2,18 +2,46 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "ELE",
   "scopeName": "source.ele",
-  "fileTypes": ["l"],
+  "fileTypes": [
+    "l"
+  ],
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#strings" },
-    { "include": "#method_calls" },
-    { "include": "#generics" },
-    { "include": "#keywords" },
-    { "include": "#types" },
-    { "include": "#constants" },
-    { "include": "#functions" },
-    { "include": "#operators" },
-    { "include": "#numbers" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#method_calls"
+    },
+    {
+      "include": "#generics"
+    },
+    {
+      "include": "#bindings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#numbers"
+    }
   ],
   "repository": {
     "comments": {
@@ -45,13 +73,19 @@
               "begin": "\\{",
               "end": "\\}",
               "beginCaptures": {
-                "0": { "name": "punctuation.definition.interpolation.begin.ele" }
+                "0": {
+                  "name": "punctuation.definition.interpolation.begin.ele"
+                }
               },
               "endCaptures": {
-                "0": { "name": "punctuation.definition.interpolation.end.ele" }
+                "0": {
+                  "name": "punctuation.definition.interpolation.end.ele"
+                }
               },
               "patterns": [
-                { "include": "$self" }
+                {
+                  "include": "$self"
+                }
               ]
             }
           ]
@@ -64,8 +98,12 @@
           "name": "meta.method-call.ele",
           "match": "(@)([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.operator.method.ele" },
-            "2": { "name": "entity.name.function.method.ele" }
+            "1": {
+              "name": "keyword.operator.method.ele"
+            },
+            "2": {
+              "name": "entity.name.function.method.ele"
+            }
           }
         }
       ]
@@ -75,8 +113,12 @@
         {
           "match": "\\b(of)\\s*(\\[)",
           "captures": {
-            "1": { "name": "keyword.other.generic.ele" },
-            "2": { "name": "punctuation.bracket.square.ele" }
+            "1": {
+              "name": "keyword.other.generic.ele"
+            },
+            "2": {
+              "name": "punctuation.bracket.square.ele"
+            }
           }
         }
       ]
@@ -142,6 +184,10 @@
         {
           "name": "constant.language.boolean.ele",
           "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.other.identifier.ele",
+          "match": "\\b[A-Z][A-Z0-9_]+\\b"
         }
       ]
     },
@@ -150,13 +196,17 @@
         {
           "match": "\\b(?:flow|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "entity.name.function.ele" }
+            "1": {
+              "name": "entity.name.function.ele"
+            }
           }
         },
         {
           "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
           "captures": {
-            "1": { "name": "entity.name.function.ele" }
+            "1": {
+              "name": "entity.name.function.ele"
+            }
           }
         }
       ]
@@ -218,6 +268,59 @@
         {
           "name": "constant.numeric.integer.ele",
           "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "bindings": {
+      "patterns": [
+        {
+          "match": "\\b(fixed)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.ele"
+            },
+            "2": {
+              "name": "variable.other.constant.declaration.ele"
+            }
+          }
+        },
+        {
+          "match": "\\b(hold|change)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ownership.ele"
+            },
+            "2": {
+              "name": "variable.other.declaration.ele"
+            }
+          }
+        },
+        {
+          "match": "(?<=[(,])\\s*([a-z_][a-zA-Z0-9_]*)\\s*(?=:)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.ele"
+            }
+          }
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "match": "(\\.)([a-z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.ele"
+            },
+            "2": {
+              "name": "variable.other.member.ele"
+            }
+          }
+        },
+        {
+          "name": "variable.other.readwrite.ele",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
         }
       ]
     }

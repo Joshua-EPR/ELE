@@ -107,4 +107,46 @@ for (const rule of theme.tokenColors) {
   assert.match(rule.settings.foreground, /^#[0-9a-fA-F]{6}$/, 'Invalid foreground in token rule');
 }
 
+// 6. ELE binding scopes: keep keywords, methods, types and strings intact.
+const bindingPatterns = syntax.repository.bindings.patterns;
+const constDecl = 'fixed MAX_WEIGHTS: Int = 4'.match(new RegExp(bindingPatterns[0].match));
+const holdDecl = 'hold input: [Float; 2]'.match(new RegExp(bindingPatterns[1].match));
+const changeDecl = 'change weights = List[]'.match(new RegExp(bindingPatterns[1].match));
+const parameter = '(value: Float'.match(new RegExp(bindingPatterns[2].match));
+assert.strictEqual(constDecl?.[2], 'MAX_WEIGHTS');
+assert.strictEqual(holdDecl?.[2], 'input');
+assert.strictEqual(changeDecl?.[2], 'weights');
+assert.strictEqual(parameter?.[1], 'value');
+const namedConstant = new RegExp(syntax.repository.constants.patterns.find(p => p.name === 'constant.other.identifier.ele').match);
+assert.ok(namedConstant.test('MAX_WEIGHTS'), 'named constant references should be highlighted');
+assert.ok(!namedConstant.test('Float'), 'primitive type must not be treated as named constant');
+const variableRules = syntax.repository.variables.patterns;
+const member = 'column.activeCount'.match(new RegExp(variableRules[0].match));
+assert.strictEqual(member?.[2], 'activeCount');
+const variableRef = new RegExp(variableRules[1].match);
+assert.ok(variableRef.test('weights'), 'variable references should be recognized');
+assert.ok(!variableRef.test('Int'), 'type names should not match variable fallback');
+
+const includes = s => themeScopes.includes(s);
+for (const scope of [
+  'variable.other.constant.declaration.ele',
+  'constant.other.identifier.ele',
+  'variable.other.declaration.ele',
+  'variable.other.readwrite.ele',
+  'variable.other.member.ele',
+  'variable.parameter.ele'
+]) {
+  assert.ok(includes(scope), `Graphite Dark theme missing new ELE scope: ${scope}`);
+}
+const palette = ['ELE local variables','ELE parameters','ELE member fields','ELE named constants']
+  .map(name => theme.tokenColors.find(r => r.name === name)?.settings.foreground);
+assert.strictEqual(new Set(palette).size, 4, 'variables, parameters, fields and constants require distinct colors');
+assert.ok(palette.every(Boolean), 'all binding roles must have colors');
+const grammarOrder = syntax.patterns.map(p => p.include);
+assert.ok(grammarOrder.indexOf('#bindings') < grammarOrder.indexOf('#keywords'), 'binding declarations must be captured before keywords');
+assert.ok(grammarOrder.indexOf('#constants') < grammarOrder.indexOf('#types'), 'uppercase constant identifiers need precedence over broad type pattern');
+assert.ok(grammarOrder.indexOf('#variables') > grammarOrder.indexOf('#functions'), 'function names must not become variables');
+const mirror = JSON.parse(fs.readFileSync(path.resolve(rootDir, '../../syntaxes/ele.tmLanguage.json'), 'utf8'));
+assert.deepStrictEqual(syntax, mirror, 'root TextMate grammar must remain identical to VS Code extension grammar');
+
 console.log('All VS Code ELE extension validations passed successfully!');

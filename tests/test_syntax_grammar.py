@@ -234,6 +234,58 @@ class TestTextMateGrammar(unittest.TestCase):
             self.assertTrue(matched, f"Operator '{op}' not covered by operators patterns")
 
 
+class TestELEBindingHighlighting(unittest.TestCase):
+    def setUp(self):
+        self.syntax = json.loads(SYNTAX_JSON.read_text(encoding="utf-8"))
+        self.repo = self.syntax["repository"]
+
+    def test_binding_declarations_and_references(self):
+        bindings = [re.compile(p["match"]) for p in self.repo["bindings"]["patterns"]]
+        self.assertEqual(bindings[0].search("fixed MAX_WEIGHTS: Int = 4").group(2), "MAX_WEIGHTS")
+        self.assertEqual(bindings[0].search("fixed timeout = 5").group(2), "timeout")
+        self.assertEqual(bindings[1].search("hold input: [Float; 2]").group(2), "input")
+        self.assertEqual(bindings[1].search("change weights = List[]").group(2), "weights")
+        self.assertEqual(bindings[2].search("(post: Float").group(1), "post")
+        named_constant = next(
+            p["match"] for p in self.repo["constants"]["patterns"]
+            if p["name"] == "constant.other.identifier.ele"
+        )
+        self.assertIsNotNone(re.search(named_constant, "MAX_WEIGHTS"))
+        self.assertIsNone(re.search(named_constant, "Float"))
+        member_rule = re.compile(self.repo["variables"]["patterns"][0]["match"])
+        self.assertEqual(member_rule.search("column.activeCount").group(2), "activeCount")
+        variable_rule = re.compile(self.repo["variables"]["patterns"][1]["match"])
+        self.assertIsNotNone(variable_rule.search("weights"))
+        self.assertIsNone(variable_rule.search("Float"))
+
+    def test_priorities_and_mirrored_grammar(self):
+        includes = [p["include"] for p in self.syntax["patterns"]]
+        self.assertLess(includes.index("#bindings"), includes.index("#keywords"))
+        self.assertLess(includes.index("#constants"), includes.index("#types"))
+        self.assertGreater(includes.index("#variables"), includes.index("#functions"))
+        root = json.loads(ROOT_SYNTAX_JSON.read_text(encoding="utf-8"))
+        self.assertEqual(root, self.syntax)
+
+    def test_graphite_binding_palette_is_distinct(self):
+        pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+        theme = next(t for t in pkg["contributes"]["themes"] if t["label"] == "ELE Graphite Dark")
+        colors = json.loads((EDITORS_DIR / theme["path"]).read_text(encoding="utf-8"))
+        scopes = {
+            scope: rule["settings"]["foreground"]
+            for rule in colors["tokenColors"]
+            for scope in (rule["scope"] if isinstance(rule["scope"], list) else [rule["scope"]])
+        }
+        roles = (
+            "variable.other.declaration.ele",
+            "variable.parameter.ele",
+            "variable.other.member.ele",
+            "variable.other.constant.declaration.ele",
+        )
+        actual = [scopes.get(scope) for scope in roles]
+        self.assertNotIn(None, actual)
+        self.assertEqual(len(set(actual)), len(actual))
+
+
 class TestSnippets(unittest.TestCase):
     def setUp(self):
         self.assertTrue(SNIPPETS_JSON.exists(), f"Missing {SNIPPETS_JSON}")
