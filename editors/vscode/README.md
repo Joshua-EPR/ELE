@@ -99,10 +99,10 @@ This extension now also provides the optional **ELE Graphite Dark** theme, inten
 | Types | `Float`, `List`, `Microcolumn` | muted gold `#E7C38C` |
 | Functions and methods | `main()`, `@crear()`, `@reset()` | calm blue `#82BFE9` |
 | Strings | `"hello"` | sage `#A7CFA0` |
-| Variables locales | `input`, `weights`, `column` | verde agua `#B6D7C7` |
-| Parámetros | `pre`, `post` | azul suave `#AEC9E6` |
-| Campos de objetos | `column.activeCount` | arena `#CECEAB` |
-| Constantes | `fixed MAX_WEIGHTS`, `MAX_WEIGHTS` | ámbar `#E8B68D` |
+| Local variables | `input`, `weights`, `column` | seafoam `#B6D7C7` |
+| Parameters | `pre`, `post` | soft blue `#AEC9E6` |
+| Object fields | `column.activeCount` | sandstone `#CECEAB` |
+| Named constants | `fixed MAX_WEIGHTS`, `MAX_WEIGHTS` | amber `#E8B68D` |
 | Numbers | `0.8`, `31` | apricot `#DCAA87` |
 | Comments | `// detail` | slate `#708494` |
 
