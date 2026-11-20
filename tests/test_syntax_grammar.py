@@ -357,7 +357,7 @@ class TestELEBrandedIcons(unittest.TestCase):
 
         def dimensions(p):
             data = p.read_bytes()
-            self.assertEqual(data[:8], b"\\x89PNG\\r\\n\\x1a\\n")
+            self.assertEqual(data[:8], bytes.fromhex("89504e470d0a1a0a"))
             return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
 
         width, height = dimensions(logo)
