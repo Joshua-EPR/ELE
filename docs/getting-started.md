@@ -18,22 +18,42 @@ To build the compiler from source:
 
 ---
 
-## 2. Bootstrapping the Compiler
+## 2. Installing ELE
+
+### Option A: End-User Installation (Zero Dependencies)
+
+If you have downloaded a distribution package or cloned the repository, install ELE directly without requiring Rust or Cargo:
+
+**On Windows:**
+```powershell
+.\install.ps1
+# Installs to $env:LOCALAPPDATA\ele\bin and configures User PATH.
+```
+
+**On Linux:**
+```bash
+./scripts/install.sh
+# Installs to ~/.ele/bin and configures shell PATH.
+```
+
+The installer verifies the installation by running `ele --version` and building a sample verification program.
+
+### Option B: Bootstrapping the Compiler from Source
 
 ELE features an autonomous self-hosting driver (`compiler-l/src/main_driver.l`) capable of compiling ELE programs and rebuilding its own compiler binary without external dependencies.
 
-### Step 1: Clone the Repository
+#### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/Joshua-EPR/ELE.git
 cd ELE
 ```
 
-### Step 2: Build the Stage 0 Bootstrap Compiler
+#### Step 2: Build the Stage 0 Bootstrap Compiler
 ```bash
 cargo build -p project-l --bin l
 ```
 
-### Step 3: Compile the Autonomous ELE Driver
+#### Step 3: Compile the Autonomous ELE Driver
 Using Stage 0, compile the self-hosting driver to a standalone executable:
 
 **On Windows:**
@@ -43,7 +63,12 @@ cargo test -p project-l --test ele_build_driver_l driver_cli_help_flag
 # target/stage1-tests/main_driver/normal/target/cranelift/x86_64-pc-windows-gnu/main_driver.exe
 ```
 
-Alternatively, copy the pre-built autonomous driver binary to `bin/ele.exe` (or `bin/ele.elf` on Linux).
+Alternatively, build official distribution packages using the packaging script:
+```bash
+python scripts/package_distribution.py --target all
+```
+This produces `dist/ele-windows-x86_64.zip`, `dist/ele-linux-x86_64.tar.gz`, and `dist/SHA256SUMS.txt`.
+
 
 ---
 
