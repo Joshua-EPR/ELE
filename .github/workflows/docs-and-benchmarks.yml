@@ -1,0 +1,73 @@
+name: Documentation & Benchmark Validation
+
+on:
+  push:
+    branches: [main, docs/**]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-docs-and-benchmarks:
+    name: Validate Docs, Benchmarks & SVG Charts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Validate Benchmark JSON Results & Integrity
+        run: python benchmarks/scripts/validate_results.py
+
+      - name: Verify Deterministic SVG Chart Generation
+        run: |
+          python benchmarks/scripts/generate_charts.py
+          git diff --exit-code assets/benchmarks/
+
+      - name: Verify Documentation Links and Assets
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          root = Path('.')
+          doc_files = list(root.glob('docs/**/*.md')) + [root / 'README.md', root / 'README.es.md']
+          errors = 0
+
+          for doc in doc_files:
+              if not doc.exists():
+                  continue
+              text = doc.read_text(encoding='utf-8')
+              # Find markdown image links ![alt](path)
+              images = re.findall(r'!\[.*?\]\((.*?)\)', text)
+              for img in images:
+                  img_path = (doc.parent / img).resolve()
+                  if not img_path.exists():
+                      print(f"BROKEN IMAGE in {doc}: {img} (resolved: {img_path})")
+                      errors += 1
+          if errors > 0:
+              raise SystemExit(f"Found {errors} broken image links in documentation.")
+          print("✓ All documentation image references verified successfully on disk.")
+          PY
+
+      - name: Check Formatting & Clippy Quality Gates
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Verify Canonical ELE v2 Syntax Ratchet
+        run: cargo test -p project-l --test ele_v2_legacy_ratchet -- --test-threads=1
