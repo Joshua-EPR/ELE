@@ -22,6 +22,7 @@ const FILE_TYPE_DISK: u32 = 1;
 const CREATE_NEW: u32 = 1;
 const MOVEFILE_REPLACE_EXISTING: u32 = 1;
 const MOVEFILE_WRITE_THROUGH: u32 = 8;
+const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
 
 #[repr(C)]
 struct ByHandleFileInformation {
@@ -104,6 +105,14 @@ unsafe extern "system" {
     fn l_rt_alloc(bytes: usize) -> *mut u8;
     fn l_rt_realloc(data: *mut u8, bytes: usize) -> *mut u8;
     fn l_rt_free(data: *mut u8);
+}
+
+// Windows CNG supplies OS-backed entropy for exclusive temporary names.
+// Only the Rust Stage 0 bootstrap object uses bcrypt; native ELE Gen 2/3
+// continue to use their own platform-specific entropy implementations.
+#[link(name = "bcrypt")]
+unsafe extern "system" {
+    fn BCryptGenRandom(algorithm: Handle, buffer: *mut u8, len: u32, flags: u32) -> i32;
 }
 
 // The output is zero initialized by the caller. A successful nonempty
@@ -442,21 +451,46 @@ pub unsafe extern "system" fn l_platform_write_bytes(
     if size <= 0 { return 1; }
     unsafe { dest.add(size as usize).write(0) };
 
+    // Destination + ".tmp." + 32 hexadecimal digits + NUL, in UTF-16 units.
+    // Never reuse the former predictable ".tmp.0" .. ".tmp.9" names.
     let mut tmp_wide = Buffer::new();
-    tmp_wide.grow((path_len + 32) * 2);
+    tmp_wide.grow((size as usize + 38) * 2);
+    if tmp_wide.data.is_null() {
+        return 2;
+    }
     let tmp_dest = tmp_wide.data.cast::<u16>();
     for i in 0..size as usize {
         unsafe { tmp_dest.add(i).write(*dest.add(i)) };
     }
-    let suffix: [u16; 7] = [46, 116, 109, 112, 46, 48, 0];
+    const HEX: [u16; 16] = [
+        48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 97, 98, 99, 100, 101, 102,
+    ];
+    let suffix: [u16; 5] = [46, 116, 109, 112, 46];
     for (j, &c) in suffix.iter().enumerate() {
         unsafe { tmp_dest.add(size as usize + j).write(c) };
     }
 
-    let mut attempt = 0u16;
+    let mut attempt = 0u8;
     let mut handle = ptr::null_mut();
-    while attempt < 10 {
-        unsafe { tmp_dest.add(size as usize + 5).write(48 + attempt) };
+    while attempt < 16 {
+        let mut nonce = [0u8; 16];
+        if unsafe {
+            BCryptGenRandom(
+                ptr::null_mut(), nonce.as_mut_ptr(), nonce.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        } != 0 {
+            return 2; // Entropy failure: fail closed without opening the destination.
+        }
+        for (i, &byte) in nonce.iter().enumerate() {
+            let offset = size as usize + 5 + 2 * i;
+            unsafe {
+                tmp_dest.add(offset).write(HEX[(byte >> 4) as usize]);
+                tmp_dest.add(offset + 1).write(HEX[(byte & 15) as usize]);
+            }
+        }
+        unsafe { tmp_dest.add(size as usize + 37).write(0) };
         handle = unsafe {
             CreateFileW(
                 tmp_dest, GENERIC_WRITE, SHARE_READ_WRITE_DELETE, ptr::null_mut(),
@@ -467,7 +501,7 @@ pub unsafe extern "system" fn l_platform_write_bytes(
             break;
         }
         let err = unsafe { GetLastError() };
-        if err != 80 {
+        if err != 80 && err != 183 { // ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS
             return 2;
         }
         attempt += 1;

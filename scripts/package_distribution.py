@@ -59,6 +59,22 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+
+def verify_fixpoint(gen2_bin: Path, gen3_bin: Path) -> Path:
+    """Fail closed: neither a missing Gen 3 nor a mismatch is distributable."""
+    if not gen2_bin.is_file() or not gen3_bin.is_file():
+        raise RuntimeError("Self-hosting verification failed: missing Gen 2 or Gen 3 binary")
+    hash_gen2 = sha256_file(gen2_bin)
+    hash_gen3 = sha256_file(gen3_bin)
+    if hash_gen2 != hash_gen3:
+        raise RuntimeError(
+            f"Self-hosting verification failed: Gen 2 != Gen 3 "
+            f"(Gen 2 SHA256={hash_gen2}, Gen 3 SHA256={hash_gen3})"
+        )
+    print(f"[dist] Verified Gen 2 == Gen 3 bit for bit (SHA256: {hash_gen3})")
+    return gen3_bin
+
+
 def find_or_build_stage0(repo_root: Path) -> Path:
     ext = ".exe" if sys.platform == "win32" else ""
     target_l = repo_root / f"target/debug/l{ext}"
@@ -173,37 +189,30 @@ def build_autonomous_compiler(
     if target_os == "linux" and sys.platform != "win32":
         gen2_bin.chmod(gen2_bin.stat().st_mode | 0o755)
 
-    # Perform Gen 3 build for bitwise fixpoint verification
-    # Note: On Windows building Linux ELF or vice-versa, Gen 2 can run if matching host or in WSL/native.
+    # Gen 2 must execute on the packaging host: a cross-target binary
+    # cannot certify the autonomous Gen 2 -> Gen 3 fixpoint here.
     can_execute_gen2 = (
         (target_os == "windows" and sys.platform == "win32")
         or (target_os == "linux" and sys.platform.startswith("linux"))
     )
+    if not can_execute_gen2:
+        raise RuntimeError(
+            f"Cannot verify {target_os} Gen 2 -> Gen 3 on host {sys.platform}; "
+            "build each distribution on its native target runner"
+        )
 
-    if can_execute_gen2:
-        print(f"[dist] Building Gen 3 ({target_os}) using Gen 2 for fixpoint verification...")
-        cmd_gen3 = [
-            str(gen2_bin),
-            "build",
-            str(driver_src),
-            "--target",
-            target_flag,
-            "--output",
-            str(gen3_bin),
-        ]
-        res_gen3 = subprocess.run(cmd_gen3, cwd=repo_root, capture_output=True, text=True)
-        if res_gen3.returncode == 0 and gen3_bin.is_file():
-            hash_gen2 = sha256_file(gen2_bin)
-            hash_gen3 = sha256_file(gen3_bin)
-            if hash_gen2 == hash_gen3:
-                print(f"[dist] Bitwise identical fixpoint confirmed! (SHA256: {hash_gen3})")
-                return gen3_bin
-            else:
-                print(f"[dist] Warning: Gen 2 and Gen 3 hashes differed: {hash_gen2} vs {hash_gen3}")
-                return gen3_bin
-
-    return gen2_bin
-
+    print(f"[dist] Building Gen 3 ({target_os}) using Gen 2 for fixpoint verification...")
+    cmd_gen3 = [
+        str(gen2_bin), "build", str(driver_src), "--target", target_flag,
+        "--output", str(gen3_bin),
+    ]
+    res_gen3 = subprocess.run(cmd_gen3, cwd=repo_root, capture_output=True, text=True)
+    if res_gen3.returncode != 0 or not gen3_bin.is_file():
+        raise RuntimeError(
+            f"Gen 3 self-rebuild failed (exit={res_gen3.returncode}): "
+            f"{res_gen3.stderr}\\n{res_gen3.stdout}"
+        )
+    return verify_fixpoint(gen2_bin, gen3_bin)
 
 def assemble_distribution_archive(
     repo_root: Path,

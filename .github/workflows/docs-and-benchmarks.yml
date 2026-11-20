@@ -37,6 +37,9 @@ jobs:
       - name: Validate Benchmark JSON Results & Integrity
         run: python benchmarks/scripts/validate_results.py
 
+      - name: Ensure README performance claims match versioned measurements
+        run: python -m unittest discover -s tests -p test_benchmark_readme_consistency.py -v
+
       - name: Verify Deterministic SVG Chart Generation
         run: |
           python benchmarks/scripts/generate_charts.py

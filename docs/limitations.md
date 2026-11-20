@@ -48,12 +48,17 @@ This document provides transparent, verified engineering disclosure regarding cu
 
 ## 4. Filesystem & Driver Safety Guarantees
 
-- **Lexical Path Normalization:** The driver normalizes separators and `.` / `..` as text, but this is **not** OS-backed filesystem canonicalization. Absolute/relative aliases, UNC/device paths, Unicode and symlink identities are not reliably resolved.
-- **Multi-Module Protection (Limited):** It compares the requested destination with the entry source and imported modules by textual path and a supplementary UTF-8 content heuristic. Equal content does not prove that two paths refer to the same file, and hardlink identity is not established.
-- **Output Writing Is Not Atomic:** The driver writes `{output}.tmp.ele` and then performs a separate `writeBytes(output, image)` call. **There is no atomic rename/replace**. An interrupted final write may truncate or corrupt the destination, and the temporary file may remain.
-- **Precaution:** Do not target irreplaceable files or unverified aliases. Keep backups until OS-level file identity checks, safe temporary-file handling, and atomic publication are implemented and tested.
+**Stage 3.5 behavior (native ELE and Windows Stage 0 bootstrap):**
+
+- **Source protection:** Before emitting a result, the driver checks the output against the entry source and each imported module. It performs lexical path normalization, then calls `sameFile` to compare OS file identities where available. The interface is tri-state: `0` = different, `1` = same, `2` = identity could not be established; the driver rejects `1` and `2`. Unlike the earlier implementation, equality of UTF-8 contents is **not** used as file identity.
+- **Existing aliases:** OS file identity can detect existing hardlinks and symlinks when opening their targets succeeds. Lexical normalization alone is not filesystem canonicalization; Unicode, UNC/device paths and path-resolution behavior still depend on the host OS.
+- **Native output staging:** The Linux ELF64 runtime uses `getrandom` to name a temporary file in the destination directory and opens it exclusively; the Windows PE32+ runtime uses OS-backed randomness and `CreateFileW(CREATE_NEW)`. After checked writes and file flush/sync, it publishes via Linux `rename` or Windows `MoveFileExW` with replacement flags. The Windows **Rust Stage 0 bootstrap object** also now uses CNG `BCryptGenRandom` and exclusive temporary creation. This is materially different from the obsolete double-write `{output}.tmp.ele` implementation.
+- **Atomicity scope:** These native rename/replace operations aim to avoid exposing partial output when executed on a filesystem supporting atomic same-directory replacement. They do **not** prove crash durability across power loss or universal atomicity on all filesystems, shares or Windows configurations. No directory `fsync` durability guarantee is currently established.
+- **Remaining race limitations:** File identity is checked before compilation, not pinned through publication; another process could change a path or substitute an alias in between (**TOCTOU**). Concurrent writers to the same destination are not serialized; the last successful publication may win. The Rust bootstrap and ELE-native paths must each pass platform-specific failure, concurrency and security tests before stronger guarantees are asserted.
+- **Safe use:** Prefer a dedicated build output directory, avoid compiling into locations containing irreplaceable files, and keep backups of valuable source data. A successful CI smoke test is not a formal proof of absence of races or filesystem corruption.
 
 ---
+
 ## 5. Standard Library & Ecosystem
 
 - **Minimal Builtin Runtime:** Currently limited to:

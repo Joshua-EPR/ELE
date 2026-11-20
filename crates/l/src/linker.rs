@@ -154,7 +154,15 @@ pub fn link_with_objects(
     ]);
     command.arg(format!("/OUT:{}", executable.display()));
     command.arg(object).args(objects);
-    command.arg("kernel32.lib").args(libraries);
+    command.arg("kernel32.lib");
+    // The Stage 0 Win64 platform object uses BCryptGenRandom. The object
+    // is embedded at build time as l_platform.obj and written to disk as
+    // <module>.platform.obj before linking (see main.rs). It is currently
+    // the only auxiliary object; add bcrypt only for this bootstrap path.
+    if !objects.is_empty() {
+        command.arg("bcrypt.lib");
+    }
+    command.args(libraries);
     for dir in &toolchain.libpaths {
         command.arg(format!("/LIBPATH:{}", dir.display()));
     }
