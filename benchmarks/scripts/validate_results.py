@@ -8,6 +8,7 @@ and consistency across all benchmark result files.
 import sys
 import json
 from pathlib import Path
+from statistics import median
 
 
 def validate_compilation_records(records, filename):
@@ -48,6 +49,23 @@ def validate_comparison_records(records, filename):
         assert r.get("median_compile_ms", 0) > 0, f"{filename} ({bid}): invalid median_compile_ms"
         assert r.get("median_runtime_ms", 0) > 0, f"{filename} ({bid}): invalid median_runtime_ms"
         assert r.get("binary_size_bytes", 0) > 0, f"{filename} ({bid}): invalid binary_size_bytes"
+        compile_times = r.get("compile_times_ms", [])
+        runtimes = r.get("runtimes_ms", [])
+        assert r.get("compile_iterations") == len(compile_times) and compile_times, (
+            f"{filename} ({bid}): compile_iterations does not match samples"
+        )
+        assert r.get("iterations") == len(runtimes) and runtimes, (
+            f"{filename} ({bid}): runtime iterations does not match samples"
+        )
+        assert abs(median(compile_times) - r["median_compile_ms"]) < 0.06, (
+            f"{filename} ({bid}): compilation median does not match samples"
+        )
+        assert abs(median(runtimes) - r["median_runtime_ms"]) < 0.06, (
+            f"{filename} ({bid}): runtime median does not match samples"
+        )
+        assert not Path(r.get("source_file", "")).is_absolute(), (
+            f"{filename} ({bid}): source_file should be repository relative"
+        )
     print(f"✓ {filename}: {len(records)} comparison records validated successfully")
 
 
