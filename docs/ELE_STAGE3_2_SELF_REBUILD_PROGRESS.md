@@ -14,6 +14,8 @@
 ```text
 BASE_SHA: 1d8120301ff1a679726f3b9ad7996e022fdea273
 BRANCH: feat/stage3-2-autonomous-self-rebuild
+HEAD_SHA: d66bfc233de8d97099f2a732daa38ee1dc216a95
+PR: https://github.com/Joshua-EPR/ELE/pull/new/feat/stage3-2-autonomous-self-rebuild
 GEN1_WINDOWS: COMPLETE (ele_gen1.exe, PE32+, 1,484,800 bytes)
 GEN2_WINDOWS: COMPLETE (ele_gen2.exe, PE32+, 1,484,800 bytes)
 GEN3_WINDOWS: COMPLETE (ele_gen3.exe, PE32+, 1,484,800 bytes)
