@@ -25,6 +25,10 @@ class BenchmarkReadmeConsistency(unittest.TestCase):
             self.assertIn(summary["git_sha"], text, file)
             for record in records:
                 label = LABELS[record["benchmark_id"]]
+                if record["benchmark_id"] == "compilation_main_sema":
+                    label += " (Compiler)" if file == "README.md" else " (Compilador)"
+                elif record["benchmark_id"] == "compilation_main_driver":
+                    label += " (Self-Host)"
                 milliseconds = record["median_compile_ms"]
                 formatted = (
                     f"{milliseconds / 1000:.2f} s" if milliseconds >= 1000
