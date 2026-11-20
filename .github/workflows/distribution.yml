@@ -1,0 +1,112 @@
+name: Distribution & Packaging CI
+
+on:
+  push:
+    branches: [main, feat/**]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: distribution-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package-and-verify:
+    name: Package & Verify Distribution (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Stage 0 Bootstrap Compiler
+        run: cargo build -p project-l --bin l
+
+      - name: Forbid regressions to legacy syntax (Ratchet gate)
+        run: cargo test -p project-l --test ele_v2_legacy_ratchet -- --test-threads=1
+
+      - name: Build Distribution Packages (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/package_distribution.py --target windows
+
+      - name: Build Distribution Packages (Linux)
+        if: runner.os == 'Linux'
+        run: python3 scripts/package_distribution.py --target linux
+
+      - name: Test Native Installer & Verify (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ele-installed" -NoPathUpdate
+
+      - name: Test Native Installer & Verify (Linux)
+        if: runner.os == 'Linux'
+        run: sh scripts/install.sh --prefix "$RUNNER_TEMP/ele-installed" --no-path
+
+      - name: Smoke Test Installed Binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $ele = "$env:RUNNER_TEMP\ele-installed\bin\ele.exe"
+          & $ele --version
+          & $ele --help
+          & $ele build examples/hello.l --output "$env:RUNNER_TEMP\hello.exe"
+          $out = & "$env:RUNNER_TEMP\hello.exe"
+          if ($out.Trim() -ne "42") { throw "Unexpected output: $out" }
+
+      - name: Smoke Test Installed Binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ele="$RUNNER_TEMP/ele-installed/bin/ele"
+          "$ele" --version
+          "$ele" --help
+          "$ele" build examples/hello.l --target elf --output "$RUNNER_TEMP/hello"
+          chmod 755 "$RUNNER_TEMP/hello"
+          out=$("$RUNNER_TEMP/hello")
+          if [ "$out" != "42" ]; then echo "Unexpected output: $out"; exit 1; fi
+
+      - name: Verify SHA256 Checksum Manifest (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Content dist/SHA256SUMS.txt
+          $manifest = Get-Content dist/SHA256SUMS.txt
+          foreach ($line in $manifest) {
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              $parts = $line -split '\s+'
+              $expectedHash = $parts[0]
+              $filename = $parts[1]
+              $actualHash = (Get-FileHash -Algorithm SHA256 "dist/$filename").Hash.ToLower()
+              if ($actualHash -ne $expectedHash.ToLower()) {
+                  throw "Checksum mismatch for $filename: expected $expectedHash, got $actualHash"
+              }
+              Write-Host "Verified checksum for $filename: OK"
+          }
+
+      - name: Verify SHA256 Checksum Manifest (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Upload Distribution Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ele-dist-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
