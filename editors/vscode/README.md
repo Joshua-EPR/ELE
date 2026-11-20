@@ -85,6 +85,29 @@ VS Code will populate the Problems panel, underline the offending token in the e
 
 ---
 
+## ELE Graphite Dark — optional editor colors
+
+The extension normally **inherits the active VS Code color theme**. Its TextMate grammar identifies ELE syntax scopes, but does not force a palette on the user's editor.
+
+This extension now also provides the optional **ELE Graphite Dark** theme, intended for more restrained, readable ELE code:
+
+| Syntax role | Example | Color |
+|---|---|---|
+| Declarations | `flow`, `take`, `shape` | muted teal `#83C6BC` |
+| Flow control | `when`, `give`, `each` | soft coral `#D8AD98` |
+| Ownership | `hold`, `change`, `view`, `edit` | soft blue-gray `#B9C5E0` |
+| Types | `Float`, `List`, `Microcolumn` | muted gold `#E7C38C` |
+| Functions and methods | `main()`, `@crear()`, `@reset()` | calm blue `#82BFE9` |
+| Strings | `"hello"` | sage `#A7CFA0` |
+| Numbers | `0.8`, `31` | apricot `#DCAA87` |
+| Comments | `// detail` | slate `#708494` |
+
+**Enable it:** Press `Ctrl+Shift+P`, select **Preferences: Color Theme**, and choose **ELE Graphite Dark**. Use the same menu to switch back to your previous theme. The choice affects editor/UI appearance, not compiler behavior, syntax, or generated code.
+
+**Development mode:** from `editors/vscode`, run `code --extensionDevelopmentPath=. --new-window` to open an Extension Development Host with the local extension loaded; select **ELE Graphite Dark** there. If you change the JSON afterward, reload the development window. For an installed VSIX, package and reinstall the updated extension.
+
+---
+
 ## Local Installation
 
 ### Method 1: Extension Folder Link (Development Mode)

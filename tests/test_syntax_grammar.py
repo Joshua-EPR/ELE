@@ -265,5 +265,35 @@ class TestSnippets(unittest.TestCase):
             )
 
 
+class TestELEGraphiteTheme(unittest.TestCase):
+    def test_optional_theme_contribution_and_scopes(self):
+        pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+        themes = pkg["contributes"].get("themes", [])
+        graphite = next((theme for theme in themes if theme.get("label") == "ELE Graphite Dark"), None)
+        self.assertIsNotNone(graphite, "Optional ELE Graphite Dark theme is missing")
+        self.assertEqual(graphite["uiTheme"], "vs-dark")
+        theme_path = (EDITORS_DIR / graphite["path"]).resolve()
+        self.assertTrue(theme_path.is_relative_to(EDITORS_DIR.resolve()))
+        self.assertTrue(theme_path.is_file(), "Color theme file must be bundled")
+        theme = json.loads(theme_path.read_text(encoding="utf-8"))
+        self.assertEqual(theme["type"], "dark")
+        self.assertIn("editor.background", theme["colors"])
+        scopes = set()
+        for rule in theme["tokenColors"]:
+            scope = rule.get("scope", [])
+            scopes.update(scope if isinstance(scope, list) else [scope])
+            self.assertRegex(rule["settings"]["foreground"], r"^#[0-9A-Fa-f]{6}$")
+        for scope in (
+            "keyword.declaration.ele",
+            "keyword.control.ele",
+            "storage.modifier.ownership.ele",
+            "entity.name.function.method.ele",
+            "support.type.primitive.ele",
+            "constant.numeric.float.ele",
+            "string.quoted.double.ele",
+        ):
+            self.assertIn(scope, scopes)
+
+
 if __name__ == "__main__":
     unittest.main()
