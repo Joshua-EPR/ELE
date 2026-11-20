@@ -506,6 +506,13 @@ impl Emitter<'_> {
                         self.value(&args[1])
                     )
                 }
+                PlatformOp::SameFile => {
+                    format!(
+                        "l_same_file(&({}), &({}))",
+                        self.read_place(&args[0]),
+                        self.read_place(&args[1])
+                    )
+                }
                 PlatformOp::Arg | PlatformOp::ReadText => {
                     let call = if *op == PlatformOp::Arg {
                         format!("l_process_arg({})", self.value(&args[0]))

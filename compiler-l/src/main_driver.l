@@ -380,30 +380,27 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
             each m_idx among 0..prog.module_paths.length {
-                hold m_path = view prog.module_paths[m_idx]
-                when pathsEquivalent(m_path, view output_path) {
+                hold m_path_view = view prog.module_paths[m_idx]
+                hold m_path = "{m_path_view}"
+                when pathsEquivalent(view m_path, view output_path) {
                     printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}'")
                     give 2
                 }
             }
 
-            // Safety check: alias / link detection against all project source modules
-            choose readText(output_path, 67108864) {
-                Ok(out_content): {
-                    each m_idx among 0..prog.module_paths.length {
-                        hold m_path = view prog.module_paths[m_idx]
-                        choose readText(m_path, 67108864) {
-                            Ok(mod_content): {
-                                when textMatches(view out_content, view mod_content) {
-                                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}' (alias detectado)")
-                                    give 2
-                                }
-                            }
-                            Err(e_mod): {}
-                        }
-                    }
+            // Safety check: true filesystem identity / alias detection against all project source modules
+            each m_idx among 0..prog.module_paths.length {
+                hold m_path_view = view prog.module_paths[m_idx]
+                hold m_path = "{m_path_view}"
+                hold identity = sameFile(output_path, m_path)
+                when identity == 1 {
+                    printError("error[CLI]: el archivo de salida no puede sobrescribir el módulo fuente '{m_path}' (alias detectado)")
+                    give 2
                 }
-                Err(e_out): {}
+                when identity == 2 {
+                    printError("error[IO]: no se pudo verificar la identidad del archivo de salida frente a '{m_path}'")
+                    give 4
+                }
             }
 
             hold source = view prog.source
@@ -439,20 +436,7 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
                 give 3
             }
 
-            // Atomic / Safe write flow:
-            // 1. Stage output image in a temporary file to verify write viability
-            hold tmp_output = "{output_path}.tmp.ele"
-            hold status_tmp = writeBytes(tmp_output, compiled.image)
-            when status_tmp != 0 {
-                when target == 1 {
-                    printError("error[IO]: fallo al escribir archivo temporal PE64 en {tmp_output} (código {status_tmp})")
-                } otherwise {
-                    printError("error[IO]: fallo al escribir archivo temporal ELF64 en {tmp_output} (código {status_tmp})")
-                }
-                give 5
-            }
-
-            // 2. Finalize output to target destination
+            // Atomic write: writeBytes publishes atomically via temporary file and replace
             hold status = writeBytes(output_path, compiled.image)
             when status != 0 {
                 when target == 1 {
@@ -645,21 +629,7 @@ flow main() => Int {
         give 2
     }
 
-    // Safety check: alias / link detection for input source file
-    choose readText(output_file, 67108864) {
-        Ok(out_content): {
-            choose readText(source_file, 67108864) {
-                Ok(src_content): {
-                    when textMatches(view out_content, view src_content) {
-                        printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}' (alias detectado)")
-                        give 2
-                    }
-                }
-                Err(e_src): {}
-            }
-        }
-        Err(e_out): {}
-    }
-
+    // compileProgram verifies the loaded main source and every imported
+    // module against the destination after readText establishes they exist.
     give compileProgram(source_file, output_file, target)
 }

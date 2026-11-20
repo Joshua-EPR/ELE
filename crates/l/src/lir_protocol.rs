@@ -469,6 +469,7 @@ impl FnCtx<'_> {
                     "readtext" => PlatformOp::ReadText,
                     "printerror" => PlatformOp::PrintError,
                     "writebytes" => PlatformOp::WriteBytes,
+                    "samefile" => PlatformOp::SameFile,
                     other => {
                         return line
                             .fail(format!("operación de plataforma desconocida: '{other}'"));

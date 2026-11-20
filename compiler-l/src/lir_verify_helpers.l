@@ -32,7 +32,7 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
     var arity = -1
     if op == LIR_PLATFORM_ARG_COUNT { arity = 0 }
     if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR { arity = 1 }
-    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES { arity = 2 }
+    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
     if arity < 0 { return 1 }
     if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
     let result = l.vars[dst].ty
@@ -41,14 +41,18 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
     } else if op == LIR_PLATFORM_PRINT_ERROR {
         if result != 6 { return 3 }
     } else {
-        // processArg/readText produce Result<Text,Int>: an owned union
-        // whose active Text is dropped once (or moved out by a match).
-        if result < 8 || result >= types.types.length { return 3 }
-        match types.types[result].kind {
-            SemTypeKind.Result => {
-                if types.types[result].elem_type != 5 || types.types[result].nominal_id != 1 { return 3 }
+        when op == LIR_PLATFORM_SAME_FILE {
+            when result != 1 { give 3 }
+        } otherwise {
+            // processArg/readText produce Result<Text,Int>: an owned union
+            // whose active Text is dropped once (or moved out by a match).
+            if result < 8 || result >= types.types.length { return 3 }
+            match types.types[result].kind {
+                SemTypeKind.Result => {
+                    if types.types[result].elem_type != 5 || types.types[result].nominal_id != 1 { return 3 }
+                }
+                _ => { return 3 }
             }
-            _ => { return 3 }
         }
     }
     for i in 0..count {
@@ -56,7 +60,7 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
         if arg < 0 || arg >= l.args.length { return 1 }
         var borrowed = false
         var expected = 1
-        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES {
+        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE {
             borrowed = true
             expected = 5
         }

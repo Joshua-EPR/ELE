@@ -165,6 +165,8 @@ fn stage1_platform_program_runs_like_stage0() {
     assert_eq!(bytes, fs::read(&again).unwrap());
 
     let dir = fresh_dir("stage1-run");
+    let occupied_temp = dir.join("native_platform_out.bin.tmp.0");
+    fs::write(&occupied_temp, b"occupied").unwrap();
     if let Some(run) = execute(&image, &dir, &["uno", "dos"]) {
         assert_eq!(run.stdout, "2\n0\n1\n1\n2\n");
         assert_eq!(run.stderr, "aviso: plataforma nativa\n");
@@ -173,6 +175,29 @@ fn stage1_platform_program_runs_like_stage0() {
             fs::read(dir.join("native_platform_out.bin")).unwrap(),
             b"ELE\n"
         );
+        assert_eq!(fs::read(&occupied_temp).unwrap(), b"occupied");
+        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            let mut children = Vec::new();
+            for _ in 0..4 {
+                children.push(
+                    Command::new(dir.join("prog"))
+                        .current_dir(&dir)
+                        .args(["uno", "dos"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap(),
+                );
+            }
+            for mut child in children {
+                assert_eq!(child.wait().unwrap().code(), Some(42));
+            }
+            assert_eq!(
+                fs::read(dir.join("native_platform_out.bin")).unwrap(),
+                b"ELE\n"
+            );
+            assert_eq!(fs::read(&occupied_temp).unwrap(), b"occupied");
+        }
     }
 }
 

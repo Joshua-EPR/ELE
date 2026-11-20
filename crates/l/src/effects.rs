@@ -347,7 +347,7 @@ fn scan_value(val: &Value, local: &mut LocalAnalysis) {
         ValueKind::Platform(op, args) => {
             use crate::lir::PlatformOp::*;
             local.record(Effect::Io, val.span, "servicio de plataforma");
-            if matches!(op, ReadText | PrintError | WriteBytes) {
+            if matches!(op, ReadText | PrintError | WriteBytes | SameFile) {
                 local.record(Effect::Block, val.span, "I/O síncrono de plataforma");
             }
             if !matches!(op, PrintError) {

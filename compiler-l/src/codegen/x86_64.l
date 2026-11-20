@@ -278,6 +278,15 @@ pub fn x64LoadMem64(code: &mut X64Code, dst: Int, base: Int, displacement: Int) 
     x64MemoryAddress(&mut code, dst, base, displacement)
 }
 
+expose flow x64LoadMem32(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    when dst >= 8 || base >= 8 {
+        x64Put(edit code, 64 + (dst / 8) * 4 + base / 8)
+    }
+    x64Put(edit code, 139) // mov r32, r/m32
+    x64MemoryAddress(edit code, dst, base, displacement)
+}
+
 pub fn x64StoreMem64(code: &mut X64Code, base: Int, displacement: Int, src: Int) {
     if !x64MemoryValid(&mut code, src, base, displacement) { return }
     x64RexRegRm(&mut code, src, base)
@@ -427,6 +436,14 @@ expose flow x64CallRipPlaceholder(code: edit X64Code) => Int {
     hold at = code.bytes.length
     each i among 0..4 { x64Put(edit code, 0) }
     give at
+}
+
+// CALL r64 (FF /2), used for an OS function resolved at runtime.
+expose flow x64CallReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    when reg >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 255)
+    x64Put(edit code, 208 + reg % 8)
 }
 
 // LEA r64,[RIP+disp32] (REX.W 8D, ModRM mod=00 r/m=101). Returns the

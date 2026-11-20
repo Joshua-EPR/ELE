@@ -521,6 +521,40 @@ fn driver_builds_self_rebuild_windows_fixpoint() {
         assert!(run.status.success());
         let stdout = String::from_utf8_lossy(&run.stdout);
         assert_eq!(stdout.trim(), "Autonomy Gen 3");
+
+        // Exercise the autonomous writer and identity primitive, not only
+        // Stage 0's Rust bootstrap implementation.
+        let source_before = fs::read(&hello_src).unwrap();
+        let alias = dir.join("hardlink-to-source.exe");
+        let _ = fs::remove_file(&alias);
+        fs::hard_link(&hello_src, &alias).unwrap();
+        let rejected = Command::new(&gen3_exe)
+            .current_dir(&dir)
+            .args(["build", "hello.l", "--output", "hardlink-to-source.exe"])
+            .output()
+            .unwrap();
+        assert_eq!(rejected.status.code(), Some(2));
+        assert_eq!(fs::read(&hello_src).unwrap(), source_before);
+        assert_eq!(fs::read(&alias).unwrap(), source_before);
+
+        let occupied = dir.join("salida ñ.exe.tmp.0");
+        fs::write(&occupied, b"occupied").unwrap();
+        let unicode = Command::new(&gen3_exe)
+            .current_dir(&dir)
+            .args(["build", "hello.l", "--output", "salida ñ.exe"])
+            .output()
+            .unwrap();
+        assert!(
+            unicode.status.success(),
+            "{}",
+            String::from_utf8_lossy(&unicode.stderr)
+        );
+        assert!(
+            fs::read(dir.join("salida ñ.exe"))
+                .unwrap()
+                .starts_with(b"MZ")
+        );
+        assert_eq!(fs::read(&occupied).unwrap(), b"occupied");
     }
 }
 
@@ -720,6 +754,57 @@ fn driver_cli_rejects_overwrite_of_imported_module() {
     // Verify imported source file remains completely intact
     let preserved = fs::read_to_string(&helper_src).unwrap();
     assert_eq!(preserved, helper_content);
+}
+
+#[test]
+fn driver_preserves_preexisting_predictable_temporary() {
+    let dir = work("preexisting_predictable_temp");
+    let source = dir.join("main.l");
+    let output = dir.join("salida ñ.exe");
+    let old_temp = dir.join("salida ñ.exe.tmp.0");
+    let sentinel = b"another user's file";
+    fs::write(&source, "flow main() => Int { give 0 }\n").unwrap();
+    fs::write(&old_temp, sentinel).unwrap();
+
+    let result = Command::new(driver())
+        .current_dir(&dir)
+        .args([
+            "build",
+            "main.l",
+            "--target",
+            "pe",
+            "--output",
+            "salida ñ.exe",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(fs::read(&output).unwrap().starts_with(b"MZ"));
+    assert_eq!(fs::read(&old_temp).unwrap(), sentinel);
+    assert_eq!(
+        fs::read_to_string(&source).unwrap(),
+        "flow main() => Int { give 0 }\n"
+    );
+}
+
+#[test]
+fn driver_reports_missing_output_parent_without_touching_source() {
+    let dir = work("missing_output_parent");
+    let source = dir.join("main.l");
+    let content = "flow main() => Int { give 0 }\n";
+    fs::write(&source, content).unwrap();
+    let result = Command::new(driver())
+        .current_dir(&dir)
+        .args(["build", "main.l", "--output", "absent-parent/out.exe"])
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("no se pudo verificar la identidad"));
+    assert_eq!(fs::read_to_string(&source).unwrap(), content);
 }
 
 #[test]

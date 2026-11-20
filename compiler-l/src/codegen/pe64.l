@@ -38,7 +38,7 @@ fixed PE64_DOS_SIZE = 128
 // 40-byte section headers.
 fixed PE64_OPTIONAL_END = 392
 // Known imports; the first PE64_BASE_IMPORTS are in every image.
-fixed PE64_IMPORT_COUNT = 13
+fixed PE64_IMPORT_COUNT = 21
 fixed PE64_BASE_IMPORTS = 5
 fixed PE64_STACK_SIZE = 8388608
 fixed PE64_PAGE = 4096
@@ -59,6 +59,14 @@ expose flow pe64ImportReadFile() => Int { give 9 }
 expose flow pe64ImportCloseHandle() => Int { give 10 }
 expose flow pe64ImportGetFileType() => Int { give 11 }
 expose flow pe64ImportGetLastError() => Int { give 12 }
+expose flow pe64ImportGetFileInformationByHandle() => Int { give 13 }
+expose flow pe64ImportFlushFileBuffers() => Int { give 14 }
+expose flow pe64ImportMoveFileExW() => Int { give 15 }
+expose flow pe64ImportDeleteFileW() => Int { give 16 }
+expose flow pe64ImportGetFileAttributesW() => Int { give 17 }
+expose flow pe64ImportLoadLibraryExW() => Int { give 18 }
+expose flow pe64ImportGetProcAddress() => Int { give 19 }
+expose flow pe64ImportFreeLibrary() => Int { give 20 }
 
 // Number of known imported functions: valid import indexes are 0..count-1.
 expose flow pe64ImportCount() => Int { give PE64_IMPORT_COUNT }
@@ -116,7 +124,15 @@ flow peImportName(index: Int) => Text {
     when index == 9 { give "ReadFile" }
     when index == 10 { give "CloseHandle" }
     when index == 11 { give "GetFileType" }
-    give "GetLastError"
+    when index == 12 { give "GetLastError" }
+    when index == 13 { give "GetFileInformationByHandle" }
+    when index == 14 { give "FlushFileBuffers" }
+    when index == 15 { give "MoveFileExW" }
+    when index == 16 { give "DeleteFileW" }
+    when index == 17 { give "GetFileAttributesW" }
+    when index == 18 { give "LoadLibraryExW" }
+    when index == 19 { give "GetProcAddress" }
+    give "FreeLibrary"
 }
 
 // The imports of an image, in IAT slot order: the base set, then each

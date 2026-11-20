@@ -750,13 +750,96 @@ flow wpfEmitReadText(code: edit X64Code, imports: edit Pe64Imports, rt: view PfR
     give entry
 }
 
+// BCryptGenRandom is resolved from the OS at runtime so the PE image keeps
+// its existing single KERNEL32 import descriptor. Fail closed if unavailable.
+flow wpfEmitRandom(code: edit X64Code, imports: edit Pe64Imports) => Int {
+    hold dll_at = code.bytes.length
+    hold dll = "bcrypt.dll"
+    each i among 0..dll.byteLength {
+        code.bytes@push(dll@byteAt(i))
+        code.bytes@push(0)
+    }
+    code.bytes@push(0)
+    code.bytes@push(0)
+    hold proc_at = code.bytes.length
+    hold proc = "BCryptGenRandom"
+    each i among 0..proc.byteLength { code.bytes@push(proc@byteAt(i)) }
+    code.bytes@push(0)
+
+    hold entry = code.bytes.length
+    // 0 output buffer, 1 byte count, 2 library, 3 function, 4 NTSTATUS.
+    wpfBegin(edit code, 5)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    hold dll_fixup = x64LeaRipPlaceholder(edit code, 1)
+    x64PatchRelative(edit code, dll_fixup, dll_at)
+    x64MovImm64(edit code, 2, 0)
+    x64MovImm64(edit code, 8, 2048) // LOAD_LIBRARY_SEARCH_SYSTEM32
+    w64CallImport(edit code, edit imports, pe64ImportLoadLibraryExW())
+    x64StoreSlot(edit code, 2, 0)
+    x64TestRax(edit code)
+    hold load_failed = x64ConditionalPlaceholder(edit code, true)
+
+    x64LoadSlot(edit code, 1, 2)
+    hold proc_fixup = x64LeaRipPlaceholder(edit code, 2)
+    x64PatchRelative(edit code, proc_fixup, proc_at)
+    w64CallImport(edit code, edit imports, pe64ImportGetProcAddress())
+    x64StoreSlot(edit code, 3, 0)
+    x64TestRax(edit code)
+    hold proc_failed = x64ConditionalPlaceholder(edit code, true)
+
+    x64MovImm64(edit code, 1, 0)
+    x64LoadSlot(edit code, 2, 0)
+    x64LoadSlot(edit code, 8, 1)
+    x64MovImm64(edit code, 9, 2) // BCRYPT_USE_SYSTEM_PREFERRED_RNG
+    x64LoadSlot(edit code, 11, 3)
+    x64CallReg(edit code, 11)
+    x64StoreSlot(edit code, 4, 0)
+    x64LoadSlot(edit code, 1, 2)
+    w64CallImport(edit code, edit imports, pe64ImportFreeLibrary())
+    x64LoadSlot(edit code, 0, 4)
+    x64TestRax(edit code)
+    hold random_failed = x64ConditionalPlaceholder(edit code, false)
+    x64MovImm64(edit code, 0, 0)
+    x64FrameEnd(edit code)
+
+    wpfPatchHere(edit code, proc_failed)
+    x64LoadSlot(edit code, 1, 2)
+    w64CallImport(edit code, edit imports, pe64ImportFreeLibrary())
+    wpfPatchHere(edit code, load_failed)
+    wpfPatchHere(edit code, random_failed)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+flow wpfTempHexDigit(code: edit X64Code, digit: Int, offset: Int) {
+    hold letter = wpfIf(edit code, digit, 9, 8)
+    x64MovImm64(edit code, 10, 48)
+    x64AddReg(edit code, digit, 10)
+    hold done = x64JumpPlaceholder(edit code)
+    wpfPatchHere(edit code, letter)
+    x64MovImm64(edit code, 10, 87)
+    x64AddReg(edit code, digit, 10)
+    wpfPatchHere(edit code, done)
+    x64LoadSlot(edit code, 8, 11)
+    x64LoadSlot(edit code, 1, 13)
+    x64AddReg(edit code, 1, 1)
+    x64AddReg(edit code, 8, 1)
+    x64StoreMem8(edit code, 8, offset * 2, digit)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, offset * 2 + 1, 0)
+}
+
 // writebytes(RDI = address of the path Text, RSI = address of the
 // List of[Int] header) -> RAX = status. Slots: 0 path Text, 1 length,
 // 2 UTF-8 path, 3 its capacity, 4 byte buffer, 5 its capacity, 6 handle,
-// 7 status, 8 elements, 9 UTF-16 path, 10 its capacity.
-flow wpfEmitWriteBytes(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, path_z: Int, wide_z: Int, write_handle: Int) => Int {
+// 7 status, 8 elements, 9 UTF-16 dest path, 10 its capacity, 11 UTF-16 tmp path,
+// 12 its capacity, 13 destination path length in UTF-16 units,
+// 14-15 random bytes, 16 collision count.
+flow wpfEmitWriteBytes(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, path_z: Int, wide_z: Int, write_handle: Int, random: Int) => Int {
     hold entry = code.bytes.length
-    wpfBegin(edit code, 11)
+    wpfBegin(edit code, 17)
     x64StoreSlot(edit code, 0, 7)
     x64LoadMem64(edit code, 8, 6, 0)
     x64LoadMem64(edit code, 9, 6, 8)
@@ -795,6 +878,72 @@ flow wpfEmitWriteBytes(code: edit X64Code, imports: edit Pe64Imports, rt: view P
     wpfDrop(edit code, rt, 2, 3)
     x64LoadSlot(edit code, 1, 9)
     invalid@push(wpfIf(edit code, 1, 0, 4))
+
+    // Measure dest_wide in WCHAR units
+    x64LoadSlot(edit code, 8, 9)
+    x64MovImm64(edit code, 9, 0)
+    hold measure = code.bytes.length
+    wpfUnit(edit code, 0)
+    hold measured = wpfIf(edit code, 1, 0, 4)
+    wpfAdjust(edit code, 8, 2)
+    wpfAdjust(edit code, 9, 1)
+    wpfJumpTo(edit code, measure)
+    wpfPatchHere(edit code, measured)
+    x64StoreSlot(edit code, 13, 9)
+
+    // Destination + ".tmp." + 32 random hex digits + NUL.
+    x64MovReg(edit code, 7, 9)
+    wpfAdjust(edit code, 7, 38)
+    x64AddReg(edit code, 7, 7)
+    wpfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 11, 0)
+    x64StoreSlot(edit code, 12, 2)
+
+    // Copy dest_wide into tmp_wide
+    x64MovImm64(edit code, 1, 0)
+    hold copy_loop = code.bytes.length
+    x64LoadSlot(edit code, 9, 13)
+    x64MovReg(edit code, 0, 9)
+    x64AddReg(edit code, 0, 0)
+    x64CmpReg(edit code, 1, 0)
+    hold copy_done = x64ConditionalPlaceholder(edit code, true)
+    x64LoadSlot(edit code, 8, 9)
+    x64AddReg(edit code, 8, 1)
+    x64LoadMem8(edit code, 0, 8, 0)
+    x64LoadSlot(edit code, 8, 11)
+    x64AddReg(edit code, 8, 1)
+    x64StoreMem8(edit code, 8, 0, 0)
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, copy_loop)
+    wpfPatchHere(edit code, copy_done)
+
+    // Append only the fixed prefix; the random suffix is filled before open.
+    x64LoadSlot(edit code, 8, 11)
+    x64LoadSlot(edit code, 9, 13)
+    x64MovReg(edit code, 0, 9)
+    x64AddReg(edit code, 0, 0)
+    x64AddReg(edit code, 8, 0)
+    x64MovImm64(edit code, 0, 46)
+    x64StoreMem8(edit code, 8, 0, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 1, 0)
+    x64MovImm64(edit code, 0, 116)
+    x64StoreMem8(edit code, 8, 2, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 3, 0)
+    x64MovImm64(edit code, 0, 109)
+    x64StoreMem8(edit code, 8, 4, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 5, 0)
+    x64MovImm64(edit code, 0, 112)
+    x64StoreMem8(edit code, 8, 6, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 7, 0)
+    x64MovImm64(edit code, 0, 46)
+    x64StoreMem8(edit code, 8, 8, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 9, 0)
+
     // The bytes, packed.
     x64LoadSlot(edit code, 7, 1)
     wpfCall(edit code, rt.text_new)
@@ -816,13 +965,42 @@ flow wpfEmitWriteBytes(code: edit X64Code, imports: edit Pe64Imports, rt: view P
     wpfAdjust(edit code, 1, 1)
     wpfJumpTo(edit code, pack)
     wpfPatchHere(edit code, packed)
-    // CreateFileW(path, GENERIC_WRITE, share all, NULL, CREATE_ALWAYS,
-    // FILE_ATTRIBUTE_NORMAL, NULL): created or truncated.
-    x64LoadSlot(edit code, 1, 9)
+
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 16, 0)
+    change no_temp: List of[Int] = List[]
+    hold create_retry = code.bytes.length
+    x64LeaMem(edit code, 7, 5, -128)
+    x64MovImm64(edit code, 6, 16)
+    wpfCall(edit code, random)
+    x64TestRax(edit code)
+    hold random_ok = x64ConditionalPlaceholder(edit code, true)
+    no_temp@push(x64JumpPlaceholder(edit code))
+    wpfPatchHere(edit code, random_ok)
+    each i among 0..16 {
+        x64LoadMem8(edit code, 0, 5, -128 + i)
+        x64MovImm64(edit code, 2, 0)
+        x64MovImm64(edit code, 10, 16)
+        x64DivUnsignedReg(edit code, 10)
+        x64MovReg(edit code, 11, 0)
+        wpfTempHexDigit(edit code, 11, 5 + 2 * i)
+        wpfTempHexDigit(edit code, 2, 6 + 2 * i)
+    }
+    x64LoadSlot(edit code, 8, 11)
+    x64LoadSlot(edit code, 1, 13)
+    x64AddReg(edit code, 1, 1)
+    x64AddReg(edit code, 8, 1)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 8, 74, 0)
+    x64StoreMem8(edit code, 8, 75, 0)
+
+    // Create exclusive temporary file:
+    // CreateFileW(tmp_wide, GENERIC_WRITE, share all, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL)
+    x64LoadSlot(edit code, 1, 11)
     x64MovImm64(edit code, 2, WPF_GENERIC_WRITE)
     x64MovImm64(edit code, 8, WPF_SHARE_ALL)
     x64MovImm64(edit code, 9, 0)
-    x64MovImm64(edit code, 0, WPF_CREATE_ALWAYS)
+    x64MovImm64(edit code, 0, 1) // CREATE_NEW = 1
     wpfStackArg(edit code, 0, 0)
     x64MovImm64(edit code, 0, WPF_ATTRIBUTE_NORMAL)
     wpfStackArg(edit code, 1, 0)
@@ -830,29 +1008,263 @@ flow wpfEmitWriteBytes(code: edit X64Code, imports: edit Pe64Imports, rt: view P
     wpfStackArg(edit code, 2, 0)
     w64CallImport(edit code, edit imports, pe64ImportCreateFileW())
     x64StoreSlot(edit code, 6, 0)
-    wpfDrop(edit code, rt, 9, 10)
     x64LoadSlot(edit code, 1, 6)
-    hold not_created = wpfIf(edit code, 1, -1, 4)
+    hold created = wpfIf(edit code, 1, -1, 5)
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    x64MovReg(edit code, 1, 0)
+    hold collision80 = wpfIf(edit code, 1, 80, 4)
+    hold collision183 = wpfIf(edit code, 1, 183, 4)
+    no_temp@push(x64JumpPlaceholder(edit code))
+    wpfPatchHere(edit code, collision80)
+    wpfPatchHere(edit code, collision183)
+    x64LoadSlot(edit code, 1, 16)
+    wpfAdjust(edit code, 1, 1)
+    x64StoreSlot(edit code, 16, 1)
+    hold retry = wpfIf(edit code, 1, 16, 6)
+    x64PatchRelative(edit code, retry, create_retry)
+    no_temp@push(x64JumpPlaceholder(edit code))
+    wpfPatchHere(edit code, created)
+
+    // Write full byte buffer
     x64LoadSlot(edit code, 7, 6)
     x64LoadSlot(edit code, 6, 4)
     x64LoadSlot(edit code, 2, 1)
     wpfCall(edit code, write_handle)
-    // Status 0, or 3 when write_handle reported -1.
-    x64MovImm64(edit code, 10, -3)
-    x64MulReg(edit code, 0, 10)
-    x64StoreSlot(edit code, 7, 0)
+    x64TestRax(edit code)
+    hold write_failed = x64ConditionalPlaceholder(edit code, false)
+
+    // Flush/sync: FlushFileBuffers(handle)
+    x64LoadSlot(edit code, 1, 6)
+    w64CallImport(edit code, edit imports, pe64ImportFlushFileBuffers())
+    x64TestEax(edit code)
+    hold flush_failed = x64ConditionalPlaceholder(edit code, true)
+
+    // Close handle: CloseHandle(handle)
     x64LoadSlot(edit code, 1, 6)
     w64CallImport(edit code, edit imports, pe64ImportCloseHandle())
+    x64TestEax(edit code)
+    hold close_failed = x64ConditionalPlaceholder(edit code, true)
+
+    // Atomic Replace: MoveFileExW(tmp_wide, dest_wide, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+    // 1 | 8 = 9
+    x64LoadSlot(edit code, 1, 11)
+    x64LoadSlot(edit code, 2, 9)
+    x64MovImm64(edit code, 8, 9)
+    w64CallImport(edit code, edit imports, pe64ImportMoveFileExW())
+    x64TestEax(edit code)
+    hold rename_failed = x64ConditionalPlaceholder(edit code, true)
+
+    // Success! Destination published atomically.
     wpfDrop(edit code, rt, 4, 5)
-    x64LoadSlot(edit code, 0, 7)
+    wpfDrop(edit code, rt, 9, 10)
+    wpfDrop(edit code, rt, 11, 12)
+    x64MovImm64(edit code, 0, 0)
     x64FrameEnd(edit code)
-    wpfPatchHere(edit code, not_created)
+
+    // Failure cleanup:
+    wpfPatchHere(edit code, write_failed)
+    wpfPatchHere(edit code, flush_failed)
+    x64LoadSlot(edit code, 1, 6)
+    w64CallImport(edit code, edit imports, pe64ImportCloseHandle())
+
+    wpfPatchHere(edit code, close_failed)
+    wpfPatchHere(edit code, rename_failed)
+    x64LoadSlot(edit code, 1, 11)
+    w64CallImport(edit code, edit imports, pe64ImportDeleteFileW())
     wpfDrop(edit code, rt, 4, 5)
+    wpfDrop(edit code, rt, 9, 10)
+    wpfDrop(edit code, rt, 11, 12)
+    x64MovImm64(edit code, 0, 3)
+    x64FrameEnd(edit code)
+
+    wpfPatchAll(edit code, view no_temp)
+    wpfDrop(edit code, rt, 4, 5)
+    wpfDrop(edit code, rt, 9, 10)
+    wpfDrop(edit code, rt, 11, 12)
     x64MovImm64(edit code, 0, 2)
     x64FrameEnd(edit code)
+
     wpfPatchAll(edit code, view invalid)
     x64MovImm64(edit code, 0, 1)
     x64FrameEnd(edit code)
+    give entry
+}
+
+// samefile(output, source) -> RAX: 0 different, 1 same, 2 identity error.
+// Opens both handles, calls GetFileInformationByHandle on both, and compares
+// dwVolumeSerialNumber, nFileIndexHigh, nFileIndexLow.
+flow wpfEmitSameFile(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, path_z: Int, wide_z: Int) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 30)
+    x64StoreSlot(edit code, 0, 7) // slot 0 = path_a Text
+    x64StoreSlot(edit code, 1, 6) // slot 1 = path_b Text
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 2, 0) // handle A = 0
+    x64StoreSlot(edit code, 3, 0) // handle B = 0
+    x64StoreSlot(edit code, 4, 0) // wide_a = 0
+    x64StoreSlot(edit code, 5, 0) // wide_a cap = 0
+    x64StoreSlot(edit code, 6, 0) // wide_b = 0
+    x64StoreSlot(edit code, 7, 0) // wide_b cap = 0
+    x64MovImm64(edit code, 0, 2)
+    x64StoreSlot(edit code, 8, 0) // fail closed until both identities are known
+
+    change failed: List of[Int] = List[]
+
+    // Convert path_a to UTF-8 Z
+    x64LoadSlot(edit code, 7, 0)
+    wpfCall(edit code, path_z)
+    x64StoreSlot(edit code, 9, 0)
+    x64StoreSlot(edit code, 10, 2)
+    x64MovReg(edit code, 1, 0)
+    failed@push(wpfIf(edit code, 1, 0, 4))
+
+    // Convert path_a UTF-8 Z to wide_z
+    x64LoadSlot(edit code, 7, 9)
+    wpfCall(edit code, wide_z)
+    x64StoreSlot(edit code, 4, 0)
+    x64StoreSlot(edit code, 5, 2)
+    wpfDrop(edit code, rt, 9, 10)
+    x64LoadSlot(edit code, 1, 4)
+    failed@push(wpfIf(edit code, 1, 0, 4))
+
+    // Convert path_b to UTF-8 Z
+    x64LoadSlot(edit code, 7, 1)
+    wpfCall(edit code, path_z)
+    x64StoreSlot(edit code, 11, 0)
+    x64StoreSlot(edit code, 12, 2)
+    x64MovReg(edit code, 1, 0)
+    failed@push(wpfIf(edit code, 1, 0, 4))
+
+    // Convert path_b UTF-8 Z to wide_z
+    x64LoadSlot(edit code, 7, 11)
+    wpfCall(edit code, wide_z)
+    x64StoreSlot(edit code, 6, 0)
+    x64StoreSlot(edit code, 7, 2)
+    wpfDrop(edit code, rt, 11, 12)
+    x64LoadSlot(edit code, 1, 6)
+    failed@push(wpfIf(edit code, 1, 0, 4))
+
+    // Establish source identity before treating an absent output as different.
+    x64LoadSlot(edit code, 1, 6)
+    x64MovImm64(edit code, 2, -2147483648)
+    x64MovImm64(edit code, 8, WPF_SHARE_ALL)
+    x64MovImm64(edit code, 9, 0)
+    x64MovImm64(edit code, 0, 3) // OPEN_EXISTING = 3
+    wpfStackArg(edit code, 0, 0)
+    x64MovImm64(edit code, 0, WPF_ATTRIBUTE_NORMAL)
+    wpfStackArg(edit code, 1, 0)
+    x64MovImm64(edit code, 0, 0)
+    wpfStackArg(edit code, 2, 0)
+    w64CallImport(edit code, edit imports, pe64ImportCreateFileW())
+    x64StoreSlot(edit code, 3, 0)
+    x64MovReg(edit code, 1, 0)
+    failed@push(wpfIf(edit code, 1, -1, 4))
+
+    // Open the proposed output. Failure is inspected after the normal path.
+    x64LoadSlot(edit code, 1, 4)
+    x64MovImm64(edit code, 2, -2147483648)
+    x64MovImm64(edit code, 8, WPF_SHARE_ALL)
+    x64MovImm64(edit code, 9, 0)
+    x64MovImm64(edit code, 0, 3) // OPEN_EXISTING = 3
+    wpfStackArg(edit code, 0, 0)
+    x64MovImm64(edit code, 0, WPF_ATTRIBUTE_NORMAL)
+    wpfStackArg(edit code, 1, 0)
+    x64MovImm64(edit code, 0, 0)
+    wpfStackArg(edit code, 2, 0)
+    w64CallImport(edit code, edit imports, pe64ImportCreateFileW())
+    x64StoreSlot(edit code, 2, 0)
+    x64MovReg(edit code, 1, 0)
+    hold output_unavailable = wpfIf(edit code, 1, -1, 4)
+
+    // GetFileInformationByHandle(handle A, &infoA)
+    // infoA is at RBP - 168
+    x64LoadSlot(edit code, 1, 2)
+    x64LeaMem(edit code, 2, 5, -168)
+    w64CallImport(edit code, edit imports, pe64ImportGetFileInformationByHandle())
+    x64TestEax(edit code)
+    failed@push(x64ConditionalPlaceholder(edit code, true))
+
+    // GetFileInformationByHandle(handle B, &infoB)
+    // infoB is at RBP - 232
+    x64LoadSlot(edit code, 1, 3)
+    x64LeaMem(edit code, 2, 5, -232)
+    w64CallImport(edit code, edit imports, pe64ImportGetFileInformationByHandle())
+    x64TestEax(edit code)
+    failed@push(x64ConditionalPlaceholder(edit code, true))
+
+    // Both metadata queries succeeded; compare stable file identities.
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 8, 0)
+
+    // Compare infoA and infoB:
+    // dwVolumeSerialNumber at offset +28: [RBP - 140] vs [RBP - 204]
+    x64LoadMem32(edit code, 0, 5, -140)
+    x64LoadMem32(edit code, 1, 5, -204)
+    x64CmpReg(edit code, 0, 1)
+    hold vol_mismatch = x64ConditionalPlaceholder(edit code, false)
+
+    // nFileIndexHigh at offset +44: [RBP - 124] vs [RBP - 188]
+    x64LoadMem32(edit code, 0, 5, -124)
+    x64LoadMem32(edit code, 1, 5, -188)
+    x64CmpReg(edit code, 0, 1)
+    hold idx_hi_mismatch = x64ConditionalPlaceholder(edit code, false)
+
+    // nFileIndexLow at offset +48: [RBP - 120] vs [RBP - 184]
+    x64LoadMem32(edit code, 0, 5, -120)
+    x64LoadMem32(edit code, 1, 5, -184)
+    x64CmpReg(edit code, 0, 1)
+    hold idx_lo_mismatch = x64ConditionalPlaceholder(edit code, false)
+
+    // All match: result = 1
+    x64MovImm64(edit code, 0, 1)
+    x64StoreSlot(edit code, 8, 0)
+
+    wpfPatchHere(edit code, vol_mismatch)
+    wpfPatchHere(edit code, idx_hi_mismatch)
+    wpfPatchHere(edit code, idx_lo_mismatch)
+
+    // Clean up
+    hold clean_up = code.bytes.length
+    x64LoadSlot(edit code, 1, 3)
+    hold skip_hb = wpfIf(edit code, 1, 0, 4)
+    hold skip_hb_neg = wpfIf(edit code, 1, -1, 4)
+    w64CallImport(edit code, edit imports, pe64ImportCloseHandle())
+    wpfPatchHere(edit code, skip_hb)
+    wpfPatchHere(edit code, skip_hb_neg)
+
+    x64LoadSlot(edit code, 1, 2)
+    hold skip_ha = wpfIf(edit code, 1, 0, 4)
+    hold skip_ha_neg = wpfIf(edit code, 1, -1, 4)
+    w64CallImport(edit code, edit imports, pe64ImportCloseHandle())
+    wpfPatchHere(edit code, skip_ha)
+    wpfPatchHere(edit code, skip_ha_neg)
+
+    wpfDrop(edit code, rt, 4, 5)
+    wpfDrop(edit code, rt, 6, 7)
+
+    x64LoadSlot(edit code, 0, 8)
+    x64FrameEnd(edit code)
+
+    wpfPatchAll(edit code, view failed)
+    wpfJumpTo(edit code, clean_up)
+
+    // ERROR_FILE_NOT_FOUND is safe only when the path itself has no reparse
+    // point. ERROR_PATH_NOT_FOUND and every other failure remain errors.
+    wpfPatchHere(edit code, output_unavailable)
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    x64MovReg(edit code, 1, 0)
+    hold not_absent = wpfIf(edit code, 1, 2, 5)
+    x64LoadSlot(edit code, 1, 4)
+    w64CallImport(edit code, edit imports, pe64ImportGetFileAttributesW())
+    wpfDword(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold has_entry = wpfIf(edit code, 1, WPF_DWORD_MASK, 5)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 8, 0)
+    wpfPatchHere(edit code, not_absent)
+    wpfPatchHere(edit code, has_entry)
+    wpfJumpTo(edit code, clean_up)
+
     give entry
 }
 
@@ -866,11 +1278,13 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
     hold wide_z = wpfEmitWideZ(edit code, edit imports, rt)
     hold scan = wpfEmitScan(edit code, edit imports)
+    hold random = wpfEmitRandom(edit code, edit imports)
     change at: List of[Int] = List[]
     at@push(wpfEmitArgCount(edit code, scan))
     at@push(wpfEmitArg(edit code, edit imports, rt, scan))
     at@push(wpfEmitReadText(edit code, edit imports, rt, utf8, path_z, wide_z))
     at@push(wpfEmitPrintError(edit code, edit imports, write_handle))
-    at@push(wpfEmitWriteBytes(edit code, edit imports, rt, path_z, wide_z, write_handle))
+    at@push(wpfEmitWriteBytes(edit code, edit imports, rt, path_z, wide_z, write_handle, random))
+    at@push(wpfEmitSameFile(edit code, edit imports, rt, path_z, wide_z))
     give at
 }

@@ -357,6 +357,25 @@ pub fn semaWriteBytes(ctx: &mut SemaContext, start: Int, end: Int, path_ty: Int,
     return 1
 }
 
+expose flow semaSameFile(ctx: edit SemaContext, start: Int, end: Int, path_a_ty: Int, path_a: Int, path_b_ty: Int, path_b: Int) => Int {
+    when path_a_ty != 5 || path_b_ty != 5 {
+        semaAddError(edit ctx, "L0004", "sameFile requiere (Text, Text)", start, end)
+        give 7
+    }
+    when path_a < 0 || path_b < 0 {
+        semaAddError(edit ctx, "L0016", "sameFile requiere lugares prestables para Text", start, end)
+        give 7
+    }
+    change args: List of[Int] = List[]
+    hold a_arg = lirArg(edit ctx.lir, true, path_a, false)
+    args@push(a_arg)
+    hold b_arg = lirArg(edit ctx.lir, true, path_b, false)
+    args@push(b_arg)
+    // 0 = different, 1 = same, 2 = identity could not be established.
+    semaPlatformEmit(edit ctx, 5, view args, 1, true)
+    give 1
+}
+
 pub fn semaPlatformEmit(ctx: &mut SemaContext, op: Int, args: &List<Int>, res_t: Int, ret_val: Bool) {
     let first = lirSequence(&mut ctx, args)
     let res_var = lirVar(&mut ctx.lir, res_t, false)

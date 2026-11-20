@@ -65,7 +65,7 @@ const BASE_IMPORTS: [&str; 5] = [
     "VirtualFree",
 ];
 /// The imports of an image using every platform builtin, in IAT order.
-const PLATFORM_IMPORTS: [&str; 13] = [
+const PLATFORM_IMPORTS: [&str; 21] = [
     "GetStdHandle",
     "WriteFile",
     "ExitProcess",
@@ -79,6 +79,14 @@ const PLATFORM_IMPORTS: [&str; 13] = [
     "CloseHandle",
     "GetFileType",
     "GetLastError",
+    "GetFileInformationByHandle",
+    "FlushFileBuffers",
+    "MoveFileExW",
+    "DeleteFileW",
+    "GetFileAttributesW",
+    "LoadLibraryExW",
+    "GetProcAddress",
+    "FreeLibrary",
 ];
 
 /// Parses the headers of a relocatable PE32+ image and returns its import
@@ -245,7 +253,15 @@ fn stage1_platform_program_runs_as_pe32_plus() {
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
         let dir = fresh_dir("stage1-run");
+        let occupied_temp = dir.join("native_platform_out.bin.tmp.0");
+        fs::write(&occupied_temp, b"occupied").unwrap();
         let run = execute(&_image, &dir, ["uno", "dos"]);
+        eprintln!(
+            "DEBUG run code: {:?}, stdout: {:?}, stderr: {:?}",
+            run.code,
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
         assert_eq!(String::from_utf8(run.stdout).unwrap(), "2\n0\n1\n1\n2\n");
         assert_eq!(
             String::from_utf8(run.stderr).unwrap(),
@@ -256,6 +272,30 @@ fn stage1_platform_program_runs_as_pe32_plus() {
             fs::read(dir.join("native_platform_out.bin")).unwrap(),
             b"ELE\n"
         );
+        assert_eq!(fs::read(&occupied_temp).unwrap(), b"occupied");
+
+        // Every process needs its own exclusive temporary while targeting
+        // the same output. The published bytes stay complete.
+        let mut children = Vec::new();
+        for _ in 0..4 {
+            children.push(
+                Command::new(&_image)
+                    .current_dir(&dir)
+                    .args(["uno", "dos"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+        }
+        for mut child in children {
+            assert_eq!(child.wait().unwrap().code(), Some(42));
+        }
+        assert_eq!(
+            fs::read(dir.join("native_platform_out.bin")).unwrap(),
+            b"ELE\n"
+        );
+        assert_eq!(fs::read(&occupied_temp).unwrap(), b"occupied");
         // An existing file is truncated and rewritten.
         let dir = fresh_dir("stage1-rerun");
         fs::write(dir.join("native_platform_out.bin"), vec![b'x'; 10000]).unwrap();
