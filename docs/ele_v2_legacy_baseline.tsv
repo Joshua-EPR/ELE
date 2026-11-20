@@ -1,30 +1,30 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 69; total legacy constructs: 11788
-# total	angle_generic	333
-# total	borrow_mut	2006
-# total	borrow_ref	872
-# total	dot_method_call	413
+# files with legacy syntax: 68; total legacy constructs: 11668
+# total	angle_generic	330
+# total	borrow_mut	2003
+# total	borrow_ref	854
+# total	dot_method_call	406
 # total	kw_break	44
 # total	kw_const	94
 # total	kw_continue	26
-# total	kw_else	172
+# total	kw_else	171
 # total	kw_enum	9
-# total	kw_fn	452
-# total	kw_for	202
-# total	kw_if	1609
-# total	kw_import	321
-# total	kw_in	202
-# total	kw_let	1367
+# total	kw_fn	444
+# total	kw_for	195
+# total	kw_if	1593
+# total	kw_import	320
+# total	kw_in	195
+# total	kw_let	1358
 # total	kw_match	169
-# total	kw_pub	458
-# total	kw_return	1557
-# total	kw_struct	63
-# total	kw_var	409
-# total	kw_while	106
+# total	kw_pub	448
+# total	kw_return	1542
+# total	kw_struct	61
+# total	kw_var	404
+# total	kw_while	104
 # total	match_arm_arrow	594
-# total	return_arrow	310
+# total	return_arrow	304
 # file	category	count
 compiler-l/src/ast.l	angle_generic	19
 compiler-l/src/ast.l	borrow_mut	10
@@ -348,19 +348,19 @@ compiler-l/src/lir_finish.l	kw_var	12
 compiler-l/src/lir_finish.l	kw_while	2
 compiler-l/src/lir_finish.l	return_arrow	3
 compiler-l/src/lir_module.l	borrow_mut	25
-compiler-l/src/lir_module.l	borrow_ref	47
-compiler-l/src/lir_module.l	dot_method_call	36
+compiler-l/src/lir_module.l	borrow_ref	46
+compiler-l/src/lir_module.l	dot_method_call	35
 compiler-l/src/lir_module.l	kw_continue	1
 compiler-l/src/lir_module.l	kw_else	1
 compiler-l/src/lir_module.l	kw_fn	7
-compiler-l/src/lir_module.l	kw_for	22
-compiler-l/src/lir_module.l	kw_if	36
+compiler-l/src/lir_module.l	kw_for	21
+compiler-l/src/lir_module.l	kw_if	35
 compiler-l/src/lir_module.l	kw_import	14
-compiler-l/src/lir_module.l	kw_in	22
-compiler-l/src/lir_module.l	kw_let	49
+compiler-l/src/lir_module.l	kw_in	21
+compiler-l/src/lir_module.l	kw_let	48
 compiler-l/src/lir_module.l	kw_match	3
 compiler-l/src/lir_module.l	kw_pub	3
-compiler-l/src/lir_module.l	kw_return	21
+compiler-l/src/lir_module.l	kw_return	20
 compiler-l/src/lir_module.l	kw_var	10
 compiler-l/src/lir_module.l	match_arm_arrow	8
 compiler-l/src/lir_module.l	return_arrow	1
@@ -683,23 +683,6 @@ compiler-l/src/parser.l	kw_var	1
 compiler-l/src/parser.l	kw_while	2
 compiler-l/src/parser.l	match_arm_arrow	4
 compiler-l/src/parser.l	return_arrow	2
-compiler-l/src/scopes.l	angle_generic	3
-compiler-l/src/scopes.l	borrow_mut	3
-compiler-l/src/scopes.l	borrow_ref	17
-compiler-l/src/scopes.l	dot_method_call	2
-compiler-l/src/scopes.l	kw_else	1
-compiler-l/src/scopes.l	kw_fn	8
-compiler-l/src/scopes.l	kw_for	4
-compiler-l/src/scopes.l	kw_if	13
-compiler-l/src/scopes.l	kw_import	1
-compiler-l/src/scopes.l	kw_in	4
-compiler-l/src/scopes.l	kw_let	8
-compiler-l/src/scopes.l	kw_pub	10
-compiler-l/src/scopes.l	kw_return	12
-compiler-l/src/scopes.l	kw_struct	2
-compiler-l/src/scopes.l	kw_var	5
-compiler-l/src/scopes.l	kw_while	2
-compiler-l/src/scopes.l	return_arrow	6
 compiler-l/src/sema.l	borrow_mut	69
 compiler-l/src/sema.l	borrow_ref	34
 compiler-l/src/sema.l	dot_method_call	1
@@ -975,17 +958,15 @@ compiler-l/src/stmt_lower.l	return_arrow	4
 compiler-l/src/symbols.l	angle_generic	3
 compiler-l/src/symbols.l	borrow_mut	2
 compiler-l/src/symbols.l	borrow_ref	7
-compiler-l/src/symbols.l	dot_method_call	5
+compiler-l/src/symbols.l	dot_method_call	1
 compiler-l/src/symbols.l	kw_enum	1
 compiler-l/src/symbols.l	kw_fn	8
-compiler-l/src/symbols.l	kw_for	2
-compiler-l/src/symbols.l	kw_if	17
+compiler-l/src/symbols.l	kw_if	15
 compiler-l/src/symbols.l	kw_import	1
-compiler-l/src/symbols.l	kw_in	2
 compiler-l/src/symbols.l	kw_let	7
 compiler-l/src/symbols.l	kw_match	1
 compiler-l/src/symbols.l	kw_pub	11
-compiler-l/src/symbols.l	kw_return	31
+compiler-l/src/symbols.l	kw_return	29
 compiler-l/src/symbols.l	kw_struct	2
 compiler-l/src/symbols.l	match_arm_arrow	8
 compiler-l/src/symbols.l	return_arrow	7

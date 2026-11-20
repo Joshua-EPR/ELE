@@ -174,6 +174,10 @@ fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int, p
                     let line = &semaCtx.lir_lines[i]
                     print(line)
                 }
+                each i among 0..semaCtx.lir_functions.length {
+                    hold line = view semaCtx.lir_functions[i]
+                    print(line)
+                }
                 print("end")
                 printError("LirSummary blocks={lir_blocks} insts={lir_insts} drops={drops} flags={flags}")
                 return 0
