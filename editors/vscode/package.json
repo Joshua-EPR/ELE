@@ -2,7 +2,7 @@
   "name": "ele-vscode",
   "displayName": "ELE Language Support",
   "description": "Rich language support for ELE v2: syntax highlighting, snippets, and compiler diagnostic integration.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "ele-lang",
   "engines": {
     "vscode": "^1.75.0"
@@ -41,7 +41,11 @@
         "extensions": [
           ".l"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/ele-file.png",
+          "dark": "./images/ele-file.png"
+        }
       }
     ],
     "grammars": [
@@ -84,6 +88,14 @@
           "message": 6
         }
       }
+    ],
+    "iconThemes": [
+      {
+        "id": "ele-file-icons",
+        "label": "ELE File Icons",
+        "path": "./fileicons/ele-file-icon-theme.json"
+      }
     ]
-  }
+  },
+  "icon": "./images/ele-logo.png"
 }
