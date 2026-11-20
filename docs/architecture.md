@@ -89,9 +89,9 @@ ELE executables are **100% self-contained**:
 - **Direct System Calls & Platform Wrappers:**
   - **Windows:** Resolves `ExitProcess`, `GetStdHandle`, and `WriteFile` dynamically or through minimal direct import tables.
   - **Linux:** Emits direct `syscall` instructions (`sys_write` [1], `sys_exit` [60], `sys_mmap` [9], `sys_munmap` [11]).
-- **Dynamic Heap Allocator & Capacity Guards:**
-  - Dynamic heap operations in `compiler-l/src/codegen/native_heap_dynamic.l` enforce `NATIVE_HEAP_MAX = 33554432` (32 MiB).
-  - The size guard (`heapDynSizeGuard`) accepts allocations up to and including **exactly 32 MiB** (`size <= 33554432`), rejecting strictly larger requests (`size > 33554432`) without heap corruption.
+- **Linux Dynamic Heap Capacity Guards:**
+  - Runtime-sized mapping and resizing emitted by `compiler-l/src/codegen/native_heap_dynamic.l` use a 32 MiB (33,554,432-byte) inclusive request limit.
+  - `heapDynSizeGuard` accepts positive requests up to **exactly 32 MiB**, and rejects zero/negative sizes and any `size > 33554432` before the syscall.
 - **Binary Footprint:** A standard compiled binary is typically between **4.5 KiB and 6.0 KiB**, compared to ~5 MiB for compilers that bundle a standard runtime library.
 
 ---
@@ -109,4 +109,4 @@ To maintain rigor, ELE clearly distinguishes between its development bootstrap t
 3. **Stage 2 / Stage 3 Fixpoint:**
    - The Stage 1 binary compiles its own source code (`main_driver.l`) to produce Generation 2 (`ele_gen2`).
    - Generation 2 compiles the source code again to produce Generation 3 (`ele_gen3`).
-   - `ele_gen2` and `ele_gen3` achieve **100% bitwise identity**, demonstrating complete self-hosting reproducibility without external compiler invocations.
+   - `ele_gen2` and `ele_gen3` achieve **100% bitwise identity**, demonstrating reproducible self-hosting for the compiler path and workloads exercised by those tests, without external compiler invocations during the tested autonomous generations.
