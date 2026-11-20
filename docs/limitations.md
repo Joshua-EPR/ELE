@@ -48,13 +48,12 @@ This document provides transparent, verified engineering disclosure regarding cu
 
 ## 4. Filesystem & Driver Safety Guarantees
 
-- **Path Equivalence:** Path normalization canonicalizes directory separators (`\` and `/`), strips redundant `.` segments, and resolves parent `..` traversals.
-- **Multi-Module Protection:** Compiling with `--output` pointing to the main source file or any transitively imported module in the compilation unit is strictly detected and rejected before writing.
-- **Atomic Write Staging:** Output binaries are staged to `{output}.tmp.ele` to verify write completion before being renamed to the target path.
-- **Known Limitation:** Non-UTF-8 binary images (such as existing compiled `.exe` or `.elf` files) fail closed during text content inspection. As a result, hardlink alias detection operates strictly on UTF-8 source text files.
+- **Lexical Path Normalization:** The driver normalizes separators and `.` / `..` as text, but this is **not** OS-backed filesystem canonicalization. Absolute/relative aliases, UNC/device paths, Unicode and symlink identities are not reliably resolved.
+- **Multi-Module Protection (Limited):** It compares the requested destination with the entry source and imported modules by textual path and a supplementary UTF-8 content heuristic. Equal content does not prove that two paths refer to the same file, and hardlink identity is not established.
+- **Output Writing Is Not Atomic:** The driver writes `{output}.tmp.ele` and then performs a separate `writeBytes(output, image)` call. **There is no atomic rename/replace**. An interrupted final write may truncate or corrupt the destination, and the temporary file may remain.
+- **Precaution:** Do not target irreplaceable files or unverified aliases. Keep backups until OS-level file identity checks, safe temporary-file handling, and atomic publication are implemented and tested.
 
 ---
-
 ## 5. Standard Library & Ecosystem
 
 - **Minimal Builtin Runtime:** Currently limited to:
