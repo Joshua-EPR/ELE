@@ -31,7 +31,7 @@
 fixed PE64_IMAGE_BASE = 5368709120
 fixed PE64_SECTION_ALIGN = 4096
 fixed PE64_FILE_ALIGN = 512
-fixed PE64_MAX_CODE = 16777216
+fixed PE64_MAX_CODE = 33554432
 fixed PE64_DWORD_MAX = 4294967295
 fixed PE64_DOS_SIZE = 128
 // DOS area + "PE\0\0" + COFF header + PE32+ optional header, before the
@@ -437,7 +437,7 @@ flow peHeaders(out: edit List of[Int], layout: view Pe64Layout, code_length: Int
     // over a single guard page. 8 MiB matches the usual Linux main stack.
     peLittle(edit out, PE64_STACK_SIZE, 8)  // SizeOfStackReserve
     peLittle(edit out, PE64_STACK_SIZE, 8)  // SizeOfStackCommit
-    peLittle(edit out, 1048576, 8)          // SizeOfHeapReserve
+    peLittle(edit out, 67108864, 8)         // SizeOfHeapReserve (64 MiB)
     peLittle(edit out, 4096, 8)             // SizeOfHeapCommit
     peLittle(edit out, 0, 4)                // LoaderFlags
     peLittle(edit out, 16, 4)               // NumberOfRvaAndSizes

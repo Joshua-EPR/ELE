@@ -41,7 +41,7 @@ fn nativeLoad(code: &mut X64Code, op: &NativeOperand, dst: Int, assigned: &List<
 }
 
 pub fn nativeCompileSubset(source: &Text) -> NativeBuild {
-    if source.byteLength == 0 || source.byteLength > 1048576 { return nativeFail(10) }
+    if source.byteLength == 0 || source.byteLength > 33554432 { return nativeFail(10) }
     var reader = nativeReaderNew()
     nativeExpect(source, &mut reader, "ELE-LIR")
     nativeExpect(source, &mut reader, "1")

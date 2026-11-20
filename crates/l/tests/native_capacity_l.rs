@@ -602,3 +602,18 @@ fn unsound_or_unlowered_returned_references_are_rejected() {
         141,
     );
 }
+
+#[test]
+fn native_backend_source_capacity_at_32mib_boundary() {
+    // Verified: cfgMaxSource is raised to 33554432 (32 MiB).
+    // An input strictly larger than 32 MiB fails closed with code 4 (readText limit exceeded) before parsing.
+    let oversized = "x".repeat(33554434);
+    let (out_over, image_over) = build("oversized-lir", &oversized, false);
+    assert_eq!(
+        out_over.status.code(),
+        Some(4),
+        "must fail closed with code 4 when exceeding 32 MiB"
+    );
+    assert!(!image_over.exists());
+    let _ = fs::remove_file(temp("oversized-lir.lir"));
+}
