@@ -65,7 +65,7 @@ const BASE_IMPORTS: [&str; 5] = [
     "VirtualFree",
 ];
 /// The imports of an image using every platform builtin, in IAT order.
-const PLATFORM_IMPORTS: [&str; 13] = [
+const PLATFORM_IMPORTS: [&str; 17] = [
     "GetStdHandle",
     "WriteFile",
     "ExitProcess",
@@ -79,6 +79,10 @@ const PLATFORM_IMPORTS: [&str; 13] = [
     "CloseHandle",
     "GetFileType",
     "GetLastError",
+    "GetFileInformationByHandle",
+    "FlushFileBuffers",
+    "MoveFileExW",
+    "DeleteFileW",
 ];
 
 /// Parses the headers of a relocatable PE32+ image and returns its import
@@ -246,6 +250,12 @@ fn stage1_platform_program_runs_as_pe32_plus() {
     {
         let dir = fresh_dir("stage1-run");
         let run = execute(&_image, &dir, ["uno", "dos"]);
+        eprintln!(
+            "DEBUG run code: {:?}, stdout: {:?}, stderr: {:?}",
+            run.code,
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
         assert_eq!(String::from_utf8(run.stdout).unwrap(), "2\n0\n1\n1\n2\n");
         assert_eq!(
             String::from_utf8(run.stderr).unwrap(),

@@ -373,6 +373,24 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
                 return semaWriteBytes(&mut ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
             }
+            hold name_same_file = "sameFile"
+            when symbolNameEqualsText(source, name_start, name_end, name_same_file) {
+                when arg_count != 2 {
+                    semaAddError(edit ctx, "L0004", "sameFile requiere (Text, Text)", expr.start, expr.end)
+                    give 7
+                }
+                hold path_a_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold path_a_loan = semaPlatformArgLoan(edit ctx, path_a_ty, expr.start, expr.end)
+                hold path_a = ctx.lir.borrowed
+                hold path_b_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                hold path_b_loan = semaPlatformArgLoan(edit ctx, path_b_ty, expr.start, expr.end)
+                hold path_b = ctx.lir.borrowed
+                change loans: List of[Int] = List[]
+                loans@push(path_a_loan)
+                loans@push(path_b_loan)
+                semaCallLoans(edit ctx, view loans, 4, SITE_NONE, expr.start, expr.end)
+                give semaSameFile(edit ctx, expr.start, expr.end, path_a_ty, path_a, path_b_ty, path_b)
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {

@@ -2891,7 +2891,9 @@ impl Verifier<'_> {
                     self.expect(*ty, actual, "operación de plataforma")?;
                 }
                 match (op, result) {
-                    (PlatformOp::ArgCount, Type::Int) | (PlatformOp::PrintError, Type::Unit) => {}
+                    (PlatformOp::ArgCount, Type::Int)
+                    | (PlatformOp::PrintError, Type::Unit)
+                    | (PlatformOp::SameFile, Type::Bool) => {}
                     (PlatformOp::Arg | PlatformOp::ReadText, Type::Enum(id))
                         if self.module.enums.get(*id).is_some_and(|e| {
                             matches!(

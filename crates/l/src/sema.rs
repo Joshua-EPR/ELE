@@ -2895,6 +2895,7 @@ impl Checker<'_> {
                 PlatformOp::ArgCount => Type::Int,
                 PlatformOp::PrintError => Type::Unit,
                 PlatformOp::WriteBytes => unreachable!("handled before generic platform calls"),
+                PlatformOp::SameFile => Type::Bool,
                 PlatformOp::Arg | PlatformOp::ReadText => {
                     let id = env.template_ids["Result"];
                     Type::Enum(env.instantiate(id, vec![Type::Text, Type::Int], span)?)

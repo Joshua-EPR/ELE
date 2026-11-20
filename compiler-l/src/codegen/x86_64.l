@@ -278,6 +278,15 @@ pub fn x64LoadMem64(code: &mut X64Code, dst: Int, base: Int, displacement: Int) 
     x64MemoryAddress(&mut code, dst, base, displacement)
 }
 
+expose flow x64LoadMem32(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    when dst >= 8 || base >= 8 {
+        x64Put(edit code, 64 + (dst / 8) * 4 + base / 8)
+    }
+    x64Put(edit code, 139) // mov r32, r/m32
+    x64MemoryAddress(edit code, dst, base, displacement)
+}
+
 pub fn x64StoreMem64(code: &mut X64Code, base: Int, displacement: Int, src: Int) {
     if !x64MemoryValid(&mut code, src, base, displacement) { return }
     x64RexRegRm(&mut code, src, base)

@@ -38,6 +38,7 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "readtext") { give 2 }
     when nativeEquals(source, word, "printerror") { give 3 }
     when nativeEquals(source, word, "writebytes") { give 4 }
+    when nativeEquals(source, word, "samefile") { give 5 }
     give -1
 }
 
@@ -97,7 +98,7 @@ flow cfgIsTextResult(p: view CfgProgram, ty: Int) => Bool {
 }
 
 expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.op < 0 || inst.op > 4 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
+    when inst.op < 0 || inst.op > 5 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
     hold first = inst.arg_first
     when inst.op == 1 && !cfgPlatformArgOk(p, f, first, false, false) { give 131 }
     when inst.op == 2 {
@@ -107,9 +108,13 @@ expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     when inst.op == 4 {
         when !cfgPlatformArgOk(p, f, first, true, false) || !cfgPlatformArgOk(p, f, first + 1, true, true) { give 131 }
     }
+    when inst.op == 5 {
+        when !cfgPlatformArgOk(p, f, first, true, false) || !cfgPlatformArgOk(p, f, first + 1, true, false) { give 131 }
+    }
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
     when (inst.op == 0 || inst.op == 4) && dest != 0 { give 132 }
     when inst.op == 3 && dest != cfgUnitType() { give 132 }
+    when inst.op == 5 && dest != 1 { give 132 }
     when (inst.op == 1 || inst.op == 2) && !cfgIsTextResult(p, dest) { give 132 }
     give 0
 }
@@ -147,9 +152,14 @@ expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst
         x64MovReg(edit code, 6, 0)
         cfgPlatformArgAddress(edit code, p, f, first, edit fix)
         x64MovReg(edit code, 7, 0)
+    } otherwise when inst.op == 5 {
+        cfgPlatformArgAddress(edit code, p, f, first + 1, edit fix)
+        x64MovReg(edit code, 6, 0)
+        cfgPlatformArgAddress(edit code, p, f, first, edit fix)
+        x64MovReg(edit code, 7, 0)
     }
     cfgRuntimeCall(edit code, edit fix, cfgPlatformBase() + inst.op)
-    when inst.op == 0 || inst.op == 4 {
+    when inst.op == 0 || inst.op == 4 || inst.op == 5 {
         x64StoreSlot(edit code, dst_slot, 0)
     }
 }
