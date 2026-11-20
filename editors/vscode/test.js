@@ -149,4 +149,34 @@ assert.ok(grammarOrder.indexOf('#variables') > grammarOrder.indexOf('#functions'
 const mirror = JSON.parse(fs.readFileSync(path.resolve(rootDir, '../../syntaxes/ele.tmLanguage.json'), 'utf8'));
 assert.deepStrictEqual(syntax, mirror, 'root TextMate grammar must remain identical to VS Code extension grammar');
 
+// 7. ELE language/logo and source icon assets must be genuine bundled PNG files.
+function bundledPath(relativePath) {
+  const asset = path.resolve(rootDir, relativePath);
+  assert.ok(asset.startsWith(rootDir + path.sep), 'Asset must stay inside extension root');
+  assert.ok(fs.existsSync(asset), `Missing extension asset: ${relativePath}`);
+  return asset;
+}
+function pngDimensions(relativePath) {
+  const image = fs.readFileSync(bundledPath(relativePath));
+  assert.ok(image.length > 32, 'PNG must contain nonempty image data');
+  assert.ok(image.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a','hex')), `Invalid PNG signature: ${relativePath}`);
+  return {width:image.readUInt32BE(16),height:image.readUInt32BE(20)};
+}
+const extensionLogo = pngDimensions(pkg.icon);
+assert.ok(extensionLogo.width >= 128 && extensionLogo.height >= 128, 'VS Code extension marketplace icon must be at least 128x128');
+const eleLanguage = pkg.contributes.languages.find(l => l.id === 'ele');
+assert.ok(eleLanguage.icon, 'ELE language must define fallback file icons');
+const lightFileIcon = pngDimensions(eleLanguage.icon.light);
+const darkFileIcon = pngDimensions(eleLanguage.icon.dark);
+assert.ok(lightFileIcon.width >= 64 && darkFileIcon.width >= 64, 'ELE source file icon must remain legible');
+const eleThemeContribution = pkg.contributes.iconThemes.find(t => t.id === 'ele-file-icons');
+assert.ok(eleThemeContribution, 'Missing opt-in ELE File Icons theme contribution');
+const iconTheme = JSON.parse(fs.readFileSync(bundledPath(eleThemeContribution.path), 'utf8'));
+assert.strictEqual(iconTheme.fileExtensions.l, '_ele_source');
+assert.strictEqual(iconTheme.languageIds.ele, '_ele_source');
+const imgRef = iconTheme.iconDefinitions._ele_source.iconPath;
+const resolvedFileIcon = path.resolve(path.dirname(bundledPath(eleThemeContribution.path)),imgRef);
+assert.strictEqual(resolvedFileIcon, bundledPath(eleLanguage.icon.dark), 'File icon theme and language fallback must use the same PNG');
+assert.strictEqual(pkg.version, '0.1.3', 'Branded extension must carry the new version');
+
 console.log('All VS Code ELE extension validations passed successfully!');
