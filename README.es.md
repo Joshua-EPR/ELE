@@ -198,7 +198,7 @@ Para el informe arquitectónico completo, consulta la [Documentación de Self-Ho
 </p>
 
 - **102 / 102 archivos fuente (100%)** en `compiler-l/src/` superan las fases de Lexer, Parser y Análisis Semántico.
-- **20 / 20 ejecutables independientes (100%)** alcanzan la emisión de código máquina nativo (ELF64 y PE32+).
+- **20 / 102 archivos fuente (~19,6%)** alcanzan la fase de emisión del backend nativo; corresponden a los **20 / 20 puntos de entrada independientes** de la matriz actual. Esto no significa cobertura nativa total de las fuentes.
 
 ---
 
