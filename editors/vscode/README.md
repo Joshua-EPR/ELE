@@ -99,8 +99,14 @@ This extension now also provides the optional **ELE Graphite Dark** theme, inten
 | Types | `Float`, `List`, `Microcolumn` | muted gold `#E7C38C` |
 | Functions and methods | `main()`, `@crear()`, `@reset()` | calm blue `#82BFE9` |
 | Strings | `"hello"` | sage `#A7CFA0` |
+| Variables locales | `input`, `weights`, `column` | verde agua `#B6D7C7` |
+| Parámetros | `pre`, `post` | azul suave `#AEC9E6` |
+| Campos de objetos | `column.activeCount` | arena `#CECEAB` |
+| Constantes | `fixed MAX_WEIGHTS`, `MAX_WEIGHTS` | ámbar `#E8B68D` |
 | Numbers | `0.8`, `31` | apricot `#DCAA87` |
 | Comments | `// detail` | slate `#708494` |
+
+**How it highlights names:** Declarations with `hold` and `change`, function parameters, member fields and ordinary lowercase variable references are colored independently. `fixed` declarations receive the constant color. References written in `UPPER_SNAKE_CASE` also receive the constant color. **TextMate highlighting is lexical, not a full name resolver:** references to lowercase `fixed` names use the variable color until ELE supports semantic tokens. The change does not modify compiler semantics.
 
 **Enable it:** Press `Ctrl+Shift+P`, select **Preferences: Color Theme**, and choose **ELE Graphite Dark**. Use the same menu to switch back to your previous theme. The choice affects editor/UI appearance, not compiler behavior, syntax, or generated code.
 
@@ -120,7 +126,7 @@ Using `@vscode/vsce`:
 ```bash
 cd editors/vscode
 npx @vscode/vsce package
-code --install-extension ele-vscode-0.1.0.vsix
+code --install-extension ele-vscode-0.1.2.vsix
 ```
 
 ---
