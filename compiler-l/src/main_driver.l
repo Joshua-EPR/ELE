@@ -174,6 +174,14 @@ flow driverPathStem(path: view Text) => Text {
     give out
 }
 
+flow isLinuxHost() => Bool {
+    hold proc_path = "/proc/version"
+    choose readText(proc_path, 4096) {
+        Ok(s): { give true }
+        Err(e): { give false }
+    }
+}
+
 flow printHelp() {
     print("ELE Compiler Driver 0.3.0")
     print("Uso: ele <comando> [opciones]")
@@ -397,7 +405,7 @@ flow main() => Int {
     hold ext_exe = ".exe"
     hold ext_elf = ".elf"
 
-    // Determine target format
+    // Determine target format: Linux defaults to ELF64 (0), Windows defaults to PE64 (1)
     when target < 0 {
         when output_file.byteLength > 0 && textEndsWith(view output_file, view ext_exe) {
             target = 1
@@ -405,8 +413,11 @@ flow main() => Int {
             when output_file.byteLength > 0 && textEndsWith(view output_file, view ext_elf) {
                 target = 0
             } otherwise {
-                // Default target is PE64 (1) on Windows
-                target = 1
+                when isLinuxHost() {
+                    target = 0
+                } otherwise {
+                    target = 1
+                }
             }
         }
     }
@@ -419,6 +430,12 @@ flow main() => Int {
         } otherwise {
             output_file = "{stem}"
         }
+    }
+
+    // Safety check: output path cannot overwrite input source file
+    when textMatches(view source_file, view output_file) {
+        printError("error[CLI]: el archivo de salida no puede sobrescribir el archivo de entrada '{source_file}'")
+        give 2
     }
 
     give compileProgram(source_file, output_file, target)
