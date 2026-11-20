@@ -6,7 +6,6 @@
   <img src="https://img.shields.io/badge/Architecture-x86--64-blue?style=flat-square" alt="x86-64">
   <img src="https://img.shields.io/badge/Targets-Windows%20PE32%2B%20%7C%20Linux%20ELF64-success?style=flat-square" alt="Targets">
   <img src="https://img.shields.io/badge/Runtime-Zero%20CRT-informational?style=flat-square" alt="Zero CRT">
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="License">
 </p>
 
 <p align="center">
@@ -248,4 +247,4 @@ cargo test -p project-l --test ele_v2_legacy_ratchet
 python benchmarks/scripts/validate_results.py
 ```
 
-ELE is released under the [MIT License](LICENSE).
+**License:** No repository-level license file has been published. Do not assume redistribution rights without confirming the project's terms.
