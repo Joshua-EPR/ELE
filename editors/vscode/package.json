@@ -1,0 +1,81 @@
+{
+  "name": "ele-vscode",
+  "displayName": "ELE Language Support",
+  "description": "Rich language support for ELE v2: syntax highlighting, snippets, and compiler diagnostic integration.",
+  "version": "0.1.0",
+  "publisher": "ele-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "ele",
+    "ele-v2",
+    "programming-language",
+    "systems-programming",
+    "syntax-highlighting"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Joshua-EPR/ELE"
+  },
+  "bugs": {
+    "url": "https://github.com/Joshua-EPR/ELE/issues"
+  },
+  "homepage": "https://github.com/Joshua-EPR/ELE",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "ele",
+        "aliases": [
+          "ELE",
+          "ele"
+        ],
+        "extensions": [
+          ".l"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ele",
+        "scopeName": "source.ele",
+        "path": "./syntaxes/ele.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ele",
+        "path": "./snippets/ele.json"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "ele",
+        "label": "ELE Compiler Diagnostics",
+        "owner": "ele",
+        "source": "ele",
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(error|warning)\\[([^\\]]+)\\]:\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        }
+      }
+    ]
+  }
+}
