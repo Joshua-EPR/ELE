@@ -30,7 +30,7 @@ expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
 
     x64MovImm64(edit code, 1, 33554432)
     x64CmpReg(edit code, reg, 1)
-    x64SetCondition(edit code, 9) // signed > max
+    x64SetCondition(edit code, 8) // signed > max
     x64TestRax(edit code)
     hold good_max = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 122)
