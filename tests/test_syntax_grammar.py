@@ -347,5 +347,42 @@ class TestELEGraphiteTheme(unittest.TestCase):
             self.assertIn(scope, scopes)
 
 
+class TestELEBrandedIcons(unittest.TestCase):
+    def test_language_and_extension_png_icons(self):
+        pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+        self.assertEqual(pkg["version"], "0.1.3")
+        logo = (EDITORS_DIR / pkg["icon"]).resolve()
+        self.assertTrue(logo.is_relative_to(EDITORS_DIR.resolve()))
+        self.assertTrue(logo.is_file())
+
+        def dimensions(p):
+            data = p.read_bytes()
+            self.assertEqual(data[:8], b"\\x89PNG\\r\\n\\x1a\\n")
+            return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+        width, height = dimensions(logo)
+        self.assertGreaterEqual(width, 128)
+        self.assertGreaterEqual(height, 128)
+        lang = next(l for l in pkg["contributes"]["languages"] if l["id"] == "ele")
+        for appearance in ("light", "dark"):
+            file_icon = (EDITORS_DIR / lang["icon"][appearance]).resolve()
+            self.assertTrue(file_icon.is_relative_to(EDITORS_DIR.resolve()))
+            self.assertTrue(file_icon.is_file())
+            self.assertGreaterEqual(dimensions(file_icon)[0], 64)
+
+    def test_file_icon_theme_mapping(self):
+        pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+        contributions = pkg["contributes"]["iconThemes"]
+        icon_theme = next(t for t in contributions if t["id"] == "ele-file-icons")
+        theme_path = (EDITORS_DIR / icon_theme["path"]).resolve()
+        self.assertTrue(theme_path.is_relative_to(EDITORS_DIR.resolve()))
+        theme = json.loads(theme_path.read_text(encoding="utf-8"))
+        self.assertEqual(theme["fileExtensions"]["l"], "_ele_source")
+        self.assertEqual(theme["languageIds"]["ele"], "_ele_source")
+        image_path = (theme_path.parent / theme["iconDefinitions"]["_ele_source"]["iconPath"]).resolve()
+        self.assertEqual(image_path, (EDITORS_DIR / pkg["contributes"]["languages"][0]["icon"]["dark"]).resolve())
+        self.assertTrue(image_path.is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
