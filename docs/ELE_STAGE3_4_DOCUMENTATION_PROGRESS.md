@@ -13,7 +13,7 @@
 
 ```text
 BASE_SHA: 33b4a3f4879313c26050920f3441d6eab953e789
-HEAD_SHA: fb9310e16b8b1ae400a779390af3aee78f1b570a
+HEAD_SHA: 3042661c92cb00a2ee3154881ca7b8bc1eb1eb75
 BRANCH: docs/stage3-4-performance-documentation
 PR: https://github.com/Joshua-EPR/ELE/pull/new/docs/stage3-4-performance-documentation
 
