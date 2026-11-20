@@ -120,7 +120,9 @@ Consulta la [Referencia del Lenguaje](docs/language-reference.md) para especific
 
 Todas las afirmaciones de rendimiento en ELE están respaldadas por benchmarks auditables y automatizados ejecutados sobre hardware real (Intel x86-64, Windows 10 y WSL2 Ubuntu). Ninguna cifra ni gráfico es simulado.
 
-Para la metodología completa y los datos crutos, consulta el [Informe de Rendimiento](docs/performance.md) y la [Metodología de Benchmarking](docs/benchmarks/methodology.md).
+Para la metodología completa y los datos brutos, consulta el [Informe de Rendimiento](docs/performance.md) y la [Metodología de Benchmarking](docs/benchmarks/methodology.md).
+
+**Procedencia de las mediciones:** Los resultados de Windows aquí mostrados se registraron en el commit [`56f34fb`](https://github.com/Joshua-EPR/ELE/commit/56f34fb437e20ca2b6b5613106f96ec153f36969) (20 de noviembre de 2026), **antes** de fusionar Stage 3.5. Son mediciones históricas, no resultados recién obtenidos de `main`. Se deben repetir los benchmarks sobre la versión integrada antes de atribuirle estas cifras. La comparativa externa y la suite de runtime independiente son experimentos diferentes; la tabla de runtime usa los datos de la comparativa.
 
 ### Latencia de Compilación
 
@@ -132,13 +134,13 @@ ELE compila programas pequeños y medianos en decenas de milisegundos:
 
 | Carga de Trabajo | Líneas de Fuente | Mediana de Tiempo | Pico RSS (Memoria) | Tamaño de Salida |
 |---|---|---|---|---|
-| `hello.l` | 5 | **31.4 ms** | 24.50 MiB | 4,608 B |
-| `arithmetic.l` | 10 | **36.1 ms** | 24.52 MiB | 5,120 B |
-| `fibonacci.l` | 13 | **38.7 ms** | 24.52 MiB | 5,120 B |
-| `text_processing.l` | 10 | **39.2 ms** | 24.52 MiB | 5,120 B |
-| `multimodule (main.l)` | 10 | **54.7 ms** | 40.59 MiB | 5,120 B |
-| `main_sema.l` (Compilador) | 274 | **15.64 s** | 525.11 MiB | 909,824 B |
-| `main_driver.l` (Self-Host) | 665 | **31.30 s** | 855.04 MiB | 1,508,352 B |
+| `hello.l` | 5 | **32.05 ms** | 1.18 MiB | 4,608 B |
+| `arithmetic.l` | 10 | **32.90 ms** | 1.21 MiB | 5,120 B |
+| `fibonacci.l` | 13 | **35.75 ms** | 1.21 MiB | 5,120 B |
+| `text_processing.l` | 10 | **35.24 ms** | 1.20 MiB | 5,120 B |
+| `multimodule (main.l)` | 10 | **33.36 ms** | 1.22 MiB | 5,120 B |
+| `main_sema.l` (Compilador) | 278 | **3.16 s** | 52.46 MiB | 913,408 B |
+| `main_driver.l` (Self-Host) | 692 | **5.23 s** | 87.53 MiB | 1,514,496 B |
 
 ---
 
@@ -162,15 +164,15 @@ Evaluamos algoritmos idénticos entre **ELE**, **Rust (`rustc 1.99.1`)** y **C (
 
 | Benchmark | Lenguaje | Nivel de Optimización | Tiempo Compilación | Runtime (ms) | Tamaño Binario |
 |---|---|---|---|---|---|
-| **Fibonacci(25)** | **ELE** | `native-direct-emit` | **40.6 ms** | **28.37 ms** | **5,120 B** |
-| Fibonacci(25) | Rust | Debug (`-O0`) | 657.6 ms | 20.72 ms | 5,086,801 B |
-| Fibonacci(25) | Rust | Release (`-O3`) | 718.6 ms | 21.02 ms | 5,085,050 B |
-| **Loop(10M)** | **ELE** | `native-direct-emit` | **48.9 ms** | **101.42 ms** | **5,120 B** |
-| Loop(10M) | Rust | Debug (`-O0`) | 674.9 ms | 103.11 ms | 5,086,761 B |
-| Loop(10M) | Rust | Release (`-O3`) | 692.6 ms | 21.40 ms | 5,084,972 B |
+| **Fibonacci(25)** | **ELE** | `native-direct-emit` | 32.79 ms | 53.49 ms | 5,120 B |
+| Fibonacci(25) | Rust | Debug (`-O0`) | 670.88 ms | 22.63 ms | 5,086,801 B |
+| Fibonacci(25) | Rust | Release (`-O3`) | 716.37 ms | 24.92 ms | 5,085,050 B |
+| **Loop(10M)** | **ELE** | `native-direct-emit` | 38.12 ms | 101.34 ms | 5,120 B |
+| Loop(10M) | Rust | Debug (`-O0`) | 649.07 ms | 94.34 ms | 5,086,761 B |
+| Loop(10M) | Rust | Release (`-O3`) | 690.35 ms | 21.47 ms | 5,084,972 B |
 
 > [!NOTE]
-> El backend nativo de ELE emite código máquina directo a partir de bloques básicos del CFG sin pasadas de optimización SSA. Su velocidad de ejecución es directamente comparable a los binarios de depuración no optimizados de C y Rust, pero compilando en una fracción mínima del tiempo.
+> El backend nativo de ELE emite código máquina directamente desde bloques CFG, sin optimizaciones SSA. El rendimiento depende de la carga y la configuración; estas cifras describen experimentos concretos y no establecen una clasificación general entre lenguajes.
 
 ---
 
