@@ -10,8 +10,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-MARKDOWN_LINK = re.compile(r"!?(?:\\[[^\\]\\n]*\\])\\(([^)]+)\\)")
-FENCED = re.compile(r"(?ms)^\\s*```[^\\n]*\\n.*?^\\s*```\\s*$")
+MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+FENCED = re.compile(r"(?ms)^\s*```[^\n]*\n.*?^\s*```\s*$")
 
 
 class HtmlReferences(HTMLParser):
@@ -64,7 +64,7 @@ def main():
             if not target.exists():
                 errors.append(f"{doc.relative_to(ROOT)} -> {url} (missing)")
     if errors:
-        print("\\n".join(errors), file=sys.stderr)
+        print("\n".join(errors), file=sys.stderr)
         return 1
     print(f"Checked {len(docs)} Markdown files and {validated} local links/assets.")
     return 0
