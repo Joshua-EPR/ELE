@@ -76,4 +76,35 @@ for (const prefix of requiredSnippets) {
   assert.ok(snippetPrefixes.includes(prefix), `Snippet prefix ${prefix} missing`);
 }
 
+// 5. The optional ELE Graphite Dark theme is packaged and scopes match ELE grammar.
+const themeContribution = pkg.contributes.themes.find(t => t.label === 'ELE Graphite Dark');
+assert.ok(themeContribution, 'ELE Graphite Dark must be registered as an optional theme');
+assert.strictEqual(themeContribution.uiTheme, 'vs-dark');
+const themePath = path.resolve(rootDir, themeContribution.path);
+assert.ok(fs.existsSync(themePath), 'theme file must exist inside the extension');
+const theme = JSON.parse(fs.readFileSync(themePath, 'utf8'));
+assert.strictEqual(theme.name, 'ELE Graphite Dark');
+assert.strictEqual(theme.type, 'dark');
+assert.ok(theme.colors['editor.background'], 'theme needs editor background');
+const themeScopes = theme.tokenColors.flatMap(r => Array.isArray(r.scope) ? r.scope : [r.scope]);
+for (const scope of [
+  'keyword.declaration.ele',
+  'keyword.control.ele',
+  'storage.modifier.ownership.ele',
+  'entity.name.function.method.ele',
+  'support.type.primitive.ele',
+  'constant.numeric.float.ele',
+  'string.quoted.double.ele'
+]) {
+  assert.ok(themeScopes.includes(scope), `ELE theme is missing scope ${scope}`);
+}
+for (const [token, color] of Object.entries(theme.colors)) {
+  if (typeof color === 'string' && color.startsWith('#')) {
+    assert.match(color, /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/, `Invalid color for ${token}`);
+  }
+}
+for (const rule of theme.tokenColors) {
+  assert.match(rule.settings.foreground, /^#[0-9a-fA-F]{6}$/, 'Invalid foreground in token rule');
+}
+
 console.log('All VS Code ELE extension validations passed successfully!');
