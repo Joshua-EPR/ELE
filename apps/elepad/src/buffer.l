@@ -84,6 +84,32 @@ expose flow insertText(b: edit Buffer, offset: Int, source: view Text) => Bool {
     give true
 }
 
+// Insert one Unicode scalar as UTF-8. Return its encoded byte count, or 0
+// for an invalid scalar or a position inside another UTF-8 sequence.
+expose flow insertScalar(b: edit Buffer, offset: Int, scalar: Int) => Int {
+    when !boundary(view b, offset) || scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) { give 0 }
+    when scalar < 128 {
+        insertRaw(edit b, offset, scalar)
+        give 1
+    }
+    when scalar < 2048 {
+        insertRaw(edit b, offset, 192 + scalar / 64)
+        insertRaw(edit b, offset + 1, 128 + scalar % 64)
+        give 2
+    }
+    when scalar < 65536 {
+        insertRaw(edit b, offset, 224 + scalar / 4096)
+        insertRaw(edit b, offset + 1, 128 + (scalar / 64) % 64)
+        insertRaw(edit b, offset + 2, 128 + scalar % 64)
+        give 3
+    }
+    insertRaw(edit b, offset, 240 + scalar / 262144)
+    insertRaw(edit b, offset + 1, 128 + (scalar / 4096) % 64)
+    insertRaw(edit b, offset + 2, 128 + (scalar / 64) % 64)
+    insertRaw(edit b, offset + 3, 128 + scalar % 64)
+    give 4
+}
+
 expose flow deleteForward(b: edit Buffer, offset: Int) => Bool {
     when offset >= length(view b) || !boundary(view b, offset) { give false }
     hold crlf = byteAt(view b, offset) == 13 && offset + 1 < length(view b) && byteAt(view b, offset + 1) == 10
