@@ -29,12 +29,31 @@ flow main() => Int {
     hold accent = "é"
     when !insertText(edit b, 3, view accent) { give 11 }
     when !equalsText(view b, view sample) { give 12 }
+    when deleteBackward(edit b, 0) { give 30 }
+    when deleteBackward(edit b, 4) { give 31 }
+    when !deleteBackward(edit b, 5) { give 32 }
+    when !insertText(edit b, 3, view accent) { give 33 }
+    when !equalsText(view b, view sample) { give 34 }
+    when lineEnd(view b, 0) != 5 { give 35 }
+    change endings = loadText(view sample)
+    when !deleteForward(edit endings, 5) { give 37 }
+    hold without_break = "JoséELE\n"
+    when !equalsText(view endings, view without_break) { give 38 }
+    endings = loadText(view sample)
+    when !deleteBackward(edit endings, 7) { give 39 }
+    when !equalsText(view endings, view without_break) { give 40 }
     change c = newCursor()
     c.offset = 3
     right(view b, edit c)
     when c.offset != 5 { give 20 }
     left(view b, edit c)
     when c.offset != 3 { give 21 }
+    when c.column_bytes != 3 { give 36 }
+    c.offset = 5
+    right(view b, edit c)
+    when c.offset != 7 { give 41 }
+    left(view b, edit c)
+    when c.offset != 5 { give 42 }
     hold query = "ELE"
     when findText(view b, view query, 0) != 7 { give 22 }
     when insertAscii(edit b, 4, 88) { give 23 }

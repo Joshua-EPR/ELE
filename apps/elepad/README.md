@@ -14,6 +14,8 @@ ELEPad es un editor nativo en desarrollo. El código de aplicación y las prueba
 
 El gap buffer conserva capacidad libre junto al cursor. La inserción local no copia el documento completo por pulsación. Mover el cursor sobre una región extensa y serializar al guardar sí requieren recorrer bytes. Los límites UTF-8 evitan editar en mitad de un carácter codificado; no se calculan graphemes ni ancho visual. Se conservan los bytes CRLF o LF tal como se cargaron.
 
+El núcleo también borra hacia atrás un escalar UTF-8 completo y trata CRLF como un solo salto de línea al navegar o borrar. `lineEnd` sitúa el cursor antes del CR de una línea CRLF. Estas operaciones están cubiertas por `editor_test.l`; el programa principal continúa siendo la utilidad M1, sin bucle interactivo ni guardado atómico.
+
 ## Compilar y verificar en PowerShell
 
 Desde la raíz del proyecto:
