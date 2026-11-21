@@ -1,0 +1,169 @@
+# Tests of std/io/console.l and the consoleInputMode/readConsoleEvent
+# platform operations on Windows. The programs under test are ELE compiled by
+# the autonomous driver; this script only builds them, feeds input and checks
+# exit codes and console state.
+#
+#   .\tests\std\console_input.ps1 -Ele <path to ele.exe or main_driver.exe>
+#
+# 1. Decoder over redirected bytes (positive, and a negative mismatch).
+# 2. Real console: a console is allocated, INPUT_RECORDs are written with
+#    WriteConsoleInputW, the ELE program reads them through
+#    ReadConsoleInputW, and the console input mode must be restored.
+# 3. The interactive test refuses redirected input (not a console).
+param(
+    [Parameter(Mandatory = $true)][string]$Ele,
+    [string]$OutDir = (Join-Path ([IO.Path]::GetTempPath()) 'ele-console-input-tests')
+)
+$ErrorActionPreference = 'Stop'
+$root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+$src = Join-Path $root 'std\io'
+New-Item -ItemType Directory -Force $OutDir | Out-Null
+$failures = 0
+# .NET Framework creates the child's stdin writer with Console.InputEncoding
+# and writes its preamble: without this, every byte test would start with a
+# UTF-8 BOM (U+FEFF), which the decoder rightly reports as a character.
+[Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+
+function Build-Ele([string]$name) {
+    $out = Join-Path $OutDir ($name + '.exe')
+    if (Test-Path $out) { Remove-Item $out -Force }
+    Push-Location $src
+    try { & $Ele build ($name + '.l') -o $out | Out-Host } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) { throw "build of $name.l failed" }
+    return $out
+}
+
+function Invoke-WithBytes([string]$exe, [byte[]]$bytes) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $exe
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $p = [Diagnostics.Process]::Start($psi)
+    $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $p.StandardInput.Close()
+    $null = $p.StandardOutput.ReadToEnd()
+    $p.WaitForExit()
+    return $p.ExitCode
+}
+
+function Check([string]$what, [int]$actual, [int]$expected) {
+    if ($actual -eq $expected) {
+        Write-Host "PASS $what"
+    } else {
+        Write-Host "FAIL $what (exit $actual, expected $expected)"
+        $script:failures++
+    }
+}
+
+$decoder = Build-Ele 'console_test'
+$interactive = Build-Ele 'console_interactive_test'
+$demo = Build-Ele 'console_keys'
+
+# 1. Bytes: a, é, ESC[A, ESC[1;5C, ESC[3~, Ctrl+S, DEL, CR, TAB, ESC ESC,
+#    ESC O P, ESC[15~, U+1F600, 0xFF, ESC x.
+$seq = [byte[]](0x61, 0xC3, 0xA9, 0x1B, 0x5B, 0x41, 0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x43,
+    0x1B, 0x5B, 0x33, 0x7E, 0x13, 0x7F, 0x0D, 0x09, 0x1B, 0x1B, 0x1B, 0x4F, 0x50,
+    0x1B, 0x5B, 0x31, 0x35, 0x7E, 0xF0, 0x9F, 0x98, 0x80, 0xFF, 0x1B, 0x78)
+Check 'decoder: byte sequence' (Invoke-WithBytes $decoder $seq) 0
+Check 'decoder: mismatch is reported' (Invoke-WithBytes $decoder ([byte[]](0x62))) 2
+Check 'decoder: truncated UTF-8 then end' (Invoke-WithBytes $decoder ([byte[]](0x61, 0xC3))) 3
+Check 'decoder: empty input' (Invoke-WithBytes $decoder ([byte[]]@())) 2
+Check 'demo: redirected input ends cleanly' (Invoke-WithBytes $demo ([byte[]](0x61, 0x13, 0x1B, 0x5B, 0x41))) 0
+# 3. Not a console.
+Check 'interactive test: redirected input is not a console' (Invoke-WithBytes $interactive ([byte[]](0x61))) 1
+
+# 2. Real console.
+Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class EleConsoleHarness {
+    [StructLayout(LayoutKind.Explicit, Size = 20)]
+    public struct InputRecord {
+        [FieldOffset(0)] public ushort EventType;
+        [FieldOffset(4)] public int KeyDown;
+        [FieldOffset(8)] public ushort Repeat;
+        [FieldOffset(10)] public ushort VirtualKey;
+        [FieldOffset(12)] public ushort ScanCode;
+        [FieldOffset(14)] public ushort Unicode;
+        [FieldOffset(16)] public uint KeyControl;
+        [FieldOffset(4)] public short X;
+        [FieldOffset(6)] public short Y;
+        [FieldOffset(8)] public uint Buttons;
+        [FieldOffset(12)] public uint MouseControl;
+        [FieldOffset(16)] public uint MouseFlags;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool FreeConsole();
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool AllocConsole();
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool WriteConsoleInputW(IntPtr h, InputRecord[] records, uint count, out uint written);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleMode(IntPtr h, out uint mode);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+    [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+
+    static InputRecord Key(ushort vk, ushort unit, uint control, bool down, ushort repeat) {
+        InputRecord r = new InputRecord();
+        r.EventType = 1; r.KeyDown = down ? 1 : 0; r.Repeat = repeat;
+        r.VirtualKey = vk; r.Unicode = unit; r.KeyControl = control;
+        return r;
+    }
+
+    // Returns "exit=<code> before=<mode> after=<mode>" or an error text.
+    public static string Run(string exe) {
+        FreeConsole();
+        if (!AllocConsole()) return "AllocConsole failed " + Marshal.GetLastWin32Error();
+        ShowWindow(GetConsoleWindow(), 0);
+        IntPtr input = CreateFileW("CONIN$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        if (input == new IntPtr(-1)) return "CONIN$ failed " + Marshal.GetLastWin32Error();
+        uint before;
+        if (!GetConsoleMode(input, out before)) return "GetConsoleMode failed";
+        InputRecord resize = new InputRecord(); resize.EventType = 4; resize.X = 100; resize.Y = 30;
+        InputRecord click = new InputRecord(); click.EventType = 2; click.X = 5; click.Y = 7; click.Buttons = 1;
+        InputRecord[] records = new InputRecord[] {
+            Key(65, 97, 0, true, 1),
+            Key(83, 19, 8, true, 1),
+            Key(38, 0, 0x100, true, 1),
+            Key(16, 0, 16, true, 1),
+            Key(65, 65, 16, true, 1),
+            Key(65, 65, 16, false, 1),
+            Key(0, 0xD83D, 0, true, 1),
+            Key(0, 0xDE00, 0, true, 1),
+            Key(50, 64, 1 + 8, true, 1),
+            resize,
+            click,
+            Key(116, 0, 0, true, 3),
+            Key(27, 27, 0, true, 1),
+        };
+        uint written;
+        if (!WriteConsoleInputW(input, records, (uint)records.Length, out written) || written != records.Length)
+            return "WriteConsoleInputW failed " + Marshal.GetLastWin32Error();
+        ProcessStartInfo psi = new ProcessStartInfo(exe);
+        psi.UseShellExecute = false;
+        Process p = Process.Start(psi);
+        if (!p.WaitForExit(20000)) { p.Kill(); return "timeout"; }
+        uint after;
+        GetConsoleMode(input, out after);
+        CloseHandle(input);
+        FreeConsole();
+        return "exit=" + p.ExitCode + " before=" + before + " after=" + after;
+    }
+}
+'@
+$result = [EleConsoleHarness]::Run($interactive)
+Write-Host "console run: $result"
+if ($result -match '^exit=(\d+) before=(\d+) after=(\d+)$') {
+    Check 'interactive: ReadConsoleInputW events decoded' ([int]$Matches[1]) 0
+    Check 'interactive: console input mode restored' ([int]([long]$Matches[2] -eq [long]$Matches[3])) 1
+} else {
+    Write-Host "FAIL interactive harness: $result"
+    $failures++
+}
+
+if ($failures -ne 0) { Write-Host "$failures failure(s)"; exit 1 }
+Write-Host 'all console input tests passed'
+exit 0
