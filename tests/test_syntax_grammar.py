@@ -350,7 +350,7 @@ class TestELEGraphiteTheme(unittest.TestCase):
 class TestELEBrandedIcons(unittest.TestCase):
     def test_language_and_extension_png_icons(self):
         pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(pkg["version"], "0.1.5")
+        self.assertEqual(pkg["version"], "0.1.6")
         logo = (EDITORS_DIR / pkg["icon"]).resolve()
         self.assertTrue(logo.is_relative_to(EDITORS_DIR.resolve()))
         self.assertTrue(logo.is_file())
@@ -385,11 +385,15 @@ class TestELEBrandedIcons(unittest.TestCase):
         self.assertEqual(image_path.suffix, ".svg")
         svg = image_path.read_text(encoding="utf-8")
         self.assertIn("<svg ", svg)
-        self.assertIn('viewBox="0 0 128 128"', svg)
-        self.assertIn("#70C7BE", svg)
+        self.assertIn('viewBox="0 0 64 64"', svg)
+        self.assertIn("#0EADA8", svg)
+        self.assertIn("#FFFFFF", svg)
+        self.assertNotIn("filter=", svg)
         fallback = (EDITORS_DIR / pkg["contributes"]["languages"][0]["icon"]["dark"]).resolve()
         self.assertTrue(fallback.is_file())
         self.assertEqual(fallback.suffix, ".png")
+        self.assertEqual(fallback.name, "ele-icon-v016.png")
+        self.assertEqual(image_path.name, "ele-icon-v016.svg")
 
 
 if __name__ == "__main__":
