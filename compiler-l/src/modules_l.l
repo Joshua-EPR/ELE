@@ -125,12 +125,14 @@ fn resolvedImportPath(own_dir: &Text, imp_name: &Text, lib_root: &Text) -> Text 
     let rel = importRelativePath(imp_name)
     let local = "{own_dir}/{rel}"
     if lib_root.byteLength == 0 { return local }
+    change missing = false
     match readText(&local, 16 * 1024 * 1024) {
-        Ok(source) => { return local }
+        Ok(source) => {}
         Err(code) => {
-            if code != 2 { return local }
+            if code == 2 { missing = true }
         }
     }
+    if !missing { return local }
     return "{lib_root}/{rel}"
 }
 
