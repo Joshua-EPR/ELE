@@ -39,6 +39,13 @@ This file is meant to let a new session resume without repeating investigations.
   - Commit: `8134728` on `feat/p0b-file-streams-20261121`, pushed; no PR opened (no `gh`).
   - Clippy `-D warnings` and `cargo fmt --check`: clean.
 - Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI not run).
+- Branch `feat/linear-resources-20261121` (`b7ea833`, **stacked on P0-B**) is step 1 of `docs/native-window-and-callbacks-design.md`: the File-specific linearity becomes general. It is a refactor with no behavior change.
+  - Sema now has `semTypeIsLinear`, `semTypeLinearIds` and `semTypeCloser`.
+  - Flow analysis tracks a list (`FlowGraph.linear_types`), and `FlowCheck.linear` names the leaked type.
+  - Aggregate rule: `semaRejectLinearElem`.
+  - LIR verifier: a table-driven `lirVerifyResourcePlatform`.
+  - Evidence: File diagnostics are byte-identical; `file_streams_l` 4/4; ratchet and syntax green.
+  - Full suite: 776 passed, 2 failed. One is the known ELF whitelist failure. The other, `stage1_import_exports_l`, hit Windows error 32 under parallel threads **even without clippy running**, so it is an intermittent contention inside the suite itself; 3/3 alone.
 - Not yet done: existence/metadata queries, rename/replace through streams, directory iteration, permissions/attributes on stream-created files, concurrent-writer tests, and Stage 0 support for the builtins.
 
 ### 2.2 ELEPad terminal (P0 editor)
