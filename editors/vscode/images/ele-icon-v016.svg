@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">
+  <title>ELE language source file</title>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#0EADA8"/>
+  <path d="M20 15H51L46 24H30V28H45L41 36H30V41H51L46 50H20L14 44V22Z" fill="#FFFFFF"/>
+</svg>
