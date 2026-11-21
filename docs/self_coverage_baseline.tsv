@@ -37,6 +37,7 @@ codegen/win64_callback.l	lir
 codegen/win64_heap.l	lir
 codegen/win64_rt.l	lir
 codegen/win64_rt_platform.l	lir
+codegen/win64_window.l	lir
 codegen/x86_64.l	lir
 cursor.l	lir
 decl.l	lir

@@ -147,8 +147,9 @@ flow windowsModifiers(state: Int) => Int {
     give mods
 }
 
-// Special key of a Windows virtual-key code, or KEY_NONE.
-flow windowsKey(vk: Int) => Int {
+// Special key of a Windows virtual-key code, or KEY_NONE. Shared with
+// std.ui.window, so console and window applications see the same keys.
+expose flow windowsKey(vk: Int) => Int {
     when vk == 8 { give KEY_BACKSPACE }
     when vk == 9 { give KEY_TAB }
     when vk == 13 { give KEY_ENTER }
@@ -169,7 +170,7 @@ flow windowsKey(vk: Int) => Int {
 
 // Shift, Ctrl, Alt, Caps Lock, Num Lock, Scroll Lock and the Windows keys
 // change modifiers only; they are not reported as keys.
-flow windowsModifierOnly(vk: Int) => Bool {
+expose flow windowsModifierOnly(vk: Int) => Bool {
     give vk == 16 || vk == 17 || vk == 18 || vk == 20 || vk == 91 || vk == 92 || vk == 93 || vk == 144 || vk == 145
 }
 

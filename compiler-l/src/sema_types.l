@@ -18,6 +18,8 @@ pub enum SemTypeKind {
     Result
     // Opaque, linear handle of an open file (P0-B). Below sema it is an Int.
     File
+    // Opaque, linear native window (P0-D). Below sema it is an Int.
+    Window
 }
 
 pub struct SemType {
@@ -114,19 +116,37 @@ expose flow semTypeIsFile(table: view TypeTable, ty: Int) => Bool {
 // semTypeCloser; flow analysis, the aggregate rule, drops and the LIR
 // serialization then apply to it unchanged.
 
+// The single Window type, created on first use like File.
+expose flow semTypeMakeWindow(table: edit TypeTable) => Int {
+    each i among 8..table.types.length {
+        when semTypeIsWindow(table, i) { give i }
+    }
+    give semTypeAdd(edit table, SemTypeKind.Window, -1, -1, -1, -1)
+}
+
+expose flow semTypeIsWindow(table: view TypeTable, ty: Int) => Bool {
+    when ty < 8 || ty >= table.types.length { give false }
+    choose table.types[ty].kind {
+        SemTypeKind.Window : { give true }
+        _ : { give false }
+    }
+}
+
 expose flow semTypeIsLinear(table: view TypeTable, ty: Int) => Bool {
-    give semTypeIsFile(table, ty)
+    give semTypeIsFile(table, ty) || semTypeIsWindow(table, ty)
 }
 
 // The source name of linear type `ty`, for diagnostics.
 expose flow semTypeLinearName(table: view TypeTable, ty: Int) => Text {
     when semTypeIsFile(table, ty) { give "File" }
+    when semTypeIsWindow(table, ty) { give "Window" }
     give "recurso"
 }
 
 // The operation that consumes a value of linear type `ty`, for diagnostics.
 expose flow semTypeCloser(table: view TypeTable, ty: Int) => Text {
     when semTypeIsFile(table, ty) { give "fileClose" }
+    when semTypeIsWindow(table, ty) { give "windowClose" }
     give "su operación de cierre"
 }
 
@@ -340,6 +360,7 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
         return "<invalid>"
     }
     when semTypeIsFile(table, type_id) { give "File" }
+    when semTypeIsWindow(table, type_id) { give "Window" }
     let t = &table.types[type_id]
     match t.kind {
         SemTypeKind.Unknown => { return "Unknown" }
@@ -385,5 +406,6 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
             return "Result<{inner}>"
         }
         SemTypeKind.File : { give "File" }
+        SemTypeKind.Window : { give "Window" }
     }
 }

@@ -436,6 +436,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             }
             hold file_result = semaFileBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
             when file_result != -1 { give file_result }
+            hold window_result = semaWindowBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
+            when window_result != -1 { give window_result }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
@@ -761,6 +763,87 @@ flow semaFileBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTre
             args@push(lirArg(edit ctx.lir, false, whence, false))
         }
     }
+    semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, start, end)
+    semaPlatformEmit(edit ctx, op, view args, res_t, true)
+    give res_t
+}
+
+// ---- Native windows (P0-D) -----------------------------------------------
+
+flow semaWindowOp(source: view Text, name_start: Int, name_end: Int) => Int {
+    hold n_open = "windowOpen"
+    hold n_status = "windowStatus"
+    hold n_next = "windowNext"
+    hold n_fill = "windowFill"
+    hold n_text = "windowText"
+    hold n_present = "windowPresent"
+    hold n_send = "windowSend"
+    hold n_pixel = "windowPixel"
+    hold n_close = "windowClose"
+    when symbolNameEqualsText(source, name_start, name_end, n_open) { give LIR_PLATFORM_WINDOW_OPEN }
+    when symbolNameEqualsText(source, name_start, name_end, n_status) { give LIR_PLATFORM_WINDOW_STATUS }
+    when symbolNameEqualsText(source, name_start, name_end, n_next) { give LIR_PLATFORM_WINDOW_NEXT }
+    when symbolNameEqualsText(source, name_start, name_end, n_fill) { give LIR_PLATFORM_WINDOW_FILL }
+    when symbolNameEqualsText(source, name_start, name_end, n_text) { give LIR_PLATFORM_WINDOW_TEXT }
+    when symbolNameEqualsText(source, name_start, name_end, n_present) { give LIR_PLATFORM_WINDOW_PRESENT }
+    when symbolNameEqualsText(source, name_start, name_end, n_send) { give LIR_PLATFORM_WINDOW_SEND }
+    when symbolNameEqualsText(source, name_start, name_end, n_pixel) { give LIR_PLATFORM_WINDOW_PIXEL }
+    when symbolNameEqualsText(source, name_start, name_end, n_close) { give LIR_PLATFORM_WINDOW_CLOSE }
+    give -1
+}
+
+flow semaWindowUsage(op: Int) => Text {
+    when op == LIR_PLATFORM_WINDOW_OPEN { give "windowOpen requiere (título: Text, ancho: Int, alto: Int)" }
+    when op == LIR_PLATFORM_WINDOW_FILL { give "windowFill requiere (ventana: Window, x: Int, y: Int, ancho: Int, alto: Int, rgb: Int)" }
+    when op == LIR_PLATFORM_WINDOW_TEXT { give "windowText requiere (ventana: Window, x: Int, y: Int, texto: Text, rgb: Int)" }
+    when op == LIR_PLATFORM_WINDOW_SEND { give "windowSend requiere (ventana: Window, mensaje: Int, wparam: Int, lparam: Int)" }
+    when op == LIR_PLATFORM_WINDOW_PIXEL { give "windowPixel requiere (ventana: Window, x: Int, y: Int)" }
+    when op == LIR_PLATFORM_WINDOW_CLOSE { give "windowClose requiere (ventana: Window), que se consume" }
+    give "la operación requiere (ventana: Window)"
+}
+
+// The window builtins, checked and lowered from the shared resource table
+// (lir_build.l): windowOpen produces the linear Window, windowClose
+// consumes it (a move), every other operation borrows it shared for the
+// call. Returns -1 when the callee is not a window builtin.
+flow semaWindowBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTree, start: Int, end: Int, name_start: Int, name_end: Int, first_arg: Int, arg_count: Int) => Int {
+    hold op = semaWindowOp(source, name_start, name_end)
+    when op < 0 { give -1 }
+    when arg_count != lirResourceArity(op) {
+        semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+        give 7
+    }
+    hold window_t = semTypeMakeWindow(edit ctx.types)
+    change args: List of[Int] = List[]
+    change loans: List of[Int] = List[]
+    each i among 0..arg_count {
+        hold kind = lirResourceArgKind(op, i)
+        when kind == 0 || kind == 5 {
+            hold t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + i], ACCESS_MOVE)
+            hold operand = lirTakeOperand(edit ctx, t)
+            when (kind == 0 && t != 1) || (kind == 5 && !semTypeIsWindow(view ctx.types, t)) {
+                semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+                give 7
+            }
+            args@push(lirArg(edit ctx.lir, false, operand, false))
+        } otherwise {
+            hold t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + i], ACCESS_READ)
+            hold loan = semaPlatformArgLoan(edit ctx, t, start, end)
+            hold place = ctx.lir.borrowed
+            when (kind == 1 && !semTypeIsWindow(view ctx.types, t)) || (kind == 4 && t != 5) {
+                semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+                give 7
+            }
+            when place < 0 || loan < 0 {
+                semaAddError(edit ctx, "L0016", "la operación requiere un lugar prestable (Window o Text)", start, end)
+                give 7
+            }
+            loans@push(loan)
+            args@push(lirArg(edit ctx.lir, true, place, false))
+        }
+    }
+    change res_t = 1
+    when lirResourceOpens(op) { res_t = window_t }
     semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, start, end)
     semaPlatformEmit(edit ctx, op, view args, res_t, true)
     give res_t
