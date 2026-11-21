@@ -27,12 +27,11 @@ Desde la raíz del proyecto:
 
 `elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. `writeBytes` no ofrece publicación atómica ni recuperación de una salida parcialmente escrita; por eso la utilidad exige un nombre de salida nuevo.
 
+`readKey` sigue siendo una API inexistente: `probes/keyboard.l` permanece como prueba negativa (L0001). En la rama P0-A, `consoleInputMode`, `readConsoleEvent` y `std/io/console.l` proporcionan entrada general. Para que una aplicación fuera de `std/` importe la biblioteca sin copiarla, el compilador acepta ahora `--lib`:
 
-\`readKey\` sigue siendo una API inexistente: \`probes/keyboard.l\` permanece como prueba negativa (L0001). En la rama P0-A, \`consoleInputMode\`, \`readConsoleEvent\` y \`std/io/console.l\` proporcionan entrada general. Para que una aplicación fuera de \`std/\` importe la biblioteca sin copiarla, el compilador acepta ahora \`--lib\`:
-
-\`\`\`powershell
+```powershell
 .\ele.exe build .\apps\elepad\probes\console_import.l --lib . --target pe --output .\target\elepad-console-probe.exe
 .\target\elepad-console-probe.exe
-\`\`\`
+```
 
-El probe importa \`take std.io.console\`, abre y cierra el lector y verifica el enlace. **Todavía no es ELEPad interactivo**: \`apps/elepad/src/main.l\` sigue siendo la utilidad M1. El siguiente hito M2 debe integrar \`consoleNext\` al núcleo de edición. Tampoco existe una interfaz Win32 GUI verificada.
+El probe importa `take std.io.console`, abre y cierra el lector y verifica el enlace. **Todavía no es ELEPad interactivo**: `apps/elepad/src/main.l` sigue siendo la utilidad M1. El siguiente hito M2 debe integrar `consoleNext` al núcleo de edición. Tampoco existe una interfaz Win32 GUI verificada.
