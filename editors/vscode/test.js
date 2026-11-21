@@ -179,7 +179,7 @@ const resolvedFileIcon = path.resolve(path.dirname(bundledPath(eleThemeContribut
 assert.strictEqual(path.extname(resolvedFileIcon), '.svg', 'Explorer icons must be resolution-independent SVG');
 assert.ok(fs.existsSync(resolvedFileIcon), 'Scalable ELE File Icons asset must be bundled');
 const svg = fs.readFileSync(resolvedFileIcon, 'utf8');
-assert.match(svg, /<svg\\b/, 'ELE file icon must contain an SVG root');
+assert.ok(svg.includes('<svg '), 'ELE file icon must contain an SVG root');
 assert.match(svg, /viewBox="0 0 128 128"/, 'ELE file icon must declare its viewBox');
 assert.match(svg, /#70C7BE/, 'ELE file icon must contain the bold teal E mark');
 assert.strictEqual(darkFileIcon.width, 128, 'Fallback file icon must be 128px');
