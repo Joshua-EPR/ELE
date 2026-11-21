@@ -1519,13 +1519,78 @@ flow wpfEmitReadEvent(code: edit X64Code, imports: edit Pe64Imports) => Int {
     give entry
 }
 
+// Binary-safe stdout write of a borrowed List<Int>, with no newline.
+// 0 success, -1 OS failure, -2 invalid byte/length.
+flow wpfEmitWriteConsole(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, write_handle: Int) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 5)
+    x64LoadMem64(edit code, 8, 7, 0)
+    x64LoadMem64(edit code, 9, 7, 8)
+    x64StoreSlot(edit code, 0, 8)
+    x64StoreSlot(edit code, 1, 9)
+    x64MovReg(edit code, 1, 9)
+    hold invalid_size = wpfIf(edit code, 1, 16777216, 8)
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold checked = wpfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 0, 0, 0)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    hold invalid_byte = x64AboveEqualPlaceholder(edit code)
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, check)
+    wpfPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 1)
+    wpfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 2, 0)
+    x64StoreSlot(edit code, 3, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold packed = wpfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 2, 0, 0)
+    x64LoadSlot(edit code, 0, 2)
+    x64AddReg(edit code, 0, 1)
+    x64StoreMem8(edit code, 0, 0, 2)
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, pack)
+    wpfPatchHere(edit code, packed)
+    x64MovImm64(edit code, 1, -11)             // STD_OUTPUT_HANDLE
+    w64CallImport(edit code, edit imports, pe64ImportGetStdHandle())
+    x64StoreSlot(edit code, 4, 0)
+    x64LoadSlot(edit code, 7, 4)
+    x64LoadSlot(edit code, 6, 2)
+    x64LoadSlot(edit code, 2, 1)
+    wpfCall(edit code, write_handle)
+    x64StoreSlot(edit code, 1, 0)
+    wpfDrop(edit code, rt, 2, 3)
+    x64LoadSlot(edit code, 0, 1)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, invalid_size)
+    wpfPatchHere(edit code, invalid_byte)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    give entry
+}
+
 // Emits the Windows platform runtime; returns the entry of each operation,
 // indexed by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), like
 // native_rt_platform's pfEmitAll. Its absolute addresses: none (tables are
 // reached RIP-relative), so it adds no base relocation.
 // The console input routines (codes 6, 7) are emitted only when `console`
 // holds; otherwise their entries are -1 and their imports stay out.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool) => List of[Int] {
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -1546,5 +1611,7 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
         at@push(-1)
         at@push(-1)
     }
+    when console_output { at@push(wpfEmitWriteConsole(edit code, edit imports, rt, write_handle)) }
+    otherwise { at@push(-1) }
     give at
 }
