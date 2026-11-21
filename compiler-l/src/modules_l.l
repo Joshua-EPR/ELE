@@ -118,6 +118,22 @@ fn importRelativePath(name: &Text) -> Text {
     return "{out}.l"
 }
 
+// Preserve local-first imports. Only a genuinely missing local file may
+// fall back to the explicit library root; syntax/permissions/read errors
+// must not silently resolve to another source file.
+fn resolvedImportPath(own_dir: &Text, imp_name: &Text, lib_root: &Text) -> Text {
+    let rel = importRelativePath(imp_name)
+    let local = "{own_dir}/{rel}"
+    if lib_root.byteLength == 0 { return local }
+    match readText(&local, 16 * 1024 * 1024) {
+        Ok(source) => { return local }
+        Err(code) => {
+            if code != 2 { return local }
+        }
+    }
+    return "{lib_root}/{rel}"
+}
+
 fn listTextIndexOf(list: &List<Text>, item: &Text) -> Int {
     for i in 0..list.length {
         let elem = &list[i]
@@ -130,6 +146,7 @@ fn listTextIndexOf(list: &List<Text>, item: &Text) -> Int {
 
 fn loadModuleRecursive(
     path: &Text,
+    lib_root: &Text,
     loading_stack: &mut List<Text>,
     loaded_paths: &mut List<Text>,
     combined_source: &mut Text,
@@ -186,8 +203,8 @@ fn loadModuleRecursive(
                                 AstDeclKind.Import => {
                                     if !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) {
                                         let imp_name = pathSubstring(mod_source, decl.a, decl.b)
-                                        let dep_path = "{own_dir}/{importRelativePath(&imp_name)}"
-                                        let res = loadModuleRecursive(&dep_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
+                                        let dep_path = resolvedImportPath(&own_dir, &imp_name, lib_root)
+                                        let res = loadModuleRecursive(&dep_path, lib_root, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
                                         when res != 0 {
                                             import_error = res
                                         } otherwise {
@@ -255,7 +272,7 @@ fn loadModuleRecursive(
     }
 }
 
-pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+pub fn loadProgramWithLib(entry_path: &Text, lib_root: &Text) -> Result<LoadedProgram, Int> {
     var loading_stack: List<Text> = List[]
     var loaded_paths: List<Text> = List[]
     var combined_source = ""
@@ -268,7 +285,7 @@ pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     var dep_counts: List<Int> = List[]
     var dep_ids: List<Int> = List[]
 
-    let res = loadModuleRecursive(entry_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
+    let res = loadModuleRecursive(entry_path, lib_root, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
     if res != 0 {
         return Err(res)
     }
@@ -285,4 +302,10 @@ pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     }
     let access = moduleAccessBuild(module_paths.length, &dep_first, &dep_counts, &dep_ids)
     return Ok(LoadedProgram(source: combined_source, tree: tree, module_count: module_paths.length, module_paths: module_paths, module_starts: module_starts, decl_module: decl_module, module_access: access))
+}
+
+// Compatibility entry point: existing compiler clients retain local-only imports.
+pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+    let empty = ""
+    return loadProgramWithLib(entry_path, &empty)
 }
