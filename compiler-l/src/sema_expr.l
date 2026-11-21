@@ -434,6 +434,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaCallLoans(edit ctx, view loans, 1, SITE_NONE, expr.start, expr.end)
                 give semaWriteConsoleBytes(edit ctx, expr.start, expr.end, bytes_ty, bytes)
             }
+            hold file_result = semaFileBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
+            when file_result != -1 { give file_result }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
@@ -626,4 +628,140 @@ fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
     }
     semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
     return 7
+}
+
+// ---- File streams (P0-B) ---------------------------------------------------
+
+flow semaFileOp(source: view Text, name_start: Int, name_end: Int) => Int {
+    hold n_open = "fileOpen"
+    hold n_read = "fileRead"
+    hold n_write = "fileWrite"
+    hold n_seek = "fileSeek"
+    hold n_size = "fileSize"
+    hold n_flush = "fileFlush"
+    hold n_close = "fileClose"
+    hold n_status = "fileStatus"
+    when symbolNameEqualsText(source, name_start, name_end, n_open) { give LIR_PLATFORM_FILE_OPEN }
+    when symbolNameEqualsText(source, name_start, name_end, n_read) { give LIR_PLATFORM_FILE_READ }
+    when symbolNameEqualsText(source, name_start, name_end, n_write) { give LIR_PLATFORM_FILE_WRITE }
+    when symbolNameEqualsText(source, name_start, name_end, n_seek) { give LIR_PLATFORM_FILE_SEEK }
+    when symbolNameEqualsText(source, name_start, name_end, n_size) { give LIR_PLATFORM_FILE_SIZE }
+    when symbolNameEqualsText(source, name_start, name_end, n_flush) { give LIR_PLATFORM_FILE_FLUSH }
+    when symbolNameEqualsText(source, name_start, name_end, n_close) { give LIR_PLATFORM_FILE_CLOSE }
+    when symbolNameEqualsText(source, name_start, name_end, n_status) { give LIR_PLATFORM_FILE_STATUS }
+    give -1
+}
+
+flow semaFileUsage(op: Int) => Text {
+    when op == LIR_PLATFORM_FILE_OPEN { give "fileOpen requiere (ruta: Text, modo: Int)" }
+    when op == LIR_PLATFORM_FILE_READ { give "fileRead requiere (archivo: File, destino: List<Int> mutable, máximo: Int)" }
+    when op == LIR_PLATFORM_FILE_WRITE { give "fileWrite requiere (archivo: File, bytes: List<Int>, cantidad: Int)" }
+    when op == LIR_PLATFORM_FILE_SEEK { give "fileSeek requiere (archivo: File, desplazamiento: Int, origen: Int)" }
+    when op == LIR_PLATFORM_FILE_CLOSE { give "fileClose requiere (archivo: File), que se consume" }
+    give "la operación requiere (archivo: File)"
+}
+
+flow semaIsByteList(ctx: view SemaContext, ty: Int) => Bool {
+    when ty < 8 || ty >= ctx.types.types.length { give false }
+    choose ctx.types.types[ty].kind {
+        SemTypeKind.List : { give ctx.types.types[ty].elem_type == 1 }
+        _ : { give false }
+    }
+}
+
+// The file builtins: fileOpen produces the linear File; fileClose consumes
+// it (a move, so later use or a second close is a use-after-move); every
+// other operation borrows it shared for the call. Returns -1 when the
+// callee is not a file builtin.
+flow semaFileBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTree, start: Int, end: Int, name_start: Int, name_end: Int, first_arg: Int, arg_count: Int) => Int {
+    hold op = semaFileOp(source, name_start, name_end)
+    when op < 0 { give -1 }
+    change arity = 1
+    when op == LIR_PLATFORM_FILE_OPEN { arity = 2 }
+    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { arity = 3 }
+    hold usage = semaFileUsage(op)
+    when arg_count != arity {
+        semaAddError(edit ctx, "L0004", usage, start, end)
+        give 7
+    }
+    hold file_t = semTypeMakeFile(edit ctx.types)
+    change args: List of[Int] = List[]
+    change loans: List of[Int] = List[]
+    change res_t = 1
+    when op == LIR_PLATFORM_FILE_OPEN {
+        hold path_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+        hold path_loan = semaPlatformArgLoan(edit ctx, path_t, start, end)
+        hold path = ctx.lir.borrowed
+        hold mode_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+        hold mode = lirTakeOperand(edit ctx, mode_t)
+        when path_t != 5 || mode_t != 1 {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        when path < 0 || path_loan < 0 {
+            semaAddError(edit ctx, "L0016", "fileOpen requiere un lugar Text prestable", start, end)
+            give 7
+        }
+        loans@push(path_loan)
+        args@push(lirArg(edit ctx.lir, true, path, false))
+        args@push(lirArg(edit ctx.lir, false, mode, false))
+        res_t = file_t
+    } otherwise when op == LIR_PLATFORM_FILE_CLOSE {
+        hold close_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+        hold file = lirTakeOperand(edit ctx, close_t)
+        when !semTypeIsFile(view ctx.types, close_t) {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        args@push(lirArg(edit ctx.lir, false, file, false))
+    } otherwise {
+        hold f_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+        hold f_loan = semaPlatformArgLoan(edit ctx, f_t, start, end)
+        hold f_place = ctx.lir.borrowed
+        when !semTypeIsFile(view ctx.types, f_t) {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        when f_place < 0 || f_loan < 0 {
+            semaAddError(edit ctx, "L0016", "la operación requiere un lugar File prestable", start, end)
+            give 7
+        }
+        loans@push(f_loan)
+        args@push(lirArg(edit ctx.lir, true, f_place, false))
+        when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE {
+            hold is_read = op == LIR_PLATFORM_FILE_READ
+            hold b_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+            change b_loan = -1
+            when is_read { b_loan = semaPlatformArgLoanEdit(edit ctx, b_t, start, end) }
+            otherwise { b_loan = semaPlatformArgLoan(edit ctx, b_t, start, end) }
+            hold b_place = ctx.lir.borrowed
+            hold n_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 2], ACCESS_MOVE)
+            hold n = lirTakeOperand(edit ctx, n_t)
+            when !semaIsByteList(view ctx, b_t) || n_t != 1 {
+                semaAddError(edit ctx, "L0004", usage, start, end)
+                give 7
+            }
+            when b_place < 0 || b_loan < 0 {
+                semaAddError(edit ctx, "L0016", "la operación requiere un lugar List<Int> prestable", start, end)
+                give 7
+            }
+            loans@push(b_loan)
+            args@push(lirArg(edit ctx.lir, true, b_place, is_read))
+            args@push(lirArg(edit ctx.lir, false, n, false))
+        } otherwise when op == LIR_PLATFORM_FILE_SEEK {
+            hold o_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+            hold offset = lirTakeOperand(edit ctx, o_t)
+            hold w_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 2], ACCESS_MOVE)
+            hold whence = lirTakeOperand(edit ctx, w_t)
+            when o_t != 1 || w_t != 1 {
+                semaAddError(edit ctx, "L0004", usage, start, end)
+                give 7
+            }
+            args@push(lirArg(edit ctx.lir, false, offset, false))
+            args@push(lirArg(edit ctx.lir, false, whence, false))
+        }
+    }
+    semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, start, end)
+    semaPlatformEmit(edit ctx, op, view args, res_t, true)
+    give res_t
 }

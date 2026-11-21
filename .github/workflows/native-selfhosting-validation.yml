@@ -99,6 +99,11 @@ jobs:
         run: |
           cargo test -p project-l --test ele_build_driver_l driver_library_ -- --test-threads=1
           cargo test -p project-l --test ele_build_driver_l driver_resolves_elepad_std_console_with_explicit_library_root -- --test-threads=1
+      # P0-B file streams: the ELF64 image runs natively here (Windows runs
+      # the PE32+ half inside the full suite below).
+      - name: Native file streams (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test file_streams_l -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
       - name: Stage 0 front end, modules, references and differential suites (MSVC)

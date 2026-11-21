@@ -56,6 +56,9 @@ pub fn semaNeedsDrop(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ty: I
         SemTypeKind.Result => { shape = 6 }
         _ => {}
     }
+    // A File owns an OS resource: tracked like an owner so moves are
+    // checked, but never dropped implicitly (flowVerify status 4).
+    when semTypeIsFile(view ctx.types, ty) { shape = 1 }
     var needs = shape == 1
     if shape == 2 || shape == 5 || shape == 6 {
         needs = semaNeedsDrop(&mut ctx, source, tree, elem)

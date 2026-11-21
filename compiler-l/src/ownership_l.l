@@ -110,6 +110,21 @@ pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, ve
     return true
 }
 
+// Whether dropping `root` would release a linear leaf (a File) that is
+// still owned on some path into this point (FLOW_LIVE or FLOW_MAYBE).
+flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int) => Bool {
+    when graph.linear_type < 0 || root < 0 || root >= graph.paths.length { give false }
+    change leaf = root
+    during leaf >= 0 {
+        when leaf < graph.drop_types.length && graph.drop_types[leaf] == graph.linear_type {
+            hold s = state[leaf]
+            when s == FLOW_LIVE || s == FLOW_MAYBE { give true }
+        }
+        leaf = flowNextPath(graph, root, leaf)
+    }
+    give false
+}
+
 pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
     let paths = graph.paths.length
     let blocks = graph.blocks.length
@@ -147,6 +162,9 @@ pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
             var event = block.first
             while event >= 0 {
                 let instruction = &graph.events[event]
+                when instruction.kind == FLOW_DROP && flowDropsLinear(graph, view work.scratch, instruction.path) {
+                    give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps)
+                }
                 if !flowApply(graph, &mut work.scratch, instruction, true) {
                     return FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps)
                 }

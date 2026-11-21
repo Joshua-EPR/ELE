@@ -1584,13 +1584,414 @@ flow wpfEmitWriteConsole(code: edit X64Code, imports: edit Pe64Imports, rt: view
     give entry
 }
 
+// ---- File streams (ELE-LIR platform codes 9..16) -------------------------
+//
+// Below sema a File is the HANDLE from CreateFileW (never -1, a positive
+// kernel handle value) or, after a failed open, the negative error code.
+// Results and error codes are those of native_rt_platform (Linux):
+//   -1 invalid argument, -2 not found, -3 permission denied or sharing
+//   violation, -4 already exists, -5 other I/O failure (also: not a disk
+//   file), -6 file not open.
+fixed WPF_FILE_BLOCK = 16777216
+fixed WPF_GENERIC_RW = 3221225472
+fixed WPF_WRITE_ATTRS = 1073741952      // GENERIC_WRITE | FILE_READ_ATTRIBUTES
+fixed WPF_APPEND_ACCESS = 1048708       // FILE_APPEND_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE
+
+// RAX = the ELE file error code for the GetLastError value in RCX.
+// Clobbers R10.
+flow wpfMapError(code: edit X64Code) {
+    change missing: List of[Int] = List[]
+    change denied: List of[Int] = List[]
+    change exists: List of[Int] = List[]
+    change invalid: List of[Int] = List[]
+    change not_open: List of[Int] = List[]
+    missing@push(wpfIf(edit code, 1, 2, 4))      // FILE_NOT_FOUND
+    missing@push(wpfIf(edit code, 1, 3, 4))      // PATH_NOT_FOUND
+    missing@push(wpfIf(edit code, 1, 15, 4))     // INVALID_DRIVE
+    missing@push(wpfIf(edit code, 1, 53, 4))     // BAD_NETPATH
+    missing@push(wpfIf(edit code, 1, 67, 4))     // BAD_NET_NAME
+    missing@push(wpfIf(edit code, 1, 161, 4))    // BAD_PATHNAME
+    denied@push(wpfIf(edit code, 1, 5, 4))       // ACCESS_DENIED
+    denied@push(wpfIf(edit code, 1, 19, 4))      // WRITE_PROTECT
+    denied@push(wpfIf(edit code, 1, 32, 4))      // SHARING_VIOLATION
+    denied@push(wpfIf(edit code, 1, 33, 4))      // LOCK_VIOLATION
+    exists@push(wpfIf(edit code, 1, 80, 4))      // FILE_EXISTS
+    exists@push(wpfIf(edit code, 1, 183, 4))     // ALREADY_EXISTS
+    invalid@push(wpfIf(edit code, 1, 87, 4))     // INVALID_PARAMETER
+    invalid@push(wpfIf(edit code, 1, 123, 4))    // INVALID_NAME
+    invalid@push(wpfIf(edit code, 1, 131, 4))    // NEGATIVE_SEEK
+    invalid@push(wpfIf(edit code, 1, 206, 4))    // FILENAME_EXCED_RANGE
+    not_open@push(wpfIf(edit code, 1, 6, 4))     // INVALID_HANDLE
+    change done: List of[Int] = List[]
+    x64MovImm64(edit code, 0, -5)
+    done@push(x64JumpPlaceholder(edit code))
+    wpfPatchAll(edit code, view missing)
+    x64MovImm64(edit code, 0, -2)
+    done@push(x64JumpPlaceholder(edit code))
+    wpfPatchAll(edit code, view denied)
+    x64MovImm64(edit code, 0, -3)
+    done@push(x64JumpPlaceholder(edit code))
+    wpfPatchAll(edit code, view exists)
+    x64MovImm64(edit code, 0, -4)
+    done@push(x64JumpPlaceholder(edit code))
+    wpfPatchAll(edit code, view invalid)
+    x64MovImm64(edit code, 0, -1)
+    done@push(x64JumpPlaceholder(edit code))
+    wpfPatchAll(edit code, view not_open)
+    x64MovImm64(edit code, 0, -6)
+    wpfPatchAll(edit code, view done)
+}
+
+flow wpfReturnConst(code: edit X64Code, value: Int) {
+    x64MovImm64(edit code, 0, value)
+    x64FrameEnd(edit code)
+}
+
+// RAX = mapped GetLastError(), then return from the frame.
+flow wpfReturnLastError(code: edit X64Code, imports: edit Pe64Imports) {
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    wpfDword(edit code)
+    x64MovReg(edit code, 1, 0)
+    wpfMapError(edit code)
+    x64FrameEnd(edit code)
+}
+
+// RCX = RCX * 8 + [list header in RDX].elements. Clobbers R10.
+flow wpfElementAddress(code: edit X64Code) {
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 1, 10)
+    x64LoadMem64(edit code, 10, 2, 0)
+    x64AddReg(edit code, 1, 10)
+}
+
+// Stores `value` in frame slot `slot` when RCX == `mode`. Clobbers RAX, R10.
+flow wpfModeSlot(code: edit X64Code, mode: Int, slot: Int, value: Int) {
+    hold other = wpfIf(edit code, 1, mode, 5)
+    x64MovImm64(edit code, 0, value)
+    x64StoreSlot(edit code, slot, 0)
+    wpfPatchHere(edit code, other)
+}
+
+// open(RDI = address of the path Text, RSI = mode) -> RAX = HANDLE or an
+// error. Modes as on Linux: 1 read (shares read, write and delete),
+// 2 write (CREATE_ALWAYS), 3 append (FILE_APPEND_DATA, OPEN_ALWAYS),
+// 4 create new (CREATE_NEW), 5 read+write (OPEN_EXISTING); write modes
+// share read only. Anything but FILE_TYPE_DISK is closed and rejected (-5).
+// Slots: 0 mode, 1 UTF-8 path, 2 its capacity, 3 UTF-16 path, 4 its
+// capacity, 5 handle, 6 error, 7 path Text, 8 access, 9 share, 10 disposition.
+flow wpfEmitFileOpen(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, path_z: Int, wide_z: Int) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 11)
+    x64StoreSlot(edit code, 0, 6)
+    x64StoreSlot(edit code, 7, 7)
+    change invalid: List of[Int] = List[]
+    x64MovReg(edit code, 1, 6)
+    invalid@push(wpfIf(edit code, 1, 1, 6))
+    invalid@push(wpfIf(edit code, 1, 5, 8))
+    x64LoadSlot(edit code, 7, 7)
+    wpfCall(edit code, path_z)
+    x64StoreSlot(edit code, 1, 0)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 0)
+    invalid@push(wpfIf(edit code, 1, 0, 4))
+    x64LoadSlot(edit code, 7, 1)
+    wpfCall(edit code, wide_z)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    wpfDrop(edit code, rt, 1, 2)
+    x64LoadSlot(edit code, 1, 3)
+    invalid@push(wpfIf(edit code, 1, 0, 4))
+    // Mode 1 defaults, then the other modes.
+    x64MovImm64(edit code, 0, WPF_GENERIC_READ)
+    x64StoreSlot(edit code, 8, 0)
+    x64MovImm64(edit code, 0, WPF_SHARE_ALL)
+    x64StoreSlot(edit code, 9, 0)
+    x64MovImm64(edit code, 0, WPF_OPEN_EXISTING)
+    x64StoreSlot(edit code, 10, 0)
+    x64LoadSlot(edit code, 1, 0)
+    wpfModeSlot(edit code, 2, 8, WPF_WRITE_ATTRS)
+    wpfModeSlot(edit code, 2, 9, 1)
+    wpfModeSlot(edit code, 2, 10, WPF_CREATE_ALWAYS)
+    wpfModeSlot(edit code, 3, 8, WPF_APPEND_ACCESS)
+    wpfModeSlot(edit code, 3, 9, 1)
+    wpfModeSlot(edit code, 3, 10, 4)
+    wpfModeSlot(edit code, 4, 8, WPF_WRITE_ATTRS)
+    wpfModeSlot(edit code, 4, 9, 1)
+    wpfModeSlot(edit code, 4, 10, 1)
+    wpfModeSlot(edit code, 5, 8, WPF_GENERIC_RW)
+    wpfModeSlot(edit code, 5, 9, 1)
+    // CreateFileW(path, access, share, NULL, disposition, NORMAL, NULL).
+    x64LoadSlot(edit code, 1, 3)
+    x64LoadSlot(edit code, 2, 8)
+    x64LoadSlot(edit code, 8, 9)
+    x64MovImm64(edit code, 9, 0)
+    x64LoadSlot(edit code, 0, 10)
+    wpfStackArg(edit code, 0, 0)
+    x64MovImm64(edit code, 0, WPF_ATTRIBUTE_NORMAL)
+    wpfStackArg(edit code, 1, 0)
+    x64MovImm64(edit code, 0, 0)
+    wpfStackArg(edit code, 2, 0)
+    w64CallImport(edit code, edit imports, pe64ImportCreateFileW())
+    x64StoreSlot(edit code, 5, 0)
+    x64MovReg(edit code, 1, 0)
+    hold opened = wpfIf(edit code, 1, -1, 5)
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    wpfDword(edit code)
+    x64StoreSlot(edit code, 6, 0)
+    wpfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 6)
+    wpfMapError(edit code)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, opened)
+    wpfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 5)
+    w64CallImport(edit code, edit imports, pe64ImportGetFileType())
+    wpfDword(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold not_disk = wpfIf(edit code, 1, WPF_FILE_TYPE_DISK, 5)
+    x64LoadSlot(edit code, 0, 5)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, not_disk)
+    x64LoadSlot(edit code, 1, 5)
+    w64CallImport(edit code, edit imports, pe64ImportCloseHandle())
+    wpfReturnConst(edit code, -5)
+    wpfPatchAll(edit code, view invalid)
+    wpfReturnConst(edit code, -1)
+    give entry
+}
+
+// read(RDI = HANDLE, RSI = address of a List of[Int] header, RDX = limit)
+// -> RAX = bytes stored into elements 0.., 0 at end of file, or an error.
+// Slots: 0 handle, 1 list header, 2 limit, 3 buffer, 4 capacity, 5 bytes
+// read (DWORD, zeroed first), 6 error.
+flow wpfEmitFileRead(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 7)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wpfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(wpfIf(edit code, 1, 1, 6))
+    invalid@push(wpfIf(edit code, 1, WPF_FILE_BLOCK, 8))
+    x64LoadSlot(edit code, 2, 1)
+    x64LoadMem64(edit code, 9, 2, 8)
+    invalid@push(wpfIfReg(edit code, 1, 9, 8))
+    x64LoadSlot(edit code, 7, 2)
+    wpfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    // ReadFile(handle, buffer, limit, &read, NULL).
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 5, 0)
+    wpfStackArg(edit code, 0, 0)
+    x64LoadSlot(edit code, 1, 0)
+    x64LoadSlot(edit code, 2, 3)
+    x64LoadSlot(edit code, 8, 2)
+    x64LeaMem(edit code, 9, 5, -48)
+    w64CallImport(edit code, edit imports, pe64ImportReadFile())
+    x64TestEax(edit code)
+    hold read_ok = x64ConditionalPlaceholder(edit code, false)
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    wpfDword(edit code)
+    x64StoreSlot(edit code, 6, 0)
+    wpfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 6)
+    // ERROR_HANDLE_EOF and ERROR_BROKEN_PIPE end the stream.
+    change at_end: List of[Int] = List[]
+    at_end@push(wpfIf(edit code, 1, 38, 4))
+    at_end@push(wpfIf(edit code, 1, 109, 4))
+    wpfMapError(edit code)
+    x64FrameEnd(edit code)
+    wpfPatchAll(edit code, view at_end)
+    wpfReturnConst(edit code, 0)
+    wpfPatchHere(edit code, read_ok)
+    x64MovImm64(edit code, 1, 0)
+    hold unpack = code.bytes.length
+    x64LoadSlot(edit code, 2, 5)
+    hold unpacked = wpfIfReg(edit code, 1, 2, 9)
+    x64LoadSlot(edit code, 8, 3)
+    x64AddReg(edit code, 8, 1)
+    x64LoadMem8(edit code, 0, 8, 0)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    wpfElementAddress(edit code)
+    x64StoreMem64(edit code, 1, 0, 0)
+    x64MovReg(edit code, 1, 9)
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, unpack)
+    wpfPatchHere(edit code, unpacked)
+    wpfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 0, 5)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, not_open)
+    wpfReturnConst(edit code, -6)
+    wpfPatchAll(edit code, view invalid)
+    wpfReturnConst(edit code, -1)
+    give entry
+}
+
+// write(RDI = HANDLE, RSI = address of a List of[Int] header, RDX = count)
+// -> RAX = count once every byte is written, or an error. Bytes are all
+// validated (0..255) before the first WriteFile.
+// Slots: 0 handle, 1 list header, 2 count, 3 buffer, 4 capacity, 5 status.
+flow wpfEmitFileWrite(code: edit X64Code, rt: view PfRuntime, write_handle: Int) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 6)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wpfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(wpfIf(edit code, 1, 0, 6))
+    invalid@push(wpfIf(edit code, 1, WPF_FILE_BLOCK, 8))
+    x64LoadSlot(edit code, 2, 1)
+    x64LoadMem64(edit code, 9, 2, 8)
+    invalid@push(wpfIfReg(edit code, 1, 9, 8))
+    hold empty = wpfIf(edit code, 1, 0, 4)
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 2)
+    hold checked = wpfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    wpfElementAddress(edit code)
+    x64LoadMem64(edit code, 0, 1, 0)
+    x64MovReg(edit code, 1, 9)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    invalid@push(x64AboveEqualPlaceholder(edit code))
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, check)
+    wpfPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 2)
+    wpfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 2)
+    hold packed = wpfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    wpfElementAddress(edit code)
+    x64LoadMem64(edit code, 2, 1, 0)
+    x64LoadSlot(edit code, 8, 3)
+    x64AddReg(edit code, 8, 9)
+    x64StoreMem8(edit code, 8, 0, 2)
+    x64MovReg(edit code, 1, 9)
+    wpfAdjust(edit code, 1, 1)
+    wpfJumpTo(edit code, pack)
+    wpfPatchHere(edit code, packed)
+    x64LoadSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 6, 3)
+    x64LoadSlot(edit code, 2, 2)
+    wpfCall(edit code, write_handle)
+    x64StoreSlot(edit code, 5, 0)
+    wpfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 5)
+    hold failed = wpfIf(edit code, 1, 0, 5)
+    x64LoadSlot(edit code, 0, 2)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, failed)
+    wpfReturnConst(edit code, -5)
+    wpfPatchHere(edit code, empty)
+    wpfReturnConst(edit code, 0)
+    wpfPatchHere(edit code, not_open)
+    wpfReturnConst(edit code, -6)
+    wpfPatchAll(edit code, view invalid)
+    wpfReturnConst(edit code, -1)
+    give entry
+}
+
+// seek(RDI = HANDLE, RSI = offset, RDX = whence 0..2) -> RAX = the new
+// position or an error. Slots: 0 handle, 1 offset, 2 whence, 3 position.
+flow wpfEmitFileSeek(code: edit X64Code, imports: edit Pe64Imports) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 4)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wpfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(wpfIf(edit code, 1, 0, 6))
+    invalid@push(wpfIf(edit code, 1, 2, 8))
+    // SetFilePointerEx(handle, offset, &position, whence).
+    x64LoadSlot(edit code, 1, 0)
+    x64LoadSlot(edit code, 2, 1)
+    x64LeaMem(edit code, 8, 5, -32)
+    x64LoadSlot(edit code, 9, 2)
+    w64CallImport(edit code, edit imports, pe64ImportSetFilePointerEx())
+    x64TestEax(edit code)
+    hold ok = x64ConditionalPlaceholder(edit code, false)
+    wpfReturnLastError(edit code, edit imports)
+    wpfPatchHere(edit code, ok)
+    x64LoadSlot(edit code, 0, 3)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, not_open)
+    wpfReturnConst(edit code, -6)
+    wpfPatchAll(edit code, view invalid)
+    wpfReturnConst(edit code, -1)
+    give entry
+}
+
+// size(RDI = HANDLE) -> RAX = the file size or an error. Slots: 0 handle,
+// 1 size.
+flow wpfEmitFileSize(code: edit X64Code, imports: edit Pe64Imports) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 2)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wpfIf(edit code, 1, 0, 6)
+    x64LoadSlot(edit code, 1, 0)
+    x64LeaMem(edit code, 2, 5, -16)
+    w64CallImport(edit code, edit imports, pe64ImportGetFileSizeEx())
+    x64TestEax(edit code)
+    hold ok = x64ConditionalPlaceholder(edit code, false)
+    wpfReturnLastError(edit code, edit imports)
+    wpfPatchHere(edit code, ok)
+    x64LoadSlot(edit code, 0, 1)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, not_open)
+    wpfReturnConst(edit code, -6)
+    give entry
+}
+
+// flush (FlushFileBuffers) or close (CloseHandle) of RDI = HANDLE -> RAX
+// = 0 or an error. A failed-open File closes as 0 and flushes as -6.
+flow wpfEmitFileUnary(code: edit X64Code, imports: edit Pe64Imports, close: Bool) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 1)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wpfIf(edit code, 1, 0, 6)
+    x64LoadSlot(edit code, 1, 0)
+    when close { w64CallImport(edit code, edit imports, pe64ImportCloseHandle()) }
+    otherwise { w64CallImport(edit code, edit imports, pe64ImportFlushFileBuffers()) }
+    x64TestEax(edit code)
+    hold ok = x64ConditionalPlaceholder(edit code, false)
+    wpfReturnLastError(edit code, edit imports)
+    wpfPatchHere(edit code, ok)
+    wpfReturnConst(edit code, 0)
+    wpfPatchHere(edit code, not_open)
+    when close { wpfReturnConst(edit code, 0) }
+    otherwise { wpfReturnConst(edit code, -6) }
+    give entry
+}
+
 // Emits the Windows platform runtime; returns the entry of each operation,
 // indexed by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), like
 // native_rt_platform's pfEmitAll. Its absolute addresses: none (tables are
 // reached RIP-relative), so it adds no base relocation.
 // The console input routines (codes 6, 7) are emitted only when `console`
 // holds; otherwise their entries are -1 and their imports stay out.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool) => List of[Int] {
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -1613,5 +2014,17 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
     }
     when console_output { at@push(wpfEmitWriteConsole(edit code, edit imports, rt, write_handle)) }
     otherwise { at@push(-1) }
+    when files {
+        at@push(wpfEmitFileOpen(edit code, edit imports, rt, path_z, wide_z))
+        at@push(wpfEmitFileRead(edit code, edit imports, rt))
+        at@push(wpfEmitFileWrite(edit code, rt, write_handle))
+        at@push(wpfEmitFileSeek(edit code, edit imports))
+        at@push(wpfEmitFileSize(edit code, edit imports))
+        at@push(wpfEmitFileUnary(edit code, edit imports, false))
+        at@push(wpfEmitFileUnary(edit code, edit imports, true))
+        at@push(pfEmitFileStatus(edit code))
+    } otherwise {
+        each k among 0..8 { at@push(-1) }
+    }
     give at
 }
