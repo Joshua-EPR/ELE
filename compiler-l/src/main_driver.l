@@ -400,7 +400,7 @@ flow assembleLir(headers: view List of[Text], functions: view List of[Text]) => 
 }
 
 flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root: Text) => Int {
-    choose loadProgram(view source_path, view lib_root) {
+    choose loadProgramWithLibRoot(view source_path, view lib_root) {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
             each m_idx among 0..prog.module_paths.length {
