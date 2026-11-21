@@ -59,8 +59,19 @@ This file is meant to let a new session resume without repeating investigations.
 - **NO INICIADO**: system clipboard, mouse selection, horizontal scroll, grapheme/East-Asian width, automatic VT enable on Windows, multiple documents.
 
 ### 2.3 Native FFI / callbacks / windows (P0-C, P0-D)
-- `codex/ele-win32-abi-20261121` and `codex/ele-win32-window-probe-20261121` exist; merge state not verified.
-- Status on `main`: **NO VERIFIADO** in this pass. Do not claim window support.
+- On `main`: `compiler-l/src/codegen/win64_callback.l` has 1-word and 4-word adapters (Win64 register args → ELE stack args, RDI/RSI saved). Only the 1-word one was ever executed (`EnumSystemLocalesW`, PR #137). The `codex/ele-win32-*` branches are 0 commits ahead of `main`.
+- Branch `feat/p0c-callbacks-20261121` (`1d18b5a`, from `f166cad`) executes the 4-word adapter three ways. Each target checks all four arguments:
+  - a direct Win64 call with RDI/RSI/RBX sentinels;
+  - `EnumResourceNamesW`;
+  - `CallWindowProcW`: a WndProc-shaped dispatch, whose LRESULT comes back to the caller and whose lParam travels on the stack.
+- Evidence (local): `tests/native_backend/win64_callback.ps1` passes. With the adapter's RSI or RDI restore removed, the probe exits 7; with a wrong expected argument, its marker disappears. A system caller hides lost nonvolatile registers, so only the direct call can catch them. That is why the direct check exists.
+- Register audit: generated code doesn't use RBX, R12–R15 or XMM, so saving RDI/RSI is enough today.
+- Status: 4-word callback ABI **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI).
+- **NO INICIADO**:
+  - source-level FFI: extern declarations, ELE flows as callbacks, lifetime rules;
+  - callbacks with stack-passed parameters, floats or structs;
+  - reentrancy;
+  - a registered window class and message loop (P0-D).
 
 ### 2.4 Self-hosting and coverage
 - Historical matrix: `docs/SELF_COVERAGE_MATRIX_2026-11-11.md` (104 modules, 83 to LIR, 21 to backend). Historical, not re-measured.
@@ -84,7 +95,7 @@ This file is meant to let a new session resume without repeating investigations.
 2. Open Draft PRs for `feat/elepad-terminal-history-20261121`, `feat/p0b-file-streams-20261121` and `fix/elf-syscall-whitelist-20261121`, and let CI validate them (no `gh` here). The whitelist fix is independent and the smallest; merge it first.
 3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
-5. P0-C: audit `compiler-l/src/codegen/win64_callback.l` and build the four-argument callback test.
+5. P0-C/P0-D next: a real window via `RegisterClassExW` + `CreateWindowExW` + `GetMessageW`/`DispatchMessageW`, with the 4-word adapter as WndProc (same probe style). Then design source-level callbacks: an ELE flow with a fixed Win64 signature, emitted through the adapter, with static lifetime only.
 6. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
 ## 5. Verification log
