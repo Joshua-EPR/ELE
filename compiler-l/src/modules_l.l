@@ -273,7 +273,7 @@ fn loadModuleRecursive(
 }
 
 // --lib is a search root containing the std/ directory, not std/ itself.
-pub fn loadProgram(entry_path: &Text, lib_root: &Text) -> Result<LoadedProgram, Int> {
+pub fn loadProgramWithLibRoot(entry_path: &Text, lib_root: &Text) -> Result<LoadedProgram, Int> {
     var loading_stack: List<Text> = List[]
     var loaded_paths: List<Text> = List[]
     var combined_source = ""
@@ -303,4 +303,11 @@ pub fn loadProgram(entry_path: &Text, lib_root: &Text) -> Result<LoadedProgram, 
     }
     let access = moduleAccessBuild(module_paths.length, &dep_first, &dep_counts, &dep_ids)
     return Ok(LoadedProgram(source: combined_source, tree: tree, module_count: module_paths.length, module_paths: module_paths, module_starts: module_starts, decl_module: decl_module, module_access: access))
+}
+
+// Preserve the historic loader signature for main_sema and Stage 0 fixtures.
+// Projects that do not opt into --lib remain strictly relative-only.
+pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+    let empty_root = ""
+    return loadProgramWithLibRoot(entry_path, &empty_root)
 }
