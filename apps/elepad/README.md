@@ -36,4 +36,19 @@ Desde la raíz del proyecto:
 .\target\elepad-console-probe.exe
 ```
 
-El probe importa `take std.io.console`, abre y cierra el lector y verifica el enlace. **Todavía no es ELEPad interactivo**: `apps/elepad/src/main.l` sigue siendo la utilidad M1. El siguiente hito M2 debe integrar `consoleNext` al núcleo de edición. Tampoco existe una interfaz Win32 GUI verificada.
+El probe importa `take std.io.console`, abre y cierra el lector y verifica el enlace. `apps/elepad/src/main.l` sigue siendo la utilidad M1; `apps/elepad/src/terminal.l` es el editor de terminal de esta rama. No existe una interfaz Win32 GUI verificada.
+
+## Editor de terminal (rama P0-E)
+
+`src/terminal.l` abre un archivo UTF-8 existente y procesa eventos de `std.io.console` sin sondeo. El documento y el cursor viven en `editor_core.l`; `terminal_dispatch.l` traduce teclas a operaciones compartidas, y `terminal_render.l` construye salida ANSI/VT en bytes. Compilación desde la raíz con el driver autónomo que incluya `writeConsoleBytes`:
+
+```powershell
+.\ele.exe build .\apps\elepad\src\terminal.l --lib . --target pe --output .\target\elepad-terminal.exe
+.\target\elepad-terminal.exe .\archivo.l
+.\tests\elepad\terminal.ps1 -Ele .\ele.exe
+.\tests\elepad\terminal_console.ps1 -Exe .\target\elepad-terminal.exe -File .\archivo-de-prueba.l
+```
+
+Teclas implementadas: caracteres Unicode, Enter, Tab, Backspace, Delete, flechas, Home, End, Page Up y Page Down. Ctrl+S guarda y comprueba por lectura que los bytes publicados coinciden; Ctrl+Q sale, y requiere una segunda pulsación si existen cambios sin guardar. Los demás atajos siguen pendientes. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
+
+`terminal.ps1` verifica el ciclo nativo con entrada redirigida. `terminal_console.ps1` usa una consola Windows real, inyecta eventos de teclado, edita y guarda el archivo de prueba indicado, y comprueba la restauración del modo de entrada. Use un archivo de prueba desechable: la segunda prueba modifica su contenido.
