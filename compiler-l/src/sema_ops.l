@@ -361,7 +361,10 @@ expose flow semaWriteConsoleBytes(ctx: edit SemaContext, start: Int, end: Int, b
     change valid_list = false
     when bytes_ty >= 0 && bytes_ty < ctx.types.types.length {
         hold elem = view ctx.types.types[bytes_ty]
-        when elem.kind == SemTypeKind.List { valid_list = elem.elem_type == 1 }
+        choose elem.kind {
+            SemTypeKind.List : { valid_list = elem.elem_type == 1 }
+            _ : {}
+        }
     }
     when !valid_list {
         semaAddError(edit ctx, "L0004", "writeConsoleBytes requiere (List<Int>)", start, end)
