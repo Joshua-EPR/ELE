@@ -139,9 +139,26 @@ public static class EleConsoleHarness {
             Key(116, 0, 0, true, 3),
             Key(27, 27, 0, true, 1),
         };
-        uint written;
-        if (!WriteConsoleInputW(input, records, (uint)records.Length, out written) || written != records.Length)
-            return "WriteConsoleInputW failed " + Marshal.GetLastWin32Error();
+        // A successful console write can still report fewer records than
+        // requested. Finish the batch, but never accept a zero-progress write.
+        int offset = 0;
+        int attempts = 0;
+        while (offset < records.Length && attempts < 32) {
+            int remaining = records.Length - offset;
+            InputRecord[] batch = new InputRecord[remaining];
+            Array.Copy(records, offset, batch, 0, remaining);
+            uint written;
+            bool ok = WriteConsoleInputW(input, batch, (uint)remaining, out written);
+            int error = ok ? 0 : Marshal.GetLastWin32Error();
+            if (!ok || written == 0 || written > remaining)
+                return "WriteConsoleInputW failed ok=" + ok + " written=" + written +
+                    " remaining=" + remaining + " error=" + error;
+            offset += (int)written;
+            attempts++;
+        }
+        if (offset != records.Length)
+            return "WriteConsoleInputW incomplete written=" + offset +
+                " expected=" + records.Length;
         ProcessStartInfo psi = new ProcessStartInfo(exe);
         psi.UseShellExecute = false;
         Process p = Process.Start(psi);
