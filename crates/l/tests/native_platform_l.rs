@@ -187,7 +187,10 @@ fn stage1_platform_program_runs_like_stage0() {
             let rerun = execute(&image, &dir, &[]).expect("Linux execution");
             assert_eq!(rerun.code, Some(40));
             assert_eq!(fs::read(&published).unwrap(), b"ELE\n");
-            assert_eq!(fs::metadata(&published).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                fs::metadata(&published).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
         if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             let mut children = Vec::new();
