@@ -12,7 +12,7 @@ This file is meant to let a new session resume without repeating investigations.
 | `origin/main` head | `f166cad` | Verified via `git fetch` |
 | Local checkout `main`/HEAD | `99c9eda` on a branch with 530 commits behind `origin/main` and an unfinished merge (`UU` in `.gitignore`, `crates/l/src/modules.rs`, `crates/l/src/parser.rs`) | Not touched; the user's working tree was left as is |
 | Open PRs / issues / Actions runs | Not verified: `gh` is not installed in this environment | NOT VERIFIED |
-| Remote branches with unmerged work | `codex/elepad-terminal-20261121` (`e28a72d`), `codex/native-file-streams-20261121` (`9576728`), `codex/ele-console-output-20261121`, `codex/ele-win32-abi-20261121`, `feat/ele-native-library-search-root`, `feat/ele-native-console-input`, `fix/stage3-5-native-filesystem`, among others | Exist; their merge state against `main` is NOT audited yet |
+| 2026-11 feature branches | `codex/native-file-streams`, `codex/elepad-terminal`, `codex/ele-win32-abi`, `codex/ele-console-output`, `codex/elepad-core`, `feat/ele-native-library-search-root`, `feat/ele-native-console-input`: **0 commits ahead of `origin/main`** (`git rev-list --count origin/main..<branch>`), so everything they contain is already merged. Local-only `codex/native-file-metadata-20261121` and `codex/ele-win32-window-probe-20261121`: 0 ahead, never pushed. | Verified |
 
 ## 2. Capability inventory on `origin/main` (grep-verified)
 
@@ -20,7 +20,8 @@ This file is meant to let a new session resume without repeating investigations.
 - Available: whole-file `readText(path, max)` and `writeBytes(path, bytes)` (Win64 and Linux runtimes: `compiler-l/src/codegen/win64_rt_platform.l`, `native_rt_platform.l`). `writeBytes` publishes via temporary file and replace (`compiler-l/src/main_driver.l:467`).
 - Design doc present: `docs/native-file-streams-design.md`.
 - NOT present on `main`: opaque file-stream handle type, block read/write, seek/tell/size, flush, rename/replace API, EOF-vs-error distinction as language API.
-- Status: **EN DESARROLLO** (design on `main`; implementation lives on `codex/native-file-streams-20261121`, not verified as merged content beyond PR #140).
+- Status: **NO INICIADO** (implementation). `codex/native-file-streams-20261121` is fully merged and contributed only the design contract plus the Linux permission-preservation fix for `writeBytes` (PR #140). No branch holds an opaque file handle type. The next P0-B step is a compiler change in sema, ownership, LIR verifier and both runtimes, following the contract in `docs/native-file-streams-design.md`. It is not an application-level task.
+- The PR #140 Linux permission preservation was not re-run in this pass.
 
 ### 2.2 ELEPad terminal (P0 editor)
 - Present on `main`: `apps/elepad/src/{buffer,cursor,editor_core,editor_test,main,search,terminal,terminal_dispatch,terminal_dispatch_test,terminal_render}.l`.
