@@ -7,7 +7,7 @@ Base de este trabajo: `origin/main` en `b9f6877` (PR #134 fusionado). La rama de
 | Fase | Dependencia técnica | Estado |
 |---|---|---|
 | P0-E editor de terminal | Entrada `std/io/console.l`, motor de edición, salida de terminal, guardado seguro | EN DESARROLLO: entrada disponible; motor parcial; faltan salida, comandos y guardado |
-| P0-B archivos nativos | Recursos con ownership, operaciones de bloques, flush, reemplazo seguro en PE64 y ELF64 | NO INICIADO: solo `readText` y `writeBytes` de archivo completo |
+| P0-B archivos nativos | Recursos con ownership, operaciones de bloques, flush, reemplazo seguro en PE64 y ELF64 | EN DESARROLLO: `readText` y `writeBytes` de archivo completo; `writeBytes` usa temporal, sincronización y renombrado, pero falta la API por bloques y preservar metadatos |
 | P0-C Win32 y callbacks | Contrato FFI tipado, verificación LIR, ABI Win64, duración de callbacks | NO INICIADO: llamadas internas a Win32 no son una API de ELE |
 | P0-D ventanas | P0-C, `WndProc`, eventos y recursos de ventana | NO INICIADO |
 | M3 ELEPad gráfico | P0-D, P0-B y motor compartido con P0-E | NO INICIADO |

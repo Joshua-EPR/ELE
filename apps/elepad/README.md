@@ -27,7 +27,7 @@ Desde la raíz del proyecto:
 .\apps\elepad\elepad.exe .\archivo.l .\copia-nueva.l '// cambio'
 ```
 
-`elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. `writeBytes` no ofrece publicación atómica ni recuperación de una salida parcialmente escrita; por eso la utilidad exige un nombre de salida nuevo.
+`elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. El `writeBytes` nativo actual escribe a un temporal en el directorio de destino, sincroniza y publica mediante renombrado/reemplazo; todavía no conserva de forma completa permisos y atributos ni ofrece una API de archivos por bloques. La utilidad exige una salida nueva para evitar sobrescrituras accidentales.
 
 `readKey` sigue siendo una API inexistente: `probes/keyboard.l` permanece como prueba negativa (L0001). En la rama P0-A, `consoleInputMode`, `readConsoleEvent` y `std/io/console.l` proporcionan entrada general. Para que una aplicación fuera de `std/` importe la biblioteca sin copiarla, el compilador acepta ahora `--lib`:
 
