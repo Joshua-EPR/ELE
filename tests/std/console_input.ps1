@@ -201,6 +201,7 @@ public static class EleConsoleHarness {
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetNumberOfConsoleInputEvents(IntPtr h, out uint count);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool FlushConsoleInputBuffer(IntPtr h);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetConsoleMode(IntPtr h, uint mode);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
 
     // Describes the records queued in the console input buffer, e.g.
@@ -279,29 +280,29 @@ public static class EleConsoleHarness {
             Key(116, 0, 0, true, 3),
             Key(27, 27, 0, true, 1),
         };
-        // A successful console write can still report fewer records than
-        // requested. Finish the batch, but never accept a zero-progress write.
-        int offset = 0;
-        int attempts = 0;
-        while (offset < records.Length && attempts < 32) {
-            int remaining = records.Length - offset;
-            InputRecord[] batch = new InputRecord[remaining];
-            Array.Copy(records, offset, batch, 0, remaining);
-            uint written;
-            bool ok = WriteConsoleInputW(input, batch, (uint)remaining, out written);
-            int error = ok ? 0 : Marshal.GetLastWin32Error();
-            if (!ok || written == 0 || written > remaining)
-                return "WriteConsoleInputW failed ok=" + ok + " written=" + written +
-                    " remaining=" + remaining + " error=" + error;
-            offset += (int)written;
-            attempts++;
-        }
-        if (offset != records.Length)
-            return "WriteConsoleInputW incomplete written=" + offset +
-                " expected=" + records.Length;
-        // What the console actually queued (a console host may translate or
-        // reorder written records).
-        Diagnostics += "; queued for the program: " + Pending(input);
+        // With ENABLE_PROCESSED_INPUT set, some console hosts (Windows Server
+        // 2025 on Actions) act on written records: Ctrl+S pauses output and
+        // the next key resumes it, so both are dropped and the write reports
+        // fewer records. Write as a user would type while the program is in
+        // raw mode (processed input off), then restore the original mode
+        // before the program starts so it still saves and restores `before`.
+        if (!SetConsoleMode(input, before & ~1u))
+            return "SetConsoleMode (write) failed " + Marshal.GetLastWin32Error();
+        uint written;
+        bool ok = WriteConsoleInputW(input, records, (uint)records.Length, out written);
+        int error = ok ? 0 : Marshal.GetLastWin32Error();
+        if (!SetConsoleMode(input, before))
+            return "SetConsoleMode (restore) failed " + Marshal.GetLastWin32Error();
+        // What the console actually queued must be exactly what was written:
+        // a dropped record is a harness failure, never retried (a retry would
+        // duplicate the tail).
+        string queued = Pending(input);
+        Diagnostics += "; queued for the program: " + queued;
+        if (!ok || written != records.Length)
+            return "WriteConsoleInputW wrote " + written + " of " + records.Length +
+                " ok=" + ok + " error=" + error;
+        if (!queued.StartsWith(records.Length + " ["))
+            return "console queued " + queued + " instead of " + records.Length + " records";
         string result = RunConsoleChild(exe, input, logPath);
         Diagnostics += "; left unread: " + Pending(input);
         uint after;
