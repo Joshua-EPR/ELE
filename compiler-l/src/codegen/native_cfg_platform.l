@@ -20,6 +20,9 @@ take x86_64
 //   readtext 2 ref <Text> 0 val <Int> -> Result<Text,Int>
 //   printerror 1 ref <Text> 0      -> Unit
 //   writebytes 2 ref <Text> 0 ref <List of[Int]> 0 -> Int
+//   samefile 2 ref <Text> 0 ref <Text> 0 -> Int
+//   consolemode 1 val <Int>        -> Int (codes 6 and 7: raw console
+//   readevent 0                    -> Int  input, see win64_rt_platform)
 // Result<Text,Int> is any declared enum with exactly two variants whose
 // payloads are Text (variant 0, Ok) and Int (variant 1, Err).
 //
@@ -39,6 +42,8 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "printerror") { give 3 }
     when nativeEquals(source, word, "writebytes") { give 4 }
     when nativeEquals(source, word, "samefile") { give 5 }
+    when nativeEquals(source, word, "consolemode") { give 6 }
+    when nativeEquals(source, word, "readevent") { give 7 }
     give -1
 }
 
@@ -63,8 +68,8 @@ expose flow cfgReadPlatform(p: edit CfgProgram, f: Int, source: view Text, reade
 }
 
 flow cfgPlatformArity(op: Int) => Int {
-    when op == 0 { give 0 }
-    when op == 1 || op == 3 { give 1 }
+    when op == 0 || op == 7 { give 0 }
+    when op == 1 || op == 3 || op == 6 { give 1 }
     give 2
 }
 
@@ -98,9 +103,9 @@ flow cfgIsTextResult(p: view CfgProgram, ty: Int) => Bool {
 }
 
 expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.op < 0 || inst.op > 5 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
+    when inst.op < 0 || inst.op > 7 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
     hold first = inst.arg_first
-    when inst.op == 1 && !cfgPlatformArgOk(p, f, first, false, false) { give 131 }
+    when (inst.op == 1 || inst.op == 6) && !cfgPlatformArgOk(p, f, first, false, false) { give 131 }
     when inst.op == 2 {
         when !cfgPlatformArgOk(p, f, first, true, false) || !cfgPlatformArgOk(p, f, first + 1, false, false) { give 131 }
     }
@@ -114,7 +119,7 @@ expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
     when (inst.op == 0 || inst.op == 4) && dest != 0 { give 132 }
     when inst.op == 3 && dest != cfgUnitType() { give 132 }
-    when inst.op == 5 && dest != 0 { give 132 }
+    when inst.op >= 5 && dest != 0 { give 132 }
     when (inst.op == 1 || inst.op == 2) && !cfgIsTextResult(p, dest) { give 132 }
     give 0
 }
@@ -157,9 +162,12 @@ expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst
         x64MovReg(edit code, 6, 0)
         cfgPlatformArgAddress(edit code, p, f, first, edit fix)
         x64MovReg(edit code, 7, 0)
+    } otherwise when inst.op == 6 {
+        hold mode = view p.call_args[first]
+        cfgLoadOperand(edit code, p, f, view mode, 7)
     }
     cfgRuntimeCall(edit code, edit fix, cfgPlatformBase() + inst.op)
-    when inst.op == 0 || inst.op == 4 || inst.op == 5 {
+    when inst.op == 0 || inst.op >= 4 {
         x64StoreSlot(edit code, dst_slot, 0)
     }
 }

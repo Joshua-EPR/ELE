@@ -391,6 +391,35 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaCallLoans(edit ctx, view loans, 4, SITE_NONE, expr.start, expr.end)
                 give semaSameFile(edit ctx, expr.start, expr.end, path_a_ty, path_a, path_b_ty, path_b)
             }
+            // Raw console input (std/io/console.l decodes it): Int in, Int out.
+            hold name_console_mode = "consoleInputMode"
+            when symbolNameEqualsText(source, name_start, name_end, name_console_mode) {
+                when arg_count != 1 {
+                    semaAddError(edit ctx, "L0004", "consoleInputMode requiere (mode: Int)", expr.start, expr.end)
+                    give 7
+                }
+                hold mode_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+                when mode_ty != 1 {
+                    semaAddError(edit ctx, "L0004", "consoleInputMode requiere (mode: Int)", expr.start, expr.end)
+                    give 7
+                }
+                change args: List of[Int] = List[]
+                hold mode = lirTakeOperand(edit ctx, 1)
+                hold mode_arg = lirArg(edit ctx.lir, false, mode, false)
+                args@push(mode_arg)
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_CONSOLE_MODE, view args, 1, true)
+                give 1
+            }
+            hold name_read_event = "readConsoleEvent"
+            when symbolNameEqualsText(source, name_start, name_end, name_read_event) {
+                when arg_count != 0 {
+                    semaAddError(edit ctx, "L0004", "readConsoleEvent no recibe argumentos", expr.start, expr.end)
+                    give 7
+                }
+                change args: List of[Int] = List[]
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_READ_EVENT, view args, 1, true)
+                give 1
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {

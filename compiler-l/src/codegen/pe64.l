@@ -38,7 +38,7 @@ fixed PE64_DOS_SIZE = 128
 // 40-byte section headers.
 fixed PE64_OPTIONAL_END = 392
 // Known imports; the first PE64_BASE_IMPORTS are in every image.
-fixed PE64_IMPORT_COUNT = 21
+fixed PE64_IMPORT_COUNT = 24
 fixed PE64_BASE_IMPORTS = 5
 fixed PE64_STACK_SIZE = 8388608
 fixed PE64_PAGE = 4096
@@ -67,6 +67,10 @@ expose flow pe64ImportGetFileAttributesW() => Int { give 17 }
 expose flow pe64ImportLoadLibraryExW() => Int { give 18 }
 expose flow pe64ImportGetProcAddress() => Int { give 19 }
 expose flow pe64ImportFreeLibrary() => Int { give 20 }
+// Console input (consoleInputMode, readConsoleEvent): KERNEL32 as well.
+expose flow pe64ImportGetConsoleMode() => Int { give 21 }
+expose flow pe64ImportSetConsoleMode() => Int { give 22 }
+expose flow pe64ImportReadConsoleInputW() => Int { give 23 }
 
 // Number of known imported functions: valid import indexes are 0..count-1.
 expose flow pe64ImportCount() => Int { give PE64_IMPORT_COUNT }
@@ -132,7 +136,10 @@ flow peImportName(index: Int) => Text {
     when index == 17 { give "GetFileAttributesW" }
     when index == 18 { give "LoadLibraryExW" }
     when index == 19 { give "GetProcAddress" }
-    give "FreeLibrary"
+    when index == 20 { give "FreeLibrary" }
+    when index == 21 { give "GetConsoleMode" }
+    when index == 22 { give "SetConsoleMode" }
+    give "ReadConsoleInputW"
 }
 
 // The imports of an image, in IAT slot order: the base set, then each
