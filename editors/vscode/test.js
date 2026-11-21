@@ -177,6 +177,9 @@ assert.strictEqual(iconTheme.languageIds.ele, '_ele_source');
 const imgRef = iconTheme.iconDefinitions._ele_source.iconPath;
 const resolvedFileIcon = path.resolve(path.dirname(bundledPath(eleThemeContribution.path)),imgRef);
 assert.strictEqual(resolvedFileIcon, bundledPath(eleLanguage.icon.dark), 'File icon theme and language fallback must use the same PNG');
-assert.strictEqual(pkg.version, '0.1.3', 'Branded extension must carry the new version');
+assert.strictEqual(pkg.version, '0.1.4', 'Branded extension must carry the new version');
+assert.strictEqual(extensionLogo.width, 256, 'Logo must be 256 pixels for VS Code');
+assert.strictEqual(extensionLogo.height, 256, 'Logo must be square');
+assert.ok(fs.statSync(bundledPath(pkg.icon)).size < 16384, 'Minimal ELE emblem should stay lightweight');
 
 console.log('All VS Code ELE extension validations passed successfully!');
