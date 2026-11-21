@@ -91,6 +91,14 @@ jobs:
           --test native_list_l
           --test native_pe64_l
           -- --test-threads=1
+      # Stage 1 is already built by the Linux step above. Explicitly exercise
+      # the autonomous driver with external std roots and fail-closed imports
+      # here; the full Windows suite runs these tests automatically.
+      - name: ELEPad standard library search root regression tests (Linux)
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          cargo test -p project-l --test ele_build_driver_l driver_library_ -- --test-threads=1
+          cargo test -p project-l --test ele_build_driver_l driver_resolves_elepad_std_console_with_explicit_library_root -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
       - name: Stage 0 front end, modules, references and differential suites (MSVC)

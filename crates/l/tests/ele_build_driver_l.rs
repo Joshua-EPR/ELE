@@ -906,3 +906,204 @@ fn driver_cli_rejects_overwrite_of_imported_module_hardlink() {
     assert_eq!(fs::read_to_string(&helper_src).unwrap(), helper_content);
     assert_eq!(fs::read_to_string(&helper_link).unwrap(), helper_content);
 }
+
+#[test]
+fn driver_resolves_elepad_std_console_with_explicit_library_root() {
+    let dir = work("std_console_lib_root");
+    let src = root().join("apps/elepad/probes/console_import.l");
+    let image = dir.join(if cfg!(windows) {
+        "elepad_std_probe.exe"
+    } else {
+        "elepad_std_probe.elf"
+    });
+    let target = if cfg!(windows) { "pe" } else { "elf" };
+    let out = Command::new(driver())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            target,
+            "--lib",
+            root().to_str().unwrap(),
+            "--output",
+            image.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to compile ELEPad std console probe");
+    assert!(
+        out.status.success(),
+        "ELEPad should import std.io.console from --lib: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(image.is_file());
+
+    let run = if cfg!(windows) {
+        Command::new(&image).output().unwrap()
+    } else {
+        execute_elf(&image, &dir).expect("Linux ELF execution unavailable")
+    };
+    assert!(
+        run.status.success(),
+        "console probe exited: {:?}",
+        run.status
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "elepad-std-import-ok"
+    );
+
+    // No implicit CWD/std lookup: the same source must fail without --lib.
+    let without_lib = Command::new(driver())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            target,
+            "--output",
+            dir.join("without_lib.bin").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!without_lib.status.success());
+    assert!(
+        String::from_utf8_lossy(&without_lib.stderr).contains("error[L0014]"),
+        "missing explicit library root must not be silently ignored"
+    );
+}
+
+#[test]
+fn driver_library_search_preserves_local_module_precedence() {
+    let dir = work("library_local_precedence");
+    let std_dir = dir.join("std/io");
+    fs::create_dir_all(&std_dir).unwrap();
+    let src = dir.join("entry.l");
+    let image = dir.join(if cfg!(windows) {
+        "local.exe"
+    } else {
+        "local.elf"
+    });
+    fs::write(
+        std_dir.join("console.l"),
+        "expose flow localTag() => Int { give 73 }\n",
+    )
+    .unwrap();
+    fs::write(
+        &src,
+        "take std.io.console\nflow main() => Int { give localTag() }\n",
+    )
+    .unwrap();
+    let target = if cfg!(windows) { "pe" } else { "elf" };
+    let out = Command::new(driver())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            target,
+            "--lib",
+            root().to_str().unwrap(),
+            "--output",
+            image.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "local override should be compiled: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run = if cfg!(windows) {
+        Command::new(&image).output().unwrap()
+    } else {
+        execute_elf(&image, &dir).expect("Linux ELF execution unavailable")
+    };
+    assert_eq!(run.status.code(), Some(73));
+}
+
+#[test]
+fn driver_library_root_fails_closed_on_invalid_local_module() {
+    let dir = work("library_invalid_local");
+    let std_dir = dir.join("std/io");
+    fs::create_dir_all(&std_dir).unwrap();
+    fs::write(std_dir.join("console.l"), [0xff, 0xfe, 0xfd]).unwrap();
+    let src = dir.join("entry.l");
+    fs::write(&src, "take std.io.console\nflow main() => Int { give 0 }\n").unwrap();
+    let image = dir.join("must_not_exist.bin");
+    let _ = fs::remove_file(&image);
+    let out = Command::new(driver())
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--lib",
+            root().to_str().unwrap(),
+            "--output",
+            image.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "invalid local UTF-8 must not fall back"
+    );
+    assert!(
+        !image.exists(),
+        "invalid local module unexpectedly produced output"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("error[L0014]"));
+}
+
+#[test]
+fn driver_library_root_output_cannot_overwrite_library_source() {
+    let dir = work("library_source_protection");
+    let std_dir = dir.join("lib_root/std/io");
+    fs::create_dir_all(&std_dir).unwrap();
+    let entry = dir.join("entry.l");
+    let lib_source = std_dir.join("console.l");
+    let original = "expose flow libraryTag() => Int { give 19 }\n";
+    fs::write(&lib_source, original).unwrap();
+    fs::write(
+        &entry,
+        "take std.io.console\nflow main() => Int { give libraryTag() }\n",
+    )
+    .unwrap();
+    let out = Command::new(driver())
+        .args([
+            "build",
+            entry.to_str().unwrap(),
+            "--lib",
+            dir.join("lib_root").to_str().unwrap(),
+            "--output",
+            lib_source.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(fs::read_to_string(&lib_source).unwrap(), original);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no puede sobrescribir") || err.contains("alias detectado"),
+        "library source must be protected: {err}"
+    );
+}
+
+#[test]
+fn driver_library_root_cli_validation() {
+    let dir = work("library_cli_validation");
+    let src = dir.join("entry.l");
+    fs::write(&src, "flow main() => Int { give 0 }\n").unwrap();
+    let source = src.to_str().unwrap();
+    for arguments in [
+        vec!["build", source, "--lib"],
+        vec!["build", source, "--lib", ""],
+        vec!["build", source, "--lib", "--target", "pe"],
+        vec!["build", source, "--lib", ".", "--lib", "."],
+    ] {
+        let out = Command::new(driver()).args(&arguments).output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "must reject invalid --lib usage {:?}: {}",
+            arguments,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

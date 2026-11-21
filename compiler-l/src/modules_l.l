@@ -130,6 +130,7 @@ fn listTextIndexOf(list: &List<Text>, item: &Text) -> Int {
 
 fn loadModuleRecursive(
     path: &Text,
+    lib_root: view Text,
     loading_stack: &mut List<Text>,
     loaded_paths: &mut List<Text>,
     combined_source: &mut Text,
@@ -185,9 +186,25 @@ fn loadModuleRecursive(
                             match decl.kind {
                                 AstDeclKind.Import => {
                                     if !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) {
-                                        let imp_name = pathSubstring(mod_source, decl.a, decl.b)
-                                        let dep_path = "{own_dir}/{importRelativePath(&imp_name)}"
-                                        let res = loadModuleRecursive(&dep_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
+                                        hold imp_name = pathSubstring(mod_source, decl.a, decl.b)
+                                        hold relative_file = importRelativePath(view imp_name)
+                                        change dep_path = "{own_dir}/{relative_file}"
+
+                                        // Local imports win. Only an absent local module (I/O
+                                        // code 2) may fall back to the explicit --lib root.
+                                        // Invalid UTF-8, permissions and size errors must
+                                        // not be silently masked by a library copy.
+                                        when lib_root.byteLength > 0 {
+                                            choose readText(dep_path, 16 * 1024 * 1024) {
+                                                Ok(local_module): {}
+                                                Err(code): {
+                                                    when code == 2 {
+                                                        dep_path = "{lib_root}/{relative_file}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        hold res = loadModuleRecursive(view dep_path, lib_root, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
                                         when res != 0 {
                                             import_error = res
                                         } otherwise {
@@ -255,7 +272,8 @@ fn loadModuleRecursive(
     }
 }
 
-pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+// --lib is a search root containing the std/ directory, not std/ itself.
+expose flow loadProgramWithLibRoot(entry_path: view Text, lib_root: view Text) => Result of[LoadedProgram, Int] {
     var loading_stack: List<Text> = List[]
     var loaded_paths: List<Text> = List[]
     var combined_source = ""
@@ -268,7 +286,7 @@ pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     var dep_counts: List<Int> = List[]
     var dep_ids: List<Int> = List[]
 
-    let res = loadModuleRecursive(entry_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
+    let res = loadModuleRecursive(entry_path, lib_root, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
     if res != 0 {
         return Err(res)
     }
@@ -285,4 +303,11 @@ pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     }
     let access = moduleAccessBuild(module_paths.length, &dep_first, &dep_counts, &dep_ids)
     return Ok(LoadedProgram(source: combined_source, tree: tree, module_count: module_paths.length, module_paths: module_paths, module_starts: module_starts, decl_module: decl_module, module_access: access))
+}
+
+// Preserve the historic loader signature for main_sema and Stage 0 fixtures.
+// Projects that do not opt into --lib remain strictly relative-only.
+expose flow loadProgram(entry_path: view Text) => Result of[LoadedProgram, Int] {
+    hold empty_root = ""
+    give loadProgramWithLibRoot(entry_path, view empty_root)
 }

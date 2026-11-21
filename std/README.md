@@ -54,9 +54,30 @@ that call these operations.
   Escape is reported when the next byte arrives (Escape twice is immediate).
 - Characters are Unicode scalar values, not grapheme clusters; dead keys and
   IME composition are delivered as the Windows console reports them.
-- Modules are resolved relative to the importing file, so a program outside
-  `std/io/` cannot `take` this module yet: a library search root in the
-  module loader is the next required compiler change.
+- A program outside `std/io/` can now import `std.io.console` with
+  `ele build <source.l> --lib <root-containing-std>`. The root is the
+  directory **containing** `std/`, not `std/` itself.
+- Imports still resolve locally first. `--lib` is an explicit, optional fallback
+  used **only** when the local module is absent. Permission, invalid UTF-8 and
+  oversized local-module errors are not masked by falling back to the library.
+- The older `loadProgram(entry_path)` contract remains available to internal
+  tools; no implicit global library path or environment lookup is introduced.
+
+### Compile from another directory
+
+From the ELE repository root with the autonomous compiler:
+
+```powershell
+.\ele.exe build .\apps\elepad\probes\console_import.l --lib . --target pe --output .\target\elepad-std-test.exe
+.\target\elepad-std-test.exe
+```
+
+On Linux replace `--target pe` with `--target elf` and choose an ELF output path.
+
+The probe imports `take std.io.console` while living in
+`apps/elepad/probes/`; no source files are copied into the app.
+The CLI also accepts an absolute library root. Running without `--lib`
+continues to use the previous relative-only resolution behavior.
 
 ### Tests
 
