@@ -103,8 +103,97 @@ public static class EleConsoleHarness {
     static extern bool WriteConsoleInputW(IntPtr h, InputRecord[] records, uint count, out uint written);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleMode(IntPtr h, out uint mode);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
-    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int nStdHandle);
-    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetStdHandle(int nStdHandle, IntPtr handle);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle,
+        IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess,
+        bool inheritHandle, uint options);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
+    static extern bool CreateProcess(string appName, string commandLine,
+        IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+        uint creationFlags, IntPtr environment, string currentDirectory,
+        ref StartupInfo startupInfo, out ProcessInformation processInfo);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct StartupInfo {
+        public uint cb;
+        public string reserved;
+        public string desktop;
+        public string title;
+        public uint x; public uint y; public uint xSize; public uint ySize;
+        public uint xCountChars; public uint yCountChars; public uint fillAttribute;
+        public uint flags; public ushort showWindow; public ushort cbReserved2;
+        public IntPtr reserved2;
+        public IntPtr standardInput;
+        public IntPtr standardOutput;
+        public IntPtr standardError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ProcessInformation {
+        public IntPtr process;
+        public IntPtr thread;
+        public uint processId;
+        public uint threadId;
+    }
+
+    // Explicit STARTF_USESTDHANDLES is needed when a runner (such as Actions)
+    // has launched PowerShell with stdin redirected. Changing the parent's
+    // GetStdHandle slot alone does not guarantee that Process.Start inherits it.
+    static string RunConsoleChild(string exe, IntPtr input) {
+        IntPtr proc = GetCurrentProcess();
+        IntPtr childInput;
+        if (!DuplicateHandle(proc, input, proc, out childInput, 0, true, 2))
+            return "DuplicateHandle input failed " + Marshal.GetLastWin32Error();
+        IntPtr output = CreateFileW("CONOUT$", 0x40000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        if (output == new IntPtr(-1)) {
+            CloseHandle(childInput);
+            return "CONOUT$ failed " + Marshal.GetLastWin32Error();
+        }
+        IntPtr childOutput;
+        if (!DuplicateHandle(proc, output, proc, out childOutput, 0, true, 2)) {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(output);
+            CloseHandle(childInput);
+            return "DuplicateHandle output failed " + error;
+        }
+        CloseHandle(output);
+        try {
+            StartupInfo si = new StartupInfo();
+            si.cb = (uint)Marshal.SizeOf(typeof(StartupInfo));
+            si.flags = 0x00000100; // STARTF_USESTDHANDLES
+            si.standardInput = childInput;
+            si.standardOutput = childOutput;
+            si.standardError = childOutput;
+            ProcessInformation pi;
+            if (!CreateProcess(exe, "\"" + exe + "\"", IntPtr.Zero, IntPtr.Zero,
+                    true, 0, IntPtr.Zero, null, ref si, out pi))
+                return "CreateProcessW failed " + Marshal.GetLastWin32Error();
+            try {
+                uint wait = WaitForSingleObject(pi.process, 20000);
+                if (wait != 0) {
+                    TerminateProcess(pi.process, 124);
+                    return "child wait failed or timed out " + wait;
+                }
+                uint status;
+                if (!GetExitCodeProcess(pi.process, out status))
+                    return "GetExitCodeProcess failed " + Marshal.GetLastWin32Error();
+                return "exit=" + status;
+            } finally {
+                CloseHandle(pi.thread);
+                CloseHandle(pi.process);
+            }
+        } finally {
+            CloseHandle(childOutput);
+            CloseHandle(childInput);
+        }
+    }
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
 
@@ -161,31 +250,12 @@ public static class EleConsoleHarness {
         if (offset != records.Length)
             return "WriteConsoleInputW incomplete written=" + offset +
                 " expected=" + records.Length;
-        // GitHub Actions launches PowerShell with redirected stdin. AllocConsole
-        // does not guarantee GetStdHandle(STD_INPUT_HANDLE) points to CONIN$:
-        // the child's default startup handles can still inherit the runner's
-        // redirected pipe instead of our newly allocated console.
-        // Temporarily publish the real console input handle for Process.Start.
-        IntPtr previousInput = GetStdHandle(-10);
-        if (!SetStdHandle(-10, input))
-            return "SetStdHandle(STD_INPUT_HANDLE) failed " + Marshal.GetLastWin32Error();
-        int exitCode;
-        try {
-            ProcessStartInfo psi = new ProcessStartInfo(exe);
-            psi.UseShellExecute = false;
-            using (Process p = Process.Start(psi)) {
-                if (p == null) return "Process.Start returned null";
-                if (!p.WaitForExit(20000)) { p.Kill(); return "timeout"; }
-                exitCode = p.ExitCode;
-            }
-        } finally {
-            SetStdHandle(-10, previousInput);
-        }
+        string result = RunConsoleChild(exe, input);
         uint after;
         GetConsoleMode(input, out after);
         CloseHandle(input);
         FreeConsole();
-        return "exit=" + exitCode + " before=" + before + " after=" + after;
+        return result + " before=" + before + " after=" + after;
     }
 }
 '@
