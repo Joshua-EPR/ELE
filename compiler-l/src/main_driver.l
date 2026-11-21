@@ -323,6 +323,7 @@ flow printHelp() {
     print("")
     print("Opciones de build:")
     print("  --output, -o <ruta>       Ruta del ejecutable de salida")
+    print("  --lib <directorio>        Raíz opcional de módulos compartidos (std/io/...)")
     print("  --target <elf|pe>         Formato de salida (elf = Linux ELF64, pe = Windows PE32+)")
     print("  --pe64                    Equivalente a --target pe")
     print("  --elf64                   Equivalente a --target elf")
@@ -398,8 +399,8 @@ flow assembleLir(headers: view List of[Text], functions: view List of[Text]) => 
     give "{s3}{s2}{s1}{s0}end\n"
 }
 
-flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
-    choose loadProgram(view source_path) {
+flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root: Text) => Int {
+    choose loadProgramWithLib(view source_path, view lib_root) {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
             each m_idx among 0..prog.module_paths.length {
@@ -529,12 +530,14 @@ flow main() => Int {
 
     change source_file = ""
     change output_file = ""
+    change lib_root = ""
     change target = -1
     change skip_next = false
 
     hold opt_pe64 = "--pe64"
     hold opt_elf64 = "--elf64"
     hold opt_target = "--target"
+    hold opt_lib = "--lib"
     hold opt_output = "--output"
     hold opt_o = "-o"
     hold val_pe = "pe"
@@ -580,7 +583,23 @@ flow main() => Int {
                         }
                         skip_next = true
                     } otherwise {
-                        when textMatches(view cur_arg, view opt_output) || textMatches(view cur_arg, view opt_o) {
+                        when textMatches(view cur_arg, view opt_lib) {
+                            when i + 1 >= count {
+                                printError("error[CLI]: --lib requiere un directorio")
+                                give 2
+                            }
+                            choose processArg(i + 1) {
+                                Ok(v): {
+                                    when v.byteLength == 0 || (v.byteLength > 0 && v@byteAt(0) == 45) {
+                                        printError("error[CLI]: --lib requiere un directorio válido")
+                                        give 2
+                                    }
+                                    lib_root = v
+                                }
+                                Err(code): { give 6 }
+                            }
+                            skip_next = true
+                        } otherwise when textMatches(view cur_arg, view opt_output) || textMatches(view cur_arg, view opt_o) {
                             when i + 1 >= count {
                                 printError("error[CLI]: --output requiere una ruta de destino")
                                 give 2
@@ -658,5 +677,5 @@ flow main() => Int {
 
     // compileProgram verifies the loaded main source and every imported
     // module against the destination after readText establishes they exist.
-    give compileProgram(source_file, output_file, target)
+    give compileProgram(source_file, output_file, target, lib_root)
 }
