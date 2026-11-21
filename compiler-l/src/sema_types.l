@@ -105,6 +105,40 @@ expose flow semTypeIsFile(table: view TypeTable, ty: Int) => Bool {
     }
 }
 
+// ---- Linear resources --------------------------------------------------
+// A linear type owns an operating-system resource that only its close
+// operation may release: ownership tracks it like any owner, but an
+// implicit drop of a (maybe) live value is a compile error, and it can
+// never be stored in an aggregate. Below sema it is one machine word.
+// Adding a resource kind means extending semTypeIsLinear and
+// semTypeCloser; flow analysis, the aggregate rule, drops and the LIR
+// serialization then apply to it unchanged.
+
+expose flow semTypeIsLinear(table: view TypeTable, ty: Int) => Bool {
+    give semTypeIsFile(table, ty)
+}
+
+// The source name of linear type `ty`, for diagnostics.
+expose flow semTypeLinearName(table: view TypeTable, ty: Int) => Text {
+    when semTypeIsFile(table, ty) { give "File" }
+    give "recurso"
+}
+
+// The operation that consumes a value of linear type `ty`, for diagnostics.
+expose flow semTypeCloser(table: view TypeTable, ty: Int) => Text {
+    when semTypeIsFile(table, ty) { give "fileClose" }
+    give "su operación de cierre"
+}
+
+// Every linear type id present in the table (for flow analysis).
+expose flow semTypeLinearIds(table: view TypeTable) => List of[Int] {
+    change ids: List of[Int] = List[]
+    each i among 8..table.types.length {
+        when semTypeIsLinear(table, i) { ids@push(i) }
+    }
+    give ids
+}
+
 pub fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
     for i in 8..table.types.length {
         let t = &table.types[i]

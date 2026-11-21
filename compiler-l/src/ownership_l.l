@@ -10,6 +10,8 @@ struct FlowCheck {
     start: Int
     end: Int
     iterations: Int
+    // Status 4: the linear type id of the leaf that would be dropped.
+    linear: Int
 }
 
 struct FlowWork {
@@ -110,26 +112,34 @@ pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, ve
     return true
 }
 
-// Whether dropping `root` would release a linear leaf (a File) that is
-// still owned on some path into this point (FLOW_LIVE or FLOW_MAYBE).
-flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int) => Bool {
-    when graph.linear_type < 0 || root < 0 || root >= graph.paths.length { give false }
+flow flowIsLinear(graph: view FlowGraph, ty: Int) => Bool {
+    each i among 0..graph.linear_types.length {
+        when graph.linear_types[i] == ty { give true }
+    }
+    give false
+}
+
+// The linear type of a leaf under `root` that dropping `root` would release
+// while it is still owned on some path into this point (FLOW_LIVE or
+// FLOW_MAYBE), or -1.
+flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int) => Int {
+    when graph.linear_types.length == 0 || root < 0 || root >= graph.paths.length { give -1 }
     change leaf = root
     during leaf >= 0 {
-        when leaf < graph.drop_types.length && graph.drop_types[leaf] == graph.linear_type {
+        when leaf < graph.drop_types.length && flowIsLinear(graph, graph.drop_types[leaf]) {
             hold s = state[leaf]
-            when s == FLOW_LIVE || s == FLOW_MAYBE { give true }
+            when s == FLOW_LIVE || s == FLOW_MAYBE { give graph.drop_types[leaf] }
         }
         leaf = flowNextPath(graph, root, leaf)
     }
-    give false
+    give -1
 }
 
 pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
     let paths = graph.paths.length
     let blocks = graph.blocks.length
     if paths > 2000000 / blocks {
-        return FlowCheck(status: 2, start: 0, end: 0, iterations: 0)
+        return FlowCheck(status: 2, start: 0, end: 0, iterations: 0, linear: -1)
     }
     var work = flowWorkNew(blocks, paths)
     var steps = 0
@@ -141,7 +151,7 @@ pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
         }
         steps += 1
         if steps > 100000 {
-            return FlowCheck(status: 2, start: 0, end: 0, iterations: steps)
+            return FlowCheck(status: 2, start: 0, end: 0, iterations: steps, linear: -1)
         }
         work.pending[id] = false
         flowLoad(&mut work, id, paths)
@@ -162,21 +172,24 @@ pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
             var event = block.first
             while event >= 0 {
                 let instruction = &graph.events[event]
-                when instruction.kind == FLOW_DROP && flowDropsLinear(graph, view work.scratch, instruction.path) {
-                    give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps)
+                when instruction.kind == FLOW_DROP {
+                    hold leaked = flowDropsLinear(graph, view work.scratch, instruction.path)
+                    when leaked >= 0 {
+                        give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps, linear: leaked)
+                    }
                 }
                 if !flowApply(graph, &mut work.scratch, instruction, true) {
-                    return FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps)
+                    return FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps, linear: -1)
                 }
                 event = instruction.next
             }
             if requires_return && block.next_a < 0 && !block.returned {
-                return FlowCheck(status: 3, start: 0, end: 0, iterations: steps)
+                return FlowCheck(status: 3, start: 0, end: 0, iterations: steps, linear: -1)
             }
         }
     }
     // Keep the converged entry states for drop elaboration.
     graph.entry = work.incoming
     graph.reached = work.reached
-    return FlowCheck(status: 0, start: 0, end: 0, iterations: steps)
+    return FlowCheck(status: 0, start: 0, end: 0, iterations: steps, linear: -1)
 }
