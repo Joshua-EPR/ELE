@@ -350,7 +350,7 @@ class TestELEGraphiteTheme(unittest.TestCase):
 class TestELEBrandedIcons(unittest.TestCase):
     def test_language_and_extension_png_icons(self):
         pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(pkg["version"], "0.1.4")
+        self.assertEqual(pkg["version"], "0.1.5")
         logo = (EDITORS_DIR / pkg["icon"]).resolve()
         self.assertTrue(logo.is_relative_to(EDITORS_DIR.resolve()))
         self.assertTrue(logo.is_file())
@@ -380,8 +380,16 @@ class TestELEBrandedIcons(unittest.TestCase):
         self.assertEqual(theme["fileExtensions"]["l"], "_ele_source")
         self.assertEqual(theme["languageIds"]["ele"], "_ele_source")
         image_path = (theme_path.parent / theme["iconDefinitions"]["_ele_source"]["iconPath"]).resolve()
-        self.assertEqual(image_path, (EDITORS_DIR / pkg["contributes"]["languages"][0]["icon"]["dark"]).resolve())
+        self.assertTrue(image_path.is_relative_to(EDITORS_DIR.resolve()))
         self.assertTrue(image_path.is_file())
+        self.assertEqual(image_path.suffix, ".svg")
+        svg = image_path.read_text(encoding="utf-8")
+        self.assertIn("<svg ", svg)
+        self.assertIn('viewBox="0 0 128 128"', svg)
+        self.assertIn("#70C7BE", svg)
+        fallback = (EDITORS_DIR / pkg["contributes"]["languages"][0]["icon"]["dark"]).resolve()
+        self.assertTrue(fallback.is_file())
+        self.assertEqual(fallback.suffix, ".png")
 
 
 if __name__ == "__main__":
