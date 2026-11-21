@@ -2,7 +2,7 @@
   "$schema": "vscode://schemas/icon-theme",
   "iconDefinitions": {
     "_ele_source": {
-      "iconPath": "../images/ele-file.png"
+      "iconPath": "../images/ele-file-simple.svg"
     }
   },
   "fileExtensions": {

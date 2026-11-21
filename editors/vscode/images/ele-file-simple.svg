@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>ELE source file</title>
+  <path d="M28 7H82L111 36V112Q111 120 103 120H28Q19 120 19 111V16Q19 7 28 7Z" fill="#1B2834" stroke="#7E9AA7" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M82 8V29Q82 37 90 37H111Z" fill="#BDD5D7"/>
+  <path d="M39 43H91L83 57H55V64H84L76 78H55V88H91V103H39Z" fill="#70C7BE"/>
+</svg>
