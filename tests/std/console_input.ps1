@@ -213,7 +213,13 @@ public static class EleConsoleHarness {
         uint read;
         if (!PeekConsoleInputW(input, queued, count, out read)) return count + " [peek failed]";
         string kinds = "";
-        for (int i = 0; i < read; i++) kinds += (i == 0 ? "" : " ") + queued[i].EventType;
+        for (int i = 0; i < read; i++) {
+            InputRecord r = queued[i];
+            kinds += (i == 0 ? "" : " ") + r.EventType;
+            // Key records in detail: (virtual key, UTF-16 unit, down, control state).
+            if (r.EventType == 1)
+                kinds += "(" + r.VirtualKey + "," + r.Unicode + "," + r.KeyDown + "," + r.KeyControl + ")";
+        }
         return count + " [" + kinds + "]";
     }
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
@@ -293,6 +299,9 @@ public static class EleConsoleHarness {
         if (offset != records.Length)
             return "WriteConsoleInputW incomplete written=" + offset +
                 " expected=" + records.Length;
+        // What the console actually queued (a console host may translate or
+        // reorder written records).
+        Diagnostics += "; queued for the program: " + Pending(input);
         string result = RunConsoleChild(exe, input, logPath);
         Diagnostics += "; left unread: " + Pending(input);
         uint after;
