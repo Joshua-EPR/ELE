@@ -942,7 +942,11 @@ fn driver_resolves_elepad_std_console_with_explicit_library_root() {
     } else {
         execute_elf(&image, &dir).expect("Linux ELF execution unavailable")
     };
-    assert!(run.status.success(), "console probe exited: {:?}", run.status);
+    assert!(
+        run.status.success(),
+        "console probe exited: {:?}",
+        run.status
+    );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout).trim(),
         "elepad-std-import-ok"
@@ -973,7 +977,11 @@ fn driver_library_search_preserves_local_module_precedence() {
     let std_dir = dir.join("std/io");
     fs::create_dir_all(&std_dir).unwrap();
     let src = dir.join("entry.l");
-    let image = dir.join(if cfg!(windows) { "local.exe" } else { "local.elf" });
+    let image = dir.join(if cfg!(windows) {
+        "local.exe"
+    } else {
+        "local.elf"
+    });
     fs::write(
         std_dir.join("console.l"),
         "expose flow localTag() => Int { give 73 }\n",
@@ -1018,11 +1026,7 @@ fn driver_library_root_fails_closed_on_invalid_local_module() {
     fs::create_dir_all(&std_dir).unwrap();
     fs::write(std_dir.join("console.l"), [0xff, 0xfe, 0xfd]).unwrap();
     let src = dir.join("entry.l");
-    fs::write(
-        &src,
-        "take std.io.console\nflow main() => Int { give 0 }\n",
-    )
-    .unwrap();
+    fs::write(&src, "take std.io.console\nflow main() => Int { give 0 }\n").unwrap();
     let image = dir.join("must_not_exist.bin");
     let _ = fs::remove_file(&image);
     let out = Command::new(driver())
@@ -1036,8 +1040,14 @@ fn driver_library_root_fails_closed_on_invalid_local_module() {
         ])
         .output()
         .unwrap();
-    assert!(!out.status.success(), "invalid local UTF-8 must not fall back");
-    assert!(!image.exists(), "invalid local module unexpectedly produced output");
+    assert!(
+        !out.status.success(),
+        "invalid local UTF-8 must not fall back"
+    );
+    assert!(
+        !image.exists(),
+        "invalid local module unexpectedly produced output"
+    );
     assert!(String::from_utf8_lossy(&out.stderr).contains("error[L0014]"));
 }
 
