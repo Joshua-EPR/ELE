@@ -26,4 +26,16 @@ Desde la raíz del proyecto:
 
 `elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. `writeBytes` no ofrece publicación atómica ni recuperación de una salida parcialmente escrita; por eso la utilidad exige un nombre de salida nuevo.
 
-`readKey` nunca fue una API: `probes/keyboard.l` sigue siendo rechazado a propósito (L0001). La capacidad general ya existe como operaciones de plataforma del compilador (`consoleInputMode`, `readConsoleEvent`) y la biblioteca `std/io/console.l` (ver `std/README.md`). El siguiente bloqueo para M2 es que el cargador de módulos solo resuelve `take` relativo al archivo importador: ELEPad no puede importar `std/io/console.l` hasta que exista una raíz de bibliotecas. La interfaz gráfica tampoco se ha ejecutado.
+`readKey` nunca fue una API: `probes/keyboard.l` sigue siendo rechazado a propósito (L0001). La capacidad general ya existe como operaciones de plataforma del compilador (`consoleInputMode`, `readConsoleEvent`) y la biblioteca `std/io/console.l` (ver `std/README.md`). El siguiente bloqueo para M2 es que el cargador de módulos solo resuelve `take` relativo al archivo importador: ELEPad ya dispone de una ruta de importación explícita en esta rama mediante `--lib <raíz-del-repositorio>`; la comprobación independiente de CI todavía está pendiente. La interfaz gráfica tampoco se ha ejecutado.
+
+## Módulos compartidos (`--lib`)
+
+Desde la raíz del repositorio, compile un programa de ELEPad que importe la biblioteca de consola:
+
+```powershell
+.\ele.exe build .\apps\elepad\src\console_import_smoke.l --lib . --target pe -o .\apps\elepad\console_import_smoke.exe
+.\apps\elepad\console_import_smoke.exe
+.\tests\std\library_root.ps1 -Ele .\ele.exe
+```
+
+En Linux, use `--target elf` y `sh tests/std/library_root.sh /ruta/absoluta/ele`. El directorio pasado a `--lib` debe contener `std/io/console.l` (no ser `std` mismo). Las importaciones locales conservan prioridad; solo si falta el archivo local se consulta la raíz explícita. Sin `--lib`, la resolución continúa siendo exclusivamente relativa al archivo importador. Esta prueba confirma la integración del cargador, no que ELEPad tenga todavía un bucle de teclado interactivo.
