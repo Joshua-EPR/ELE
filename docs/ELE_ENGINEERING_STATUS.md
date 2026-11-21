@@ -20,8 +20,26 @@ This file is meant to let a new session resume without repeating investigations.
 - Available: whole-file `readText(path, max)` and `writeBytes(path, bytes)` (Win64 and Linux runtimes: `compiler-l/src/codegen/win64_rt_platform.l`, `native_rt_platform.l`). `writeBytes` publishes via temporary file and replace (`compiler-l/src/main_driver.l:467`).
 - Design doc present: `docs/native-file-streams-design.md`.
 - NOT present on `main`: opaque file-stream handle type, block read/write, seek/tell/size, flush, rename/replace API, EOF-vs-error distinction as language API.
-- Status: **NO INICIADO** (implementation). `codex/native-file-streams-20261121` is fully merged and contributed only the design contract plus the Linux permission-preservation fix for `writeBytes` (PR #140). No branch holds an opaque file handle type. The next P0-B step is a compiler change in sema, ownership, LIR verifier and both runtimes, following the contract in `docs/native-file-streams-design.md`. It is not an application-level task.
-- The PR #140 Linux permission preservation was not re-run in this pass.
+- On `main`: design only. `codex/native-file-streams-20261121` (PR #140) contributed the contract and the Linux permission-preservation fix for `writeBytes`.
+- Branch `feat/p0b-file-streams-20261121` (from `f166cad`, independent of the ELEPad branch) implements the first stream slice in Stage 1 and both native backends:
+  - A linear, opaque `File` type (`SemTypeKind.File`), with `fileOpen`, `fileRead`, `fileWrite`, `fileSeek`, `fileSize`, `fileFlush`, `fileClose` and `fileStatus`.
+  - Portable negative error codes; EOF (0) is distinct from errors.
+  - Rejected at compile time: leaks (status 4 in `flowVerify` → L0005), double close and use after close (use-after-move), Int handles (sema type check plus the LIR verifier), and Files inside aggregates (L0016).
+  - Linux: raw syscalls with EINTR handling. Windows: KERNEL32 only, plus two new imports, `SetFilePointerEx` and `GetFileSizeEx`.
+  - The runtime is emitted only when a program uses files.
+  - The contract is in `std/README.md` and `docs/native-file-streams-design.md`.
+- Evidence (local, 2026-11-21):
+  - `crates/l/tests/file_streams_l.rs`: 4/4. It covers PE32+ run on Windows, ELF64 run under WSL Ubuntu, 11 negative programs, and no new imports for programs that don't use files.
+  - The 1 MiB file was verified byte by byte from outside, and a mutated expectation fails with its code.
+  - `strace` on the ELF64 run: 11 opens and 11 closes, with `O_CLOEXEC|O_NONBLOCK` (and `O_EXCL` for create-new).
+  - Full Windows suite: 775 passed, 3 failed. All three were then resolved or explained:
+    - The legacy-syntax ratchet failed on my own legacy tokens; I rewrote them in v2 and it now passes.
+    - `stage1_import_exports_l` hit Windows error 32 while clippy ran concurrently; 3/3 when rerun alone.
+    - `native_image_structure_l::stage1_example_images_are_structurally_valid` reports `writeBytes` syscalls (stat/fsync/rename/getrandom). It fails identically on clean `main` `f166cad` with `ELE_TEST_WSL_DISTRO=Ubuntu`, so it predates this branch. The validator's syscall whitelist was not updated for the PR #140 `writeBytes`. It is invisible on Windows hosts that don't execute ELF64. Separate fix, not done.
+  - Commit: `8134728` on `feat/p0b-file-streams-20261121`, pushed; no PR opened (no `gh`).
+  - Clippy `-D warnings` and `cargo fmt --check`: clean.
+- Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI not run).
+- Not yet done: existence/metadata queries, rename/replace through streams, directory iteration, permissions/attributes on stream-created files, concurrent-writer tests, and Stage 0 support for the builtins.
 
 ### 2.2 ELEPad terminal (P0 editor)
 - Present on `main`: `apps/elepad/src/{buffer,cursor,editor_core,editor_test,main,search,terminal,terminal_dispatch,terminal_dispatch_test,terminal_render}.l`.
@@ -63,10 +81,11 @@ This file is meant to let a new session resume without repeating investigations.
 ## 4. Recommended next increments (dependency-ordered)
 
 1. Reconcile the local checkout: resolve or abort the unfinished merge in the user's working copy (user decision; do not force).
-2. Audit the open remote branches against `main` (`git merge-base`, `git cherry`) to classify which are already merged content.
-3. P0-B: merge-validate `codex/native-file-streams-20261121` on a worktree, then add the stream API tests listed in brief §4.7.
-4. ELEPad: extend `terminal_dispatch.l` with Ctrl+O/Z/Y/A/C/X/V/F; each needs a failing test in `terminal_dispatch_test.l` first.
-5. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
+2. Open Draft PRs for `feat/elepad-terminal-history-20261121` and `feat/p0b-file-streams-20261121` and let CI validate them (no `gh` here).
+3. Fix the `native_image_structure_l` syscall whitelist for `writeBytes` (pre-existing, see 2.1).
+4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
+5. P0-C: audit `compiler-l/src/codegen/win64_callback.l` and build the four-argument callback test.
+6. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
 ## 5. Verification log
 
