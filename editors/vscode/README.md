@@ -4,9 +4,9 @@
 
 The ELE emblem is the extension icon; the matching document icon identifies `.l` source files.
 
-**Version 0.1.4:** The extension emblem is now a simplified, non-neon symbol optimized for 16–32px readability. The `.l` source document icon and Graphite Dark syntax colors remain unchanged.
+**Version 0.1.5:** The `.l` source file icon is now a bold, high-contrast **E on a dark document**, deliberately simplified for 16–24px Explorer rows. The installed **ELE File Icons** theme renders a crisp SVG; the ELE language fallback uses a matching PNG. The extension logo and Graphite Dark syntax colors remain unchanged.
 
-![ELE .l source icon](images/ele-file.png)
+![ELE .l source icon](images/ele-file-simple.png)
 
 Official Visual Studio Code extension providing first-class developer tooling for the **ELE** programming language (ELE v2 syntax).
 
@@ -125,7 +125,8 @@ This extension now also provides the optional **ELE Graphite Dark** theme, inten
 ## ELE branded icons
 
 - **Extension icon:** The ELE emblem is shown in VS Code's Extensions view through the `icon` field in `package.json`.
-- **File icon:** ELE contributes `images/ele-file.png` as the default file icon for language ID `ele`, in both light and dark themes. VS Code uses it only when your selected file-icon theme allows language icons and does not already assign a higher-priority icon to `.l`. <https://code.visualstudio.com/api/extension-guides/file-icon-theme>
+- **File icon:** ELE contributes `images/ele-file-simple.png` as the language fallback in both light and dark themes. The optional **ELE File Icons** theme uses the matching scalable SVG at `images/ele-file-simple.svg` for crisp icons in the Explorer. VS Code uses it only when your selected file-icon theme allows language icons and does not already assign a higher-priority icon to `.l`. <https://code.visualstudio.com/api/extension-guides/file-icon-theme>
+- **To actually see the new `.l` icon:** Install extension version **0.1.5** (not just 0.1.4), then open **Preferences: File Icon Theme**, select **ELE File Icons**, and run **Developer: Reload Window** to refresh icon caches. If an old icon persists, inspect installed extension versions and your selected file icon theme.
 - **Guaranteed visual choice:** To select the included icon set, open **Preferences: File Icon Theme** from the Command Palette and choose **ELE File Icons**. This is an optional *whole file icon theme*, so it may change the appearance of other file types. To keep your current file-icon theme, leave it selected and use the ELE language fallback when supported.
 
 These icons do not change file associations, syntax, the `.l` extension, or the compiler.
@@ -144,7 +145,7 @@ Using `@vscode/vsce`:
 ```bash
 cd editors/vscode
 npx @vscode/vsce package
-code --install-extension ele-vscode-0.1.4.vsix
+code --install-extension ele-vscode-0.1.5.vsix
 ```
 
 ---
