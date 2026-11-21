@@ -67,11 +67,20 @@ This file is meant to let a new session resume without repeating investigations.
 - Evidence (local): `tests/native_backend/win64_callback.ps1` passes. With the adapter's RSI or RDI restore removed, the probe exits 7; with a wrong expected argument, its marker disappears. A system caller hides lost nonvolatile registers, so only the direct call can catch them. That is why the direct check exists.
 - Register audit: generated code doesn't use RBX, R12–R15 or XMM, so saving RDI/RSI is enough today.
 - Status: 4-word callback ABI **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI).
+- Branch `feat/p0d-window-20261121` (`c9181f7`, **stacked on the P0-C branch**) adds a real Win32 window probe, `compiler-l/src/native_win_window_probe.l`:
+  - it registers a class whose WndProc is the 4-word adapter, then creates, shows and paints the window (FillRect + TextOutW);
+  - `GetPixel` reads the painted colour back;
+  - posted keyboard and mouse messages arrive through GetMessageW/DispatchMessageW;
+  - WM_CLOSE → DestroyWindow → PostQuitMessage, and the probe exits 0;
+  - user32/gdi32 are loaded at run time, and the import table stays KERNEL32-only.
+  - Evidence: `tests/native_backend/win64_window.ps1` passes locally, and a wrong-colour mutation is detected. A Windows CI step was added; CI hasn't run.
+  - Details and limits: `docs/win32-window-probe.md`.
 - **NO INICIADO**:
-  - source-level FFI: extern declarations, ELE flows as callbacks, lifetime rules;
+  - source-level FFI and window API: extern declarations, ELE flows as callbacks, an HWND/GDI ownership model;
   - callbacks with stack-passed parameters, floats or structs;
   - reentrancy;
-  - a registered window class and message loop (P0-D).
+  - real user input, resize and focus;
+  - Linux X11/Wayland.
 
 ### 2.4 Self-hosting and coverage
 - Historical matrix: `docs/SELF_COVERAGE_MATRIX_2026-11-11.md` (104 modules, 83 to LIR, 21 to backend). Historical, not re-measured.
@@ -95,7 +104,7 @@ This file is meant to let a new session resume without repeating investigations.
 2. Open Draft PRs for `feat/elepad-terminal-history-20261121`, `feat/p0b-file-streams-20261121` and `fix/elf-syscall-whitelist-20261121`, and let CI validate them (no `gh` here). The whitelist fix is independent and the smallest; merge it first.
 3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
-5. P0-C/P0-D next: a real window via `RegisterClassExW` + `CreateWindowExW` + `GetMessageW`/`DispatchMessageW`, with the 4-word adapter as WndProc (same probe style). Then design source-level callbacks: an ELE flow with a fixed Win64 signature, emitted through the adapter, with static lifetime only.
+5. P0-C/P0-D next: design source-level callbacks and windows. An ELE flow with a fixed Win64 signature would be emitted through the adapter, with static lifetime only, plus a linear `Window` resource modelled on the P0-B `File`. Both are compiler changes (sema, LIR and backend).
 6. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
 ## 5. Verification log
