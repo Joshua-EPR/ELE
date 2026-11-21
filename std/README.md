@@ -5,6 +5,19 @@ and compiled by the autonomous driver; the only native code involved is the
 platform runtime that the compiler itself emits (KERNEL32 on Windows, Linux
 system calls).
 
+## Binary console output
+
+The autonomous compiler provides `writeConsoleBytes(bytes)` for a borrowed
+`List of[Int]`. It writes exactly those bytes to standard output, without a
+trailing newline, and returns 0 on success, -1 for an OS write failure, or -2
+for an invalid byte or a buffer above 16 MiB. Values must be in 0..255. The
+operation does not depend on libc or a language runtime. It is suitable for
+UTF-8 and terminal control sequences, but Windows terminals must have Virtual
+Terminal Processing enabled to interpret ANSI sequences.
+
+The native positive/negative test is `python tests/std/console_output.py
+<driver> <pe|elf>`.
+
 ## `std/io/console.l`: interactive console input
 
 Status: implemented and tested on Windows x86-64 (real console) and Linux

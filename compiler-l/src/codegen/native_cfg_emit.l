@@ -365,6 +365,13 @@ flow cfgUsesConsole(p: view CfgProgram) => Bool {
     give false
 }
 
+flow cfgUsesConsoleOutput(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && p.insts[i].op == 8 { give true }
+    }
+    give false
+}
+
 expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     give cfgBuildFor(p, 0)
 }
@@ -474,10 +481,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     when platform {
         hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
         hold console = cfgUsesConsole(p)
+        hold console_output = cfgUsesConsoleOutput(p)
         when target == 1 {
-            platform_at = w64EmitPlatform(edit code, edit imports, view rt, console)
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt, console, console_output)
         } otherwise {
-            platform_at = pfEmitAll(edit code, view rt, edit data_at, console)
+            platform_at = pfEmitAll(edit code, view rt, edit data_at, console, console_output)
         }
     }
 

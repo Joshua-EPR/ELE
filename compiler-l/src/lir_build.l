@@ -56,6 +56,8 @@ expose fixed LIR_PLATFORM_SAME_FILE = 5
 // console input pair. Both take and give plain Int, so they never borrow.
 expose fixed LIR_PLATFORM_CONSOLE_MODE = 6
 expose fixed LIR_PLATFORM_READ_EVENT = 7
+// Binary-safe stdout write: shared List<Int> loan, Int status.
+expose fixed LIR_PLATFORM_WRITE_CONSOLE = 8
 
 // Terminators.
 pub const LIR_T_NONE = 0

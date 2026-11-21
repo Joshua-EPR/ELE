@@ -420,6 +420,20 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaPlatformEmit(edit ctx, LIR_PLATFORM_READ_EVENT, view args, 1, true)
                 give 1
             }
+            hold name_write_console = "writeConsoleBytes"
+            when symbolNameEqualsText(source, name_start, name_end, name_write_console) {
+                when arg_count != 1 {
+                    semaAddError(edit ctx, "L0004", "writeConsoleBytes requiere (List<Int>)", expr.start, expr.end)
+                    give 7
+                }
+                hold bytes_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold bytes_loan = semaPlatformArgLoan(edit ctx, bytes_ty, expr.start, expr.end)
+                hold bytes = ctx.lir.borrowed
+                change loans: List of[Int] = List[]
+                loans@push(bytes_loan)
+                semaCallLoans(edit ctx, view loans, 1, SITE_NONE, expr.start, expr.end)
+                give semaWriteConsoleBytes(edit ctx, expr.start, expr.end, bytes_ty, bytes)
+            }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {

@@ -23,6 +23,7 @@ take x86_64
 //   samefile 2 ref <Text> 0 ref <Text> 0 -> Int
 //   consolemode 1 val <Int>        -> Int (codes 6 and 7: raw console
 //   readevent 0                    -> Int  input, see win64_rt_platform)
+//   writeconsole 1 ref <List of[Int]> 0 -> Int (binary stdout, no newline)
 // Result<Text,Int> is any declared enum with exactly two variants whose
 // payloads are Text (variant 0, Ok) and Int (variant 1, Err).
 //
@@ -44,6 +45,7 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "samefile") { give 5 }
     when nativeEquals(source, word, "consolemode") { give 6 }
     when nativeEquals(source, word, "readevent") { give 7 }
+    when nativeEquals(source, word, "writeconsole") { give 8 }
     give -1
 }
 
@@ -69,7 +71,7 @@ expose flow cfgReadPlatform(p: edit CfgProgram, f: Int, source: view Text, reade
 
 flow cfgPlatformArity(op: Int) => Int {
     when op == 0 || op == 7 { give 0 }
-    when op == 1 || op == 3 || op == 6 { give 1 }
+    when op == 1 || op == 3 || op == 6 || op == 8 { give 1 }
     give 2
 }
 
@@ -103,7 +105,7 @@ flow cfgIsTextResult(p: view CfgProgram, ty: Int) => Bool {
 }
 
 expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.op < 0 || inst.op > 7 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
+    when inst.op < 0 || inst.op > 8 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
     hold first = inst.arg_first
     when (inst.op == 1 || inst.op == 6) && !cfgPlatformArgOk(p, f, first, false, false) { give 131 }
     when inst.op == 2 {
@@ -116,6 +118,7 @@ expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     when inst.op == 5 {
         when !cfgPlatformArgOk(p, f, first, true, false) || !cfgPlatformArgOk(p, f, first + 1, true, false) { give 131 }
     }
+    when inst.op == 8 && !cfgPlatformArgOk(p, f, first, true, true) { give 131 }
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
     when (inst.op == 0 || inst.op == 4) && dest != 0 { give 132 }
     when inst.op == 3 && dest != cfgUnitType() { give 132 }
@@ -165,6 +168,9 @@ expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst
     } otherwise when inst.op == 6 {
         hold mode = view p.call_args[first]
         cfgLoadOperand(edit code, p, f, view mode, 7)
+    } otherwise when inst.op == 8 {
+        cfgPlatformArgAddress(edit code, p, f, first, edit fix)
+        x64MovReg(edit code, 7, 0)
     }
     cfgRuntimeCall(edit code, edit fix, cfgPlatformBase() + inst.op)
     when inst.op == 0 || inst.op >= 4 {

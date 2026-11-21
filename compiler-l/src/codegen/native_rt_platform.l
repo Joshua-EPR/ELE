@@ -1046,10 +1046,73 @@ flow pfEmitReadEvent(code: edit X64Code) => Int {
     give entry
 }
 
+// writeconsole(RDI = List<Int> header) writes binary bytes to stdout without
+// adding a newline. 0 success, -1 OS failure, -2 invalid byte/length.
+// Slots: 0 elements, 1 length, 2 packed buffer, 3 capacity.
+flow pfEmitWriteConsole(code: edit X64Code, rt: view PfRuntime, write_fd: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 4)
+    x64LoadMem64(edit code, 8, 7, 0)
+    x64LoadMem64(edit code, 9, 7, 8)
+    x64StoreSlot(edit code, 0, 8)
+    x64StoreSlot(edit code, 1, 9)
+    x64MovReg(edit code, 1, 9)
+    hold invalid_size = pfIf(edit code, 1, 16777216, 8)
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold checked = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 0, 0, 0)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    hold invalid_byte = x64AboveEqualPlaceholder(edit code)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, check)
+    pfPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 1)
+    pfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 2, 0)
+    x64StoreSlot(edit code, 3, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold packed = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 2, 0, 0)
+    x64LoadSlot(edit code, 0, 2)
+    x64AddReg(edit code, 0, 1)
+    x64StoreMem8(edit code, 0, 0, 2)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, pack)
+    pfPatchHere(edit code, packed)
+    x64MovImm64(edit code, 7, 1)
+    x64LoadSlot(edit code, 6, 2)
+    x64LoadSlot(edit code, 2, 1)
+    pfCall(edit code, write_fd)
+    x64StoreSlot(edit code, 1, 0)
+    pfDrop(edit code, rt, 2, 3)
+    x64LoadSlot(edit code, 0, 1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, invalid_size)
+    pfPatchHere(edit code, invalid_byte)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    give entry
+}
+
 // Emits the platform runtime; returns the entry of each operation, indexed
 // by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), then
 // samefile, consolemode and readevent (codes 5, 6, 7).
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool) => List of[Int] {
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -1068,5 +1131,7 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
         at@push(-1)
         at@push(-1)
     }
+    when console_output { at@push(pfEmitWriteConsole(edit code, rt, write_fd)) }
+    otherwise { at@push(-1) }
     give at
 }
