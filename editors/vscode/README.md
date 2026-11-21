@@ -4,6 +4,8 @@
 
 The ELE emblem is the extension icon; the matching document icon identifies `.l` source files.
 
+**Version 0.1.4:** The extension emblem is now a simplified, non-neon symbol optimized for 16–32px readability. The `.l` source document icon and Graphite Dark syntax colors remain unchanged.
+
 ![ELE .l source icon](images/ele-file.png)
 
 Official Visual Studio Code extension providing first-class developer tooling for the **ELE** programming language (ELE v2 syntax).
@@ -142,7 +144,7 @@ Using `@vscode/vsce`:
 ```bash
 cd editors/vscode
 npx @vscode/vsce package
-code --install-extension ele-vscode-0.1.3.vsix
+code --install-extension ele-vscode-0.1.4.vsix
 ```
 
 ---
