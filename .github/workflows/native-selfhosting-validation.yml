@@ -118,6 +118,21 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: >-
           cargo test -p project-l --no-fail-fast -- --test-threads=1
+      # std/io/console.l through the autonomous driver: decoder over
+      # redirected bytes, then a real console (AllocConsole +
+      # WriteConsoleInputW) read with ReadConsoleInputW, and the console
+      # input mode restored afterwards.
+      - name: Console input library (Windows, real console)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          cargo build -p project-l --bin l
+          New-Item -ItemType Directory -Force target/ele-driver | Out-Null
+          Push-Location target/ele-driver
+          ../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift
+          Pop-Location
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/std/console_input.ps1 -Ele $driver
       # Stage 1 tools were bootstrapped by the Rust integration suites above.
       # This is a per-entry + imported closure measurement, not Stage 2.
       - name: Test self-coverage gate (MSVC)

@@ -1268,11 +1268,264 @@ flow wpfEmitSameFile(code: edit X64Code, imports: edit Pe64Imports, rt: view PfR
     give entry
 }
 
+// Console input. Both routines use the standard input handle of
+// GetStdHandle(STD_INPUT_HANDLE), which is never closed.
+//
+// consolemode(RDI = request) -> RAX: the previous input state, an opaque
+// non-negative Int (here the DWORD console mode). Requests: -1 queries
+// only; -2 switches to raw input; a value >= 0 restores a state that an
+// earlier call returned. Raw input clears ENABLE_PROCESSED_INPUT (Ctrl+C
+// arrives as a key), ENABLE_LINE_INPUT, ENABLE_ECHO_INPUT and
+// ENABLE_QUICK_EDIT_MODE, and sets ENABLE_WINDOW_INPUT, ENABLE_MOUSE_INPUT
+// and ENABLE_EXTENDED_FLAGS (required to clear quick edit).
+// Errors: -1 standard input is not a console (GetStdHandle or
+// GetConsoleMode fails: a pipe, a file, NUL, no console); -2 the console
+// rejects the new mode (the previous one stays in force); -3 a request
+// below -2 or above a DWORD (nothing is changed).
+// Slots: 0 request, 1 handle, 2 previous mode (a DWORD, zero-extended).
+flow wpfEmitConsoleMode(code: edit X64Code, imports: edit Pe64Imports) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 3)
+    x64StoreSlot(edit code, 0, 7)
+    change no_console: List of[Int] = List[]
+    change invalid: List of[Int] = List[]
+    x64MovReg(edit code, 1, 7)
+    invalid@push(wpfIf(edit code, 1, -2, 6))
+    invalid@push(wpfIf(edit code, 1, WPF_DWORD_MASK, 8))
+    x64MovImm64(edit code, 1, -10)              // STD_INPUT_HANDLE
+    w64CallImport(edit code, edit imports, pe64ImportGetStdHandle())
+    x64StoreSlot(edit code, 1, 0)
+    x64MovReg(edit code, 1, 0)
+    no_console@push(wpfIf(edit code, 1, 0, 4))
+    no_console@push(wpfIf(edit code, 1, -1, 4))
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 2, 0)
+    x64LoadSlot(edit code, 1, 1)                // hConsoleHandle
+    x64LeaMem(edit code, 2, 5, -24)             // lpMode = slot 2
+    w64CallImport(edit code, edit imports, pe64ImportGetConsoleMode())
+    x64TestEax(edit code)
+    no_console@push(x64ConditionalPlaceholder(edit code, true))
+    x64LoadSlot(edit code, 2, 0)
+    hold query_only = wpfIf(edit code, 2, -1, 4)
+    hold restore = wpfIf(edit code, 2, 0, 9)
+    // Raw: (mode & ~0xDF) + 0x98.
+    x64LoadMem32(edit code, 2, 5, -24)
+    x64MovImm64(edit code, 10, 4294967072)
+    x64AndReg(edit code, 2, 10)
+    wpfAdjust(edit code, 2, 152)
+    hold set_mode = x64JumpPlaceholder(edit code)
+    wpfPatchHere(edit code, restore)
+    x64LoadSlot(edit code, 2, 0)
+    wpfPatchHere(edit code, set_mode)
+    x64LoadSlot(edit code, 1, 1)                // hConsoleHandle, RDX = dwMode
+    w64CallImport(edit code, edit imports, pe64ImportSetConsoleMode())
+    x64TestEax(edit code)
+    hold rejected = x64ConditionalPlaceholder(edit code, true)
+    wpfPatchHere(edit code, query_only)
+    x64LoadMem32(edit code, 0, 5, -24)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, rejected)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    wpfPatchAll(edit code, view no_console)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    wpfPatchAll(edit code, view invalid)
+    x64MovImm64(edit code, 0, -3)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// RAX = the WORD at [RBP + displacement]. Clobbers R10.
+flow wpfLoadWord(code: edit X64Code, displacement: Int) {
+    x64LoadMem32(edit code, 0, 5, displacement)
+    x64MovImm64(edit code, 10, 65535)
+    x64AndReg(edit code, 0, 10)
+}
+
+// Frame slot `acc` += RAX * `scale`. Clobbers RAX, R10 and R11.
+flow wpfAccumulate(code: edit X64Code, acc: Int, scale: Int) {
+    x64MovImm64(edit code, 10, scale)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 11, acc)
+    x64AddReg(edit code, 0, 11)
+    x64StoreSlot(edit code, acc, 0)
+}
+
+// readevent() -> RAX: the next key, resize or mouse event of the console
+// input buffer, packed into one non-negative Int; -1 when standard input is
+// not a console or ReadConsoleInputW fails. ReadConsoleInputW blocks until
+// an event exists (no polling); focus and menu events are skipped.
+// Packing (bits; std/io/console.l decodes it), kind in bits 56..59:
+//   1 key:    0..15 UTF-16 unit (0 for none; a surrogate pair arrives as two
+//             events), 16..31 virtual-key code, 32..47 low word of
+//             dwControlKeyState, 48 key down, 49..55 repeat count (<= 127).
+//   2 resize: 0..15 columns, 16..31 rows of the screen buffer.
+//   3 mouse:  0..15 column, 16..31 row, 32..39 low byte of dwButtonState,
+//             40..47 dwEventFlags (low byte), 48..52 low bits of
+//             dwControlKeyState (alt, ctrl, shift), 53 wheel forward,
+//             54 wheel backward.
+// INPUT_RECORD (20 bytes) lives in slots 2..4: EventType at RBP-40, the
+// event union from RBP-36. Slots: 0 handle, 1 events read, 5 result.
+flow wpfEmitReadEvent(code: edit X64Code, imports: edit Pe64Imports) => Int {
+    hold entry = code.bytes.length
+    wpfBegin(edit code, 6)
+    change failed: List of[Int] = List[]
+    x64MovImm64(edit code, 1, -10)              // STD_INPUT_HANDLE
+    w64CallImport(edit code, edit imports, pe64ImportGetStdHandle())
+    x64StoreSlot(edit code, 0, 0)
+    x64MovReg(edit code, 1, 0)
+    failed@push(wpfIf(edit code, 1, 0, 4))
+    failed@push(wpfIf(edit code, 1, -1, 4))
+    // Not a console (a pipe or a file): one byte through ReadFile.
+    x64LoadSlot(edit code, 1, 0)
+    x64LeaMem(edit code, 2, 5, -16)
+    w64CallImport(edit code, edit imports, pe64ImportGetConsoleMode())
+    x64TestEax(edit code)
+    hold not_console = x64ConditionalPlaceholder(edit code, true)
+    hold top = code.bytes.length
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 1, 0)
+    x64StoreSlot(edit code, 5, 0)
+    x64LoadSlot(edit code, 1, 0)                // hConsoleInput
+    x64LeaMem(edit code, 2, 5, -40)             // lpBuffer
+    x64MovImm64(edit code, 8, 1)                // nLength
+    x64LeaMem(edit code, 9, 5, -16)             // lpNumberOfEventsRead
+    w64CallImport(edit code, edit imports, pe64ImportReadConsoleInputW())
+    x64TestEax(edit code)
+    failed@push(x64ConditionalPlaceholder(edit code, true))
+    x64LoadSlot(edit code, 0, 1)
+    x64TestRax(edit code)
+    hold none = x64ConditionalPlaceholder(edit code, true)
+    wpfLoadWord(edit code, -40)
+    x64MovReg(edit code, 1, 0)
+    hold is_key = wpfIf(edit code, 1, 1, 4)     // KEY_EVENT
+    hold is_mouse = wpfIf(edit code, 1, 2, 4)   // MOUSE_EVENT
+    hold is_resize = wpfIf(edit code, 1, 4, 4)  // WINDOW_BUFFER_SIZE_EVENT
+    // Focus, menu or an unknown record: read the next one.
+    wpfPatchHere(edit code, none)
+    wpfJumpTo(edit code, top)
+
+    // Key: UnicodeChar +14, wVirtualKeyCode +10, dwControlKeyState +16,
+    // bKeyDown +4, wRepeatCount +8 of the record.
+    wpfPatchHere(edit code, is_key)
+    wpfLoadWord(edit code, -26)
+    wpfAccumulate(edit code, 5, 1)
+    wpfLoadWord(edit code, -30)
+    wpfAccumulate(edit code, 5, 65536)
+    wpfLoadWord(edit code, -24)
+    wpfAccumulate(edit code, 5, 4294967296)
+    x64LoadMem32(edit code, 1, 5, -36)
+    hold key_up = wpfIf(edit code, 1, 0, 4)
+    x64MovImm64(edit code, 0, 1)
+    wpfAccumulate(edit code, 5, 281474976710656)
+    wpfPatchHere(edit code, key_up)
+    wpfLoadWord(edit code, -32)
+    x64MovReg(edit code, 1, 0)
+    hold repeat_fits = wpfIf(edit code, 1, 127, 7)
+    x64MovImm64(edit code, 1, 127)
+    wpfPatchHere(edit code, repeat_fits)
+    x64MovReg(edit code, 0, 1)
+    wpfAccumulate(edit code, 5, 562949953421312)
+    x64MovImm64(edit code, 0, 1)
+    wpfAccumulate(edit code, 5, 72057594037927936)
+    hold key_done = x64JumpPlaceholder(edit code)
+
+    // Resize: dwSize (COORD: X, Y) at +4.
+    wpfPatchHere(edit code, is_resize)
+    x64LoadMem32(edit code, 0, 5, -36)
+    wpfAccumulate(edit code, 5, 1)
+    x64MovImm64(edit code, 0, 2)
+    wpfAccumulate(edit code, 5, 72057594037927936)
+    hold resize_done = x64JumpPlaceholder(edit code)
+
+    // Mouse: dwMousePosition +4, dwButtonState +8, dwControlKeyState +12,
+    // dwEventFlags +16.
+    wpfPatchHere(edit code, is_mouse)
+    x64LoadMem32(edit code, 0, 5, -36)
+    wpfAccumulate(edit code, 5, 1)
+    x64LoadMem32(edit code, 0, 5, -32)
+    x64MovImm64(edit code, 10, 255)
+    x64AndReg(edit code, 0, 10)
+    wpfAccumulate(edit code, 5, 4294967296)
+    x64LoadMem32(edit code, 0, 5, -24)
+    x64MovImm64(edit code, 10, 255)
+    x64AndReg(edit code, 0, 10)
+    wpfAccumulate(edit code, 5, 1099511627776)
+    x64LoadMem32(edit code, 0, 5, -28)
+    x64MovImm64(edit code, 10, 31)
+    x64AndReg(edit code, 0, 10)
+    wpfAccumulate(edit code, 5, 281474976710656)
+    // Wheel direction: the signed high word of dwButtonState, meaningful
+    // only with MOUSE_WHEELED (4) or MOUSE_HWHEELED (8).
+    x64LoadMem32(edit code, 0, 5, -24)
+    x64MovImm64(edit code, 10, 12)
+    x64AndReg(edit code, 0, 10)
+    x64MovReg(edit code, 1, 0)
+    hold no_wheel = wpfIf(edit code, 1, 0, 4)
+    x64LoadMem32(edit code, 1, 5, -32)
+    hold no_delta = wpfIf(edit code, 1, 65536, 6)
+    hold backward = wpfIf(edit code, 1, 2147483648, 9)
+    x64MovImm64(edit code, 0, 1)
+    wpfAccumulate(edit code, 5, 9007199254740992)
+    hold forward_done = x64JumpPlaceholder(edit code)
+    wpfPatchHere(edit code, backward)
+    x64MovImm64(edit code, 0, 1)
+    wpfAccumulate(edit code, 5, 18014398509481984)
+    wpfPatchHere(edit code, forward_done)
+    wpfPatchHere(edit code, no_wheel)
+    wpfPatchHere(edit code, no_delta)
+    x64MovImm64(edit code, 0, 3)
+    wpfAccumulate(edit code, 5, 72057594037927936)
+
+    wpfPatchHere(edit code, key_done)
+    wpfPatchHere(edit code, resize_done)
+    x64LoadSlot(edit code, 0, 5)
+    x64FrameEnd(edit code)
+
+    // Byte input: kind 4, the byte in bits 0..7; -2 at end of input (zero
+    // bytes read, or ERROR_BROKEN_PIPE once the writer has closed a pipe).
+    wpfPatchHere(edit code, not_console)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 1, 0)
+    x64StoreSlot(edit code, 2, 0)
+    wpfStackArg(edit code, 0, 0)                // lpOverlapped = NULL
+    x64LoadSlot(edit code, 1, 0)                // hFile
+    x64LeaMem(edit code, 2, 5, -24)             // lpBuffer = slot 2
+    x64MovImm64(edit code, 8, 1)                // nNumberOfBytesToRead
+    x64LeaMem(edit code, 9, 5, -16)             // lpNumberOfBytesRead
+    w64CallImport(edit code, edit imports, pe64ImportReadFile())
+    x64TestEax(edit code)
+    hold read_failed = x64ConditionalPlaceholder(edit code, true)
+    x64LoadSlot(edit code, 0, 1)
+    x64TestRax(edit code)
+    hold end_of_input = x64ConditionalPlaceholder(edit code, true)
+    x64LoadMem8(edit code, 0, 5, -24)
+    x64MovImm64(edit code, 10, 288230376151711744)
+    x64AddReg(edit code, 0, 10)
+    x64FrameEnd(edit code)
+    wpfPatchHere(edit code, read_failed)
+    w64CallImport(edit code, edit imports, pe64ImportGetLastError())
+    wpfDword(edit code)
+    x64MovReg(edit code, 1, 0)
+    failed@push(wpfIf(edit code, 1, 109, 5))
+    wpfPatchHere(edit code, end_of_input)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+
+    wpfPatchAll(edit code, view failed)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    give entry
+}
+
 // Emits the Windows platform runtime; returns the entry of each operation,
 // indexed by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), like
 // native_rt_platform's pfEmitAll. Its absolute addresses: none (tables are
 // reached RIP-relative), so it adds no base relocation.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime) => List of[Int] {
+// The console input routines (codes 6, 7) are emitted only when `console`
+// holds; otherwise their entries are -1 and their imports stay out.
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -1286,5 +1539,12 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
     at@push(wpfEmitPrintError(edit code, edit imports, write_handle))
     at@push(wpfEmitWriteBytes(edit code, edit imports, rt, path_z, wide_z, write_handle, random))
     at@push(wpfEmitSameFile(edit code, edit imports, rt, path_z, wide_z))
+    when console {
+        at@push(wpfEmitConsoleMode(edit code, edit imports))
+        at@push(wpfEmitReadEvent(edit code, edit imports))
+    } otherwise {
+        at@push(-1)
+        at@push(-1)
+    }
     give at
 }

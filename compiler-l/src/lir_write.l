@@ -151,6 +151,8 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         if op_code == 3 { op_name = "printerror" }
         if op_code == 4 { op_name = "writebytes" }
         when op_code == 5 { op_name = "samefile" }
+        when op_code == 6 { op_name = "consolemode" }
+        when op_code == 7 { op_name = "readevent" }
         var out = "i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]

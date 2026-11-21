@@ -30,13 +30,13 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
 pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) -> Int {
     if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 3 }
     var arity = -1
-    if op == LIR_PLATFORM_ARG_COUNT { arity = 0 }
-    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR { arity = 1 }
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
+    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR || op == LIR_PLATFORM_CONSOLE_MODE { arity = 1 }
     if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
     if arity < 0 { return 1 }
     if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
     let result = l.vars[dst].ty
-    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES {
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_READ_EVENT {
         if result != 1 { return 3 }
     } else if op == LIR_PLATFORM_PRINT_ERROR {
         if result != 6 { return 3 }

@@ -52,6 +52,10 @@ pub const LIR_PLATFORM_READ_TEXT = 2
 pub const LIR_PLATFORM_PRINT_ERROR = 3
 pub const LIR_PLATFORM_WRITE_BYTES = 4
 expose fixed LIR_PLATFORM_SAME_FILE = 5
+// consoleInputMode(mode: Int) -> Int and readConsoleEvent() -> Int: the raw
+// console input pair. Both take and give plain Int, so they never borrow.
+expose fixed LIR_PLATFORM_CONSOLE_MODE = 6
+expose fixed LIR_PLATFORM_READ_EVENT = 7
 
 // Terminators.
 pub const LIR_T_NONE = 0

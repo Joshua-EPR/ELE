@@ -590,6 +590,87 @@ fn invalid_platform_calls_are_rejected_for_pe32_plus() {
     }
 }
 
+/// consoleInputMode/readConsoleEvent (codes 6, 7): an image that calls them
+/// imports exactly GetConsoleMode, SetConsoleMode and ReadConsoleInputW on
+/// top of the platform set, reproducibly; malformed calls are rejected.
+/// Images that do not call them keep the platform set (see `built_pe`).
+/// With redirected input the program runs to completion (consolemode
+/// reports "not a console", readevent end of input).
+#[test]
+fn console_input_imports_exactly_the_console_functions() {
+    let lir = platform_case(
+        "console_ok",
+        &[
+            "i platform v0 consolemode 1 val ci1",
+            "i platform v0 readevent 0",
+        ],
+    );
+    let image = temp("console_ok.exe");
+    let out = build_pe(&lir, &image);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bytes = fs::read(&image).unwrap();
+    let (dll, names) = imports_of(&bytes);
+    assert_eq!(dll, "KERNEL32.dll");
+    let mut expected: Vec<&str> = PLATFORM_IMPORTS.to_vec();
+    expected.extend(["GetConsoleMode", "SetConsoleMode", "ReadConsoleInputW"]);
+    assert_eq!(names, expected);
+    let again = temp("console_ok-again.exe");
+    assert!(build_pe(&lir, &again).status.success());
+    assert_eq!(bytes, fs::read(&again).unwrap(), "not reproducible");
+
+    let cases: &[(&str, &[&str], u32)] = &[
+        ("consolemode_arity", &["i platform v0 consolemode 0"], 130),
+        (
+            "readevent_arity",
+            &["i platform v0 readevent 1 val ci0"],
+            130,
+        ),
+        (
+            "consolemode_text",
+            &[
+                "i use v1 ct1:120",
+                "i platform v0 consolemode 1 val v1",
+                "i drop v1 -",
+            ],
+            131,
+        ),
+        ("readevent_into_unit", &["i platform v2 readevent 0"], 132),
+        (
+            "consolemode_into_text",
+            &["i platform v1 consolemode 1 val ci0"],
+            132,
+        ),
+    ];
+    for (name, body, code) in cases {
+        let file = platform_case(name, body);
+        let rejected = temp(&format!("{name}.exe"));
+        let out = build_pe(&file, &rejected);
+        assert_eq!(out.status.code(), Some(3), "{name}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(&format!("rechazado (código {code})")),
+            "{name}: {stderr}"
+        );
+        assert!(!rejected.exists(), "{name}: image written");
+    }
+
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        let dir = fresh_dir("console-run");
+        let program = dir.join("prog.exe");
+        fs::copy(&image, &program).unwrap();
+        let status = Command::new(&program)
+            .stdin(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(0));
+    }
+}
+
 /// Images without platform calls keep exactly the base import set: the
 /// import table grows only with what the code calls.
 #[test]

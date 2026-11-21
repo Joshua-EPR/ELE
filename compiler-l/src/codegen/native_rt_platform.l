@@ -78,6 +78,11 @@ flow pfPatchAll(code: edit X64Code, at: view List of[Int]) {
     each i among 0..at.length { x64PatchRelative(edit code, at[i], here) }
 }
 
+flow pfPatchHere(code: edit X64Code, at: Int) {
+    hold here = code.bytes.length
+    x64PatchRelative(edit code, at, here)
+}
+
 // MOV reg, <address of the read-write data page>, patched later.
 flow pfLoadData(code: edit X64Code, reg: Int, data_at: edit List of[Int]) {
     x64MovImm64(edit code, reg, 0)
@@ -918,9 +923,133 @@ flow pfEmitSameFile(code: edit X64Code, rt: view PfRuntime, path_z: Int) => Int 
     give entry
 }
 
+// The 64-bit word at [RBP + displacement] with its low 32 bits replaced:
+// (word & ~0xFFFFFFFF) + RAX. RAX must fit 32 bits. Clobbers R10 and R11.
+// Used to write one 32-bit termios field.
+flow pfStoreLow32(code: edit X64Code, displacement: Int) {
+    x64LoadMem64(edit code, 11, 5, displacement)
+    x64MovImm64(edit code, 10, -4294967296)
+    x64AndReg(edit code, 11, 10)
+    x64AddReg(edit code, 11, 0)
+    x64StoreMem64(edit code, 5, displacement, 11)
+}
+
+// consolemode(RDI = request) -> RAX, the contract of win64_rt_platform's
+// wpfEmitConsoleMode on the terminal of file descriptor 0. The opaque state
+// is c_lflag + c_iflag * 2^32 of the kernel termios (TCGETS). Raw input
+// clears ISIG, ICANON, ECHO and IEXTEN in c_lflag and ICRNL and IXON in
+// c_iflag (so Ctrl+C, Ctrl+S and Ctrl+Q arrive as bytes), with VMIN 1 and
+// VTIME 0: read blocks until one byte. Restoring writes both flag words
+// back. -1 not a terminal (TCGETS fails), -2 TCSETS fails, -3 a request
+// below -2. Slots: 0 request, 1 scratch, 2..6 struct termios (36 bytes,
+// 40 reserved) from RBP-56, 7 previous state.
+flow pfEmitConsoleMode(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 8)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold invalid = pfIf(edit code, 1, -2, 6)
+    x64MovImm64(edit code, 7, 0)
+    x64MovImm64(edit code, 6, 21505)            // TCGETS
+    x64LeaMem(edit code, 2, 5, -56)
+    x64MovImm64(edit code, 0, 16)               // sys_ioctl
+    x64Syscall(edit code)
+    x64TestRax(edit code)
+    hold no_terminal = x64ConditionalPlaceholder(edit code, false)
+    x64LoadMem32(edit code, 0, 5, -56)          // c_iflag
+    x64MovImm64(edit code, 10, 4294967296)
+    x64MulReg(edit code, 0, 10)
+    x64LoadMem32(edit code, 1, 5, -44)          // c_lflag
+    x64AddReg(edit code, 0, 1)
+    x64StoreSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 1, 0)
+    hold query_only = pfIf(edit code, 1, -1, 4)
+    hold restore = pfIf(edit code, 1, 0, 9)
+    // Raw.
+    x64LoadMem64(edit code, 0, 5, -56)
+    x64MovImm64(edit code, 10, -1281)           // ~(ICRNL | IXON)
+    x64AndReg(edit code, 0, 10)
+    x64StoreMem64(edit code, 5, -56, 0)
+    x64LoadMem64(edit code, 0, 5, -44)
+    x64MovImm64(edit code, 10, -32780)          // ~(ISIG | ICANON | ECHO | IEXTEN)
+    x64AndReg(edit code, 0, 10)
+    x64StoreMem64(edit code, 5, -44, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 5, -34, 0)          // c_cc[VTIME], offset 22
+    x64MovImm64(edit code, 0, 1)
+    x64StoreMem8(edit code, 5, -33, 0)          // c_cc[VMIN], offset 23
+    hold apply = x64JumpPlaceholder(edit code)
+    // Restore: RAX = c_iflag, RDX = c_lflag of the request.
+    pfPatchHere(edit code, restore)
+    x64LoadSlot(edit code, 0, 0)
+    x64MovImm64(edit code, 2, 0)
+    x64MovImm64(edit code, 10, 4294967296)
+    x64DivUnsignedReg(edit code, 10)
+    x64StoreSlot(edit code, 1, 2)
+    pfStoreLow32(edit code, -56)
+    x64LoadSlot(edit code, 0, 1)
+    pfStoreLow32(edit code, -44)
+    pfPatchHere(edit code, apply)
+    x64MovImm64(edit code, 7, 0)
+    x64MovImm64(edit code, 6, 21506)            // TCSETS
+    x64LeaMem(edit code, 2, 5, -56)
+    x64MovImm64(edit code, 0, 16)
+    x64Syscall(edit code)
+    x64TestRax(edit code)
+    hold rejected = x64ConditionalPlaceholder(edit code, false)
+    pfPatchHere(edit code, query_only)
+    x64LoadSlot(edit code, 0, 7)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, rejected)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, no_terminal)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, invalid)
+    x64MovImm64(edit code, 0, -3)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// readevent() -> RAX: one byte of file descriptor 0 as kind 4 (bits 0..7,
+// kind 4 in bits 56..59; escape sequences and UTF-8 are decoded by
+// std/io/console.l), -2 at end of input, -1 on a read error. EINTR retries.
+// Slot 0 holds the byte.
+flow pfEmitReadEvent(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 2)
+    hold top = code.bytes.length
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 0, 0)
+    x64MovImm64(edit code, 7, 0)
+    x64LeaMem(edit code, 6, 5, -8)
+    x64MovImm64(edit code, 2, 1)
+    x64MovImm64(edit code, 0, 0)                // sys_read
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold got = pfIf(edit code, 1, 1, 4)
+    hold eof = pfIf(edit code, 1, 0, 4)
+    hold interrupted = pfIf(edit code, 1, -4, 4)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, interrupted)
+    pfJumpTo(edit code, top)
+    pfPatchHere(edit code, eof)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, got)
+    x64LoadMem8(edit code, 0, 5, -8)
+    x64MovImm64(edit code, 10, 288230376151711744)
+    x64AddReg(edit code, 0, 10)
+    x64FrameEnd(edit code)
+    give entry
+}
+
 // Emits the platform runtime; returns the entry of each operation, indexed
-// by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes().
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int]) => List of[Int] {
+// by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), then
+// samefile, consolemode and readevent (codes 5, 6, 7).
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -931,5 +1060,13 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
     at@push(pfEmitPrintError(edit code, write_fd))
     at@push(pfEmitWriteBytes(edit code, rt, path_z, write_fd))
     at@push(pfEmitSameFile(edit code, rt, path_z))
+    // Console input routines only for programs that call them (-1 otherwise).
+    when console {
+        at@push(pfEmitConsoleMode(edit code))
+        at@push(pfEmitReadEvent(edit code))
+    } otherwise {
+        at@push(-1)
+        at@push(-1)
+    }
     give at
 }
