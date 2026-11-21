@@ -103,7 +103,126 @@ public static class EleConsoleHarness {
     static extern bool WriteConsoleInputW(IntPtr h, InputRecord[] records, uint count, out uint written);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleMode(IntPtr h, out uint mode);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr sourceHandle,
+        IntPtr targetProcess, out IntPtr targetHandle, uint desiredAccess,
+        bool inheritHandle, uint options);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
+    static extern bool CreateProcess(string appName, string commandLine,
+        IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+        uint creationFlags, IntPtr environment, string currentDirectory,
+        ref StartupInfo startupInfo, out ProcessInformation processInfo);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct StartupInfo {
+        public uint cb;
+        public string reserved;
+        public string desktop;
+        public string title;
+        public uint x; public uint y; public uint xSize; public uint ySize;
+        public uint xCountChars; public uint yCountChars; public uint fillAttribute;
+        public uint flags; public ushort showWindow; public ushort cbReserved2;
+        public IntPtr reserved2;
+        public IntPtr standardInput;
+        public IntPtr standardOutput;
+        public IntPtr standardError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ProcessInformation {
+        public IntPtr process;
+        public IntPtr thread;
+        public uint processId;
+        public uint threadId;
+    }
+
+    // Explicit STARTF_USESTDHANDLES is needed when a runner (such as Actions)
+    // has launched PowerShell with stdin redirected. Changing the parent's
+    // GetStdHandle slot alone does not guarantee that Process.Start inherits it.
+    // The child's stdout and stderr go to logPath (not the hidden console) so
+    // the diagnostic it prints for an unexpected event reaches the CI log.
+    static string RunConsoleChild(string exe, IntPtr input, string logPath) {
+        IntPtr proc = GetCurrentProcess();
+        IntPtr childInput;
+        if (!DuplicateHandle(proc, input, proc, out childInput, 0, true, 2))
+            return "DuplicateHandle input failed " + Marshal.GetLastWin32Error();
+        IntPtr output = CreateFileW(logPath, 0x40000000, 3, IntPtr.Zero, 2, 0, IntPtr.Zero);
+        if (output == new IntPtr(-1)) {
+            CloseHandle(childInput);
+            return "child log failed " + Marshal.GetLastWin32Error();
+        }
+        IntPtr childOutput;
+        if (!DuplicateHandle(proc, output, proc, out childOutput, 0, true, 2)) {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(output);
+            CloseHandle(childInput);
+            return "DuplicateHandle output failed " + error;
+        }
+        CloseHandle(output);
+        try {
+            StartupInfo si = new StartupInfo();
+            si.cb = (uint)Marshal.SizeOf(typeof(StartupInfo));
+            si.flags = 0x00000100; // STARTF_USESTDHANDLES
+            si.standardInput = childInput;
+            si.standardOutput = childOutput;
+            si.standardError = childOutput;
+            ProcessInformation pi;
+            if (!CreateProcess(exe, "\"" + exe + "\"", IntPtr.Zero, IntPtr.Zero,
+                    true, 0, IntPtr.Zero, null, ref si, out pi))
+                return "CreateProcessW failed " + Marshal.GetLastWin32Error();
+            try {
+                uint wait = WaitForSingleObject(pi.process, 20000);
+                if (wait != 0) {
+                    TerminateProcess(pi.process, 124);
+                    return "child wait failed or timed out " + wait;
+                }
+                uint status;
+                if (!GetExitCodeProcess(pi.process, out status))
+                    return "GetExitCodeProcess failed " + Marshal.GetLastWin32Error();
+                return "exit=" + status;
+            } finally {
+                CloseHandle(pi.thread);
+                CloseHandle(pi.process);
+            }
+        } finally {
+            CloseHandle(childOutput);
+            CloseHandle(childInput);
+        }
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool PeekConsoleInputW(IntPtr h, [Out] InputRecord[] records, uint count, out uint read);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetNumberOfConsoleInputEvents(IntPtr h, out uint count);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool FlushConsoleInputBuffer(IntPtr h);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetConsoleMode(IntPtr h, uint mode);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+
+    // Describes the records queued in the console input buffer, e.g.
+    // "2 [4 1]" (two records: a buffer-size event and a key event).
+    static string Pending(IntPtr input) {
+        uint count;
+        if (!GetNumberOfConsoleInputEvents(input, out count)) return "unknown";
+        if (count == 0) return "0";
+        InputRecord[] queued = new InputRecord[count];
+        uint read;
+        if (!PeekConsoleInputW(input, queued, count, out read)) return count + " [peek failed]";
+        string kinds = "";
+        for (int i = 0; i < read; i++) {
+            InputRecord r = queued[i];
+            kinds += (i == 0 ? "" : " ") + r.EventType;
+            // Key records in detail: (virtual key, UTF-16 unit, down, control state).
+            if (r.EventType == 1)
+                kinds += "(" + r.VirtualKey + "," + r.Unicode + "," + r.KeyDown + "," + r.KeyControl + ")";
+        }
+        return count + " [" + kinds + "]";
+    }
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
 
     static InputRecord Key(ushort vk, ushort unit, uint control, bool down, ushort repeat) {
@@ -114,7 +233,9 @@ public static class EleConsoleHarness {
     }
 
     // Returns "exit=<code> before=<mode> after=<mode>" or an error text.
-    public static string Run(string exe) {
+    public static string Diagnostics = "";
+
+    public static string Run(string exe, string logPath) {
         FreeConsole();
         if (!AllocConsole()) return "AllocConsole failed " + Marshal.GetLastWin32Error();
         ShowWindow(GetConsoleWindow(), 0);
@@ -122,6 +243,26 @@ public static class EleConsoleHarness {
         if (input == new IntPtr(-1)) return "CONIN$ failed " + Marshal.GetLastWin32Error();
         uint before;
         if (!GetConsoleMode(input, out before)) return "GetConsoleMode failed";
+        // A new console can already hold records the test did not write (on
+        // a headless runner, focus or buffer-size events from creating and
+        // hiding the window). They are logged and discarded so the program
+        // reads exactly the records below.
+        // Those events can arrive asynchronously, so the buffer is drained
+        // until it stays empty for three consecutive 100 ms polls.
+        Diagnostics = "queued before the test:";
+        int quiet = 0;
+        for (int poll = 0; poll < 50 && quiet < 3; poll++) {
+            System.Threading.Thread.Sleep(100);
+            uint pending;
+            if (!GetNumberOfConsoleInputEvents(input, out pending))
+                return "GetNumberOfConsoleInputEvents failed " + Marshal.GetLastWin32Error();
+            if (pending == 0) { quiet++; continue; }
+            quiet = 0;
+            Diagnostics += " " + Pending(input);
+            if (!FlushConsoleInputBuffer(input))
+                return "FlushConsoleInputBuffer failed " + Marshal.GetLastWin32Error();
+        }
+        if (quiet < 3) return "console input buffer never settled: " + Diagnostics;
         InputRecord resize = new InputRecord(); resize.EventType = 4; resize.X = 100; resize.Y = 30;
         InputRecord click = new InputRecord(); click.EventType = 2; click.X = 5; click.Y = 7; click.Buttons = 1;
         InputRecord[] records = new InputRecord[] {
@@ -139,23 +280,48 @@ public static class EleConsoleHarness {
             Key(116, 0, 0, true, 3),
             Key(27, 27, 0, true, 1),
         };
+        // In cooked mode some console hosts (Windows Server 2025 on Actions)
+        // act on written records: Ctrl+S suspends the console and the next
+        // key resumes it, so both are dropped and the write reports fewer
+        // records (turning off processed input alone was not enough). Write
+        // in the same raw mode the program sets with consoleInputMode(-2):
+        // clear PROCESSED, LINE, ECHO and QUICK_EDIT (0xDF) and set WINDOW,
+        // MOUSE and EXTENDED_FLAGS (0x98). The original mode is restored
+        // before the program starts so it still saves and restores `before`.
+        if (!SetConsoleMode(input, (before & ~0xDFu) | 0x98u))
+            return "SetConsoleMode (write) failed " + Marshal.GetLastWin32Error();
         uint written;
-        if (!WriteConsoleInputW(input, records, (uint)records.Length, out written) || written != records.Length)
-            return "WriteConsoleInputW failed " + Marshal.GetLastWin32Error();
-        ProcessStartInfo psi = new ProcessStartInfo(exe);
-        psi.UseShellExecute = false;
-        Process p = Process.Start(psi);
-        if (!p.WaitForExit(20000)) { p.Kill(); return "timeout"; }
+        bool ok = WriteConsoleInputW(input, records, (uint)records.Length, out written);
+        int error = ok ? 0 : Marshal.GetLastWin32Error();
+        if (!SetConsoleMode(input, before))
+            return "SetConsoleMode (restore) failed " + Marshal.GetLastWin32Error();
+        // What the console actually queued must be exactly what was written:
+        // a dropped record is a harness failure, never retried (a retry would
+        // duplicate the tail).
+        string queued = Pending(input);
+        Diagnostics += "; queued for the program: " + queued;
+        if (!ok || written != records.Length)
+            return "WriteConsoleInputW wrote " + written + " of " + records.Length +
+                " ok=" + ok + " error=" + error;
+        if (!queued.StartsWith(records.Length + " ["))
+            return "console queued " + queued + " instead of " + records.Length + " records";
+        string result = RunConsoleChild(exe, input, logPath);
+        Diagnostics += "; left unread: " + Pending(input);
         uint after;
         GetConsoleMode(input, out after);
         CloseHandle(input);
         FreeConsole();
-        return "exit=" + p.ExitCode + " before=" + before + " after=" + after;
+        return result + " before=" + before + " after=" + after;
     }
 }
 '@
-$result = [EleConsoleHarness]::Run($interactive)
+$childLog = Join-Path $OutDir 'console_interactive_test.log'
+$result = [EleConsoleHarness]::Run($interactive, $childLog)
 Write-Host "console run: $result"
+Write-Host "console buffer: $([EleConsoleHarness]::Diagnostics)"
+if (Test-Path $childLog) {
+    Get-Content $childLog | ForEach-Object { Write-Host "  child: $_" }
+}
 if ($result -match '^exit=(\d+) before=(\d+) after=(\d+)$') {
     Check 'interactive: ReadConsoleInputW events decoded' ([int]$Matches[1]) 0
     Check 'interactive: console input mode restored' ([int]([long]$Matches[2] -eq [long]$Matches[3])) 1
