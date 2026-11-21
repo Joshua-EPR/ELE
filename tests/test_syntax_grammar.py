@@ -350,7 +350,7 @@ class TestELEGraphiteTheme(unittest.TestCase):
 class TestELEBrandedIcons(unittest.TestCase):
     def test_language_and_extension_png_icons(self):
         pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
-        self.assertEqual(pkg["version"], "0.1.3")
+        self.assertEqual(pkg["version"], "0.1.4")
         logo = (EDITORS_DIR / pkg["icon"]).resolve()
         self.assertTrue(logo.is_relative_to(EDITORS_DIR.resolve()))
         self.assertTrue(logo.is_file())
