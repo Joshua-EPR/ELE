@@ -103,6 +103,8 @@ public static class EleConsoleHarness {
     static extern bool WriteConsoleInputW(IntPtr h, InputRecord[] records, uint count, out uint written);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleMode(IntPtr h, out uint mode);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetStdHandle(int nStdHandle, IntPtr handle);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
 
@@ -159,15 +161,31 @@ public static class EleConsoleHarness {
         if (offset != records.Length)
             return "WriteConsoleInputW incomplete written=" + offset +
                 " expected=" + records.Length;
-        ProcessStartInfo psi = new ProcessStartInfo(exe);
-        psi.UseShellExecute = false;
-        Process p = Process.Start(psi);
-        if (!p.WaitForExit(20000)) { p.Kill(); return "timeout"; }
+        // GitHub Actions launches PowerShell with redirected stdin. AllocConsole
+        // does not guarantee GetStdHandle(STD_INPUT_HANDLE) points to CONIN$:
+        // the child's default startup handles can still inherit the runner's
+        // redirected pipe instead of our newly allocated console.
+        // Temporarily publish the real console input handle for Process.Start.
+        IntPtr previousInput = GetStdHandle(-10);
+        if (!SetStdHandle(-10, input))
+            return "SetStdHandle(STD_INPUT_HANDLE) failed " + Marshal.GetLastWin32Error();
+        int exitCode;
+        try {
+            ProcessStartInfo psi = new ProcessStartInfo(exe);
+            psi.UseShellExecute = false;
+            using (Process p = Process.Start(psi)) {
+                if (p == null) return "Process.Start returned null";
+                if (!p.WaitForExit(20000)) { p.Kill(); return "timeout"; }
+                exitCode = p.ExitCode;
+            }
+        } finally {
+            SetStdHandle(-10, previousInput);
+        }
         uint after;
         GetConsoleMode(input, out after);
         CloseHandle(input);
         FreeConsole();
-        return "exit=" + p.ExitCode + " before=" + before + " after=" + after;
+        return "exit=" + exitCode + " before=" + before + " after=" + after;
     }
 }
 '@
