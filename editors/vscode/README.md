@@ -2,7 +2,7 @@
 
 ![ELE language emblem](images/ele-logo.png)
 
-The ELE emblem is the extension icon; the matching document icon identifies `.l` source files.
+The ELE emblem identifies the extension; a bold white E on teal identifies `.l` source files in the Explorer.
 
 **Version 0.1.6:** The `.l` icon is now a large **white ELE E on a solid teal rounded square**, without a document border, tiny lettering, gradients or glow. It was previewed at the actual **16px Explorer size**. The optional **ELE File Icons** theme renders a sharp SVG, and the ELE language fallback uses a matching PNG. The extension logo and Graphite Dark syntax colors remain unchanged.
 
