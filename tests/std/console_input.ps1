@@ -280,13 +280,15 @@ public static class EleConsoleHarness {
             Key(116, 0, 0, true, 3),
             Key(27, 27, 0, true, 1),
         };
-        // With ENABLE_PROCESSED_INPUT set, some console hosts (Windows Server
-        // 2025 on Actions) act on written records: Ctrl+S pauses output and
-        // the next key resumes it, so both are dropped and the write reports
-        // fewer records. Write as a user would type while the program is in
-        // raw mode (processed input off), then restore the original mode
+        // In cooked mode some console hosts (Windows Server 2025 on Actions)
+        // act on written records: Ctrl+S suspends the console and the next
+        // key resumes it, so both are dropped and the write reports fewer
+        // records (turning off processed input alone was not enough). Write
+        // in the same raw mode the program sets with consoleInputMode(-2):
+        // clear PROCESSED, LINE, ECHO and QUICK_EDIT (0xDF) and set WINDOW,
+        // MOUSE and EXTENDED_FLAGS (0x98). The original mode is restored
         // before the program starts so it still saves and restores `before`.
-        if (!SetConsoleMode(input, before & ~1u))
+        if (!SetConsoleMode(input, (before & ~0xDFu) | 0x98u))
             return "SetConsoleMode (write) failed " + Marshal.GetLastWin32Error();
         uint written;
         bool ok = WriteConsoleInputW(input, records, (uint)records.Length, out written);
