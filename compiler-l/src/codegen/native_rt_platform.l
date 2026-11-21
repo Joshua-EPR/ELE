@@ -579,8 +579,9 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
     // Slots: 0 path Text address, 1 length, 2 dest path buffer, 3 its capacity,
     // 4 byte buffer, 5 its capacity, 6 fd, 7 status, 8 elements,
     // 9 tmp path buffer, 10 its capacity, 11 dest path length,
-    // 12-13 nonce bytes, 14 collision count.
-    x64FrameBegin(edit code, 15)
+    // 12-13 nonce bytes, 14 collision count. A 144-byte Linux stat buffer
+    // occupies [RBP - 272, RBP - 129], away from the nonce and slots.
+    x64FrameBegin(edit code, 34)
     x64StoreSlot(edit code, 0, 7)
     x64LoadMem64(edit code, 8, 6, 0)
     x64LoadMem64(edit code, 9, 6, 8)
@@ -732,6 +733,28 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
     hold created_at = code.bytes.length
     x64PatchRelative(edit code, created, created_at)
 
+    // Preserve the permission bits of an existing destination. The new
+    // temporary is initially 0644 (subject to umask); without fchmod a
+    // replacement silently widens an existing 0600 document to 0644.
+    // sys_stat follows the same path as the later rename destination.
+    change metadata_failed: List of[Int] = List[]
+    x64LoadSlot(edit code, 7, 2)
+    x64LeaMem(edit code, 6, 5, -272)
+    x64MovImm64(edit code, 0, 4) // sys_stat
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold absent_destination = pfIf(edit code, 1, -2, 4)
+    metadata_failed@push(pfIf(edit code, 1, 0, 6))
+    x64LoadMem32(edit code, 6, 5, -248) // st_mode at stat + 24
+    x64MovImm64(edit code, 10, 4095) // permission and special bits
+    x64AndReg(edit code, 6, 10)
+    x64LoadSlot(edit code, 7, 6)
+    x64MovImm64(edit code, 0, 91) // sys_fchmod
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    metadata_failed@push(pfIf(edit code, 1, 0, 6))
+    pfPatchHere(edit code, absent_destination)
+
     // Write full buffer
     x64LoadSlot(edit code, 7, 6)
     x64LoadSlot(edit code, 6, 4)
@@ -771,6 +794,7 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
 
     // Cleanup on failure after open:
     hold write_failed_at = code.bytes.length
+    pfPatchAll(edit code, view metadata_failed)
     x64PatchRelative(edit code, write_failed, write_failed_at)
     hold sync_failed_at = code.bytes.length
     x64PatchRelative(edit code, sync_failed, sync_failed_at)
