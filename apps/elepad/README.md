@@ -14,6 +14,8 @@ ELEPad es un editor nativo en desarrollo. El código de aplicación y las prueba
 
 El gap buffer conserva capacidad libre junto al cursor. La inserción local no copia el documento completo por pulsación. Mover el cursor sobre una región extensa y serializar al guardar sí requieren recorrer bytes. Los límites UTF-8 evitan editar en mitad de un carácter codificado; no se calculan graphemes ni ancho visual. Se conservan los bytes CRLF o LF tal como se cargaron.
 
+El núcleo también borra hacia atrás un escalar UTF-8 completo y trata CRLF como un solo salto de línea al navegar o borrar. `lineEnd` sitúa el cursor antes del CR de una línea CRLF. Estas operaciones están cubiertas por `editor_test.l`; el programa principal continúa siendo la utilidad M1, sin bucle interactivo ni guardado atómico.
+
 ## Compilar y verificar en PowerShell
 
 Desde la raíz del proyecto:
@@ -25,7 +27,7 @@ Desde la raíz del proyecto:
 .\apps\elepad\elepad.exe .\archivo.l .\copia-nueva.l '// cambio'
 ```
 
-`elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. `writeBytes` no ofrece publicación atómica ni recuperación de una salida parcialmente escrita; por eso la utilidad exige un nombre de salida nuevo.
+`elepad.exe` es la utilidad de ciclo de archivos de M1: abre un archivo UTF-8 existente, añade texto al final, escribe una ruta nueva y verifica la reapertura. Rechaza una salida existente. Aún no es un editor interactivo. El `writeBytes` nativo actual escribe a un temporal en el directorio de destino, sincroniza y publica mediante renombrado/reemplazo; todavía no conserva de forma completa permisos y atributos ni ofrece una API de archivos por bloques. La utilidad exige una salida nueva para evitar sobrescrituras accidentales.
 
 `readKey` sigue siendo una API inexistente: `probes/keyboard.l` permanece como prueba negativa (L0001). En la rama P0-A, `consoleInputMode`, `readConsoleEvent` y `std/io/console.l` proporcionan entrada general. Para que una aplicación fuera de `std/` importe la biblioteca sin copiarla, el compilador acepta ahora `--lib`:
 

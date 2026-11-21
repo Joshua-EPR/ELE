@@ -86,11 +86,28 @@ expose flow insertText(b: edit Buffer, offset: Int, source: view Text) => Bool {
 
 expose flow deleteForward(b: edit Buffer, offset: Int) => Bool {
     when offset >= length(view b) || !boundary(view b, offset) { give false }
+    hold crlf = byteAt(view b, offset) == 13 && offset + 1 < length(view b) && byteAt(view b, offset + 1) == 10
     moveGap(edit b, offset)
-    b.gap_end += 1
+    when crlf { b.gap_end += 2 }
+    otherwise { b.gap_end += 1 }
     during offset < length(view b) && !boundary(view b, offset) {
         b.gap_end += 1
     }
+    b.dirty = true
+    give true
+}
+
+// Remove the complete UTF-8 scalar immediately before a byte boundary.
+// Return false at the start of the document or for an invalid offset.
+expose flow deleteBackward(b: edit Buffer, offset: Int) => Bool {
+    when offset <= 0 || !boundary(view b, offset) { give false }
+    change start = offset - 1
+    when offset >= 2 && byteAt(view b, offset - 1) == 10 && byteAt(view b, offset - 2) == 13 {
+        start -= 1
+    }
+    during start > 0 && !boundary(view b, start) { start -= 1 }
+    moveGap(edit b, offset)
+    b.gap_start = start
     b.dirty = true
     give true
 }
