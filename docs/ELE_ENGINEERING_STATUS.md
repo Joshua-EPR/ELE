@@ -82,8 +82,27 @@ This file is meant to let a new session resume without repeating investigations.
   - user32/gdi32 are loaded at run time, and the import table stays KERNEL32-only.
   - Evidence: `tests/native_backend/win64_window.ps1` passes locally, and a wrong-colour mutation is detected. A Windows CI step was added; CI hasn't run.
   - Details and limits: `docs/win32-window-probe.md`.
+- Branch `feat/p0d-window-api-20261121` (`df2d811`, stacked on `feat/linear-resources-20261121`) implements step 2 of the design: the **linear `Window` language API**.
+  - Builtins: `windowOpen/Status/Next/Fill/Text/Present/Send/Pixel/Close`.
+  - Library: `std/ui/window.l`, with `WindowEvent` and the console's key codes.
+  - Runtime: `compiler-l/src/codegen/win64_window.l`.
+    - A per-window state block holds a DIB back buffer, a font, a resolved user32/gdi32 table and a 256-event ring.
+    - The WndProc runs through the 4-word adapter and only enqueues events or BitBlts the back buffer.
+    - WM_CLOSE is a request event, not a destroy.
+  - Linux reports -7 (no graphical session).
+  - Evidence (local):
+    - `crates/l/tests/window_l.rs` 3/3:
+      - a real window with pixel read-back and synthetic key/char/surrogate/mouse/wheel/close input through the real message loop;
+      - the Linux -7 report under WSL;
+      - six rejected programs.
+    - `win64_window_resources.ps1`: 200 cycles end at 12 GDI objects; a DeleteObject-skipping mutant reaches 212 and fails.
+    - Runtime mutations (fill tail, WM_CHAR kind) are caught with their exit codes.
+  - Full suite: 778 passed, 3 failed.
+    - The new module needed a self-coverage baseline line, now regenerated (`codegen/win64_window.l lir`).
+    - The other two are the known ELF whitelist failure and the intermittent error 32.
+  - Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI).
 - **NO INICIADO**:
-  - source-level FFI and window API: extern declarations, ELE flows as callbacks, an HWND/GDI ownership model;
+  - source-level FFI: extern declarations and ELE flows as callbacks;
   - callbacks with stack-passed parameters, floats or structs;
   - reentrancy;
   - real user input, resize and focus;
@@ -108,11 +127,20 @@ This file is meant to let a new session resume without repeating investigations.
 ## 4. Recommended next increments (dependency-ordered)
 
 1. Reconcile the local checkout: resolve or abort the unfinished merge in the user's working copy (user decision; do not force).
-2. Open Draft PRs for `feat/elepad-terminal-history-20261121`, `feat/p0b-file-streams-20261121` and `fix/elf-syscall-whitelist-20261121`, and let CI validate them (no `gh` here). The whitelist fix is independent and the smallest; merge it first.
+2. Open Draft PRs and let CI validate them (no `gh` here). Merge order:
+   1. `fix/elf-syscall-whitelist-20261121` (independent, smallest);
+   2. `feat/elepad-terminal-history-20261121` (independent);
+   3. `feat/p0b-file-streams-20261121`, then `feat/linear-resources-20261121`, then `feat/p0d-window-api-20261121` (stacked in that order);
+   4. `feat/p0c-callbacks-20261121`, then `feat/p0d-window-20261121` (probes and design doc; stacked).
 3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
-5. P0-C/P0-D next: design source-level callbacks and windows. An ELE flow with a fixed Win64 signature would be emitted through the adapter, with static lifetime only, plus a linear `Window` resource modelled on the P0-B `File`. Both are compiler changes (sema, LIR and backend).
-6. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
+5. Design step 3: the graphical ELEPad on `Window`.
+   - Reuse `editor_core.l` unchanged.
+   - Add a `gui_render.l` (rows through `windowText`).
+   - Add a `gui_dispatch.l` that shares a key-to-command table with `terminal_dispatch.l`.
+   - It needs font metrics (`windowCell`) first; the next window builtin to add.
+6. Design steps 4–6: a PE writable data section, `system flow`/`foreign flow`, and the X11 backend.
+7. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
 ## 5. Verification log
 
