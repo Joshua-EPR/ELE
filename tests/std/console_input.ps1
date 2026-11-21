@@ -146,15 +146,17 @@ public static class EleConsoleHarness {
     // Explicit STARTF_USESTDHANDLES is needed when a runner (such as Actions)
     // has launched PowerShell with stdin redirected. Changing the parent's
     // GetStdHandle slot alone does not guarantee that Process.Start inherits it.
-    static string RunConsoleChild(string exe, IntPtr input) {
+    // The child's stdout and stderr go to logPath (not the hidden console) so
+    // the diagnostic it prints for an unexpected event reaches the CI log.
+    static string RunConsoleChild(string exe, IntPtr input, string logPath) {
         IntPtr proc = GetCurrentProcess();
         IntPtr childInput;
         if (!DuplicateHandle(proc, input, proc, out childInput, 0, true, 2))
             return "DuplicateHandle input failed " + Marshal.GetLastWin32Error();
-        IntPtr output = CreateFileW("CONOUT$", 0x40000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+        IntPtr output = CreateFileW(logPath, 0x40000000, 3, IntPtr.Zero, 2, 0, IntPtr.Zero);
         if (output == new IntPtr(-1)) {
             CloseHandle(childInput);
-            return "CONOUT$ failed " + Marshal.GetLastWin32Error();
+            return "child log failed " + Marshal.GetLastWin32Error();
         }
         IntPtr childOutput;
         if (!DuplicateHandle(proc, output, proc, out childOutput, 0, true, 2)) {
@@ -194,7 +196,26 @@ public static class EleConsoleHarness {
             CloseHandle(childInput);
         }
     }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool PeekConsoleInputW(IntPtr h, [Out] InputRecord[] records, uint count, out uint read);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetNumberOfConsoleInputEvents(IntPtr h, out uint count);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool FlushConsoleInputBuffer(IntPtr h);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+
+    // Describes the records queued in the console input buffer, e.g.
+    // "2 [4 1]" (two records: a buffer-size event and a key event).
+    static string Pending(IntPtr input) {
+        uint count;
+        if (!GetNumberOfConsoleInputEvents(input, out count)) return "unknown";
+        if (count == 0) return "0";
+        InputRecord[] queued = new InputRecord[count];
+        uint read;
+        if (!PeekConsoleInputW(input, queued, count, out read)) return count + " [peek failed]";
+        string kinds = "";
+        for (int i = 0; i < read; i++) kinds += (i == 0 ? "" : " ") + queued[i].EventType;
+        return count + " [" + kinds + "]";
+    }
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
 
     static InputRecord Key(ushort vk, ushort unit, uint control, bool down, ushort repeat) {
@@ -205,7 +226,9 @@ public static class EleConsoleHarness {
     }
 
     // Returns "exit=<code> before=<mode> after=<mode>" or an error text.
-    public static string Run(string exe) {
+    public static string Diagnostics = "";
+
+    public static string Run(string exe, string logPath) {
         FreeConsole();
         if (!AllocConsole()) return "AllocConsole failed " + Marshal.GetLastWin32Error();
         ShowWindow(GetConsoleWindow(), 0);
@@ -213,6 +236,26 @@ public static class EleConsoleHarness {
         if (input == new IntPtr(-1)) return "CONIN$ failed " + Marshal.GetLastWin32Error();
         uint before;
         if (!GetConsoleMode(input, out before)) return "GetConsoleMode failed";
+        // A new console can already hold records the test did not write (on
+        // a headless runner, focus or buffer-size events from creating and
+        // hiding the window). They are logged and discarded so the program
+        // reads exactly the records below.
+        // Those events can arrive asynchronously, so the buffer is drained
+        // until it stays empty for three consecutive 100 ms polls.
+        Diagnostics = "queued before the test:";
+        int quiet = 0;
+        for (int poll = 0; poll < 50 && quiet < 3; poll++) {
+            System.Threading.Thread.Sleep(100);
+            uint pending;
+            if (!GetNumberOfConsoleInputEvents(input, out pending))
+                return "GetNumberOfConsoleInputEvents failed " + Marshal.GetLastWin32Error();
+            if (pending == 0) { quiet++; continue; }
+            quiet = 0;
+            Diagnostics += " " + Pending(input);
+            if (!FlushConsoleInputBuffer(input))
+                return "FlushConsoleInputBuffer failed " + Marshal.GetLastWin32Error();
+        }
+        if (quiet < 3) return "console input buffer never settled: " + Diagnostics;
         InputRecord resize = new InputRecord(); resize.EventType = 4; resize.X = 100; resize.Y = 30;
         InputRecord click = new InputRecord(); click.EventType = 2; click.X = 5; click.Y = 7; click.Buttons = 1;
         InputRecord[] records = new InputRecord[] {
@@ -250,7 +293,8 @@ public static class EleConsoleHarness {
         if (offset != records.Length)
             return "WriteConsoleInputW incomplete written=" + offset +
                 " expected=" + records.Length;
-        string result = RunConsoleChild(exe, input);
+        string result = RunConsoleChild(exe, input, logPath);
+        Diagnostics += "; left unread: " + Pending(input);
         uint after;
         GetConsoleMode(input, out after);
         CloseHandle(input);
@@ -259,8 +303,13 @@ public static class EleConsoleHarness {
     }
 }
 '@
-$result = [EleConsoleHarness]::Run($interactive)
+$childLog = Join-Path $OutDir 'console_interactive_test.log'
+$result = [EleConsoleHarness]::Run($interactive, $childLog)
 Write-Host "console run: $result"
+Write-Host "console buffer: $([EleConsoleHarness]::Diagnostics)"
+if (Test-Path $childLog) {
+    Get-Content $childLog | ForEach-Object { Write-Host "  child: $_" }
+}
 if ($result -match '^exit=(\d+) before=(\d+) after=(\d+)$') {
     Check 'interactive: ReadConsoleInputW events decoded' ([int]$Matches[1]) 0
     Check 'interactive: console input mode restored' ([int]([long]$Matches[2] -eq [long]$Matches[3])) 1
