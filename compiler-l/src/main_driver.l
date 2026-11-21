@@ -324,6 +324,7 @@ flow printHelp() {
     print("Opciones de build:")
     print("  --output, -o <ruta>       Ruta del ejecutable de salida")
     print("  --target <elf|pe>         Formato de salida (elf = Linux ELF64, pe = Windows PE32+)")
+    print("  --lib <raiz>              Busca imports ausentes bajo esta raiz (ej.: --lib . para std/)")
     print("  --pe64                    Equivalente a --target pe")
     print("  --elf64                   Equivalente a --target elf")
     print("")
@@ -398,8 +399,8 @@ flow assembleLir(headers: view List of[Text], functions: view List of[Text]) => 
     give "{s3}{s2}{s1}{s0}end\n"
 }
 
-flow compileProgram(source_path: Text, output_path: Text, target: Int) => Int {
-    choose loadProgram(view source_path) {
+flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root: Text) => Int {
+    choose loadProgram(view source_path, view lib_root) {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
             each m_idx among 0..prog.module_paths.length {
@@ -529,6 +530,7 @@ flow main() => Int {
 
     change source_file = ""
     change output_file = ""
+    change library_root = ""
     change target = -1
     change skip_next = false
 
@@ -537,6 +539,7 @@ flow main() => Int {
     hold opt_target = "--target"
     hold opt_output = "--output"
     hold opt_o = "-o"
+    hold opt_lib = "--lib"
     hold val_pe = "pe"
     hold val_pe64 = "pe64"
     hold val_elf = "elf"
@@ -580,13 +583,31 @@ flow main() => Int {
                         }
                         skip_next = true
                     } otherwise {
-                        when textMatches(view cur_arg, view opt_output) || textMatches(view cur_arg, view opt_o) {
+                        when textMatches(view cur_arg, view opt_output) || textMatches(view cur_arg, view opt_o) || textMatches(view cur_arg, view opt_lib) {
                             when i + 1 >= count {
-                                printError("error[CLI]: --output requiere una ruta de destino")
+                                printError("error[CLI]: --output o --lib requiere una ruta")
                                 give 2
                             }
                             choose processArg(i + 1) {
-                                Ok(v): { output_file = v }
+                                Ok(v): {
+                                    when textMatches(view cur_arg, view opt_lib) {
+                                        when v.byteLength == 0 {
+                                            printError("error[CLI]: --lib requiere una raiz no vacia")
+                                            give 2
+                                        }
+                                        when v@byteAt(0) == 45 {
+                                            printError("error[CLI]: --lib requiere una ruta valida, no otra opcion")
+                                            give 2
+                                        }
+                                        when library_root.byteLength > 0 {
+                                            printError("error[CLI]: --lib solo se puede indicar una vez")
+                                            give 2
+                                        }
+                                        library_root = v
+                                    } otherwise {
+                                        output_file = v
+                                    }
+                                }
                                 Err(code): { give 6 }
                             }
                             skip_next = true
@@ -658,5 +679,5 @@ flow main() => Int {
 
     // compileProgram verifies the loaded main source and every imported
     // module against the destination after readText establishes they exist.
-    give compileProgram(source_file, output_file, target)
+    give compileProgram(source_file, output_file, target, library_root)
 }
