@@ -22,3 +22,16 @@ test "$status" -eq 33
 printf 'ab\r\ncd' > "$work/expected"
 cmp "$work/expected" "$work/sample.l"
 printf 'PASS unsaved EOF leaves source unchanged\n'
+# Ctrl+A, Ctrl+X, Ctrl+Z, Ctrl+Y, Ctrl+Z, 'x', Ctrl+Z, Ctrl+F 'c' Enter,
+# Escape (ESC ESC), 'Z' replaces the found "c", Ctrl+S, Ctrl+Q.
+printf 'ab\r\ncd' > "$work/sample.l"
+printf '\001\030\032\031\032x\032\006c\r\033\033Z\023\021' | "$work/elepad-terminal" "$work/sample.l" > "$work/screen" 2> "$work/errors"
+printf 'ab\r\nZd' > "$work/expected"
+cmp "$work/expected" "$work/sample.l"
+printf 'PASS native ELEPad undo/redo, cut, find and replace-selection\n'
+# Typing then undoing back to the loaded text is clean: Ctrl+Q quits at once.
+printf 'ab\r\ncd' > "$work/sample.l"
+printf 'xy\032\021' | "$work/elepad-terminal" "$work/sample.l" > "$work/screen" 2> "$work/errors"
+printf 'ab\r\ncd' > "$work/expected"
+cmp "$work/expected" "$work/sample.l"
+printf 'PASS undo to the loaded state clears the unsaved marker\n'

@@ -24,10 +24,20 @@ This file is meant to let a new session resume without repeating investigations.
 
 ### 2.2 ELEPad terminal (P0 editor)
 - Present on `main`: `apps/elepad/src/{buffer,cursor,editor_core,editor_test,main,search,terminal,terminal_dispatch,terminal_dispatch_test,terminal_render}.l`.
-- Key handling (`apps/elepad/src/terminal_dispatch.l:10-13`): **only Ctrl+S (save) and Ctrl+Q (quit)** are bound. Every other Ctrl/Alt combination is ignored.
-- Not present on `main` (grep-verified): undo/redo, clipboard (copy/cut/paste), select-all, open dialog (Ctrl+O), find UI wiring (`search.l` exists but no Ctrl+F binding), horizontal scroll, status bar change indicator.
-- Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** for basic editing and save; **NO INICIADO** for the rest of §7.1 of the brief.
-- Windows VT: not audited in this pass.
+- On `main` (`f166cad`), key handling binds only Ctrl+S (save) and Ctrl+Q (quit).
+- Branch `feat/elepad-terminal-history-20261121` adds, in the shared `editor_core.l`: an operation-log undo/redo with grouping and a saved-state marker, keyboard selection (Shift+movement, Ctrl+A, Escape), an in-process clipboard (Ctrl+C/X/V), and a find prompt (Ctrl+F, Enter, Escape). `buffer.l` gains `deleteRange` and `insertBytes`; `search.l` gains `findBytes` and moves from `import` to `take`. The renderer highlights the selection (SGR 7/27) and shows the find prompt in the status line. `terminal.l` uses `editorMarkSaved`, so undoing back to the saved text clears the unsaved marker.
+- Evidence on that branch (local, 2026-11-21, driver built from `f166cad` sources):
+  - `terminal_dispatch_test.l` (PE, native): passes; it has 30 new assertions. A mutation check (one inverted expectation) fails with the expected code 23.
+  - `editor_test.l` (PE, native): passes.
+  - `tests/elepad/terminal.ps1`: 4/4 PASS, including the 2 new redirected-input cases (undo/redo/cut/find/replace, undo-to-clean).
+  - Same 4 cases on the ELF64 build under WSL Ubuntu: 4/4 PASS. `tests/elepad/terminal.sh` now contains the 2 new cases; the script itself was not run end to end, because it needs a Linux driver binary.
+  - `tests/elepad/terminal_console.ps1` (real Windows console, mode restoration): PASS.
+  - `cargo test --test ele_syntax_v2 --test ele_v2_legacy_ratchet --test examples_ele_v2`: 16/16 pass.
+  - Test-script fix: `terminal.ps1` and `terminal_console.ps1` compared against a literal `é`, which Windows PowerShell 5.1 decodes as ANSI. They now use `[char]0xE9`; the assertions are unchanged.
+  - CI: NOT run (no PR opened from this environment).
+- Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI) for undo/redo, selection, clipboard and find.
+- **BLOQUEADO**: Ctrl+O, because ELE has no primitive to build a `Text` path from runtime bytes (checked `docs/ELE_SYNTAX_V2.md` and the platform builtins).
+- **NO INICIADO**: system clipboard, mouse selection, horizontal scroll, grapheme/East-Asian width, automatic VT enable on Windows, multiple documents.
 
 ### 2.3 Native FFI / callbacks / windows (P0-C, P0-D)
 - `codex/ele-win32-abi-20261121` and `codex/ele-win32-window-probe-20261121` exist; merge state not verified.

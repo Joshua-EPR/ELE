@@ -49,6 +49,20 @@ El probe importa `take std.io.console`, abre y cierra el lector y verifica el en
 .\tests\elepad\terminal_console.ps1 -Exe .\target\elepad-terminal.exe -File .\archivo-de-prueba.l
 ```
 
-Teclas implementadas: caracteres Unicode, Enter, Tab, Backspace, Delete, flechas, Home, End, Page Up y Page Down. Ctrl+S guarda y comprueba por lectura que los bytes publicados coinciden; Ctrl+Q sale, y requiere una segunda pulsación si existen cambios sin guardar. Los demás atajos siguen pendientes. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
+Teclas implementadas: caracteres Unicode, Enter, Tab, Backspace, Delete, flechas, Home, End, Page Up y Page Down. Ctrl+S guarda y comprueba por lectura que los bytes publicados coinciden; Ctrl+Q sale, y requiere una segunda pulsación si existen cambios sin guardar.
+
+Edición avanzada (núcleo compartido `editor_core.l`, utilizable también por un futuro frontend gráfico):
+
+| Atajo | Acción |
+|---|---|
+| Ctrl+Z / Ctrl+Y | Deshacer / rehacer. Los caracteres escritos seguidos forman un solo paso (un espacio o tabulador cierra la palabra); pegar o escribir sobre una selección es un paso. Una edición nueva descarta la rama de rehacer. Volver al estado guardado quita el indicador `*`. |
+| Shift+flechas, Shift+Home/End/PgUp/PgDn | Selección con teclado, mostrada en vídeo inverso. Escape la cancela. |
+| Ctrl+A | Seleccionar todo. |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copiar / cortar / pegar con un portapapeles **interno del proceso**; no es el portapapeles del sistema. |
+| Ctrl+F | Modo búsqueda en la barra de estado: escribir la consulta, Enter (o Ctrl+F) selecciona la siguiente coincidencia y vuelve al principio una vez; Escape vuelve a editar. Búsqueda exacta por bytes UTF-8, sin mayúsculas/minúsculas. |
+
+El historial guarda las operaciones (no copias del documento). Si sus bytes superan 32 MiB, se descarta entero y el documento queda marcado como modificado hasta guardar.
+
+Pendiente: Ctrl+O (necesita una primitiva para construir `Text` a partir de bytes, que el lenguaje todavía no expone), portapapeles del sistema, selección con ratón, scroll horizontal, anchura visual de grafemas y caracteres anchos, activación automática de VT en Windows. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
 
 `terminal.ps1` verifica el ciclo nativo con entrada redirigida. `terminal_console.ps1` usa una consola Windows real, inyecta eventos de teclado, edita y guarda el archivo de prueba indicado, y comprueba la restauración del modo de entrada. Use un archivo de prueba desechable: la segunda prueba modifica su contenido.
