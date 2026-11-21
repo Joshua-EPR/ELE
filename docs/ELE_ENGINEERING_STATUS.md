@@ -35,7 +35,7 @@ This file is meant to let a new session resume without repeating investigations.
   - Full Windows suite: 775 passed, 3 failed. All three were then resolved or explained:
     - The legacy-syntax ratchet failed on my own legacy tokens; I rewrote them in v2 and it now passes.
     - `stage1_import_exports_l` hit Windows error 32 while clippy ran concurrently; 3/3 when rerun alone.
-    - `native_image_structure_l::stage1_example_images_are_structurally_valid` reports `writeBytes` syscalls (stat/fsync/rename/getrandom). It fails identically on clean `main` `f166cad` with `ELE_TEST_WSL_DISTRO=Ubuntu`, so it predates this branch. The validator's syscall whitelist was not updated for the PR #140 `writeBytes`. It is invisible on Windows hosts that don't execute ELF64. Separate fix, not done.
+    - `native_image_structure_l::stage1_example_images_are_structurally_valid` reports `writeBytes` syscalls (stat/fsync/rename/getrandom). It fails identically on clean `main` `f166cad` with `ELE_TEST_WSL_DISTRO=Ubuntu`, so it predates this branch. The validator's syscall whitelist was not updated for the PR #140 `writeBytes`. It is invisible on Windows hosts that don't execute ELF64. Fixed separately on `fix/elf-syscall-whitelist-20261121` (`fccb3e0`, from `f166cad`): `ALLOWED_SYSCALLS` gains getrandom, stat, lstat, fchmod, fsync, rename and unlink. With `ELE_TEST_WSL_DISTRO=Ubuntu`: `native_image_structure_l` 4/4, `native_adversarial_lir_l` 9/9.
   - Commit: `8134728` on `feat/p0b-file-streams-20261121`, pushed; no PR opened (no `gh`).
   - Clippy `-D warnings` and `cargo fmt --check`: clean.
 - Status: **IMPLEMENTADO, PENDIENTE DE VALIDACIÓN** (CI not run).
@@ -81,8 +81,8 @@ This file is meant to let a new session resume without repeating investigations.
 ## 4. Recommended next increments (dependency-ordered)
 
 1. Reconcile the local checkout: resolve or abort the unfinished merge in the user's working copy (user decision; do not force).
-2. Open Draft PRs for `feat/elepad-terminal-history-20261121` and `feat/p0b-file-streams-20261121` and let CI validate them (no `gh` here).
-3. Fix the `native_image_structure_l` syscall whitelist for `writeBytes` (pre-existing, see 2.1).
+2. Open Draft PRs for `feat/elepad-terminal-history-20261121`, `feat/p0b-file-streams-20261121` and `fix/elf-syscall-whitelist-20261121`, and let CI validate them (no `gh` here). The whitelist fix is independent and the smallest; merge it first.
+3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
 5. P0-C: audit `compiler-l/src/codegen/win64_callback.l` and build the four-argument callback test.
 6. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
