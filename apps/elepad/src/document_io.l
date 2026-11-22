@@ -25,3 +25,45 @@ expose flow saveDocument(editor: edit Editor, path: view Text) => Int {
     editorMarkSaved(edit editor)
     give 0
 }
+
+// Results of openDocument (also kept in Editor.open_failed for the prompt).
+expose fixed OPEN_OK = 0
+expose fixed OPEN_UNSAVED = 1
+expose fixed OPEN_BAD_PATH = 2
+expose fixed OPEN_READ_FAILED = 3
+
+// Opens the path typed in the open prompt (Ctrl+O) in place of the current
+// document. Unsaved changes are never discarded: the open is refused and
+// the prompt stays, so the user can save first. The typed path must be
+// UTF-8 (textFromBytes) and a readable UTF-8 file below 16 MiB (readText).
+// On success `current` becomes the new path; the clipboard and the typed
+// path survive into the new editor.
+expose flow openDocument(editor: edit Editor, current: edit Text) => Int {
+    when editor.document.dirty {
+        editor.open_failed = OPEN_UNSAVED
+        give OPEN_UNSAVED
+    }
+    choose textFromBytes(editor.path_input, editor.path_len) {
+        Ok(path): {
+            choose readText(path, 16 * 1024 * 1024) {
+                Ok(source): {
+                    change next = newEditor(view source)
+                    each i among 0..editor.clipboard.length { next.clipboard@push(editor.clipboard[i]) }
+                    each i among 0..editor.path_len { next.path_input@push(editor.path_input[i]) }
+                    next.path_len = editor.path_len
+                    editor = next
+                    current = path
+                    give OPEN_OK
+                },
+                Err(code): {
+                    editor.open_failed = OPEN_READ_FAILED
+                    give OPEN_READ_FAILED
+                },
+            }
+        },
+        Err(code): {
+            editor.open_failed = OPEN_BAD_PATH
+            give OPEN_BAD_PATH
+        },
+    }
+}

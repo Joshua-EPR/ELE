@@ -158,3 +158,7 @@ This file is meant to let a new session resume without repeating investigations.
 - `git fetch origin` completed; `origin/main` = `f166cad`.
 - `git grep` on `origin/main` for undo/redo/clipboard/open/save: only save present in ELEPad.
 - `terminal_dispatch.l` lines 10-13 read directly.
+
+## Integration follow-up — 2026-11-22
+
+The former stacked PR #149 was merged into a feature branch rather than directly into main. This follow-up integrates `textFromBytes`, Ctrl+O in terminal and graphical ELEPad, byte-exact terminal tests, and Windows terminal CI on current main. Verify the checks on this PR head before declaring the feature integrated. The pre-existing GUI/Win32 CI steps are preserved.

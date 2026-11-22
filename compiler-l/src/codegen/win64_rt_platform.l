@@ -1994,7 +1994,7 @@ flow wpfEmitFileUnary(code: edit X64Code, imports: edit Pe64Imports, close: Bool
 // holds; otherwise their entries are -1 and their imports stay out.
 // Window routines (codes 17..25, codegen/win64_window.l) likewise only
 // when `windows` holds.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool, windows: Bool, text_bytes: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -2035,5 +2035,7 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
     } otherwise {
         each k among 0..11 { at@push(-1) }
     }
+    when text_bytes { at@push(pfEmitTextFromBytes(edit code, rt, utf8)) }
+    otherwise { at@push(-1) }
     give at
 }

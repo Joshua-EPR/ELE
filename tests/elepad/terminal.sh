@@ -35,3 +35,19 @@ printf 'xy\032\021' | "$work/elepad-terminal" "$work/sample.l" > "$work/screen" 
 printf 'ab\r\ncd' > "$work/expected"
 cmp "$work/expected" "$work/sample.l"
 printf 'PASS undo to the loaded state clears the unsaved marker\n'
+# Ctrl+O: open a second file, edit and save it; the first stays intact.
+printf 'ab\r\ncd' > "$work/sample.l"
+printf 'one' > "$work/second.l"
+{ printf '\017'; printf '%s' "$work/second.l"; printf '\rx\023\021'; } | "$work/elepad-terminal" "$work/sample.l" > "$work/screen" 2> "$work/errors"
+printf 'xone' > "$work/expected"
+cmp "$work/expected" "$work/second.l"
+printf 'ab\r\ncd' > "$work/expected"
+cmp "$work/expected" "$work/sample.l"
+printf 'PASS Ctrl+O opens, edits and saves another file\n'
+# Ctrl+O with unsaved changes is refused; nothing is lost or opened.
+{ printf 'z\017'; printf '%s' "$work/second.l"; printf '\r\033\033\023\021'; } | "$work/elepad-terminal" "$work/sample.l" > "$work/screen" 2> "$work/errors"
+printf 'zab\r\ncd' > "$work/expected"
+cmp "$work/expected" "$work/sample.l"
+printf 'xone' > "$work/expected"
+cmp "$work/expected" "$work/second.l"
+printf 'PASS Ctrl+O with unsaved changes is refused\n'

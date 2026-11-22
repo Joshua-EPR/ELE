@@ -18,6 +18,25 @@ Terminal Processing enabled to interpret ANSI sequences.
 The native positive/negative test is `python tests/std/console_output.py
 <driver> <pe|elf>`.
 
+## Text from bytes
+
+`textFromBytes(bytes: List of[Int], count: Int) => Result<Text, Int>` turns
+the first `count` elements of a byte list into an owned `Text`. The UTF-8
+check is the strict one `readText` uses, so overlong forms, surrogates and
+cut sequences are rejected. Results:
+
+- `Err(1)`: `count` outside 0..length or above 64 MiB, or an element outside
+  0..255;
+- `Err(4)`: the bytes are not UTF-8.
+
+The list is only borrowed. The routine uses the runtime heap and no system
+call, so Linux and Windows share it, and it is emitted only into programs
+that use it.
+
+Typical use: an editor's typed path becomes a `Text` for `readText`/`fileOpen`
+(ELEPad Ctrl+O). Tests: `cargo test -p project-l --test text_from_bytes_l`,
+on PE32+ and ELF64.
+
 ## Native windows (`Window`, `std/ui/window.l`)
 
 Windows x64 only for now. On Linux `windowOpen` reports -7 (no graphical

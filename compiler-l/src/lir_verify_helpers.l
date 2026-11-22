@@ -81,7 +81,7 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
     var arity = -1
     if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
     if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_WRITE_CONSOLE { arity = 1 }
-    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
+    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_TEXT_FROM_BYTES { arity = 2 }
     if arity < 0 { return 1 }
     if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
     let result = l.vars[dst].ty
@@ -109,14 +109,14 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
         if arg < 0 || arg >= l.args.length { return 1 }
         var borrowed = false
         var expected = 1
-        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_WRITE_CONSOLE {
+        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_WRITE_CONSOLE || (op == LIR_PLATFORM_TEXT_FROM_BYTES && i == 0) {
             borrowed = true
             expected = 5
         }
         if l.args[arg].by_ref != borrowed { return 4 }
         if borrowed && l.args[arg].mutable { return 4 }
         let ty = lirArgType(l, types, lm, arg)
-        if (op == LIR_PLATFORM_WRITE_BYTES && i == 1) || op == LIR_PLATFORM_WRITE_CONSOLE {
+        if (op == LIR_PLATFORM_WRITE_BYTES && i == 1) || op == LIR_PLATFORM_WRITE_CONSOLE || (op == LIR_PLATFORM_TEXT_FROM_BYTES && i == 0) {
             if ty < 8 || ty >= types.types.length { return 3 }
             match types.types[ty].kind {
                 SemTypeKind.List => { if types.types[ty].elem_type != 1 { return 3 } }

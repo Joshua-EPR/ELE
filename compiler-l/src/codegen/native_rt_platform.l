@@ -1529,6 +1529,83 @@ expose flow pfEmitFileStatus(code: edit X64Code) => Int {
     give entry
 }
 
+// textfrombytes(RDI = List of[Int] header, RSI = count, RDX = address of
+// the Result<Text,Int>): the first `count` elements as a new owned Text.
+// Err(1) count outside 0..length or above 64 MiB, or an element outside
+// 0..255; Err(4) not UTF-8 (the strict validator of readText). Only the
+// runtime heap is used, no system call, so Linux and Windows share it.
+// Slots: 0 list, 1 count, 2 result, 3 buffer, 4 capacity.
+expose flow pfEmitTextFromBytes(code: edit X64Code, rt: view PfRuntime, utf8: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 5)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    change bad: List of[Int] = List[]
+    x64MovReg(edit code, 1, 6)
+    bad@push(pfIf(edit code, 1, 0, 6))
+    bad@push(pfIf(edit code, 1, 67108864, 8))
+    x64LoadMem64(edit code, 9, 7, 8)
+    bad@push(pfIfReg(edit code, 1, 9, 8))
+    // A buffer of at least one byte (an empty Text still owns one).
+    x64MovReg(edit code, 7, 1)
+    hold nonempty = pfIf(edit code, 7, 0, 5)
+    x64MovImm64(edit code, 7, 1)
+    pfPatchHere(edit code, nonempty)
+    pfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    // Pack, rejecting any element outside 0..255.
+    change bad_byte: List of[Int] = List[]
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold packed = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 0)
+    pfElementAddress(edit code)
+    x64LoadMem64(edit code, 2, 1, 0)
+    x64MovReg(edit code, 1, 9)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 2, 10)
+    bad_byte@push(x64AboveEqualPlaceholder(edit code))
+    x64LoadSlot(edit code, 8, 3)
+    x64AddReg(edit code, 8, 1)
+    x64StoreMem8(edit code, 8, 0, 2)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, pack)
+    pfPatchHere(edit code, packed)
+    x64LoadSlot(edit code, 7, 3)
+    x64LoadSlot(edit code, 6, 1)
+    pfCall(edit code, utf8)
+    x64TestRax(edit code)
+    hold not_utf8 = x64ConditionalPlaceholder(edit code, true)
+    x64LoadSlot(edit code, 11, 2)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem64(edit code, 11, 0, 0)
+    x64LoadSlot(edit code, 0, 3)
+    x64StoreMem64(edit code, 11, 8, 0)
+    x64LoadSlot(edit code, 0, 1)
+    x64StoreMem64(edit code, 11, 16, 0)
+    x64LoadSlot(edit code, 0, 4)
+    x64StoreMem64(edit code, 11, 24, 0)
+    x64FrameEnd(edit code)
+    // Failures after the buffer exists release it first.
+    pfPatchHere(edit code, not_utf8)
+    pfDrop(edit code, rt, 3, 4)
+    x64MovImm64(edit code, 1, 4)
+    hold store_utf8 = x64JumpPlaceholder(edit code)
+    pfPatchAll(edit code, view bad_byte)
+    pfDrop(edit code, rt, 3, 4)
+    pfPatchAll(edit code, view bad)
+    x64MovImm64(edit code, 1, 1)
+    pfPatchHere(edit code, store_utf8)
+    x64LoadSlot(edit code, 11, 2)
+    pfStoreErr(edit code)
+    x64FrameEnd(edit code)
+    give entry
+}
+
 // Window operations on Linux (codes 17..25): no graphical backend exists
 // yet, so they answer honestly instead of pretending. windowOpen gives a
 // Window holding -7 (no graphical session); every operation on it reports
@@ -1547,7 +1624,7 @@ expose flow pfEmitConstant(code: edit X64Code, value: Int) => Int {
 // samefile, consolemode and readevent (codes 5, 6, 7), writeconsole (8),
 // the file streams (9..16, only when `files` holds; -1 otherwise) and the
 // window operations (17..25, only when `windows` holds).
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool, text_bytes: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -1591,5 +1668,7 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
     } otherwise {
         each k among 0..11 { at@push(-1) }
     }
+    when text_bytes { at@push(pfEmitTextFromBytes(edit code, rt, utf8)) }
+    otherwise { at@push(-1) }
     give at
 }
