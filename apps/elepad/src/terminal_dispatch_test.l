@@ -54,6 +54,112 @@ flow main() => Int {
     when frame.length < sample.byteLength || frame[0] != 27 { give 13 }
     hold cursor = renderCursorOnly(view e, 0, 80, 24)
     when cursor.length < 4 || cursor[0] != 27 { give 14 }
+    hold history = historyChecks()
+    when history != 0 { give history }
     print("elepad-dispatch-ok")
     give 0
+}
+
+flow key(e: edit Editor, k: Int, scalar: Int, mods: Int) => Int {
+    hold ev = event(k, scalar, mods)
+    give dispatchEvent(edit e, view ev)
+}
+
+// Undo/redo, selection, clipboard and find through the dispatcher.
+flow historyChecks() => Int {
+    hold abc = "abc"
+    change e = newEditor(view abc)
+    key(edit e, KEY_CHAR, 120, 0)
+    key(edit e, KEY_CHAR, 121, 0)
+    hold xy = "xyabc"
+    when !equals(view e.document, view xy) { give 20 }
+    when !e.document.dirty { give 21 }
+    when key(edit e, KEY_CHAR, 122, MOD_CTRL) != ACTION_REDRAW { give 22 }
+    when !equals(view e.document, view abc) { give 23 }
+    // Undo back to the loaded state is clean again.
+    when e.document.dirty { give 24 }
+    when e.cursor.offset != 0 { give 25 }
+    key(edit e, KEY_CHAR, 121, MOD_CTRL)
+    when !equals(view e.document, view xy) { give 26 }
+    when e.cursor.offset != 2 { give 27 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    when !equals(view e.document, view abc) { give 28 }
+
+    // Shift+Right twice selects "ab"; copy, End, paste.
+    key(edit e, KEY_RIGHT, 0, MOD_SHIFT)
+    when key(edit e, KEY_RIGHT, 0, MOD_SHIFT) != ACTION_REDRAW { give 30 }
+    when selectionStart(view e) != 0 || selectionEnd(view e) != 2 { give 31 }
+    hold frame = renderFull(view e, view abc, 0, 80, 24)
+    when !containsReverse(view frame) { give 32 }
+    key(edit e, KEY_CHAR, 99, MOD_CTRL)
+    key(edit e, KEY_END, 0, 0)
+    when editorHasSelection(view e) { give 33 }
+    key(edit e, KEY_CHAR, 118, MOD_CTRL)
+    hold pasted = "abcab"
+    when !equals(view e.document, view pasted) { give 34 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    when !equals(view e.document, view abc) { give 35 }
+
+    // Select all, cut, paste, then undo both steps.
+    key(edit e, KEY_CHAR, 97, MOD_CTRL)
+    key(edit e, KEY_CHAR, 120, MOD_CTRL)
+    when length(view e.document) != 0 { give 40 }
+    key(edit e, KEY_CHAR, 118, MOD_CTRL)
+    when !equals(view e.document, view abc) { give 41 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    when length(view e.document) != 0 { give 42 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    when !equals(view e.document, view abc) { give 43 }
+
+    // Typing over a selection replaces it as one undo step.
+    key(edit e, KEY_CHAR, 97, MOD_CTRL)
+    key(edit e, KEY_CHAR, 122, 0)
+    hold z = "z"
+    when !equals(view e.document, view z) { give 50 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    when !equals(view e.document, view abc) { give 51 }
+
+    // A new edit after undo discards the redo branch.
+    key(edit e, KEY_END, 0, 0)
+    key(edit e, KEY_CHAR, 33, 0)
+    key(edit e, KEY_CHAR, 121, MOD_CTRL)
+    hold bang = "abc!"
+    when !equals(view e.document, view bang) { give 52 }
+
+    // Backspace deletes a selection; UTF-8 delete/undo round trip.
+    key(edit e, KEY_LEFT, 0, MOD_SHIFT)
+    key(edit e, KEY_BACKSPACE, 0, 0)
+    when !equals(view e.document, view abc) { give 53 }
+    key(edit e, KEY_CHAR, 233, 0)
+    key(edit e, KEY_BACKSPACE, 0, 0)
+    when !equals(view e.document, view abc) { give 54 }
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    hold accent = "abcé"
+    when !equals(view e.document, view accent) { give 55 }
+
+    // Find "b": Ctrl+F, type, Enter selects it; Escape leaves find mode.
+    key(edit e, KEY_HOME, 0, 0)
+    when key(edit e, KEY_CHAR, 102, MOD_CTRL) != ACTION_REDRAW { give 60 }
+    when e.mode != MODE_FIND { give 61 }
+    key(edit e, KEY_CHAR, 98, 0)
+    when !equals(view e.document, view accent) { give 62 }
+    key(edit e, KEY_ENTER, 0, 0)
+    when selectionStart(view e) != 1 || selectionEnd(view e) != 2 { give 63 }
+    key(edit e, KEY_BACKSPACE, 0, 0)
+    key(edit e, KEY_CHAR, 113, 0)
+    key(edit e, KEY_ENTER, 0, 0)
+    when !e.find_failed { give 64 }
+    key(edit e, KEY_ESCAPE, 0, 0)
+    when e.mode != MODE_EDIT { give 65 }
+    when !equals(view e.document, view accent) { give 66 }
+    give 0
+}
+
+flow containsReverse(frame: view List of[Int]) => Bool {
+    change i = 0
+    during i + 3 < frame.length {
+        when frame[i] == 27 && frame[i + 1] == 91 && frame[i + 2] == 55 && frame[i + 3] == 109 { give true }
+        i += 1
+    }
+    give false
 }
