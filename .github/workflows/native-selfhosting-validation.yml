@@ -182,6 +182,12 @@ jobs:
         run: |
           $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
           ./tests/native_backend/win64_callback.ps1 -Ele $driver
+      - name: Win32 window and message loop through autonomous PE generator
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/native_backend/win64_window.ps1 -Ele $driver
       # Stage 1 tools were bootstrapped by the Rust integration suites above.
       # This is a per-entry + imported closure measurement, not Stage 2.
       - name: Test self-coverage gate (MSVC)

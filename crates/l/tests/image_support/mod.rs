@@ -891,9 +891,28 @@ pub fn run_elf(image: &Path, dir: &Path, args: &[&str], trace: bool) -> Exec {
 
 /// Syscalls the ELE Linux runtime is allowed to make (codegen/native_rt*.l,
 /// native_rt_platform.l, native_list_int.l): `execve` is strace's own record
-/// of the program start.
-pub const ALLOWED_SYSCALLS: [&str; 10] = [
-    "execve", "read", "write", "open", "close", "fstat", "mmap", "munmap", "mremap", "exit",
+/// of the program start. The second row is the safe publication of
+/// `writeBytes` (getrandom nonce, stat + fchmod to keep the destination's
+/// mode, fsync, rename, unlink of the temporary on failure) and `sameFile`
+/// (lstat), present since PR #140; every other syscall is still a violation.
+pub const ALLOWED_SYSCALLS: [&str; 17] = [
+    "execve",
+    "read",
+    "write",
+    "open",
+    "close",
+    "fstat",
+    "mmap",
+    "munmap",
+    "mremap",
+    "exit",
+    "getrandom",
+    "stat",
+    "lstat",
+    "fchmod",
+    "fsync",
+    "rename",
+    "unlink",
 ];
 
 /// Scratch directory under `target/stage1-tests/<group>`.
