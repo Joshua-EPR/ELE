@@ -83,9 +83,10 @@ pub struct FlowGraph {
     current: Int
     break_to: Int
     continue_to: Int
-    // Sema type id of the linear File, or -1: a File leaf still (maybe)
-    // owned when it is dropped is rejected instead of released.
-    linear_type: Int
+    // Sema type ids of the linear resources (semTypeLinearIds): a leaf of
+    // one of these types still (maybe) owned when it is dropped is rejected
+    // instead of released.
+    linear_types: List of[Int]
 }
 
 pub fn flowNew() -> FlowGraph {
@@ -99,8 +100,9 @@ pub fn flowNew() -> FlowGraph {
     let origins: List<Int> = List[]
     let entry: List<Int> = List[]
     let reached: List<Bool> = List[]
+    hold linear_types: List of[Int] = List[]
     blocks.push(flowEmptyBlock())
-    return FlowGraph(blocks: blocks, events: events, paths: paths, predecessors: predecessors, loans: loans, binding_loans: binding_loans, drop_types: drop_types, origins: origins, entry: entry, reached: reached, current: 0, break_to: -1, continue_to: -1, linear_type: -1)
+    return FlowGraph(blocks: blocks, events: events, paths: paths, predecessors: predecessors, loans: loans, binding_loans: binding_loans, drop_types: drop_types, origins: origins, entry: entry, reached: reached, current: 0, break_to: -1, continue_to: -1, linear_types: linear_types)
 }
 
 pub fn flowEmptyBlock() -> FlowBlock {

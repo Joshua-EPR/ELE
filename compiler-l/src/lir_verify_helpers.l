@@ -27,9 +27,31 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
 // accepted the destination's own type and never inspected the arguments.
 // Rules: 1 invalid ids/opcode, 3 type/result, 4 arity/borrow mode,
 // 5 use-before-initialization.
-// File stream argument kinds: 0 val Int, 1 shared ref File, 2 shared ref
-// List<Int>, 3 exclusive ref List<Int>, 4 shared ref Text, 5 val File.
-flow lirFileArgKind(op: Int, i: Int) => Int {
+// ---- Linear resource operations ------------------------------------------
+// Each resource family (today: File streams, codes 9..16) is described by a
+// small table: which ops belong to it, their arity, which op opens (its
+// result is the resource), which op closes (it takes the resource by
+// value), and the kind of every other argument. A new family adds rows
+// here and its type in lirIsOpResource; the checks below are shared.
+//
+// Argument kinds: 0 val Int, 1 shared ref resource, 2 shared ref
+// List<Int>, 3 exclusive ref List<Int>, 4 shared ref Text, 5 val resource.
+
+flow lirIsResourceOp(op: Int) => Bool {
+    give op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_FILE_STATUS
+}
+
+flow lirResourceOpens(op: Int) => Bool {
+    give op == LIR_PLATFORM_FILE_OPEN
+}
+
+flow lirResourceArity(op: Int) => Int {
+    when op == LIR_PLATFORM_FILE_OPEN { give 2 }
+    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { give 3 }
+    give 1
+}
+
+flow lirResourceArgKind(op: Int, i: Int) => Int {
     when op == LIR_PLATFORM_FILE_OPEN {
         when i == 0 { give 4 }
         give 0
@@ -41,6 +63,11 @@ flow lirFileArgKind(op: Int, i: Int) => Int {
     give 0
 }
 
+// Whether `ty` is the linear resource type of the family of `op`.
+flow lirIsOpResource(types: view TypeTable, op: Int, ty: Int) => Bool {
+    give semTypeIsFile(types, ty)
+}
+
 flow lirIsByteList(types: view TypeTable, ty: Int) => Bool {
     when ty < 8 || ty >= types.types.length { give false }
     choose types.types[ty].kind {
@@ -49,28 +76,27 @@ flow lirIsByteList(types: view TypeTable, ty: Int) => Bool {
     }
 }
 
-// File streams. A File can only come from fileOpen: every File operand must
-// have the File type (an Int cannot be passed as a handle), the File is
-// never borrowed exclusively, and only fileClose consumes it by value.
-flow lirVerifyFilePlatform(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) => Int {
-    change arity = 1
-    when op == LIR_PLATFORM_FILE_OPEN { arity = 2 }
-    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { arity = 3 }
+// A resource comes only from its open op: every resource operand must have
+// the family's resource type (an Int cannot be passed as a handle), the
+// resource is never borrowed exclusively, and only the close op consumes
+// it by value.
+flow lirVerifyResourcePlatform(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) => Int {
+    hold arity = lirResourceArity(op)
     when count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { give 4 }
     hold result = l.vars[dst].ty
-    when op == LIR_PLATFORM_FILE_OPEN {
-        when !semTypeIsFile(types, result) { give 3 }
+    when lirResourceOpens(op) {
+        when !lirIsOpResource(types, op, result) { give 3 }
     } otherwise when result != 1 { give 3 }
     each i among 0..count {
         hold arg = l.operands[first + i]
         when arg < 0 || arg >= l.args.length { give 1 }
-        hold kind = lirFileArgKind(op, i)
+        hold kind = lirResourceArgKind(op, i)
         hold by_ref = kind >= 1 && kind <= 4
         when l.args[arg].by_ref != by_ref { give 4 }
         when l.args[arg].mutable != (kind == 3) { give 4 }
         hold ty = lirArgType(l, types, lm, arg)
         when kind == 0 && ty != 1 { give 3 }
-        when (kind == 1 || kind == 5) && !semTypeIsFile(types, ty) { give 3 }
+        when (kind == 1 || kind == 5) && !lirIsOpResource(types, op, ty) { give 3 }
         when (kind == 2 || kind == 3) && !lirIsByteList(types, ty) { give 3 }
         when kind == 4 && ty != 5 { give 3 }
         when !lirArgDefined(edit v, l, arg, check) { give 5 }
@@ -80,8 +106,8 @@ flow lirVerifyFilePlatform(v: edit LirVerifier, l: view LirFn, types: view TypeT
 
 pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) -> Int {
     if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 3 }
-    when op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_FILE_STATUS {
-        give lirVerifyFilePlatform(edit v, l, types, lm, op, first, count, dst, check)
+    when lirIsResourceOp(op) {
+        give lirVerifyResourcePlatform(edit v, l, types, lm, op, first, count, dst, check)
     }
     var arity = -1
     if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
