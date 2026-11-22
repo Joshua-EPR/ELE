@@ -63,7 +63,10 @@ flow wcLea(code: edit X64Code, reg: Int, at: Int) {
     hold fix = x64LeaRipPlaceholder(edit code, reg)
     x64PatchRelative(edit code, fix, at)
 }
-flow wcPatch(code: edit X64Code, at: Int) { x64PatchRelative(edit code, at, code.bytes.length) }
+flow wcPatch(code: edit X64Code, at: Int) {
+    hold size = code.bytes.length
+    x64PatchRelative(edit code, at, size)
+}
 flow wcPatchAll(code: edit X64Code, at: view List of[Int]) {
     each i among 0..at.length { wcPatch(edit code, at[i]) }
 }
