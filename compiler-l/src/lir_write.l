@@ -151,7 +151,29 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         if op_code == 3 { op_name = "printerror" }
         if op_code == 4 { op_name = "writebytes" }
         when op_code == 5 { op_name = "samefile" }
-        var out = "i platform v{dst} {op_name} {count}"
+        when op_code == 6 { op_name = "consolemode" }
+        when op_code == 7 { op_name = "readevent" }
+        when op_code == 8 { op_name = "writeconsole" }
+        when op_code == 9 { op_name = "fileopen" }
+        when op_code == 10 { op_name = "fileread" }
+        when op_code == 11 { op_name = "filewrite" }
+        when op_code == 12 { op_name = "fileseek" }
+        when op_code == 13 { op_name = "filesize" }
+        when op_code == 14 { op_name = "fileflush" }
+        when op_code == 15 { op_name = "fileclose" }
+        when op_code == 16 { op_name = "filestatus" }
+        when op_code == 17 { op_name = "windowopen" }
+        when op_code == 18 { op_name = "windowstatus" }
+        when op_code == 19 { op_name = "windownext" }
+        when op_code == 20 { op_name = "windowfill" }
+        when op_code == 21 { op_name = "windowtext" }
+        when op_code == 22 { op_name = "windowpresent" }
+        when op_code == 23 { op_name = "windowsend" }
+        when op_code == 24 { op_name = "windowpixel" }
+        when op_code == 25 { op_name = "windowclose" }
+        when op_code == 26 { op_name = "windowcell" }
+        when op_code == 27 { op_name = "windowtextbytes" }
+        var out ="i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]
             let piece = lirArgText(l, source, item)

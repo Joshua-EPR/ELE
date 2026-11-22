@@ -84,14 +84,79 @@ expose flow insertText(b: edit Buffer, offset: Int, source: view Text) => Bool {
     give true
 }
 
+// Insert one Unicode scalar as UTF-8. Return its encoded byte count, or 0
+// for an invalid scalar or a position inside another UTF-8 sequence.
+expose flow insertScalar(b: edit Buffer, offset: Int, scalar: Int) => Int {
+    when !boundary(view b, offset) || scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) { give 0 }
+    when scalar < 128 {
+        insertRaw(edit b, offset, scalar)
+        give 1
+    }
+    when scalar < 2048 {
+        insertRaw(edit b, offset, 192 + scalar / 64)
+        insertRaw(edit b, offset + 1, 128 + scalar % 64)
+        give 2
+    }
+    when scalar < 65536 {
+        insertRaw(edit b, offset, 224 + scalar / 4096)
+        insertRaw(edit b, offset + 1, 128 + (scalar / 64) % 64)
+        insertRaw(edit b, offset + 2, 128 + scalar % 64)
+        give 3
+    }
+    insertRaw(edit b, offset, 240 + scalar / 262144)
+    insertRaw(edit b, offset + 1, 128 + (scalar / 4096) % 64)
+    insertRaw(edit b, offset + 2, 128 + (scalar / 64) % 64)
+    insertRaw(edit b, offset + 3, 128 + scalar % 64)
+    give 4
+}
+
 expose flow deleteForward(b: edit Buffer, offset: Int) => Bool {
     when offset >= length(view b) || !boundary(view b, offset) { give false }
+    hold crlf = byteAt(view b, offset) == 13 && offset + 1 < length(view b) && byteAt(view b, offset + 1) == 10
     moveGap(edit b, offset)
-    b.gap_end += 1
+    when crlf { b.gap_end += 2 }
+    otherwise { b.gap_end += 1 }
     during offset < length(view b) && !boundary(view b, offset) {
         b.gap_end += 1
     }
     b.dirty = true
+    give true
+}
+
+// Remove the complete UTF-8 scalar immediately before a byte boundary.
+// Return false at the start of the document or for an invalid offset.
+expose flow deleteBackward(b: edit Buffer, offset: Int) => Bool {
+    when offset <= 0 || !boundary(view b, offset) { give false }
+    change start = offset - 1
+    when offset >= 2 && byteAt(view b, offset - 1) == 10 && byteAt(view b, offset - 2) == 13 {
+        start -= 1
+    }
+    during start > 0 && !boundary(view b, start) { start -= 1 }
+    moveGap(edit b, offset)
+    b.gap_start = start
+    b.dirty = true
+    give true
+}
+
+// Remove the bytes [start, end). Both ends must be UTF-8 boundaries.
+expose flow deleteRange(b: edit Buffer, start: Int, end: Int) => Bool {
+    when start < 0 || end > length(view b) || start >= end { give false }
+    when !boundary(view b, start) || !boundary(view b, end) { give false }
+    moveGap(edit b, end)
+    b.gap_start = start
+    b.dirty = true
+    give true
+}
+
+// Insert count bytes of source starting at index from. The caller supplies
+// bytes previously taken from this buffer, so they are complete UTF-8.
+expose flow insertBytes(b: edit Buffer, offset: Int, source: view List of[Int], from: Int, count: Int) => Bool {
+    when !boundary(view b, offset) || from < 0 || count < 0 || from + count > source.length { give false }
+    change i = 0
+    during i < count {
+        insertRaw(edit b, offset + i, source[from + i])
+        i += 1
+    }
     give true
 }
 

@@ -33,6 +33,7 @@ expose flow semaBuiltinPayloadExpected(ctx: view SemaContext, contextual: Int, v
 // the drop obligation of its active payload. No unchecked read or fake
 // integer tag is emitted; unsupported payloads keep failing with L0016.
 pub fn semaBuiltinUnionValue(ctx: &mut SemaContext, arg_t: Int, payload: Int, variant: Int, start: Int, end: Int) -> Int {
+    when semaRejectLinearElem(edit ctx, arg_t, start, end) { give 7 }
     if variant == 2 {
         let ty = semTypeMakeOption(&mut ctx.types, arg_t)
         let index = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, ty)

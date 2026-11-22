@@ -52,6 +52,83 @@ pub const LIR_PLATFORM_READ_TEXT = 2
 pub const LIR_PLATFORM_PRINT_ERROR = 3
 pub const LIR_PLATFORM_WRITE_BYTES = 4
 expose fixed LIR_PLATFORM_SAME_FILE = 5
+// consoleInputMode(mode: Int) -> Int and readConsoleEvent() -> Int: the raw
+// console input pair. Both take and give plain Int, so they never borrow.
+expose fixed LIR_PLATFORM_CONSOLE_MODE = 6
+expose fixed LIR_PLATFORM_READ_EVENT = 7
+// Binary-safe stdout write: shared List<Int> loan, Int status.
+expose fixed LIR_PLATFORM_WRITE_CONSOLE = 8
+// File streams (P0-B): the File operand is a shared ref to the linear
+// File, except for the consuming close, which takes it by value.
+expose fixed LIR_PLATFORM_FILE_OPEN = 9
+expose fixed LIR_PLATFORM_FILE_READ = 10
+expose fixed LIR_PLATFORM_FILE_WRITE = 11
+expose fixed LIR_PLATFORM_FILE_SEEK = 12
+expose fixed LIR_PLATFORM_FILE_SIZE = 13
+expose fixed LIR_PLATFORM_FILE_FLUSH = 14
+expose fixed LIR_PLATFORM_FILE_CLOSE = 15
+expose fixed LIR_PLATFORM_FILE_STATUS = 16
+// Native windows (P0-D): the linear Window, same rules as File.
+expose fixed LIR_PLATFORM_WINDOW_OPEN = 17
+expose fixed LIR_PLATFORM_WINDOW_STATUS = 18
+expose fixed LIR_PLATFORM_WINDOW_NEXT = 19
+expose fixed LIR_PLATFORM_WINDOW_FILL = 20
+expose fixed LIR_PLATFORM_WINDOW_TEXT = 21
+expose fixed LIR_PLATFORM_WINDOW_PRESENT = 22
+expose fixed LIR_PLATFORM_WINDOW_SEND = 23
+expose fixed LIR_PLATFORM_WINDOW_PIXEL = 24
+expose fixed LIR_PLATFORM_WINDOW_CLOSE = 25
+// Font cell size (width + height * 65536) and text drawn from UTF-8 bytes
+// of a List of[Int] (editors keep documents as bytes, not Text).
+expose fixed LIR_PLATFORM_WINDOW_CELL = 26
+expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
+
+// ---- Linear resource operation table ------------------------------------
+// Each resource family is a small table shared by sema (argument checking
+// and lowering) and the LIR verifier: which ops belong to it, their arity,
+// which op opens (its result is the resource), which op closes (it takes
+// the resource by value), and the kind of each argument. Ref arguments
+// only ever sit at positions 0..3, so the native backend can compute their
+// addresses before loading value arguments into R8/R9.
+//
+// Argument kinds: 0 val Int, 1 shared ref resource, 2 shared ref
+// List<Int>, 3 exclusive ref List<Int>, 4 shared ref Text, 5 val resource.
+
+expose flow lirIsResourceOp(op: Int) => Bool {
+    give op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_WINDOW_TEXT_BYTES
+}
+
+expose flow lirIsWindowOp(op: Int) => Bool {
+    give op >= LIR_PLATFORM_WINDOW_OPEN && op <= LIR_PLATFORM_WINDOW_TEXT_BYTES
+}
+
+expose flow lirResourceOpens(op: Int) => Bool {
+    give op == LIR_PLATFORM_FILE_OPEN || op == LIR_PLATFORM_WINDOW_OPEN
+}
+
+expose flow lirResourceArity(op: Int) => Int {
+    when op == LIR_PLATFORM_FILE_OPEN { give 2 }
+    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { give 3 }
+    when op == LIR_PLATFORM_WINDOW_OPEN || op == LIR_PLATFORM_WINDOW_PIXEL { give 3 }
+    when op == LIR_PLATFORM_WINDOW_FILL || op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give 6 }
+    when op == LIR_PLATFORM_WINDOW_TEXT { give 5 }
+    when op == LIR_PLATFORM_WINDOW_SEND { give 4 }
+    give 1
+}
+
+expose flow lirResourceArgKind(op: Int, i: Int) => Int {
+    when op == LIR_PLATFORM_FILE_OPEN || op == LIR_PLATFORM_WINDOW_OPEN {
+        when i == 0 { give 4 }
+        give 0
+    }
+    when op == LIR_PLATFORM_FILE_CLOSE || op == LIR_PLATFORM_WINDOW_CLOSE { give 5 }
+    when i == 0 { give 1 }
+    when i == 1 && op == LIR_PLATFORM_FILE_READ { give 3 }
+    when i == 1 && op == LIR_PLATFORM_FILE_WRITE { give 2 }
+    when i == 3 && op == LIR_PLATFORM_WINDOW_TEXT { give 4 }
+    when i == 3 && op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give 2 }
+    give 0
+}
 
 // Terminators.
 pub const LIR_T_NONE = 0

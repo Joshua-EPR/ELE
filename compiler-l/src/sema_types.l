@@ -16,6 +16,10 @@ pub enum SemTypeKind {
     List
     Option
     Result
+    // Opaque, linear handle of an open file (P0-B). Below sema it is an Int.
+    File
+    // Opaque, linear native window (P0-D). Below sema it is an Int.
+    Window
 }
 
 pub struct SemType {
@@ -74,6 +78,86 @@ pub fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int
         kind = SemTypeKind.MutRef
     }
     return semTypeAdd(&mut table, kind, -1, -1, inner_id, -1)
+}
+
+// The single File type: created on first use, so programs without files
+// keep their type tables (and LIR) unchanged.
+expose flow semTypeMakeFile(table: edit TypeTable) => Int {
+    hold found = semTypeFindFile(table)
+    when found >= 0 { give found }
+    give semTypeAdd(edit table, SemTypeKind.File, -1, -1, -1, -1)
+}
+
+// The File type id, or -1 when the program never named or produced one.
+expose flow semTypeFindFile(table: view TypeTable) => Int {
+    each i among 8..table.types.length {
+        choose table.types[i].kind {
+            SemTypeKind.File : { give i }
+            _ : {}
+        }
+    }
+    give -1
+}
+
+expose flow semTypeIsFile(table: view TypeTable, ty: Int) => Bool {
+    when ty < 8 || ty >= table.types.length { give false }
+    choose table.types[ty].kind {
+        SemTypeKind.File : { give true }
+        _ : { give false }
+    }
+}
+
+// ---- Linear resources --------------------------------------------------
+// A linear type owns an operating-system resource that only its close
+// operation may release: ownership tracks it like any owner, but an
+// implicit drop of a (maybe) live value is a compile error, and it can
+// never be stored in an aggregate. Below sema it is one machine word.
+// Adding a resource kind means extending semTypeIsLinear and
+// semTypeCloser; flow analysis, the aggregate rule and drops then apply to
+// it unchanged. Its LIR identity is not inherited: lirTypeCode and the native
+// reader (cfgType, cfgIsLinear) need a code of their own for each kind.
+
+// The single Window type, created on first use like File.
+expose flow semTypeMakeWindow(table: edit TypeTable) => Int {
+    each i among 8..table.types.length {
+        when semTypeIsWindow(table, i) { give i }
+    }
+    give semTypeAdd(edit table, SemTypeKind.Window, -1, -1, -1, -1)
+}
+
+expose flow semTypeIsWindow(table: view TypeTable, ty: Int) => Bool {
+    when ty < 8 || ty >= table.types.length { give false }
+    choose table.types[ty].kind {
+        SemTypeKind.Window : { give true }
+        _ : { give false }
+    }
+}
+
+expose flow semTypeIsLinear(table: view TypeTable, ty: Int) => Bool {
+    give semTypeIsFile(table, ty) || semTypeIsWindow(table, ty)
+}
+
+// The source name of linear type `ty`, for diagnostics.
+expose flow semTypeLinearName(table: view TypeTable, ty: Int) => Text {
+    when semTypeIsFile(table, ty) { give "File" }
+    when semTypeIsWindow(table, ty) { give "Window" }
+    give "recurso"
+}
+
+// The operation that consumes a value of linear type `ty`, for diagnostics.
+expose flow semTypeCloser(table: view TypeTable, ty: Int) => Text {
+    when semTypeIsFile(table, ty) { give "fileClose" }
+    when semTypeIsWindow(table, ty) { give "windowClose" }
+    give "su operación de cierre"
+}
+
+// Every linear type id present in the table (for flow analysis).
+expose flow semTypeLinearIds(table: view TypeTable) => List of[Int] {
+    change ids: List of[Int] = List[]
+    each i among 8..table.types.length {
+        when semTypeIsLinear(table, i) { ids@push(i) }
+    }
+    give ids
 }
 
 pub fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
@@ -276,6 +360,8 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
     if type_id < 0 || type_id >= table.types.length {
         return "<invalid>"
     }
+    when semTypeIsFile(table, type_id) { give "File" }
+    when semTypeIsWindow(table, type_id) { give "Window" }
     let t = &table.types[type_id]
     match t.kind {
         SemTypeKind.Unknown => { return "Unknown" }
@@ -320,5 +406,7 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
             let inner = semTypeName(table, source, t.elem_type)
             return "Result<{inner}>"
         }
+        SemTypeKind.File : { give "File" }
+        SemTypeKind.Window : { give "Window" }
     }
 }

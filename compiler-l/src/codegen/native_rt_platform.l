@@ -78,6 +78,11 @@ flow pfPatchAll(code: edit X64Code, at: view List of[Int]) {
     each i among 0..at.length { x64PatchRelative(edit code, at[i], here) }
 }
 
+flow pfPatchHere(code: edit X64Code, at: Int) {
+    hold here = code.bytes.length
+    x64PatchRelative(edit code, at, here)
+}
+
 // MOV reg, <address of the read-write data page>, patched later.
 flow pfLoadData(code: edit X64Code, reg: Int, data_at: edit List of[Int]) {
     x64MovImm64(edit code, reg, 0)
@@ -574,8 +579,9 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
     // Slots: 0 path Text address, 1 length, 2 dest path buffer, 3 its capacity,
     // 4 byte buffer, 5 its capacity, 6 fd, 7 status, 8 elements,
     // 9 tmp path buffer, 10 its capacity, 11 dest path length,
-    // 12-13 nonce bytes, 14 collision count.
-    x64FrameBegin(edit code, 15)
+    // 12-13 nonce bytes, 14 collision count. A 144-byte Linux stat buffer
+    // occupies [RBP - 272, RBP - 129], away from the nonce and slots.
+    x64FrameBegin(edit code, 34)
     x64StoreSlot(edit code, 0, 7)
     x64LoadMem64(edit code, 8, 6, 0)
     x64LoadMem64(edit code, 9, 6, 8)
@@ -727,6 +733,28 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
     hold created_at = code.bytes.length
     x64PatchRelative(edit code, created, created_at)
 
+    // Preserve the permission bits of an existing destination. The new
+    // temporary is initially 0644 (subject to umask); without fchmod a
+    // replacement silently widens an existing 0600 document to 0644.
+    // sys_stat follows the same path as the later rename destination.
+    change metadata_failed: List of[Int] = List[]
+    x64LoadSlot(edit code, 7, 2)
+    x64LeaMem(edit code, 6, 5, -272)
+    x64MovImm64(edit code, 0, 4) // sys_stat
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold absent_destination = pfIf(edit code, 1, -2, 4)
+    metadata_failed@push(pfIf(edit code, 1, 0, 6))
+    x64LoadMem32(edit code, 6, 5, -248) // st_mode at stat + 24
+    x64MovImm64(edit code, 10, 4095) // permission and special bits
+    x64AndReg(edit code, 6, 10)
+    x64LoadSlot(edit code, 7, 6)
+    x64MovImm64(edit code, 0, 91) // sys_fchmod
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    metadata_failed@push(pfIf(edit code, 1, 0, 6))
+    pfPatchHere(edit code, absent_destination)
+
     // Write full buffer
     x64LoadSlot(edit code, 7, 6)
     x64LoadSlot(edit code, 6, 4)
@@ -766,6 +794,7 @@ flow pfEmitWriteBytes(code: edit X64Code, rt: view PfRuntime, path_z: Int, write
 
     // Cleanup on failure after open:
     hold write_failed_at = code.bytes.length
+    pfPatchAll(edit code, view metadata_failed)
     x64PatchRelative(edit code, write_failed, write_failed_at)
     hold sync_failed_at = code.bytes.length
     x64PatchRelative(edit code, sync_failed, sync_failed_at)
@@ -918,9 +947,607 @@ flow pfEmitSameFile(code: edit X64Code, rt: view PfRuntime, path_z: Int) => Int 
     give entry
 }
 
+// The 64-bit word at [RBP + displacement] with its low 32 bits replaced:
+// (word & ~0xFFFFFFFF) + RAX. RAX must fit 32 bits. Clobbers R10 and R11.
+// Used to write one 32-bit termios field.
+flow pfStoreLow32(code: edit X64Code, displacement: Int) {
+    x64LoadMem64(edit code, 11, 5, displacement)
+    x64MovImm64(edit code, 10, -4294967296)
+    x64AndReg(edit code, 11, 10)
+    x64AddReg(edit code, 11, 0)
+    x64StoreMem64(edit code, 5, displacement, 11)
+}
+
+// consolemode(RDI = request) -> RAX, the contract of win64_rt_platform's
+// wpfEmitConsoleMode on the terminal of file descriptor 0. The opaque state
+// is c_lflag + c_iflag * 2^32 of the kernel termios (TCGETS). Raw input
+// clears ISIG, ICANON, ECHO and IEXTEN in c_lflag and ICRNL and IXON in
+// c_iflag (so Ctrl+C, Ctrl+S and Ctrl+Q arrive as bytes), with VMIN 1 and
+// VTIME 0: read blocks until one byte. Restoring writes both flag words
+// back. -1 not a terminal (TCGETS fails), -2 TCSETS fails, -3 a request
+// below -2. Slots: 0 request, 1 scratch, 2..6 struct termios (36 bytes,
+// 40 reserved) from RBP-56, 7 previous state.
+flow pfEmitConsoleMode(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 8)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold invalid = pfIf(edit code, 1, -2, 6)
+    x64MovImm64(edit code, 7, 0)
+    x64MovImm64(edit code, 6, 21505)            // TCGETS
+    x64LeaMem(edit code, 2, 5, -56)
+    x64MovImm64(edit code, 0, 16)               // sys_ioctl
+    x64Syscall(edit code)
+    x64TestRax(edit code)
+    hold no_terminal = x64ConditionalPlaceholder(edit code, false)
+    x64LoadMem32(edit code, 0, 5, -56)          // c_iflag
+    x64MovImm64(edit code, 10, 4294967296)
+    x64MulReg(edit code, 0, 10)
+    x64LoadMem32(edit code, 1, 5, -44)          // c_lflag
+    x64AddReg(edit code, 0, 1)
+    x64StoreSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 1, 0)
+    hold query_only = pfIf(edit code, 1, -1, 4)
+    hold restore = pfIf(edit code, 1, 0, 9)
+    // Raw.
+    x64LoadMem64(edit code, 0, 5, -56)
+    x64MovImm64(edit code, 10, -1281)           // ~(ICRNL | IXON)
+    x64AndReg(edit code, 0, 10)
+    x64StoreMem64(edit code, 5, -56, 0)
+    x64LoadMem64(edit code, 0, 5, -44)
+    x64MovImm64(edit code, 10, -32780)          // ~(ISIG | ICANON | ECHO | IEXTEN)
+    x64AndReg(edit code, 0, 10)
+    x64StoreMem64(edit code, 5, -44, 0)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreMem8(edit code, 5, -34, 0)          // c_cc[VTIME], offset 22
+    x64MovImm64(edit code, 0, 1)
+    x64StoreMem8(edit code, 5, -33, 0)          // c_cc[VMIN], offset 23
+    hold apply = x64JumpPlaceholder(edit code)
+    // Restore: RAX = c_iflag, RDX = c_lflag of the request.
+    pfPatchHere(edit code, restore)
+    x64LoadSlot(edit code, 0, 0)
+    x64MovImm64(edit code, 2, 0)
+    x64MovImm64(edit code, 10, 4294967296)
+    x64DivUnsignedReg(edit code, 10)
+    x64StoreSlot(edit code, 1, 2)
+    pfStoreLow32(edit code, -56)
+    x64LoadSlot(edit code, 0, 1)
+    pfStoreLow32(edit code, -44)
+    pfPatchHere(edit code, apply)
+    x64MovImm64(edit code, 7, 0)
+    x64MovImm64(edit code, 6, 21506)            // TCSETS
+    x64LeaMem(edit code, 2, 5, -56)
+    x64MovImm64(edit code, 0, 16)
+    x64Syscall(edit code)
+    x64TestRax(edit code)
+    hold rejected = x64ConditionalPlaceholder(edit code, false)
+    pfPatchHere(edit code, query_only)
+    x64LoadSlot(edit code, 0, 7)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, rejected)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, no_terminal)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, invalid)
+    x64MovImm64(edit code, 0, -3)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// readevent() -> RAX: one byte of file descriptor 0 as kind 4 (bits 0..7,
+// kind 4 in bits 56..59; escape sequences and UTF-8 are decoded by
+// std/io/console.l), -2 at end of input, -1 on a read error. EINTR retries.
+// Slot 0 holds the byte.
+flow pfEmitReadEvent(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 2)
+    hold top = code.bytes.length
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 0, 0)
+    x64MovImm64(edit code, 7, 0)
+    x64LeaMem(edit code, 6, 5, -8)
+    x64MovImm64(edit code, 2, 1)
+    x64MovImm64(edit code, 0, 0)                // sys_read
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    hold got = pfIf(edit code, 1, 1, 4)
+    hold eof = pfIf(edit code, 1, 0, 4)
+    hold interrupted = pfIf(edit code, 1, -4, 4)
+    x64MovImm64(edit code, 0, -1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, interrupted)
+    pfJumpTo(edit code, top)
+    pfPatchHere(edit code, eof)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, got)
+    x64LoadMem8(edit code, 0, 5, -8)
+    x64MovImm64(edit code, 10, 288230376151711744)
+    x64AddReg(edit code, 0, 10)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// writeconsole(RDI = List<Int> header) writes binary bytes to stdout without
+// adding a newline. 0 success, -1 OS failure, -2 invalid byte/length.
+// Slots: 0 elements, 1 length, 2 packed buffer, 3 capacity.
+flow pfEmitWriteConsole(code: edit X64Code, rt: view PfRuntime, write_fd: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 4)
+    x64LoadMem64(edit code, 8, 7, 0)
+    x64LoadMem64(edit code, 9, 7, 8)
+    x64StoreSlot(edit code, 0, 8)
+    x64StoreSlot(edit code, 1, 9)
+    x64MovReg(edit code, 1, 9)
+    hold invalid_size = pfIf(edit code, 1, 16777216, 8)
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold checked = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 0, 0, 0)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    hold invalid_byte = x64AboveEqualPlaceholder(edit code)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, check)
+    pfPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 1)
+    pfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 2, 0)
+    x64StoreSlot(edit code, 3, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 1)
+    hold packed = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 0, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 0, 10)
+    x64LoadSlot(edit code, 8, 0)
+    x64AddReg(edit code, 0, 8)
+    x64LoadMem64(edit code, 2, 0, 0)
+    x64LoadSlot(edit code, 0, 2)
+    x64AddReg(edit code, 0, 1)
+    x64StoreMem8(edit code, 0, 0, 2)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, pack)
+    pfPatchHere(edit code, packed)
+    x64MovImm64(edit code, 7, 1)
+    x64LoadSlot(edit code, 6, 2)
+    x64LoadSlot(edit code, 2, 1)
+    pfCall(edit code, write_fd)
+    x64StoreSlot(edit code, 1, 0)
+    pfDrop(edit code, rt, 2, 3)
+    x64LoadSlot(edit code, 0, 1)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, invalid_size)
+    pfPatchHere(edit code, invalid_byte)
+    x64MovImm64(edit code, 0, -2)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// ---- File streams (ELE-LIR platform codes 9..16) -------------------------
+//
+// A File is, below sema, the Int file descriptor (>= 0) or, after a failed
+// open, the negative error code. Sema keeps the value linear and opaque.
+// Results: >= 0 success; negative codes, identical on Windows:
+//   -1 invalid argument (mode, count, limit, whence, path, byte value)
+//   -2 not found, -3 permission denied, -4 already exists,
+//   -5 other I/O failure (also: not a regular file), -6 file not open.
+// Block transfers are bounded by PF_FILE_BLOCK bytes per call.
+fixed PF_FILE_BLOCK = 16777216
+
+// RAX = the ELE file error code for errno RCX (positive). Clobbers R10.
+flow pfMapErrno(code: edit X64Code) {
+    change missing: List of[Int] = List[]
+    change denied: List of[Int] = List[]
+    change exists: List of[Int] = List[]
+    change invalid: List of[Int] = List[]
+    change not_open: List of[Int] = List[]
+    missing@push(pfIf(edit code, 1, 2, 4))      // ENOENT
+    missing@push(pfIf(edit code, 1, 20, 4))     // ENOTDIR
+    denied@push(pfIf(edit code, 1, 1, 4))       // EPERM
+    denied@push(pfIf(edit code, 1, 13, 4))      // EACCES
+    denied@push(pfIf(edit code, 1, 30, 4))      // EROFS
+    exists@push(pfIf(edit code, 1, 17, 4))      // EEXIST
+    invalid@push(pfIf(edit code, 1, 22, 4))     // EINVAL
+    invalid@push(pfIf(edit code, 1, 29, 4))     // ESPIPE
+    invalid@push(pfIf(edit code, 1, 36, 4))     // ENAMETOOLONG
+    not_open@push(pfIf(edit code, 1, 9, 4))     // EBADF
+    change done: List of[Int] = List[]
+    x64MovImm64(edit code, 0, -5)
+    done@push(x64JumpPlaceholder(edit code))
+    pfPatchAll(edit code, view missing)
+    x64MovImm64(edit code, 0, -2)
+    done@push(x64JumpPlaceholder(edit code))
+    pfPatchAll(edit code, view denied)
+    x64MovImm64(edit code, 0, -3)
+    done@push(x64JumpPlaceholder(edit code))
+    pfPatchAll(edit code, view exists)
+    x64MovImm64(edit code, 0, -4)
+    done@push(x64JumpPlaceholder(edit code))
+    pfPatchAll(edit code, view invalid)
+    x64MovImm64(edit code, 0, -1)
+    done@push(x64JumpPlaceholder(edit code))
+    pfPatchAll(edit code, view not_open)
+    x64MovImm64(edit code, 0, -6)
+    pfPatchAll(edit code, view done)
+}
+
+// Returns RAX = `value` from the current frame.
+flow pfReturnConst(code: edit X64Code, value: Int) {
+    x64MovImm64(edit code, 0, value)
+    x64FrameEnd(edit code)
+}
+
+// RCX = RCX * 8 + [list header in RDX].elements: the address of element
+// RCX of the List of[Int] whose header address is in RDX. Clobbers R10.
+flow pfElementAddress(code: edit X64Code) {
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 1, 10)
+    x64LoadMem64(edit code, 10, 2, 0)
+    x64AddReg(edit code, 1, 10)
+}
+
+// open(RDI = address of the path Text, RSI = mode) -> RAX = fd or error.
+// Modes: 1 read, 2 write (create/truncate), 3 append (create), 4 create
+// new (fails if it exists), 5 read+write of an existing file. O_CLOEXEC
+// always; O_NONBLOCK so that opening a FIFO never blocks, then anything
+// but a regular file is closed again and rejected (-5).
+// Slots: 0 mode, 1 path buffer, 2 its capacity, 3 fd, 4 error;
+// 10..27 struct stat at RBP-224.
+flow pfEmitFileOpen(code: edit X64Code, rt: view PfRuntime, path_z: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 28)
+    x64StoreSlot(edit code, 0, 6)
+    // No path buffer yet: the invalid exit may release slot 1.
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 1, 0)
+    change invalid: List of[Int] = List[]
+    x64MovReg(edit code, 1, 6)
+    invalid@push(pfIf(edit code, 1, 1, 6))
+    invalid@push(pfIf(edit code, 1, 5, 8))
+    pfCall(edit code, path_z)
+    x64StoreSlot(edit code, 1, 0)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 0)
+    invalid@push(pfIf(edit code, 1, 0, 4))
+    // RSI = flags for the mode (O_NONBLOCK 2048 | O_CLOEXEC 524288 | ...).
+    x64LoadSlot(edit code, 1, 0)
+    x64MovImm64(edit code, 6, 526336)              // 1: O_RDONLY
+    hold not2 = pfIf(edit code, 1, 2, 5)
+    x64MovImm64(edit code, 6, 526913)              // 2: O_WRONLY|O_CREAT|O_TRUNC
+    pfPatchHere(edit code, not2)
+    hold not3 = pfIf(edit code, 1, 3, 5)
+    x64MovImm64(edit code, 6, 527425)              // 3: O_WRONLY|O_CREAT|O_APPEND
+    pfPatchHere(edit code, not3)
+    hold not4 = pfIf(edit code, 1, 4, 5)
+    x64MovImm64(edit code, 6, 526529)              // 4: O_WRONLY|O_CREAT|O_EXCL
+    pfPatchHere(edit code, not4)
+    hold not5 = pfIf(edit code, 1, 5, 5)
+    x64MovImm64(edit code, 6, 526338)              // 5: O_RDWR
+    pfPatchHere(edit code, not5)
+    x64StoreSlot(edit code, 4, 6)
+    hold retry = code.bytes.length
+    x64LoadSlot(edit code, 7, 1)
+    x64LoadSlot(edit code, 6, 4)
+    x64MovImm64(edit code, 2, 438)                 // 0666 before umask
+    x64MovImm64(edit code, 0, 2)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 9, 0)
+    hold interrupted = pfIf(edit code, 9, -4, 4)
+    x64PatchRelative(edit code, interrupted, retry)
+    x64StoreSlot(edit code, 3, 9)
+    pfDrop(edit code, rt, 1, 2)
+    x64LoadSlot(edit code, 9, 3)
+    hold opened = pfIf(edit code, 9, 0, 9)
+    x64MovReg(edit code, 1, 9)
+    x64NegReg(edit code, 1)
+    pfMapErrno(edit code)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, opened)
+    // fstat(fd, stat): (st_mode & S_IFMT) == S_IFREG.
+    x64LoadSlot(edit code, 7, 3)
+    x64MovReg(edit code, 6, 5)
+    pfAdjust(edit code, 6, -224)
+    x64MovImm64(edit code, 0, 5)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 1, 0)
+    change not_regular: List of[Int] = List[]
+    not_regular@push(pfIf(edit code, 1, 0, 5))
+    x64LoadMem64(edit code, 1, 5, -200)
+    x64MovImm64(edit code, 10, 61440)
+    x64AndReg(edit code, 1, 10)
+    not_regular@push(pfIf(edit code, 1, 32768, 5))
+    x64LoadSlot(edit code, 0, 3)
+    x64FrameEnd(edit code)
+    pfPatchAll(edit code, view not_regular)
+    x64LoadSlot(edit code, 7, 3)
+    x64MovImm64(edit code, 0, 3)
+    x64Syscall(edit code)
+    pfReturnConst(edit code, -5)
+    pfPatchAll(edit code, view invalid)
+    pfDrop(edit code, rt, 1, 2)
+    pfReturnConst(edit code, -1)
+    give entry
+}
+
+// read(RDI = fd, RSI = address of a List of[Int] header, RDX = limit)
+// -> RAX = bytes stored into elements 0.. (1..limit), 0 at end of file,
+// or an error. The limit must be 1..length and at most PF_FILE_BLOCK.
+// Slots: 0 fd, 1 list header, 2 limit, 3 buffer, 4 capacity, 5 count.
+flow pfEmitFileRead(code: edit X64Code, rt: view PfRuntime) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 6)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 3, 0)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = pfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(pfIf(edit code, 1, 1, 6))
+    invalid@push(pfIf(edit code, 1, PF_FILE_BLOCK, 8))
+    x64LoadSlot(edit code, 2, 1)
+    x64LoadMem64(edit code, 9, 2, 8)
+    invalid@push(pfIfReg(edit code, 1, 9, 8))
+    x64LoadSlot(edit code, 7, 2)
+    pfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    hold retry = code.bytes.length
+    x64LoadSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 6, 3)
+    x64LoadSlot(edit code, 2, 2)
+    x64MovImm64(edit code, 0, 0)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 9, 0)
+    hold interrupted = pfIf(edit code, 9, -4, 4)
+    x64PatchRelative(edit code, interrupted, retry)
+    x64StoreSlot(edit code, 5, 9)
+    hold got = pfIf(edit code, 9, 0, 9)
+    pfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 5)
+    x64NegReg(edit code, 1)
+    pfMapErrno(edit code)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, got)
+    // Widen each byte into its 8-byte element.
+    x64MovImm64(edit code, 1, 0)
+    hold unpack = code.bytes.length
+    x64LoadSlot(edit code, 2, 5)
+    hold unpacked = pfIfReg(edit code, 1, 2, 9)
+    x64LoadSlot(edit code, 8, 3)
+    x64AddReg(edit code, 8, 1)
+    x64LoadMem8(edit code, 0, 8, 0)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    pfElementAddress(edit code)
+    x64StoreMem64(edit code, 1, 0, 0)
+    x64MovReg(edit code, 1, 9)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, unpack)
+    pfPatchHere(edit code, unpacked)
+    pfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 0, 5)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, not_open)
+    pfReturnConst(edit code, -6)
+    pfPatchAll(edit code, view invalid)
+    pfReturnConst(edit code, -1)
+    give entry
+}
+
+// write(RDI = fd, RSI = address of a List of[Int] header, RDX = count)
+// -> RAX = count once every byte of elements 0..count-1 is written, or an
+// error. Every element must be 0..255; count is 0..length, at most
+// PF_FILE_BLOCK. Partial writes and EINTR are retried by write_fd.
+// Slots: 0 fd, 1 list header, 2 count, 3 buffer, 4 capacity, 5 status.
+flow pfEmitFileWrite(code: edit X64Code, rt: view PfRuntime, write_fd: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 6)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = pfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(pfIf(edit code, 1, 0, 6))
+    invalid@push(pfIf(edit code, 1, PF_FILE_BLOCK, 8))
+    x64LoadSlot(edit code, 2, 1)
+    x64LoadMem64(edit code, 9, 2, 8)
+    invalid@push(pfIfReg(edit code, 1, 9, 8))
+    hold empty = pfIf(edit code, 1, 0, 4)
+    // Validate every byte before anything is written.
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 2)
+    hold checked = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    pfElementAddress(edit code)
+    x64LoadMem64(edit code, 0, 1, 0)
+    x64MovReg(edit code, 1, 9)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    invalid@push(x64AboveEqualPlaceholder(edit code))
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, check)
+    pfPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 2)
+    pfCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 3, 0)
+    x64StoreSlot(edit code, 4, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 2)
+    hold packed = pfIfReg(edit code, 1, 2, 9)
+    x64MovReg(edit code, 9, 1)
+    x64LoadSlot(edit code, 2, 1)
+    pfElementAddress(edit code)
+    x64LoadMem64(edit code, 2, 1, 0)
+    x64LoadSlot(edit code, 8, 3)
+    x64AddReg(edit code, 8, 9)
+    x64StoreMem8(edit code, 8, 0, 2)
+    x64MovReg(edit code, 1, 9)
+    pfAdjust(edit code, 1, 1)
+    pfJumpTo(edit code, pack)
+    pfPatchHere(edit code, packed)
+    x64LoadSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 6, 3)
+    x64LoadSlot(edit code, 2, 2)
+    pfCall(edit code, write_fd)
+    x64StoreSlot(edit code, 5, 0)
+    pfDrop(edit code, rt, 3, 4)
+    x64LoadSlot(edit code, 1, 5)
+    hold failed = pfIf(edit code, 1, 0, 5)
+    x64LoadSlot(edit code, 0, 2)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, failed)
+    pfReturnConst(edit code, -5)
+    pfPatchHere(edit code, empty)
+    pfReturnConst(edit code, 0)
+    pfPatchHere(edit code, not_open)
+    pfReturnConst(edit code, -6)
+    pfPatchAll(edit code, view invalid)
+    pfReturnConst(edit code, -1)
+    give entry
+}
+
+// seek(RDI = fd, RSI = offset, RDX = whence 0 start, 1 current, 2 end)
+// -> RAX = the new position or an error (-1 for a negative result).
+flow pfEmitFileSeek(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 3)
+    x64StoreSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 1, 6)
+    x64StoreSlot(edit code, 2, 2)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = pfIf(edit code, 1, 0, 6)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 2)
+    invalid@push(pfIf(edit code, 1, 0, 6))
+    invalid@push(pfIf(edit code, 1, 2, 8))
+    x64LoadSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 6, 1)
+    x64LoadSlot(edit code, 2, 2)
+    x64MovImm64(edit code, 0, 8)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 9, 0)
+    hold ok = pfIf(edit code, 9, 0, 9)
+    x64MovReg(edit code, 1, 9)
+    x64NegReg(edit code, 1)
+    pfMapErrno(edit code)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, ok)
+    x64MovReg(edit code, 0, 9)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, not_open)
+    pfReturnConst(edit code, -6)
+    pfPatchAll(edit code, view invalid)
+    pfReturnConst(edit code, -1)
+    give entry
+}
+
+// size(RDI = fd) -> RAX = st_size or an error. Slots 10..27: struct stat.
+flow pfEmitFileSize(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 28)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = pfIf(edit code, 1, 0, 6)
+    x64MovReg(edit code, 6, 5)
+    pfAdjust(edit code, 6, -224)
+    x64MovImm64(edit code, 0, 5)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 9, 0)
+    hold ok = pfIf(edit code, 9, 0, 4)
+    x64MovReg(edit code, 1, 9)
+    x64NegReg(edit code, 1)
+    pfMapErrno(edit code)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, ok)
+    x64LoadMem64(edit code, 0, 5, -176)
+    x64FrameEnd(edit code)
+    pfPatchHere(edit code, not_open)
+    pfReturnConst(edit code, -6)
+    give entry
+}
+
+// One-argument file call: RDI = fd; `number` is the system call (74 fsync,
+// 3 close). EINTR from close still released the descriptor (Linux), so it
+// counts as success; fsync is retried. A failed-open File closes as 0 and
+// flushes as -6.
+flow pfEmitFileUnary(code: edit X64Code, number: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 1)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = pfIf(edit code, 1, 0, 6)
+    hold retry = code.bytes.length
+    x64LoadSlot(edit code, 7, 0)
+    x64MovImm64(edit code, 0, number)
+    x64Syscall(edit code)
+    x64MovReg(edit code, 9, 0)
+    change ok: List of[Int] = List[]
+    ok@push(pfIf(edit code, 9, 0, 9))
+    hold interrupted = pfIf(edit code, 9, -4, 4)
+    when number == 3 { ok@push(interrupted) }
+    otherwise { x64PatchRelative(edit code, interrupted, retry) }
+    x64MovReg(edit code, 1, 9)
+    x64NegReg(edit code, 1)
+    pfMapErrno(edit code)
+    x64FrameEnd(edit code)
+    pfPatchAll(edit code, view ok)
+    pfReturnConst(edit code, 0)
+    pfPatchHere(edit code, not_open)
+    when number == 3 { pfReturnConst(edit code, 0) }
+    otherwise { pfReturnConst(edit code, -6) }
+    give entry
+}
+
+// status(RDI = File) -> RAX = 0 when open, else the open error (negative).
+// Shared by both targets: it needs no operating system call.
+expose flow pfEmitFileStatus(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 0)
+    x64MovReg(edit code, 1, 7)
+    hold failed = pfIf(edit code, 1, 0, 6)
+    pfReturnConst(edit code, 0)
+    pfPatchHere(edit code, failed)
+    x64MovReg(edit code, 0, 7)
+    x64FrameEnd(edit code)
+    give entry
+}
+
+// Window operations on Linux (codes 17..25): no graphical backend exists
+// yet, so they answer honestly instead of pretending. windowOpen gives a
+// Window holding -7 (no graphical session); every operation on it reports
+// -6 (not open), its status is -7 (pfEmitFileStatus), and closing it is 0.
+// An X11 backend replaces these routines (docs/native-window-and-callbacks-
+// design.md, section 2.4).
+expose flow pfEmitConstant(code: edit X64Code, value: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 0)
+    pfReturnConst(edit code, value)
+    give entry
+}
+
 // Emits the platform runtime; returns the entry of each operation, indexed
-// by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes().
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int]) => List of[Int] {
+// by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), then
+// samefile, consolemode and readevent (codes 5, 6, 7), writeconsole (8),
+// the file streams (9..16, only when `files` holds; -1 otherwise) and the
+// window operations (17..25, only when `windows` holds).
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -931,5 +1558,38 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
     at@push(pfEmitPrintError(edit code, write_fd))
     at@push(pfEmitWriteBytes(edit code, rt, path_z, write_fd))
     at@push(pfEmitSameFile(edit code, rt, path_z))
+    // Console input routines only for programs that call them (-1 otherwise).
+    when console {
+        at@push(pfEmitConsoleMode(edit code))
+        at@push(pfEmitReadEvent(edit code))
+    } otherwise {
+        at@push(-1)
+        at@push(-1)
+    }
+    when console_output { at@push(pfEmitWriteConsole(edit code, rt, write_fd)) }
+    otherwise { at@push(-1) }
+    when files {
+        at@push(pfEmitFileOpen(edit code, rt, path_z))
+        at@push(pfEmitFileRead(edit code, rt))
+        at@push(pfEmitFileWrite(edit code, rt, write_fd))
+        at@push(pfEmitFileSeek(edit code))
+        at@push(pfEmitFileSize(edit code))
+        at@push(pfEmitFileUnary(edit code, 74))
+        at@push(pfEmitFileUnary(edit code, 3))
+        at@push(pfEmitFileStatus(edit code))
+    } otherwise {
+        each k among 0..8 { at@push(-1) }
+    }
+    when windows {
+        at@push(pfEmitConstant(edit code, -7))         // open
+        at@push(pfEmitFileStatus(edit code))           // status
+        hold not_open = pfEmitConstant(edit code, -6)
+        each k among 0..6 { at@push(not_open) }        // next .. pixel
+        at@push(pfEmitConstant(edit code, 0))          // close
+        at@push(not_open)                              // cell
+        at@push(not_open)                              // text bytes
+    } otherwise {
+        each k among 0..11 { at@push(-1) }
+    }
     give at
 }

@@ -27,16 +27,65 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
 // accepted the destination's own type and never inspected the arguments.
 // Rules: 1 invalid ids/opcode, 3 type/result, 4 arity/borrow mode,
 // 5 use-before-initialization.
+// ---- Linear resource operations ------------------------------------------
+// The per-family table (ops, arity, opener, argument kinds) lives in
+// lir_build.l, shared with sema. Here: the resource type of each family.
+
+// Whether `ty` is the linear resource type of the family of `op`.
+flow lirIsOpResource(types: view TypeTable, op: Int, ty: Int) => Bool {
+    when lirIsWindowOp(op) { give semTypeIsWindow(types, ty) }
+    give semTypeIsFile(types, ty)
+}
+
+flow lirIsByteList(types: view TypeTable, ty: Int) => Bool {
+    when ty < 8 || ty >= types.types.length { give false }
+    choose types.types[ty].kind {
+        SemTypeKind.List : { give types.types[ty].elem_type == 1 }
+        _ : { give false }
+    }
+}
+
+// A resource comes only from its open op: every resource operand must have
+// the family's resource type (an Int cannot be passed as a handle), the
+// resource is never borrowed exclusively, and only the close op consumes
+// it by value.
+flow lirVerifyResourcePlatform(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) => Int {
+    hold arity = lirResourceArity(op)
+    when count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { give 4 }
+    hold result = l.vars[dst].ty
+    when lirResourceOpens(op) {
+        when !lirIsOpResource(types, op, result) { give 3 }
+    } otherwise when result != 1 { give 3 }
+    each i among 0..count {
+        hold arg = l.operands[first + i]
+        when arg < 0 || arg >= l.args.length { give 1 }
+        hold kind = lirResourceArgKind(op, i)
+        hold by_ref = kind >= 1 && kind <= 4
+        when l.args[arg].by_ref != by_ref { give 4 }
+        when l.args[arg].mutable != (kind == 3) { give 4 }
+        hold ty = lirArgType(l, types, lm, arg)
+        when kind == 0 && ty != 1 { give 3 }
+        when (kind == 1 || kind == 5) && !lirIsOpResource(types, op, ty) { give 3 }
+        when (kind == 2 || kind == 3) && !lirIsByteList(types, ty) { give 3 }
+        when kind == 4 && ty != 5 { give 3 }
+        when !lirArgDefined(edit v, l, arg, check) { give 5 }
+    }
+    give 0
+}
+
 pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) -> Int {
     if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 3 }
+    when lirIsResourceOp(op) {
+        give lirVerifyResourcePlatform(edit v, l, types, lm, op, first, count, dst, check)
+    }
     var arity = -1
-    if op == LIR_PLATFORM_ARG_COUNT { arity = 0 }
-    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR { arity = 1 }
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
+    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_WRITE_CONSOLE { arity = 1 }
     if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
     if arity < 0 { return 1 }
     if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
     let result = l.vars[dst].ty
-    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES {
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_READ_EVENT || op == LIR_PLATFORM_WRITE_CONSOLE {
         if result != 1 { return 3 }
     } else if op == LIR_PLATFORM_PRINT_ERROR {
         if result != 6 { return 3 }
@@ -60,14 +109,14 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
         if arg < 0 || arg >= l.args.length { return 1 }
         var borrowed = false
         var expected = 1
-        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE {
+        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_WRITE_CONSOLE {
             borrowed = true
             expected = 5
         }
         if l.args[arg].by_ref != borrowed { return 4 }
         if borrowed && l.args[arg].mutable { return 4 }
         let ty = lirArgType(l, types, lm, arg)
-        if op == LIR_PLATFORM_WRITE_BYTES && i == 1 {
+        if (op == LIR_PLATFORM_WRITE_BYTES && i == 1) || op == LIR_PLATFORM_WRITE_CONSOLE {
             if ty < 8 || ty >= types.types.length { return 3 }
             match types.types[ty].kind {
                 SemTypeKind.List => { if types.types[ty].elem_type != 1 { return 3 } }

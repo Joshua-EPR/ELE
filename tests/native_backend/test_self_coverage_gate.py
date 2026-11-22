@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -24,6 +25,27 @@ class SelfCoverageGateTests(unittest.TestCase):
         self.assertEqual(d["code"], "L0001")
         self.assertEqual(d["span"]["path"], r"C:\repo\compiler-l\src\tokens.l")
         self.assertEqual((d["span"]["line"], d["span"]["column"]), (28, 42))
+
+    def test_find_binary_takes_newest_build_and_refuses_stale_or_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sources = root / "src"
+            sources.mkdir()
+            source = sources / "main.l"
+            source.write_text("flow main() {}", encoding="utf-8")
+            os.utime(source, (100, 100))
+            with self.assertRaisesRegex(ValueError, "no tool.exe"):
+                gate.find_binary(root, "tool", sources)
+            builds = {}
+            for pid, stamp in (("900-0", 300), ("10-0", 400), ("50-1", 200)):
+                builds[pid] = root / "tool" / "normal" / pid / "tool.exe"
+                builds[pid].parent.mkdir(parents=True)
+                builds[pid].write_bytes(b"binary")
+                os.utime(builds[pid], (stamp, stamp))
+            self.assertEqual(gate.find_binary(root, "tool", sources), builds["10-0"])
+            os.utime(source, (500, 500))
+            with self.assertRaisesRegex(ValueError, "stale"):
+                gate.find_binary(root, "tool", sources)
 
     def test_skip_pipeline_after_ownership_failure(self):
         with tempfile.TemporaryDirectory() as td:

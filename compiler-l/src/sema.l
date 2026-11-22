@@ -73,8 +73,8 @@ fn semaCollectDeclarations(ctx: &mut SemaContext, source: &Text, tree: &AstTree)
                     scopeAddSymbol(&mut ctx.scopes, sym_id)
                 }
             }
-            AstDeclKind.Struct => {}
-            AstDeclKind.Enum => {}
+            AstDeclKind.Struct => { semaRejectLinearMembers(edit ctx, source, tree, i, false) }
+            AstDeclKind.Enum => { semaRejectLinearMembers(edit ctx, source, tree, i, true) }
             AstDeclKind.Const => {
                 let existing = scopeLookupCurrentModule(&ctx.scopes, &ctx.symbols, source, decl.a, decl.b, ctx.current_module)
                 if existing >= 0 {
@@ -96,6 +96,25 @@ fn semaCollectDeclarations(ctx: &mut SemaContext, source: &Text, tree: &AstTree)
             AstDeclKind.Import => {
                 // Local module imports and std.io.print are recognized in Stage 1.
             }
+        }
+    }
+}
+
+// A shape field or choice payload of a linear type is rejected (see
+// semaRejectLinearElem): its owner's drop could not close it.
+flow semaRejectLinearMembers(ctx: edit SemaContext, source: view Text, tree: view AstTree, d: Int, is_enum: Bool) {
+    hold first = tree.declarations[d].c
+    hold count = tree.declarations[d].d
+    each m among first..(first + count) {
+        when is_enum {
+            hold payload = tree.variants[m].first_payload_index
+            each k among 0..tree.variants[m].payload_count {
+                hold pt = semaResolveAstType(edit ctx, source, tree, tree.extra[payload + k])
+                semaRejectLinearElem(edit ctx, pt, tree.declarations[d].start, tree.declarations[d].end)
+            }
+        } otherwise {
+            hold ft = semaFieldType(edit ctx, source, tree, m)
+            semaRejectLinearElem(edit ctx, ft, tree.fields[m].start, tree.fields[m].end)
         }
     }
 }
@@ -179,6 +198,7 @@ fn semaCheckDeclarations(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
                 }
                 // Falling off the end releases the parameters.
                 semaScopeExit(&mut ctx, decl.end, decl.end)
+                ctx.flow.linear_types = semTypeLinearIds(view ctx.types)
                 let checked = flowVerify(&mut ctx.flow, ret_t != 6 && ret_t != 7)
                 ctx.flow_blocks += ctx.flow.blocks.length
                 ctx.flow_edges += ctx.flow.predecessors.length
@@ -191,10 +211,17 @@ fn semaCheckDeclarations(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
                 } else if checked.status == 3 {
                     semaAddError(&mut ctx, "L0003", "la función requiere retorno explícito en cada salida alcanzable", decl.start, decl.end)
                 } else {
+                    when checked.status == 4 {
+                        hold leaked_name = semTypeLinearName(view ctx.types, checked.linear)
+                        hold closer = semTypeCloser(view ctx.types, checked.linear)
+                        hold leak_message = "{leaked_name} abierto al salir del ámbito: ciérralo con {closer} o muévelo (posible fuga del recurso)"
+                        semaAddError(edit ctx, "L0005", leak_message, checked.start, checked.end)
+                    } otherwise {
                     let plan = semaCheckDrops(&mut ctx, source, tree, decl.a, decl.start, decl.end)
                     semaCheckLoans(&mut ctx, source, decl.start, decl.end)
                     if ctx.errors.length == errors_before {
                         semaLirFinish(&mut ctx, source, tree, &plan, i)
+                    }
                     }
                 }
                 scopePop(&mut ctx.scopes)

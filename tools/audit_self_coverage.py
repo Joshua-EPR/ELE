@@ -5,18 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
+from self_coverage_gate import find_binary
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "compiler-l" / "src"
 TARGET = ROOT / "target" / "stage1-tests"
 OUT = ROOT / "docs" / "SELF_COVERAGE_MATRIX_2026-11-11.md"
-
-
-def binary(name: str) -> Path:
-    matches = list((TARGET / name / "normal").rglob(name + ".exe"))
-    if len(matches) != 1:
-        raise RuntimeError(f"expected one {name}.exe, found {matches}")
-    return matches[0]
 
 
 def run(exe: Path, *args: Path | str) -> subprocess.CompletedProcess[str]:
@@ -41,9 +36,9 @@ def result(out: subprocess.CompletedProcess[str]) -> str:
 
 
 def main() -> None:
-    parser = binary("main_parser")
-    sema = binary("main_sema")
-    native = binary("native_cfg_demo")
+    parser = find_binary(TARGET, "main_parser", SRC)
+    sema = find_binary(TARGET, "main_sema", SRC)
+    native = find_binary(TARGET, "native_cfg_demo", SRC)
     audit_dir = TARGET / "self-coverage-audit"
     audit_dir.mkdir(exist_ok=True)
     rows = []

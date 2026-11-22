@@ -391,6 +391,53 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaCallLoans(edit ctx, view loans, 4, SITE_NONE, expr.start, expr.end)
                 give semaSameFile(edit ctx, expr.start, expr.end, path_a_ty, path_a, path_b_ty, path_b)
             }
+            // Raw console input (std/io/console.l decodes it): Int in, Int out.
+            hold name_console_mode = "consoleInputMode"
+            when symbolNameEqualsText(source, name_start, name_end, name_console_mode) {
+                when arg_count != 1 {
+                    semaAddError(edit ctx, "L0004", "consoleInputMode requiere (mode: Int)", expr.start, expr.end)
+                    give 7
+                }
+                hold mode_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+                when mode_ty != 1 {
+                    semaAddError(edit ctx, "L0004", "consoleInputMode requiere (mode: Int)", expr.start, expr.end)
+                    give 7
+                }
+                change args: List of[Int] = List[]
+                hold mode = lirTakeOperand(edit ctx, 1)
+                hold mode_arg = lirArg(edit ctx.lir, false, mode, false)
+                args@push(mode_arg)
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_CONSOLE_MODE, view args, 1, true)
+                give 1
+            }
+            hold name_read_event = "readConsoleEvent"
+            when symbolNameEqualsText(source, name_start, name_end, name_read_event) {
+                when arg_count != 0 {
+                    semaAddError(edit ctx, "L0004", "readConsoleEvent no recibe argumentos", expr.start, expr.end)
+                    give 7
+                }
+                change args: List of[Int] = List[]
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_READ_EVENT, view args, 1, true)
+                give 1
+            }
+            hold name_write_console = "writeConsoleBytes"
+            when symbolNameEqualsText(source, name_start, name_end, name_write_console) {
+                when arg_count != 1 {
+                    semaAddError(edit ctx, "L0004", "writeConsoleBytes requiere (List<Int>)", expr.start, expr.end)
+                    give 7
+                }
+                hold bytes_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold bytes_loan = semaPlatformArgLoan(edit ctx, bytes_ty, expr.start, expr.end)
+                hold bytes = ctx.lir.borrowed
+                change loans: List of[Int] = List[]
+                loans@push(bytes_loan)
+                semaCallLoans(edit ctx, view loans, 1, SITE_NONE, expr.start, expr.end)
+                give semaWriteConsoleBytes(edit ctx, expr.start, expr.end, bytes_ty, bytes)
+            }
+            hold file_result = semaFileBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
+            when file_result != -1 { give file_result }
+            hold window_result = semaWindowBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
+            when window_result != -1 { give window_result }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
@@ -583,4 +630,226 @@ fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, exp
     }
     semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
     return 7
+}
+
+// ---- File streams (P0-B) ---------------------------------------------------
+
+flow semaFileOp(source: view Text, name_start: Int, name_end: Int) => Int {
+    hold n_open = "fileOpen"
+    hold n_read = "fileRead"
+    hold n_write = "fileWrite"
+    hold n_seek = "fileSeek"
+    hold n_size = "fileSize"
+    hold n_flush = "fileFlush"
+    hold n_close = "fileClose"
+    hold n_status = "fileStatus"
+    when symbolNameEqualsText(source, name_start, name_end, n_open) { give LIR_PLATFORM_FILE_OPEN }
+    when symbolNameEqualsText(source, name_start, name_end, n_read) { give LIR_PLATFORM_FILE_READ }
+    when symbolNameEqualsText(source, name_start, name_end, n_write) { give LIR_PLATFORM_FILE_WRITE }
+    when symbolNameEqualsText(source, name_start, name_end, n_seek) { give LIR_PLATFORM_FILE_SEEK }
+    when symbolNameEqualsText(source, name_start, name_end, n_size) { give LIR_PLATFORM_FILE_SIZE }
+    when symbolNameEqualsText(source, name_start, name_end, n_flush) { give LIR_PLATFORM_FILE_FLUSH }
+    when symbolNameEqualsText(source, name_start, name_end, n_close) { give LIR_PLATFORM_FILE_CLOSE }
+    when symbolNameEqualsText(source, name_start, name_end, n_status) { give LIR_PLATFORM_FILE_STATUS }
+    give -1
+}
+
+flow semaFileUsage(op: Int) => Text {
+    when op == LIR_PLATFORM_FILE_OPEN { give "fileOpen requiere (ruta: Text, modo: Int)" }
+    when op == LIR_PLATFORM_FILE_READ { give "fileRead requiere (archivo: File, destino: List<Int> mutable, máximo: Int)" }
+    when op == LIR_PLATFORM_FILE_WRITE { give "fileWrite requiere (archivo: File, bytes: List<Int>, cantidad: Int)" }
+    when op == LIR_PLATFORM_FILE_SEEK { give "fileSeek requiere (archivo: File, desplazamiento: Int, origen: Int)" }
+    when op == LIR_PLATFORM_FILE_CLOSE { give "fileClose requiere (archivo: File), que se consume" }
+    give "la operación requiere (archivo: File)"
+}
+
+flow semaIsByteList(ctx: view SemaContext, ty: Int) => Bool {
+    when ty < 8 || ty >= ctx.types.types.length { give false }
+    choose ctx.types.types[ty].kind {
+        SemTypeKind.List : { give ctx.types.types[ty].elem_type == 1 }
+        _ : { give false }
+    }
+}
+
+// The file builtins: fileOpen produces the linear File; fileClose consumes
+// it (a move, so later use or a second close is a use-after-move); every
+// other operation borrows it shared for the call. Returns -1 when the
+// callee is not a file builtin.
+flow semaFileBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTree, start: Int, end: Int, name_start: Int, name_end: Int, first_arg: Int, arg_count: Int) => Int {
+    hold op = semaFileOp(source, name_start, name_end)
+    when op < 0 { give -1 }
+    change arity = 1
+    when op == LIR_PLATFORM_FILE_OPEN { arity = 2 }
+    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { arity = 3 }
+    hold usage = semaFileUsage(op)
+    when arg_count != arity {
+        semaAddError(edit ctx, "L0004", usage, start, end)
+        give 7
+    }
+    hold file_t = semTypeMakeFile(edit ctx.types)
+    change args: List of[Int] = List[]
+    change loans: List of[Int] = List[]
+    change res_t = 1
+    when op == LIR_PLATFORM_FILE_OPEN {
+        hold path_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+        hold path_loan = semaPlatformArgLoan(edit ctx, path_t, start, end)
+        hold path = ctx.lir.borrowed
+        hold mode_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+        hold mode = lirTakeOperand(edit ctx, mode_t)
+        when path_t != 5 || mode_t != 1 {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        when path < 0 || path_loan < 0 {
+            semaAddError(edit ctx, "L0016", "fileOpen requiere un lugar Text prestable", start, end)
+            give 7
+        }
+        loans@push(path_loan)
+        args@push(lirArg(edit ctx.lir, true, path, false))
+        args@push(lirArg(edit ctx.lir, false, mode, false))
+        res_t = file_t
+    } otherwise when op == LIR_PLATFORM_FILE_CLOSE {
+        hold close_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+        hold file = lirTakeOperand(edit ctx, close_t)
+        when !semTypeIsFile(view ctx.types, close_t) {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        args@push(lirArg(edit ctx.lir, false, file, false))
+    } otherwise {
+        hold f_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+        hold f_loan = semaPlatformArgLoan(edit ctx, f_t, start, end)
+        hold f_place = ctx.lir.borrowed
+        when !semTypeIsFile(view ctx.types, f_t) {
+            semaAddError(edit ctx, "L0004", usage, start, end)
+            give 7
+        }
+        when f_place < 0 || f_loan < 0 {
+            semaAddError(edit ctx, "L0016", "la operación requiere un lugar File prestable", start, end)
+            give 7
+        }
+        loans@push(f_loan)
+        args@push(lirArg(edit ctx.lir, true, f_place, false))
+        when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE {
+            hold is_read = op == LIR_PLATFORM_FILE_READ
+            hold b_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+            change b_loan = -1
+            when is_read { b_loan = semaPlatformArgLoanEdit(edit ctx, b_t, start, end) }
+            otherwise { b_loan = semaPlatformArgLoan(edit ctx, b_t, start, end) }
+            hold b_place = ctx.lir.borrowed
+            hold n_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 2], ACCESS_MOVE)
+            hold n = lirTakeOperand(edit ctx, n_t)
+            when !semaIsByteList(view ctx, b_t) || n_t != 1 {
+                semaAddError(edit ctx, "L0004", usage, start, end)
+                give 7
+            }
+            when b_place < 0 || b_loan < 0 {
+                semaAddError(edit ctx, "L0016", "la operación requiere un lugar List<Int> prestable", start, end)
+                give 7
+            }
+            loans@push(b_loan)
+            args@push(lirArg(edit ctx.lir, true, b_place, is_read))
+            args@push(lirArg(edit ctx.lir, false, n, false))
+        } otherwise when op == LIR_PLATFORM_FILE_SEEK {
+            hold o_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+            hold offset = lirTakeOperand(edit ctx, o_t)
+            hold w_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 2], ACCESS_MOVE)
+            hold whence = lirTakeOperand(edit ctx, w_t)
+            when o_t != 1 || w_t != 1 {
+                semaAddError(edit ctx, "L0004", usage, start, end)
+                give 7
+            }
+            args@push(lirArg(edit ctx.lir, false, offset, false))
+            args@push(lirArg(edit ctx.lir, false, whence, false))
+        }
+    }
+    semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, start, end)
+    semaPlatformEmit(edit ctx, op, view args, res_t, true)
+    give res_t
+}
+
+// ---- Native windows (P0-D) -----------------------------------------------
+
+flow semaWindowOp(source: view Text, name_start: Int, name_end: Int) => Int {
+    hold n_open = "windowOpen"
+    hold n_status = "windowStatus"
+    hold n_next = "windowNext"
+    hold n_fill = "windowFill"
+    hold n_text = "windowText"
+    hold n_present = "windowPresent"
+    hold n_send = "windowSend"
+    hold n_pixel = "windowPixel"
+    hold n_close = "windowClose"
+    when symbolNameEqualsText(source, name_start, name_end, n_open) { give LIR_PLATFORM_WINDOW_OPEN }
+    when symbolNameEqualsText(source, name_start, name_end, n_status) { give LIR_PLATFORM_WINDOW_STATUS }
+    when symbolNameEqualsText(source, name_start, name_end, n_next) { give LIR_PLATFORM_WINDOW_NEXT }
+    when symbolNameEqualsText(source, name_start, name_end, n_fill) { give LIR_PLATFORM_WINDOW_FILL }
+    when symbolNameEqualsText(source, name_start, name_end, n_text) { give LIR_PLATFORM_WINDOW_TEXT }
+    when symbolNameEqualsText(source, name_start, name_end, n_present) { give LIR_PLATFORM_WINDOW_PRESENT }
+    when symbolNameEqualsText(source, name_start, name_end, n_send) { give LIR_PLATFORM_WINDOW_SEND }
+    when symbolNameEqualsText(source, name_start, name_end, n_pixel) { give LIR_PLATFORM_WINDOW_PIXEL }
+    when symbolNameEqualsText(source, name_start, name_end, n_close) { give LIR_PLATFORM_WINDOW_CLOSE }
+    hold n_cell = "windowCell"
+    hold n_text_bytes = "windowTextBytes"
+    when symbolNameEqualsText(source, name_start, name_end, n_cell) { give LIR_PLATFORM_WINDOW_CELL }
+    when symbolNameEqualsText(source, name_start, name_end, n_text_bytes) { give LIR_PLATFORM_WINDOW_TEXT_BYTES }
+    give -1
+}
+
+flow semaWindowUsage(op: Int) => Text {
+    when op == LIR_PLATFORM_WINDOW_OPEN { give "windowOpen requiere (título: Text, ancho: Int, alto: Int)" }
+    when op == LIR_PLATFORM_WINDOW_FILL { give "windowFill requiere (ventana: Window, x: Int, y: Int, ancho: Int, alto: Int, rgb: Int)" }
+    when op == LIR_PLATFORM_WINDOW_TEXT { give "windowText requiere (ventana: Window, x: Int, y: Int, texto: Text, rgb: Int)" }
+    when op == LIR_PLATFORM_WINDOW_SEND { give "windowSend requiere (ventana: Window, mensaje: Int, wparam: Int, lparam: Int)" }
+    when op == LIR_PLATFORM_WINDOW_PIXEL { give "windowPixel requiere (ventana: Window, x: Int, y: Int)" }
+    when op == LIR_PLATFORM_WINDOW_CLOSE { give "windowClose requiere (ventana: Window), que se consume" }
+    when op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give "windowTextBytes requiere (ventana: Window, x: Int, y: Int, bytes: List<Int>, cantidad: Int, rgb: Int)" }
+    give "la operación requiere (ventana: Window)"
+}
+
+// The window builtins, checked and lowered from the shared resource table
+// (lir_build.l): windowOpen produces the linear Window, windowClose
+// consumes it (a move), every other operation borrows it shared for the
+// call. Returns -1 when the callee is not a window builtin.
+flow semaWindowBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTree, start: Int, end: Int, name_start: Int, name_end: Int, first_arg: Int, arg_count: Int) => Int {
+    hold op = semaWindowOp(source, name_start, name_end)
+    when op < 0 { give -1 }
+    when arg_count != lirResourceArity(op) {
+        semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+        give 7
+    }
+    hold window_t = semTypeMakeWindow(edit ctx.types)
+    change args: List of[Int] = List[]
+    change loans: List of[Int] = List[]
+    each i among 0..arg_count {
+        hold kind = lirResourceArgKind(op, i)
+        when kind == 0 || kind == 5 {
+            hold t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + i], ACCESS_MOVE)
+            hold operand = lirTakeOperand(edit ctx, t)
+            when (kind == 0 && t != 1) || (kind == 5 && !semTypeIsWindow(view ctx.types, t)) {
+                semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+                give 7
+            }
+            args@push(lirArg(edit ctx.lir, false, operand, false))
+        } otherwise {
+            hold t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + i], ACCESS_READ)
+            hold loan = semaPlatformArgLoan(edit ctx, t, start, end)
+            hold place = ctx.lir.borrowed
+            when (kind == 1 && !semTypeIsWindow(view ctx.types, t)) || (kind == 4 && t != 5) || (kind == 2 && !semaIsByteList(view ctx, t)) {
+                semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
+                give 7
+            }
+            when place < 0 || loan < 0 {
+                semaAddError(edit ctx, "L0016", "la operación requiere un lugar prestable (Window o Text)", start, end)
+                give 7
+            }
+            loans@push(loan)
+            args@push(lirArg(edit ctx.lir, true, place, false))
+        }
+    }
+    change res_t = 1
+    when lirResourceOpens(op) { res_t = window_t }
+    semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, start, end)
+    semaPlatformEmit(edit ctx, op, view args, res_t, true)
+    give res_t
 }

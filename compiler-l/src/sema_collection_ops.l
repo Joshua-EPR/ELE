@@ -22,6 +22,7 @@ pub fn semaExpectedListElem(ctx: &SemaContext) -> Int {
 }
 
 pub fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool, elem_t: Int, elements: &List<Int>) -> Int {
+    when semaRejectLinearElem(edit ctx, elem_t, expr.start, expr.end) { give 7 }
     if is_array {
         lirMarkUnsupported(&mut ctx.lir, expr.start)
         return semTypeMakeArray(&mut ctx.types, elem_t)

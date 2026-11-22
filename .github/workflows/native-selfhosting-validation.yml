@@ -2,9 +2,10 @@ name: ELE native self-hosting validation
 
 on:
   push:
-    branches: [main, feat/ele-original-syntax-v2]
+    branches: [main]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax, feat/ele-v2-stage1-of-types]
+    # Stacked feature PRs target other feature branches. Run this gate for
+    # every PR head instead of silently omitting those integration changes.
   workflow_dispatch:
 
 concurrency:
@@ -91,6 +92,24 @@ jobs:
           --test native_list_l
           --test native_pe64_l
           -- --test-threads=1
+      # Stage 1 is already built by the Linux step above. Explicitly exercise
+      # the autonomous driver with external std roots and fail-closed imports
+      # here; the full Windows suite runs these tests automatically.
+      - name: ELEPad standard library search root regression tests (Linux)
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          cargo test -p project-l --test ele_build_driver_l driver_library_ -- --test-threads=1
+          cargo test -p project-l --test ele_build_driver_l driver_resolves_elepad_std_console_with_explicit_library_root -- --test-threads=1
+      # P0-D windows: on Linux windowOpen must report -7 (no graphical
+      # backend yet); Windows runs the real window test in the full suite.
+      - name: Native windows report no graphical session (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test window_l -- --test-threads=1
+      # P0-B file streams: the ELF64 image runs natively here (Windows runs
+      # the PE32+ half inside the full suite below).
+      - name: Native file streams (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test file_streams_l -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
       - name: Stage 0 front end, modules, references and differential suites (MSVC)
@@ -118,6 +137,57 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: >-
           cargo test -p project-l --no-fail-fast -- --test-threads=1
+      # P0-D: 200 open/draw/close cycles must not leak GDI or USER objects.
+      - name: Native window resource audit (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          cargo build -p project-l --bin l
+          New-Item -ItemType Directory -Force target/ele-driver | Out-Null
+          Push-Location target/ele-driver
+          ../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift
+          Pop-Location
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/native_backend/win64_window_resources.ps1 -Ele $driver
+      # Window ELEPad: in-process render/dispatch test, then the real
+      # executable edited and saved through posted window messages.
+      - name: ELEPad window editor (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          & $driver build apps/elepad/src/gui_test.l --lib . --target pe --output target/elepad-gui-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'gui_test build failed' }
+          $out = & ./target/elepad-gui-test.exe
+          if ($LASTEXITCODE -ne 0 -or $out -cne 'elepad-gui-ok') { throw "gui_test failed ($LASTEXITCODE): $out" }
+          ./tests/elepad/gui.ps1 -Ele $driver
+      # std/io/console.l through the autonomous driver: decoder over
+      # redirected bytes, then a real console (AllocConsole +
+      # WriteConsoleInputW) read with ReadConsoleInputW, and the console
+      # input mode restored afterwards.
+      - name: Console input library (Windows, real console)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          cargo build -p project-l --bin l
+          New-Item -ItemType Directory -Force target/ele-driver | Out-Null
+          Push-Location target/ele-driver
+          ../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift
+          Pop-Location
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/std/console_input.ps1 -Ele $driver
+      - name: Win64 callback through autonomous PE generator
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/native_backend/win64_callback.ps1 -Ele $driver
+      - name: Win32 window and message loop through autonomous PE generator
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/native_backend/win64_window.ps1 -Ele $driver
       # Stage 1 tools were bootstrapped by the Rust integration suites above.
       # This is a per-entry + imported closure measurement, not Stage 2.
       - name: Test self-coverage gate (MSVC)

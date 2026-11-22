@@ -326,6 +326,17 @@ pub fn semaPlatformArgLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int)
     return ctx.pending_loan
 }
 
+// The exclusive form, for fileRead's destination list: the runtime stores
+// into its elements, so no other access may overlap the call.
+expose flow semaPlatformArgLoanEdit(ctx: edit SemaContext, ty: Int, start: Int, end: Int) => Int {
+    hold place = ctx.lir.place
+    hold path = ctx.expression_path
+    ctx.lir.borrowed = -1
+    when place < 0 || path < 0 { give -1 }
+    semaBorrowPlace(edit ctx, path, ty, true, SITE_ARG, start, end)
+    give ctx.pending_loan
+}
+
 // writeBytes borrows the two stable places for the duration of the platform
 // operation. It must never move or duplicate the List<Int> heap owner.
 // The LIR verifier independently requires two immutable ref arguments.
@@ -355,6 +366,29 @@ pub fn semaWriteBytes(ctx: &mut SemaContext, start: Int, end: Int, path_ty: Int,
     args.push(bytes_arg)
     semaPlatformEmit(&mut ctx, LIR_PLATFORM_WRITE_BYTES, &args, 1, true)
     return 1
+}
+
+expose flow semaWriteConsoleBytes(ctx: edit SemaContext, start: Int, end: Int, bytes_ty: Int, bytes: Int) => Int {
+    change valid_list = false
+    when bytes_ty >= 0 && bytes_ty < ctx.types.types.length {
+        hold elem = view ctx.types.types[bytes_ty]
+        choose elem.kind {
+            SemTypeKind.List : { valid_list = elem.elem_type == 1 }
+            _ : {}
+        }
+    }
+    when !valid_list {
+        semaAddError(edit ctx, "L0004", "writeConsoleBytes requiere (List<Int>)", start, end)
+        give 7
+    }
+    when bytes < 0 {
+        semaAddError(edit ctx, "L0016", "writeConsoleBytes requiere un lugar prestable", start, end)
+        give 7
+    }
+    change args: List of[Int] = List[]
+    args@push(lirArg(edit ctx.lir, true, bytes, false))
+    semaPlatformEmit(edit ctx, LIR_PLATFORM_WRITE_CONSOLE, view args, 1, true)
+    give 1
 }
 
 expose flow semaSameFile(ctx: edit SemaContext, start: Int, end: Int, path_a_ty: Int, path_a: Int, path_b_ty: Int, path_b: Int) => Int {

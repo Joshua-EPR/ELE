@@ -354,6 +354,41 @@ flow cfgUsesKind(p: view CfgProgram, kind: Int) => Bool {
     give false
 }
 
+// Whether the program calls the console input operations (platform codes 6
+// consolemode, 7 readevent). Their routines, and on Windows their imports
+// (GetConsoleMode, SetConsoleMode, ReadConsoleInputW), are emitted only
+// then, so other images keep their import tables unchanged.
+flow cfgUsesConsole(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && (p.insts[i].op == 6 || p.insts[i].op == 7) { give true }
+    }
+    give false
+}
+
+flow cfgUsesConsoleOutput(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && p.insts[i].op == 8 { give true }
+    }
+    give false
+}
+
+// File stream routines (platform codes 9..16) only for programs using them,
+// so every other image keeps its exact bytes and imports.
+flow cfgUsesFiles(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && p.insts[i].op >= 9 && p.insts[i].op <= 16 { give true }
+    }
+    give false
+}
+
+// Window routines (platform codes 17..25), likewise only when used.
+flow cfgUsesWindows(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && p.insts[i].op >= 17 && p.insts[i].op <= 27 { give true }
+    }
+    give false
+}
+
 expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     give cfgBuildFor(p, 0)
 }
@@ -462,10 +497,14 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change platform_at: List of[Int] = List[]
     when platform {
         hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
+        hold console = cfgUsesConsole(p)
+        hold console_output = cfgUsesConsoleOutput(p)
+        hold files = cfgUsesFiles(p)
+        hold windows = cfgUsesWindows(p)
         when target == 1 {
-            platform_at = w64EmitPlatform(edit code, edit imports, view rt)
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt, console, console_output, files, windows)
         } otherwise {
-            platform_at = pfEmitAll(edit code, view rt, edit data_at)
+            platform_at = pfEmitAll(edit code, view rt, edit data_at, console, console_output, files, windows)
         }
     }
 
@@ -501,6 +540,8 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         hold routine = -1 - fix.call_to[i] - cfgPlatformBase()
         hold platform_routine = routine >= 0 && routine < platform_at.length
         when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine { missing_routine = true }
+        // A platform routine left out of this image (-1) is never a target.
+        when platform_routine && platform_at[routine] < 0 { missing_routine = true }
     }
     when missing_routine {
         result.error = 73
