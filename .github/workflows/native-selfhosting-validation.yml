@@ -104,6 +104,10 @@ jobs:
       - name: Native windows report no graphical session (Linux ELF64)
         if: runner.os == 'Linux' && !cancelled()
         run: cargo test -p project-l --test window_l -- --test-threads=1
+      # textFromBytes: the ELF64 image runs natively here.
+      - name: Text from bytes (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test text_from_bytes_l -- --test-threads=1
       # P0-B file streams: the ELF64 image runs natively here (Windows runs
       # the PE32+ half inside the full suite below).
       - name: Native file streams (Linux ELF64)
