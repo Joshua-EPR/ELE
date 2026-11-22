@@ -571,6 +571,92 @@ fn forged_file_handles_are_rejected_before_image_creation() {
     }
 }
 
+/// A File opened on only some paths into a join must not escape the exit
+/// check, which only sees values that are live on every path.
+#[test]
+fn file_live_on_some_paths_is_rejected() {
+    let program = |count: usize, blocks: &[&str]| {
+        format!(
+            "ELE-LIR 1\nmodule structs 0 funcs 1 main f0\n\
+             func f0 4:109,97,105,110 params 0 result i 0 0 vars 4 blocks {count}\n\
+             var v0 val t\nvar v1 val h\nvar v2 val b\nvar v3 val i\n{}\nendfunc\nend\n",
+            blocks.join("\n")
+        )
+    };
+    let open = "i platform v1 fileopen 2 ref p0 0 val ci0";
+    let text = "i use v0 ct1:120";
+    let flag = "i use v2 cb1";
+    let release = "i drop v0 -";
+    let cases = [
+        (
+            "file_open_on_one_branch",
+            program(
+                4,
+                &[
+                    "block 0 2",
+                    text,
+                    flag,
+                    "t branch v2 1 2",
+                    "block 1 1",
+                    open,
+                    "t jump 3",
+                    "block 2 0",
+                    "t jump 3",
+                    "block 3 1",
+                    release,
+                    "t return ci0",
+                ],
+            ),
+        ),
+        (
+            "file_reopened_in_loop",
+            program(
+                4,
+                &[
+                    "block 0 2",
+                    text,
+                    flag,
+                    "t jump 1",
+                    "block 1 0",
+                    "t branch v2 2 3",
+                    "block 2 1",
+                    open,
+                    "t jump 1",
+                    "block 3 1",
+                    release,
+                    "t return ci0",
+                ],
+            ),
+        ),
+        (
+            "file_reopened_through_entry",
+            program(
+                3,
+                &[
+                    "block 0 3",
+                    text,
+                    flag,
+                    open,
+                    "t branch v2 1 2",
+                    "block 1 1",
+                    release,
+                    "t jump 0",
+                    "block 2 2",
+                    release,
+                    "i platform v3 fileclose 1 val v1",
+                    "t return ci0",
+                ],
+            ),
+        ),
+    ];
+    for (name, lir) in cases {
+        for target in TARGETS {
+            let built = compile(name, lir.as_bytes(), target);
+            rejection(&built, Some(59)).unwrap_or_else(|why| panic!("{name} [{target:?}]: {why}"));
+        }
+    }
+}
+
 #[test]
 fn typed_file_open_and_close_is_accepted() {
     let lir = main_only(
