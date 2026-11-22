@@ -21,7 +21,7 @@ Sections 1-5 are the 2026-11-21 snapshot. Where they differ, this section wins: 
 Full validation: on a local, unpushed integration of `main` + this chain + #145 (Windows + WSL): fmt and clippy clean, workspace suite 1181 passed / 0 failed / 5 ignored, self-coverage 106/106/106/22, Windows Gen2 = Gen3 bit for bit through `scripts/package_distribution.py`. The chain alone fails `stage1_example_images_are_structurally_valid` where ELF64 runs (WSL), until it receives #141 from main.
 
 Blockers and known limits:
-- CI passed on `8f1d1f4` (#142), `213183c` (#146), `a0f29f1` (#147) and `8f972c0` (#145). For #148 and #149 check the PR; local results are not CI.
+- CI passed on `8f1d1f4` (#142), `213183c` (#146), `a0f29f1` (#147), `37e504d` (#148) and `8f972c0` (#145), and the Windows suite on `73399d3` (#149). The commits after `73399d3` only change this file; check their CI on the PR.
 - Forged LIR can still leak an owned `Text` opened on one path (reproduced; general verifier).
 - A File live at `t unreachable` is accepted (reproduced; that terminator does not return).
 - The Window runtime trusts verified LIR; it does not validate the block magic.
