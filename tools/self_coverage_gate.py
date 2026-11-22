@@ -63,12 +63,18 @@ def code48_hint(module: dict[str, int] | None, code: int | None) -> str | None:
 
 
 
-def find_binary(target: Path, name: str) -> Path:
-    # Stage 0 builds Stage 1 tools into per-test normal directories on MSVC.
-    found = sorted((target / name / "normal").rglob(name + ".exe"))
-    if len(found) != 1:
-        raise ValueError(f"expected one {name}.exe under {target}, found {len(found)}")
-    return found[0]
+def find_binary(target: Path, name: str, sources: Path) -> Path:
+    # Every test process builds its Stage 1 tools in a directory of its own
+    # (tests/stage1_support), so one run leaves several copies. Measure the
+    # newest, and never one that predates the sources being measured.
+    found = list((target / name / "normal").rglob(name + ".exe"))
+    if not found:
+        raise ValueError(f"no {name}.exe under {target}")
+    newest = max(found, key=lambda path: (path.stat().st_mtime_ns, str(path)))
+    edited = max((path.stat().st_mtime_ns for path in sources.rglob("*.l")), default=0)
+    if newest.stat().st_mtime_ns < edited:
+        raise ValueError(f"stale {name}.exe under {target}: rebuild Stage 1 first")
+    return newest
 
 
 def command(argv: list[str], cwd: Path, timeout: int) -> dict[str, Any]:
@@ -269,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         source_paths = sorted(root.rglob("*.l"))
         if not source_paths:
             raise ValueError(f"no ELE sources in {root}")
-        paths = {name: find_binary(args.target, name) for name in
+        paths = {name: find_binary(args.target, name, root) for name in
                  ("main_parser", "main_sema", "native_cfg_demo")}
         args.output.mkdir(parents=True, exist_ok=True)
         rows = [
