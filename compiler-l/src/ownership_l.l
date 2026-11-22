@@ -110,7 +110,7 @@ pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, ve
     return true
 }
 
-// Whether dropping `root` would release a linear leaf (a File) that is
+// Whether releasing `root` would discard a linear leaf (a File) that is
 // still owned on some path into this point (FLOW_LIVE or FLOW_MAYBE).
 flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int) => Bool {
     when graph.linear_type < 0 || root < 0 || root >= graph.paths.length { give false }
@@ -121,6 +121,21 @@ flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int)
             when s == FLOW_LIVE || s == FLOW_MAYBE { give true }
         }
         leaf = flowNextPath(graph, root, leaf)
+    }
+    give false
+}
+
+// A write to an owned place releases its old value, just like a scope drop.
+// A write through `edit` instead releases the referent; its binding path is
+// a reference and therefore has no owned drop leaf. The event carries the
+// referent type so it cannot evade the linear check through that binding.
+flow flowReleasesLinear(graph: view FlowGraph, state: view List of[Int], event: view FlowEvent) => Bool {
+    when event.kind == FLOW_DROP_REF {
+        give graph.linear_type >= 0 && event.data == graph.linear_type
+    }
+    when event.kind == FLOW_DROP { give flowDropsLinear(graph, state, event.path) }
+    when event.kind == FLOW_WRITE {
+        give flowDropsLinear(graph, state, event.path)
     }
     give false
 }
@@ -162,7 +177,7 @@ pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
             var event = block.first
             while event >= 0 {
                 let instruction = &graph.events[event]
-                when instruction.kind == FLOW_DROP && flowDropsLinear(graph, view work.scratch, instruction.path) {
+                when flowReleasesLinear(graph, view work.scratch, instruction) {
                     give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps)
                 }
                 if !flowApply(graph, &mut work.scratch, instruction, true) {
