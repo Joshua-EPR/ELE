@@ -37,6 +37,9 @@ expose flow cfgTextType() => Int {
 // integer constant or arithmetic expression has this type.
 expose flow cfgFileType() => Int { give -4 }
 
+// Values that own an OS resource only their close operation may release.
+expose flow cfgIsLinear(ty: Int) => Bool { give ty == cfgFileType() }
+
 // Values whose assignment transfers ownership instead of copying.
 expose flow cfgIsMove(ty: Int) => Bool {
     give ty >= 2 || ty == cfgTextType() || ty == cfgFileType()

@@ -279,6 +279,27 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
     give true
 }
 
+// The liveness fixpoint is a MUST analysis (intersection at joins), so on
+// its own it forgets a resource opened on only some paths into a block: that
+// resource would be neither closed nor seen at return or at the next write.
+// An owned linear value must therefore be live on all edges into a block or
+// on none. The entry block also has the implicit edge from the caller.
+flow cfgLinearJoins(p: view CfgProgram, f: Int, inputs: view List of[Bool], outputs: view List of[Bool], pred_first: view List of[Int], preds: view List of[Int], bits: Int) => Bool {
+    hold func = view p.functions[f]
+    each v among 0..func.vars {
+        hold slot = func.first_var + v
+        when cfgIsLinear(p.types_code[slot]) && !p.var_ref[slot] {
+            when inputs[v] != (v < func.params) { give false }
+            each b among 0..func.blocks {
+                each n among pred_first[b]..pred_first[b + 1] {
+                    when outputs[preds[n] * bits + v] != inputs[b * bits + v] { give false }
+                }
+            }
+        }
+    }
+    give true
+}
+
 flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     hold func = view p.functions[f]
     hold blocks = func.blocks
@@ -366,6 +387,7 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
         }
     }
 
+    when !cfgLinearJoins(p, f, view inputs, view outputs, view pred_first, view preds, bits) { give 59 }
     each b among 0..blocks {
         hold block = view p.blocks[func.first_block + b]
         change live: List of[Bool] = List[]
