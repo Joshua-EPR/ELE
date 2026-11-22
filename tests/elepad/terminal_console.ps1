@@ -112,7 +112,7 @@ try {
     if ($result -notmatch '^exit=(\d+) before=(\d+) after=(\d+)$') { throw $result }
     if ([int]$Matches[1] -ne 0) { throw "ELEPad exited $($Matches[1]); log: $([IO.File]::ReadAllText($log))" }
     if ([long]$Matches[2] -ne [long]$Matches[3]) { throw 'console input mode was not restored' }
-    $expected = "aéb`r`nc"
+    $expected = "a" + [char]0xE9 + "b`r`nc"
     if ([IO.File]::ReadAllText($filePath,[Text.UTF8Encoding]::new($false)) -cne $expected) { throw "file mismatch; before=$beforeFile" }
     Write-Host 'PASS real Windows console ELEPad edit/save/reopen and mode restoration'
 } finally {

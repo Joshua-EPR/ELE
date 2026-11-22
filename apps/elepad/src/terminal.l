@@ -28,7 +28,7 @@ flow saveDocument(editor: edit Editor, path: view Text) => Int {
         },
         Err(code): { give 22 },
     }
-    editor.document.dirty = false
+    editorMarkSaved(edit editor)
     give 0
 }
 
@@ -80,7 +80,7 @@ flow run(path: view Text, source: view Text) => Int {
                 change scroll = false
                 when new_line < top { top = new_line; scroll = true }
                 when new_line >= top + height - 2 { top = new_line - height + 3; scroll = true }
-                when scroll || ev.key == KEY_ENTER || (ev.key == KEY_DELETE && old_offset == old_end) || new_line != old_line {
+                when scroll || action == ACTION_REDRAW || ev.key == KEY_ENTER || (ev.key == KEY_DELETE && old_offset == old_end) || new_line != old_line {
                     frame = renderFull(view editor, path, top, width, height)
                 } otherwise when ev.kind == EVENT_KEY && (ev.key == KEY_CHAR || ev.key == KEY_TAB || ev.key == KEY_BACKSPACE || ev.key == KEY_DELETE) {
                     frame = renderCurrentLine(view editor, path, top, width, height)
