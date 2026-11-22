@@ -36,6 +36,11 @@ expose shape Editor {
     mode: Int
     query: List of[Int]
     query_len: Int
+    // Open prompt (Ctrl+O): the typed path as UTF-8 bytes, and the result
+    // of the last attempt (0 none, else a document_io open status).
+    path_input: List of[Int]
+    path_len: Int
+    open_failed: Int
     find_failed: Bool
 }
 
@@ -43,6 +48,7 @@ expose fixed OP_INSERT = 1
 expose fixed OP_DELETE = 2
 expose fixed MODE_EDIT = 0
 expose fixed MODE_FIND = 1
+expose fixed MODE_OPEN = 2
 // History bytes beyond this bound drop the whole log (no partial undo).
 fixed HISTORY_LIMIT = 33554432
 
@@ -65,7 +71,8 @@ expose flow newEditor(source: view Text) => Editor {
     change cursors: List of[Int] = List[]
     change data: List of[Int] = List[]
     change query: List of[Int] = List[]
-    give Editor(document: loadText(source), cursor: newCursor(), newline_crlf: crlf, anchor: -1, clipboard: clip, clipboard_status: 0, h_kind: kinds, h_offset: offsets, h_count: counts, h_start: starts, h_group: groups, h_cursor: cursors, h_data: data, h_top: 0, h_total: 0, h_group_next: 0, h_typing: false, h_saved: 0, mode: MODE_EDIT, query: query, query_len: 0, find_failed: false)
+    change path_input: List of[Int] = List[]
+    give Editor(document: loadText(source), cursor: newCursor(), newline_crlf: crlf, anchor: -1, clipboard: clip, clipboard_status: 0, path_input: path_input, path_len: 0, open_failed: 0, h_kind: kinds, h_offset: offsets, h_count: counts, h_start: starts, h_group: groups, h_cursor: cursors, h_data: data, h_top: 0, h_total: 0, h_group_next: 0, h_typing: false, h_saved: 0, mode: MODE_EDIT, query: query, query_len: 0, find_failed: false)
 }
 
 flow setAt(list: edit List of[Int], index: Int, value: Int) {
@@ -375,30 +382,48 @@ expose flow editorPaste(editor: edit Editor) => Bool {
 
 // ---- find ----------------------------------------------------------------
 
-// Append one Unicode scalar, UTF-8 encoded, to the find query.
-expose flow editorQueryPush(editor: edit Editor, scalar: Int) => Bool {
-    when scalar < 32 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) { give false }
-    change at = editor.query_len
+// Prompt input (the find query, the open path): UTF-8 bytes in `list`,
+// `len` of them in use. Returns the new length, or -1 for a scalar that
+// is not printable text.
+flow promptPush(list: edit List of[Int], len: Int, scalar: Int) => Int {
+    when scalar < 32 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) { give -1 }
+    change at = len
     when scalar < 128 {
-        setAt(edit editor.query, at, scalar)
+        setAt(edit list, at, scalar)
         at += 1
     } otherwise when scalar < 2048 {
-        setAt(edit editor.query, at, 192 + scalar / 64)
-        setAt(edit editor.query, at + 1, 128 + scalar % 64)
+        setAt(edit list, at, 192 + scalar / 64)
+        setAt(edit list, at + 1, 128 + scalar % 64)
         at += 2
     } otherwise when scalar < 65536 {
-        setAt(edit editor.query, at, 224 + scalar / 4096)
-        setAt(edit editor.query, at + 1, 128 + (scalar / 64) % 64)
-        setAt(edit editor.query, at + 2, 128 + scalar % 64)
+        setAt(edit list, at, 224 + scalar / 4096)
+        setAt(edit list, at + 1, 128 + (scalar / 64) % 64)
+        setAt(edit list, at + 2, 128 + scalar % 64)
         at += 3
     } otherwise {
-        setAt(edit editor.query, at, 240 + scalar / 262144)
-        setAt(edit editor.query, at + 1, 128 + (scalar / 4096) % 64)
-        setAt(edit editor.query, at + 2, 128 + (scalar / 64) % 64)
-        setAt(edit editor.query, at + 3, 128 + scalar % 64)
+        setAt(edit list, at, 240 + scalar / 262144)
+        setAt(edit list, at + 1, 128 + (scalar / 4096) % 64)
+        setAt(edit list, at + 2, 128 + (scalar / 64) % 64)
+        setAt(edit list, at + 3, 128 + scalar % 64)
         at += 4
     }
-    editor.query_len = at
+    give at
+}
+
+// Length after removing the last complete UTF-8 scalar.
+flow promptPop(list: view List of[Int], len: Int) => Int {
+    when len == 0 { give 0 }
+    change at = len - 1
+    during at > 0 && list[at] >= 128 && list[at] < 192 { at -= 1 }
+    give at
+}
+
+// Append one Unicode scalar, UTF-8 encoded, to the find query.
+expose flow editorQueryPush(editor: edit Editor, scalar: Int) => Bool {
+    hold len = editor.query_len
+    hold next = promptPush(edit editor.query, len, scalar)
+    when next < 0 { give false }
+    editor.query_len = next
     editor.find_failed = false
     give true
 }
@@ -406,10 +431,34 @@ expose flow editorQueryPush(editor: edit Editor, scalar: Int) => Bool {
 // Remove the last complete UTF-8 scalar of the find query.
 expose flow editorQueryPop(editor: edit Editor) => Bool {
     when editor.query_len == 0 { give false }
-    change at = editor.query_len - 1
-    during at > 0 && editor.query[at] >= 128 && editor.query[at] < 192 { at -= 1 }
-    editor.query_len = at
+    hold len = editor.query_len
+    editor.query_len = promptPop(view editor.query, len)
     editor.find_failed = false
+    give true
+}
+
+// ---- open prompt -----------------------------------------------------------
+
+// Start typing a path to open (Ctrl+O); the previous path is kept.
+expose flow editorOpenPrompt(editor: edit Editor) {
+    editor.mode = MODE_OPEN
+    editor.open_failed = 0
+}
+
+expose flow editorPathPush(editor: edit Editor, scalar: Int) => Bool {
+    hold len = editor.path_len
+    hold next = promptPush(edit editor.path_input, len, scalar)
+    when next < 0 { give false }
+    editor.path_len = next
+    editor.open_failed = 0
+    give true
+}
+
+expose flow editorPathPop(editor: edit Editor) => Bool {
+    when editor.path_len == 0 { give false }
+    hold len = editor.path_len
+    editor.path_len = promptPop(view editor.path_input, len)
+    editor.open_failed = 0
     give true
 }
 

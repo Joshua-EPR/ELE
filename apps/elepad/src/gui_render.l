@@ -245,7 +245,16 @@ expose flow guiRender(w: view Window, editor: view Editor, title: view Text, v: 
     // Status bar, or the find prompt.
     hold bar_y = statusTop(v)
     fill(w, 0, bar_y, v.width, ch + 8, COLOR_BAR, edit status)
-    when editor.mode == MODE_FIND {
+    when editor.mode == MODE_OPEN {
+        hold label = "Abrir: "
+        windowText(w, 8, bar_y + 4, label, COLOR_ACCENT)
+        when editor.path_len > 0 { windowTextBytes(w, 8 + 7 * cw, bar_y + 4, editor.path_input, editor.path_len, COLOR_TEXT) }
+        change hint = "Enter abrir  Esc volver"
+        when editor.open_failed == 1 { hint = "cambios sin guardar: ^S primero" }
+        when editor.open_failed == 2 { hint = "ruta no válida" }
+        when editor.open_failed == 3 { hint = "no se pudo abrir" }
+        windowText(w, 8 + (9 + editor.path_len) * cw, bar_y + 4, hint, COLOR_GUTTER)
+    } otherwise when editor.mode == MODE_FIND {
         hold label = "Buscar: "
         windowText(w, 8, bar_y + 4, label, COLOR_ACCENT)
         when editor.query_len > 0 { windowTextBytes(w, 8 + 8 * cw, bar_y + 4, editor.query, editor.query_len, COLOR_TEXT) }
@@ -255,7 +264,7 @@ expose flow guiRender(w: view Window, editor: view Editor, title: view Text, v: 
     } otherwise {
         hold cursor_line = lineOf(b, editor.cursor.offset) + 1
         hold cursor_col = guiColumn(b, editor.cursor.offset) + 1
-        change note = "^S guardar  ^Q salir  ^F buscar  ^Z/^Y deshacer/rehacer"
+        change note = "^S guardar  ^Q salir  ^O abrir  ^F buscar  ^Z/^Y deshacer/rehacer"
         when v.message == GUI_MESSAGE_UNSAVED { note = "Cambios sin guardar: cerrar otra vez para descartarlos" }
         when v.message == GUI_MESSAGE_SAVED { note = "Guardado" }
         when v.message == GUI_MESSAGE_SAVE_FAILED { note = "Error al guardar" }

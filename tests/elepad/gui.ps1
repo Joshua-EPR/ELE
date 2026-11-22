@@ -50,6 +50,18 @@ function Send-Key($hwnd, [uint32]$msg, [long]$wp, [long]$lp = 0) {
 # posted before sending a release, so it arrives after it as on a keyboard.
 function Settle { Start-Sleep -Milliseconds 200 }
 
+function Open-Path($hwnd, [string]$path) {
+    Post $hwnd $WM_CHAR 15
+    foreach ($c in $path.ToCharArray()) { Post $hwnd $WM_CHAR ([int]$c) }
+    Post $hwnd $WM_KEYDOWN 13
+    Settle
+}
+
+function Cancel-Prompt($hwnd) {
+    Post $hwnd $WM_KEYDOWN 27
+    Settle
+}
+
 function Same-Content([string]$file, [string]$expected) {
     $actual = [IO.File]::ReadAllBytes($file)
     $wanted = $utf8.GetBytes($expected)
@@ -210,6 +222,62 @@ try {
     if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad stayed open after undo to the saved text' }
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after undo" }
     Write-Host 'PASS undo to the saved text closes at once'
+
+    # Ctrl+O (WM_CHAR 15), the path, Enter: edit and save the second file.
+    $second = Join-Path $work 'second.l'
+    [IO.File]::WriteAllText($second, "one", $utf8)
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 15
+    foreach ($c in $second.ToCharArray()) { Post $hwnd $WM_CHAR ([int]$c) }
+    Post $hwnd $WM_KEYDOWN 13
+    Post $hwnd $WM_CHAR 120
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $second "xone"
+    Post $hwnd $WM_CLOSE 0
+    if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad did not close after Ctrl+O' }
+    if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after Ctrl+O" }
+    if (-not (Same-Content $file $edited)) { throw 'Ctrl+O changed the first file' }
+    Write-Host 'PASS Ctrl+O opens, edits and saves another file'
+
+    # A path outside ASCII (Latin and CJK; this script stays ASCII).
+    $unicode = Join-Path $work ("caf" + [char]0xE9 + "-" + [char]0x65E5 + ".l")
+    [IO.File]::WriteAllText($unicode, "two", $utf8)
+    $p, $hwnd = Start-Editor $file
+    Open-Path $hwnd $unicode
+    Post $hwnd $WM_CHAR 120
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $unicode "xtwo"
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after a Unicode open'
+    if (-not (Same-Content $file $edited)) { throw 'Unicode open changed the first file' }
+    Write-Host 'PASS Ctrl+O opens a Unicode path'
+
+    # A failed open keeps the document: its next save goes to its own file.
+    $invalid = Join-Path $work 'invalid.l'
+    [IO.File]::WriteAllBytes($invalid, [byte[]](0x61, 0xC3, 0x28))
+    $p, $hwnd = Start-Editor $file
+    Open-Path $hwnd $invalid
+    Cancel-Prompt $hwnd
+    Post $hwnd $WM_CHAR 107
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $file ("k" + $edited)
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after an invalid open'
+    $bytes = [IO.File]::ReadAllBytes($invalid)
+    if (($bytes -join ',') -cne '97,195,40') { throw 'invalid UTF-8 file was modified' }
+    Write-Host 'PASS Ctrl+O rejects invalid UTF-8 and keeps the document'
+
+    # Unsaved changes are never discarded by an open.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 109
+    Open-Path $hwnd $second
+    Cancel-Prompt $hwnd
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $file ("mk" + $edited)
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after a refused open'
+    if (-not (Same-Content $second "xone")) { throw 'refused open touched the other file' }
+    Write-Host 'PASS Ctrl+O with unsaved changes is refused'
 } finally {
     if ($p -and -not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
     Remove-Item -LiteralPath $work -Recurse -Force
