@@ -47,15 +47,30 @@ flow emitPosition(out: edit List of[Int], row: Int, col: Int) {
     appendText(edit out, view seq)
 }
 
-flow emitLine(out: edit List of[Int], b: view Buffer, start: Int, n: Int, width: Int) {
+// Toggle reverse video when the byte at i enters or leaves [sel_lo, sel_hi).
+flow emitSelection(out: edit List of[Int], i: Int, sel_lo: Int, sel_hi: Int, active: Bool) => Bool {
+    hold selected = i >= sel_lo && i < sel_hi
+    when selected && !active {
+        hold on = "\u{1b}[7m"
+        appendText(edit out, view on)
+    } otherwise when !selected && active {
+        hold off = "\u{1b}[27m"
+        appendText(edit out, view off)
+    }
+    give selected
+}
+
+flow emitLine(out: edit List of[Int], b: view Buffer, start: Int, n: Int, width: Int, sel_lo: Int, sel_hi: Int) {
     hold line_number = n + 1
     hold prefix = "{line_number}  "
     appendText(edit out, view prefix)
     change col = prefix.byteLength
     change tab_col = 0
+    change inverse = false
     change i = start
     during i < length(b) && byteAt(b, i) != 10 {
         hold ch = byteAt(b, i)
+        when ch != 13 { inverse = emitSelection(edit out, i, sel_lo, sel_hi, inverse) }
         when ch == 13 { i += 1 }
         otherwise when ch == 9 {
             hold spaces = 4 - tab_col % 4
@@ -79,6 +94,10 @@ flow emitLine(out: edit List of[Int], b: view Buffer, start: Int, n: Int, width:
             tab_col += 1
         }
     }
+    when inverse {
+        hold off = "\u{1b}[27m"
+        appendText(edit out, view off)
+    }
 }
 
 flow emitStatus(out: edit List of[Int], editor: view Editor, path: view Text, height: Int) {
@@ -87,9 +106,22 @@ flow emitStatus(out: edit List of[Int], editor: view Editor, path: view Text, he
     appendText(edit out, view clear)
     hold line = lineNumber(view editor.document, editor.cursor.offset) + 1
     hold col = visualColumn(view editor.document, editor.cursor.offset) + 1
+    when editor.mode == MODE_FIND {
+        hold label = "Buscar: "
+        appendText(edit out, view label)
+        change q = 0
+        during q < editor.query_len {
+            out@push(editor.query[q])
+            q += 1
+        }
+        change result = "  Enter siguiente  Esc volver"
+        when editor.find_failed { result = "  (sin resultados)  Enter siguiente  Esc volver" }
+        appendText(edit out, view result)
+        give
+    }
     change marker = ""
     when editor.document.dirty { marker = " *" }
-    hold status = "{path}{marker}  Ln {line}, Col {col}  Ctrl+S guardar  Ctrl+Q salir"
+    hold status = "{path}{marker}  Ln {line}, Col {col}  ^S guardar ^Q salir ^F buscar ^Z/^Y deshacer/rehacer"
     appendText(edit out, view status)
 }
 
@@ -123,7 +155,7 @@ expose flow renderFull(editor: view Editor, path: view Text, top: Int, width: In
     during row < height {
         emitPosition(edit out, row, 1)
         when at <= length(view editor.document) {
-            emitLine(edit out, view editor.document, at, n, width)
+            emitLine(edit out, view editor.document, at, n, width, selectionStart(editor), selectionEnd(editor))
             during at < length(view editor.document) && byteAt(view editor.document, at) != 10 { at += 1 }
             when at < length(view editor.document) { at += 1 }
             otherwise { at = length(view editor.document) + 1 }
@@ -151,7 +183,7 @@ expose flow renderCurrentLine(editor: view Editor, path: view Text, top: Int, wi
     emitPosition(edit out, n - top + 2, 1)
     hold clear = "\u{1b}[2K"
     appendText(edit out, view clear)
-    emitLine(edit out, view editor.document, lineStart(view editor.document, editor.cursor.offset), n, width)
+    emitLine(edit out, view editor.document, lineStart(view editor.document, editor.cursor.offset), n, width, selectionStart(editor), selectionEnd(editor))
     emitStatus(edit out, editor, path, height)
     emitCursor(edit out, editor, top, width, height)
     give out

@@ -138,6 +138,28 @@ expose flow deleteBackward(b: edit Buffer, offset: Int) => Bool {
     give true
 }
 
+// Remove the bytes [start, end). Both ends must be UTF-8 boundaries.
+expose flow deleteRange(b: edit Buffer, start: Int, end: Int) => Bool {
+    when start < 0 || end > length(view b) || start >= end { give false }
+    when !boundary(view b, start) || !boundary(view b, end) { give false }
+    moveGap(edit b, end)
+    b.gap_start = start
+    b.dirty = true
+    give true
+}
+
+// Insert count bytes of source starting at index from. The caller supplies
+// bytes previously taken from this buffer, so they are complete UTF-8.
+expose flow insertBytes(b: edit Buffer, offset: Int, source: view List of[Int], from: Int, count: Int) => Bool {
+    when !boundary(view b, offset) || from < 0 || count < 0 || from + count > source.length { give false }
+    change i = 0
+    during i < count {
+        insertRaw(edit b, offset + i, source[from + i])
+        i += 1
+    }
+    give true
+}
+
 expose flow loadText(source: view Text) => Buffer {
     change b = newBuffer()
     change i = 0
