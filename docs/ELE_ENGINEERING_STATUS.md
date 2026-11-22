@@ -130,15 +130,17 @@ This file is meant to let a new session resume without repeating investigations.
 2. Open Draft PRs and let CI validate them (no `gh` here). Merge order:
    1. `fix/elf-syscall-whitelist-20261121` (independent, smallest);
    2. `feat/elepad-terminal-history-20261121` (independent);
-   3. `feat/p0b-file-streams-20261121`, then `feat/linear-resources-20261121`, then `feat/p0d-window-api-20261121` (stacked in that order);
+   3. `feat/p0b-file-streams-20261121`, then `feat/linear-resources-20261121`, then `feat/p0d-window-api-20261121`, then `feat/elepad-gui-20261121` (stacked in that order; the last also merges the ELEPad history branch);
    4. `feat/p0c-callbacks-20261121`, then `feat/p0d-window-20261121` (probes and design doc; stacked).
 3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
-5. Design step 3: the graphical ELEPad on `Window`.
-   - Reuse `editor_core.l` unchanged.
-   - Add a `gui_render.l` (rows through `windowText`).
-   - Add a `gui_dispatch.l` that shares a key-to-command table with `terminal_dispatch.l`.
-   - It needs font metrics (`windowCell`) first; the next window builtin to add.
+5. Design step 3 (graphical ELEPad) is done on `feat/elepad-gui-20261121` (`817b1a8`; it contains the ELEPad history branch and the Window API, plus fix `04e36a4`):
+   - `apps/elepad/src/gui.l`, `gui_render.l` and `gui_dispatch.l`.
+   - The shared key table `editor_commands.l` and the shared `document_io.l`.
+   - Builtins `windowCell` (code 26) and `windowTextBytes` (code 27).
+   - Evidence: `gui_test.l` and `tests/elepad/gui.ps1` pass, terminal tests are unchanged and green, a screenshot of the real window was inspected, and the full suite has only the 2 known failures.
+   - A real bug was found and fixed: misaligned UTF-16 class name → `RegisterClassExW` ERROR_NOACCESS in larger images (commit `04e36a4`, also on the Window API branch).
+   - Next for the window editor: Ctrl+O and several documents (needs Text-from-bytes), system clipboard, mouse drag selection, dirty-region redraw.
 6. Design steps 4–6: a PE writable data section, `system flow`/`foreign flow`, and the X11 backend.
 7. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
