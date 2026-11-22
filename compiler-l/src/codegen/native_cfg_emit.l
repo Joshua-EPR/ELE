@@ -381,7 +381,15 @@ flow cfgUsesFiles(p: view CfgProgram) => Bool {
     give false
 }
 
-// Window routines (platform codes 17..25), likewise only when used.
+// textFromBytes (platform code 28), likewise only when used.
+flow cfgUsesTextBytes(p: view CfgProgram) => Bool {
+    each i among 0..p.insts.length {
+        when p.insts[i].kind == 24 && p.insts[i].op == 28 { give true }
+    }
+    give false
+}
+
+// Window routines (platform codes 17..27), likewise only when used.
 flow cfgUsesWindows(p: view CfgProgram) => Bool {
     each i among 0..p.insts.length {
         when p.insts[i].kind == 24 && p.insts[i].op >= 17 && p.insts[i].op <= 27 { give true }
@@ -501,10 +509,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         hold console_output = cfgUsesConsoleOutput(p)
         hold files = cfgUsesFiles(p)
         hold windows = cfgUsesWindows(p)
+        hold text_bytes = cfgUsesTextBytes(p)
         when target == 1 {
-            platform_at = w64EmitPlatform(edit code, edit imports, view rt, console, console_output, files, windows)
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt, console, console_output, files, windows, text_bytes)
         } otherwise {
-            platform_at = pfEmitAll(edit code, view rt, edit data_at, console, console_output, files, windows)
+            platform_at = pfEmitAll(edit code, view rt, edit data_at, console, console_output, files, windows, text_bytes)
         }
     }
 

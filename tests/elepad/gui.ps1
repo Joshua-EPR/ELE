@@ -86,6 +86,22 @@ try {
     if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad stayed open after undo to the saved text' }
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after undo" }
     Write-Host 'PASS undo to the saved text closes at once'
+
+    # Ctrl+O (WM_CHAR 15), the path, Enter: edit and save the second file.
+    $second = Join-Path $work 'second.l'
+    [IO.File]::WriteAllText($second, "one", $utf8)
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 15
+    foreach ($c in $second.ToCharArray()) { Post $hwnd $WM_CHAR ([int]$c) }
+    Post $hwnd $WM_KEYDOWN 13
+    Post $hwnd $WM_CHAR 120
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $second "xone"
+    Post $hwnd $WM_CLOSE 0
+    if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad did not close after Ctrl+O' }
+    if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after Ctrl+O" }
+    if ([IO.File]::ReadAllText($file, $utf8) -cne $edited) { throw 'Ctrl+O changed the first file' }
+    Write-Host 'PASS Ctrl+O opens, edits and saves another file'
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force
 }

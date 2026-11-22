@@ -11,6 +11,9 @@ take std.ui.window
 
 flow run(path: view Text, source: view Text) => Int {
     change editor = newEditor(source)
+    // The open document's path changes with Ctrl+O (the window title keeps
+    // the first one; the title bar inside the window shows the current one).
+    change current = "{path}"
     hold title = "ELEPad - {path}"
     hold w = windowOpen(title, 960, 640)
     hold opened = windowStatus(w)
@@ -23,7 +26,7 @@ flow run(path: view Text, source: view Text) => Int {
     change reader = windowReader()
     change quit_armed = false
     change exit_code = 0
-    guiRender(w, editor, path, v)
+    guiRender(w, editor, current, v)
     during true {
         hold ev = windowEvent(w, edit reader)
         change redraw = false
@@ -52,12 +55,19 @@ flow run(path: view Text, source: view Text) => Int {
         } otherwise when ev.kind == WINDOW_KEY || ev.kind == WINDOW_CHAR {
             hold action = guiCommand(edit editor, ev)
             when action == 2 { quit = true }
-            when action == 1 {
-                hold saved = saveDocument(edit editor, path)
+            when action == ACTION_OPEN {
+                when openDocument(edit editor, edit current) == OPEN_OK {
+                    v.top = 0
+                    v.left = 0
+                    v.message = GUI_MESSAGE_NONE
+                    quit_armed = false
+                }
+            } otherwise when action == 1 {
+                hold saved = saveDocument(edit editor, current)
                 when saved == 0 { v.message = GUI_MESSAGE_SAVED }
                 otherwise { v.message = GUI_MESSAGE_SAVE_FAILED }
                 quit_armed = false
-            } otherwise when action != 2 && (ev.kind == WINDOW_CHAR || ev.pressed) {
+            } otherwise when action != 2 && action != ACTION_OPEN && (ev.kind == WINDOW_CHAR || ev.pressed) {
                 when v.message != GUI_MESSAGE_NONE { v.message = GUI_MESSAGE_NONE }
                 quit_armed = false
             }
@@ -71,7 +81,7 @@ flow run(path: view Text, source: view Text) => Int {
             v.message = GUI_MESSAGE_UNSAVED
             redraw = true
         }
-        when redraw { guiRender(w, editor, path, v) }
+        when redraw { guiRender(w, editor, current, v) }
     }
     hold closed = windowClose(w)
     when exit_code == 0 && closed != 0 { give 6 }

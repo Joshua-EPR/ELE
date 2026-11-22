@@ -75,6 +75,7 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "windowclose") { give 25 }
     when nativeEquals(source, word, "windowcell") { give 26 }
     when nativeEquals(source, word, "windowtextbytes") { give 27 }
+    when nativeEquals(source, word, "textfrombytes") { give 28 }
     give -1
 }
 
@@ -155,6 +156,7 @@ expose flow cfgReadPlatform(p: edit CfgProgram, f: Int, source: view Text, reade
 }
 
 flow cfgPlatformArity(op: Int) => Int {
+    when op == 28 { give 2 }
     when op >= 17 { give cfgWindowArity(op) }
     when op == 0 || op == 7 { give 0 }
     when op == 1 || op == 3 || op == 6 || op == 8 || op >= 13 { give 1 }
@@ -214,10 +216,17 @@ flow cfgIsTextResult(p: view CfgProgram, ty: Int) => Bool {
 }
 
 expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.op < 0 || inst.op > 27 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
+    when inst.op < 0 || inst.op > 28 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
     hold first = inst.arg_first
     when inst.op >= 9 && inst.op <= 16 && !cfgCheckFilePlatform(p, f, inst) { give 131 }
-    when inst.op >= 17 && !cfgCheckWindowPlatform(p, f, inst) { give 131 }
+    when inst.op >= 17 && inst.op <= 27 && !cfgCheckWindowPlatform(p, f, inst) { give 131 }
+    // textfrombytes 2 ref <List of[Int]> 0 val <Int> -> Result<Text,Int>
+    when inst.op == 28 {
+        when !cfgPlatformArgOk(p, f, first, true, true) || !cfgPlatformArgOk(p, f, first + 1, false, false) { give 131 }
+        hold text_dest = p.types_code[p.functions[f].first_var + inst.dst]
+        when !cfgIsTextResult(p, text_dest) { give 132 }
+        give 0
+    }
     when (inst.op == 1 || inst.op == 6) && !cfgPlatformArgOk(p, f, first, false, false) { give 131 }
     when inst.op == 2 {
         when !cfgPlatformArgOk(p, f, first, true, false) || !cfgPlatformArgOk(p, f, first + 1, false, false) { give 131 }
@@ -304,6 +313,13 @@ expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst
     } otherwise when inst.op == 15 {
         hold file = view p.call_args[first]
         cfgLoadOperand(edit code, p, f, view file, 7)
+    } otherwise when inst.op == 28 {
+        cfgPlaceAddressRax(edit code, p, f, inst.dst, -1, -1, -1, edit fix)
+        x64MovReg(edit code, 2, 0)
+        cfgPlatformArgAddress(edit code, p, f, first, edit fix)
+        x64MovReg(edit code, 7, 0)
+        hold count = view p.call_args[first + 1]
+        cfgLoadOperand(edit code, p, f, view count, 6)
     } otherwise when inst.op >= 17 {
         cfgEmitWindowArgs(edit code, p, f, inst, edit fix)
     } otherwise when inst.op >= 13 {
@@ -311,7 +327,8 @@ expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst
         x64LoadMem64(edit code, 7, 0, 0)
     }
     cfgRuntimeCall(edit code, edit fix, cfgPlatformBase() + inst.op)
-    when inst.op == 0 || inst.op >= 4 {
+    // readtext (2) and textfrombytes (28) wrote their Result in place.
+    when inst.op == 0 || (inst.op >= 4 && inst.op != 28) {
         x64StoreSlot(edit code, dst_slot, 0)
     }
 }
