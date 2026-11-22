@@ -14,6 +14,7 @@ pub(crate) struct Platform {
     arg: FuncId,
     read_text: FuncId,
     write_bytes: FuncId,
+    same_file: FuncId,
     pub(crate) file_stat: FuncId,
     trace: bool,
 }
@@ -25,6 +26,7 @@ impl Platform {
             arg: g.declare("l_platform_arg", Linkage::Import, &[I64; 2], &[I64])?,
             read_text: g.declare("l_platform_read_text", Linkage::Import, &[I64; 5], &[I64])?,
             write_bytes: g.declare("l_platform_write_bytes", Linkage::Import, &[I64; 4], &[I64])?,
+            same_file: g.declare("l_platform_same_file", Linkage::Import, &[I64; 4], &[I64])?,
             file_stat: g.declare("l_platform_file_stat", Linkage::Import, &[I64], &[I64])?,
             trace,
         })
@@ -65,6 +67,16 @@ impl FnGen<'_> {
                     b,
                     platform.write_bytes,
                     &[path[0], path[1], bytes[0], bytes[1]],
+                );
+                Ok(result)
+            }
+            PlatformOp::SameFile => {
+                let path_a = self.arg_values(b, h, &args[0])?;
+                let path_b = self.arg_values(b, h, &args[1])?;
+                let result = h.call(
+                    b,
+                    platform.same_file,
+                    &[path_a[0], path_a[1], path_b[0], path_b[1]],
                 );
                 Ok(result)
             }

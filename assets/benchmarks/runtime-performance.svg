@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 430" width="760" height="430">
+
+    <style>
+      .bg { fill: #ffffff; }
+      .text-title { font-family: system-ui, -apple-system, sans-serif; font-size: 18px; font-weight: 700; fill: #1f2328; }
+      .text-subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #656d76; }
+      .text-label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1f2328; }
+      .text-muted { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #656d76; }
+      .text-val { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: #1f2328; }
+      .grid { stroke: #e1e4e8; stroke-dasharray: 3 3; }
+      .axis { stroke: #d0d7de; stroke-width: 1.5; }
+      .border { stroke: #d0d7de; stroke-width: 1; fill: none; }
+      .bar-ele { fill: #0969da; }
+      .bar-rust { fill: #d9381e; }
+      .bar-gcc { fill: #1a7f37; }
+      .bar-neutral { fill: #8250df; }
+      .badge-bg { fill: #dafbe1; stroke: #aceebb; }
+      .badge-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1a7f37; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #0d1117; }
+        .text-title { fill: #f0f6fc; }
+        .text-subtitle { fill: #8b949e; }
+        .text-label { fill: #e6edf3; }
+        .text-muted { fill: #8b949e; }
+        .text-val { fill: #f0f6fc; }
+        .grid { stroke: #21262d; }
+        .axis { stroke: #30363d; }
+        .border { stroke: #30363d; }
+        .bar-ele { fill: #2f81f7; }
+        .bar-rust { fill: #f85149; }
+        .bar-gcc { fill: #3fb950; }
+        .bar-neutral { fill: #a371f7; }
+        .badge-bg { fill: #1f3524; stroke: #2ea043; }
+        .badge-text { fill: #3fb950; }
+      }
+    </style>
+
+<rect width="760" height="430" rx="8" class="bg border"/>
+<text x="30" y="38" class="text-title">Runtime Execution Performance: ELE vs Rust</text>
+<text x="30" y="58" class="text-subtitle">Median execution time (10 iterations) · Exact identical mathematical outputs · Lower is better</text>
+<text x="30" y="102" class="text-title" style="font-size: 14px;">Recursive Fibonacci (n=25)</text>
+<text x="205" y="130" text-anchor="end" class="text-label">ELE (direct native)</text>
+<rect x="220" y="114" width="672.4" height="22" rx="4" class="bar-ele"/>
+<text x="902.4" y="130" class="text-val">53.49 ms</text>
+<text x="205" y="160" text-anchor="end" class="text-label">Rust (debug -O0)</text>
+<rect x="220" y="144" width="284.5" height="22" rx="4" class="bar-neutral"/>
+<text x="514.5" y="160" class="text-val">22.63 ms</text>
+<text x="205" y="190" text-anchor="end" class="text-label">Rust (release -O3)</text>
+<rect x="220" y="174" width="313.3" height="22" rx="4" class="bar-rust"/>
+<text x="543.3" y="190" class="text-val">24.92 ms</text>
+<text x="30" y="236" class="text-title" style="font-size: 14px;">Arithmetic Loop (10,000,000 iters)</text>
+<text x="205" y="264" text-anchor="end" class="text-label">ELE (direct native)</text>
+<rect x="220" y="248" width="371.6" height="22" rx="4" class="bar-ele"/>
+<text x="601.6" y="264" class="text-val">101.34 ms</text>
+<text x="205" y="294" text-anchor="end" class="text-label">Rust (debug -O0)</text>
+<rect x="220" y="278" width="345.9" height="22" rx="4" class="bar-neutral"/>
+<text x="575.9" y="294" class="text-val">94.34 ms</text>
+<text x="205" y="324" text-anchor="end" class="text-label">Rust (release -O3)</text>
+<rect x="220" y="308" width="78.7" height="22" rx="4" class="bar-rust"/>
+<text x="308.7" y="324" class="text-val">21.47 ms</text>
+<text x="30" y="412" class="text-muted">Note: ELE native backend produces baseline unoptimized x86-64 code (without SSA/LLVM passes), matching unoptimized Rust performance.</text>
+</svg>

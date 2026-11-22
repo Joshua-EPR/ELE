@@ -10,6 +10,7 @@ import lir_verify
 import lir_emit
 import lir_write
 import lir_builtin_union
+take lir_patch
 import sema_context
 import sema_drop
 
@@ -17,7 +18,7 @@ import sema_drop
 // the protocol header, and the per-function finish (splice the drop plan,
 // verify, serialize). Only `sema-l --emit-lir` finishes and writes LIR.
 
-fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
+pub fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     for f in 0..tree.fields.length { ctx.lir_field_local.push(-1) }
     var functions = 0
     var structs = 0
@@ -96,14 +97,11 @@ fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     }
 }
 
-fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
+pub fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
     if !ctx.emit_lir || ctx.errors.length > 0 { return }
-    semaLirHeader(&mut ctx, source, tree, ctx.lir_module.fn_first.length)
-    if ctx.errors.length > 0 { return }
-    for i in 0..ctx.lir_functions.length {
-        let line = &ctx.lir_functions[i]
-        ctx.lir_lines.push("{line}")
-    }
+    // Determine header function count before taking a mutable loan of ctx.
+    let function_count = ctx.lir_module.fn_first.length
+    semaLirHeader(&mut ctx, source, tree, function_count)
 }
 
 fn semaLirSignature(ctx: &mut SemaContext, source: &Text, tree: &AstTree, d: Int) {
@@ -158,6 +156,12 @@ fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions
             let first_variant = ctx.lir_module.en_first[k]
             let first_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant])
             let second_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
+            // An owned payload (e.g. a list type never registered) must have
+            // a concrete LIR type code; `?` is never serialized.
+            hold unit_first = ctx.lir_module.variant_payload[first_variant] == 0
+            when (!unit_first && first_code.byteLength == 1 && first_code@byteAt(0) == 63) || (second_code.byteLength == 1 && second_code@byteAt(0) == 63) {
+                semaAddError(edit ctx, "L0016", "payload de Option/Result no representable en ELE-LIR 1", 0, 0)
+            }
             lirBuiltinHeader(&mut ctx, k, first_code, second_code)
             continue
         }
@@ -203,7 +207,7 @@ fn semaLirTypesOk(ctx: &SemaContext, fn_index: Int) -> Bool {
     return true
 }
 
-fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &DropPlan, d: Int) {
+pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &DropPlan, d: Int) {
     if !ctx.emit_lir { return }
     let decl = &tree.declarations[d]
     let fn_index = ctx.lir_func_index[d]
@@ -214,7 +218,15 @@ fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &Dr
         return
     }
     var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
-    if ctx.lir_fault > 0 { lirInjectFault(&mut ctx.lir, &mut body, ctx.lir_fault) }
+    when ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(edit ctx.lir, edit body, ctx.lir_fault) }
+    when ctx.lir_fault >= 14 { lirInjectUnionFault(edit ctx.lir, edit body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, ctx.lir_fault) }
+    when ctx.lir_patch.byteLength > 0 {
+        hold bad = lirApplyPatch(edit ctx.lir, edit body, view ctx.lir_patch, fn_index)
+        when bad != 0 {
+            semaAddError(edit ctx, "ICE", "error interno del compilador: parche de LIR inválido (línea {bad})", decl.start, decl.end)
+            give
+        }
+    }
     let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
     if checked.status != 0 {
         let rule = checked.status
@@ -232,6 +244,88 @@ fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &Dr
 // function in one defined way so the tests can prove the verifier rejects
 // it. 1 variable id, 2 block id, 3 operand type, 4 use before assignment,
 // 5 call arity, 6 drop of a non-owned value, 7 return type, 8 field index.
+// 9 invalid platform opcode, 10 platform arity, 11 argument loan mode,
+// 12 platform result type, 13 invalid platform argument id.
+// Owned unions (#5): 14 owned payload read from the other variant (rule 3),
+// 15 conditional drop of a maybe-moved union made unconditional (rule 6),
+// 16 a use after an owned payload consumed its union (rule 5),
+// 17 drop flag forged to cb1 after move-out (double free, rule 6),
+// 18 drop flag forged to cb0 when owned (leak, rule 6).
+flow lirInjectUnionFault(l: edit LirFn, body: edit LirBody, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], fault: Int) {
+    each n among 0..body.order.length {
+        hold id = body.order[n]
+        hold kind = l.insts[id].kind
+        hold dst = l.insts[id].dst
+        when kind == LIR_DROP && fault == 15 && l.insts[id].a >= 0 && dst >= 0 && dst < l.vars.length {
+            hold ty = l.vars[dst].ty
+            when ty >= 0 && ty < types.types.length {
+                change union = false
+                choose types.types[ty].kind {
+                    SemTypeKind.Option : { union = true }
+                    SemTypeKind.Result : { union = true }
+                    _ : {}
+                }
+                when union {
+                    l.insts[id].a = -1
+                    give
+                }
+            }
+        }
+        hold is_payload = kind == LIR_PAYLOAD && dst >= 0 && dst < l.vars.length && lirBuiltinPayloadOwned(types, lm, l.vars[dst].ty)
+        hold is_read_field = kind == LIR_READ && dst >= 0 && dst < l.vars.length && l.vars[dst].ty >= 0 && l.vars[dst].ty < drop_memo.length && drop_memo[l.vars[dst].ty] == 2
+        when is_payload || is_read_field {
+            when fault == 14 && is_payload {
+                l.insts[id].c = 1 - l.insts[id].c
+                give
+            }
+            when fault == 16 && is_payload {
+                hold root = l.places[l.insts[id].a].root
+                hold block = l.insts[id].block
+                each m among (n + 1)..body.order.length {
+                    hold later = body.order[m]
+                    when l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        hold ldst = l.insts[later].dst
+                        when ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            proceed
+                        }
+                        // Well-typed copy of the consumed union into a fresh variable.
+                        hold union_ty = l.vars[root].ty
+                        hold copy = lirVar(edit l, union_ty, false)
+                        l.insts[later].dst = copy
+                        l.insts[later].a = root
+                        give
+                    }
+                }
+            }
+            when fault == 17 {
+                // Double free: drop flag forged to cb1 after payload move-out.
+                hold block = l.insts[id].block
+                each m among (n + 1)..body.order.length {
+                    hold later = body.order[m]
+                    when l.insts[later].block == block && l.insts[later].kind == LIR_USE {
+                        hold ldst = l.insts[later].dst
+                        when ldst >= 0 && ldst < l.vars.length && l.vars[ldst].ty == 4 {
+                            l.insts[later].a = lirConst(edit l, LIR_CONST_BOOL, 1, 0, 0)
+                            give
+                        }
+                    }
+                }
+            }
+        }
+        when fault == 18 && kind == LIR_USE && dst >= 0 && dst < l.vars.length && l.vars[dst].ty == 4 {
+            // Leak: drop flag forged to cb0 when owned.
+            hold operand = l.insts[id].a
+            when !lirIsVar(operand) {
+                hold cid = lirConstId(operand)
+                when cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL && l.consts[cid].value == 1 {
+                    l.insts[id].a = lirConst(edit l, LIR_CONST_BOOL, 0, 0, 0)
+                    give
+                }
+            }
+        }
+    }
+}
+
 fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
     for n in 0..body.order.length {
         let id = body.order[n]
@@ -251,6 +345,25 @@ fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
         if fault == 6 && kind == LIR_DROP {
             l.insts[id].dst = lirVar(&mut l, 1, false)
             return
+        }
+        if kind == LIR_PLATFORM {
+            if fault == 9 { l.insts[id].a = 99; return }
+            if fault == 10 { l.insts[id].c += 1; return }
+            if fault == 11 && l.insts[id].c > 0 {
+                let first = l.insts[id].b
+                let arg = l.operands[first]
+                l.args[arg].by_ref = false
+                return
+            }
+            if fault == 12 {
+                l.vars[l.insts[id].dst].ty = 4
+                return
+            }
+            if fault == 13 && l.insts[id].c > 0 {
+                let first = l.insts[id].b
+                l.operands[first] = l.args.length + 1
+                return
+            }
         }
         if fault == 8 && (kind == LIR_READ || kind == LIR_STORE) && l.places[l.insts[id].a].parent >= 0 {
             l.places[l.insts[id].a].field = 99

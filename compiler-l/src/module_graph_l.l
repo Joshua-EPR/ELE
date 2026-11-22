@@ -6,7 +6,7 @@
 // Each source runs a bounded graph traversal: one queue entry per reachable
 // module, even if multiple import paths reach it (diamonds or cycles). This
 // does not depend on module numbering or a fixed-point scan of every module.
-fn moduleAccessBuild(module_count: Int, first: &List<Int>, counts: &List<Int>, deps: &List<Int>) -> List<Int> {
+pub fn moduleAccessBuild(module_count: Int, first: &List<Int>, counts: &List<Int>, deps: &List<Int>) -> List<Int> {
     var access: List<Int> = List[]
     for i in 0..(module_count * module_count) { access.push(0) }
 

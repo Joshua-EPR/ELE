@@ -1,6 +1,6 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
 
 // `List of[T]` in the ELE-written CFG backend: declarations, instructions
 // and their static rules. Lowering lives in native_cfg_list_emit and the
@@ -44,7 +44,7 @@ expose flow cfgReadList(p: edit CfgProgram, source: view Text, reader: edit Nati
     change valid = reader.error == 0 && id == k && elem != cfgUnitType() && (elem >= 0 || elem == cfgTextType())
     when valid {
         hold size = cfgTypeSize(p, elem)
-        valid = size >= 1 && size <= 512
+        valid = size >= 1 && size <= cfgMaxValueBytes()
     }
     when valid {
         p.list_elem@push(elem)
@@ -102,6 +102,14 @@ expose flow cfgReadListInst(p: edit CfgProgram, f: Int, source: view Text, reade
         cfgSetPlace(edit inst, view place)
         give true
     }
+    when nativeEquals(source, kind, "listpop") {
+        // i listpop vD <place>
+        inst.kind = 23
+        inst.dst = nativeId(source, edit reader, 118)
+        hold place = cfgReadPlace(edit p, f, source, edit reader)
+        cfgSetPlace(edit inst, view place)
+        give true
+    }
     give false
 }
 
@@ -135,6 +143,14 @@ expose flow cfgCheckListInst(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     }
     when inst.kind == 20 && cfgOperandType(p, f, view inst.a) != 0 { give 102 }
     when inst.kind == 21 && p.types_code[first + inst.dst] != 0 { give 102 }
+    when inst.kind == 23 {
+        hold dst_ty = p.types_code[first + inst.dst]
+        hold e = dst_ty - 2 - p.decl_structs
+        when e < 0 || e >= p.decl_enums || p.enums[e].variants != 2 { give 102 }
+        hold v0 = view p.variants[p.enums[e].first_variant]
+        hold v1 = view p.variants[p.enums[e].first_variant + 1]
+        when v0.payload_type != -1 || v1.payload_type != item { give 102 }
+    }
     give 0
 }
 

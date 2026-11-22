@@ -20,7 +20,7 @@ import sema_lower
 // at one of its reference parameters, never at a local owner.
 
 // Root name expression of a place (`a`, `a.b.c`), or -1.
-fn semaPlaceRoot(tree: &AstTree, expr_id: Int) -> Int {
+pub fn semaPlaceRoot(tree: &AstTree, expr_id: Int) -> Int {
     var cursor = expr_id
     while cursor >= 0 && cursor < tree.expressions.length {
         let expr = &tree.expressions[cursor]
@@ -36,7 +36,7 @@ fn semaPlaceRoot(tree: &AstTree, expr_id: Int) -> Int {
 
 // Create the loan for `&place` / `&mut place` once the operand has been
 // resolved to `path`. A place below a reference binding reborrows it.
-fn semaBorrowPlace(ctx: &mut SemaContext, path: Int, operand_t: Int, is_mut: Bool, site: Int, start: Int, end: Int) -> Int {
+pub fn semaBorrowPlace(ctx: &mut SemaContext, path: Int, operand_t: Int, is_mut: Bool, site: Int, start: Int, end: Int) -> Int {
     ctx.pending_loan = -1
     if path < 0 {
         semaAddError(&mut ctx, "L0012", "use let para prestar una variable, campo o elemento con un origen fijo", start, end)
@@ -73,13 +73,15 @@ fn semaBorrowPlace(ctx: &mut SemaContext, path: Int, operand_t: Int, is_mut: Boo
 // Close a call: the argument loans are used at the call point, so two
 // arguments borrowing the same place must be compatible. A borrowing
 // callee yields a result loan that reborrows every reference argument.
-fn semaCallLoans(ctx: &mut SemaContext, loans: &List<Int>, ret_t: Int, site: Int, start: Int, end: Int) -> Int {
+pub fn semaCallLoans(ctx: &mut SemaContext, loans: &List<Int>, ret_t: Int, site: Int, start: Int, end: Int) -> Int {
     ctx.pending_loan = -1
     var origins: List<Int> = List[]
     for a in 0..loans.length {
         let loan = loans[a]
         if loan >= 0 {
-            flowEventData(&mut ctx.flow, FLOW_LOAN_USE, ctx.flow.loans[loan].place, start, end, loan)
+            // Read the existing loan place before mutating the event graph.
+            let place = ctx.flow.loans[loan].place
+            flowEventData(&mut ctx.flow, FLOW_LOAN_USE, place, start, end, loan)
             origins.push(loan)
         }
     }
@@ -108,17 +110,18 @@ fn semaCallLoans(ctx: &mut SemaContext, loans: &List<Int>, ret_t: Int, site: Int
 
 // A borrowed return must carry a loan of a compatible mode whose every
 // origin is rooted at a reference parameter.
-fn semaReturnBorrow(ctx: &mut SemaContext, value_t: Int, loan: Int, start: Int, end: Int) {
+pub fn semaReturnBorrow(ctx: &mut SemaContext, value_t: Int, loan: Int, start: Int, end: Int) {
     let ret_t = ctx.current_fn_ret_type
     if loan < 0 {
         semaAddError(&mut ctx, "L0013", "un retorno de referencia necesita un parámetro prestado compatible con su modo; los propietarios locales se destruyen al retornar", start, end)
         return
     }
-    if semaIsMutRef(ctx, ret_t) && !loanIsMut(&ctx.flow, loan) {
+    let origin_status = loanBorrowedReturnStatus(&ctx.flow, loan, semaIsMutRef(ctx, ret_t))
+    if origin_status == 2 {
         semaAddError(&mut ctx, "L0013", "el modo del préstamo no coincide con el retorno", start, end)
         return
     }
-    if !loanRootedAtParams(&ctx.flow, loan) {
+    if origin_status != 0 {
         semaAddError(&mut ctx, "L0013", "un retorno de referencia necesita un parámetro prestado compatible con su modo; los propietarios locales se destruyen al retornar", start, end)
         return
     }
@@ -130,7 +133,7 @@ fn semaReturnBorrow(ctx: &mut SemaContext, value_t: Int, loan: Int, start: Int, 
 }
 
 // Reject reference types outside parameters, results and let annotations.
-fn semaCheckRefTypes(ctx: &mut SemaContext, tree: &AstTree) {
+pub fn semaCheckRefTypes(ctx: &mut SemaContext, tree: &AstTree) {
     for i in 0..tree.types.length {
         let ty = &tree.types[i]
         var inner = -1

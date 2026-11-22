@@ -1,4 +1,4 @@
-import x86_64
+take x86_64
 
 // Runtime-sized mmap/munmap emission for ELF64 Linux x86-64. This is a
 // bounded allocation primitive, not yet an allocator for ELE's Text/List.
@@ -16,7 +16,7 @@ expose flow heapDynExit(code: edit X64Code, status: Int) {
     x64Syscall(edit code)
 }
 
-// Reject signed sizes outside [1,1048576] at runtime, before any syscall.
+// Reject signed sizes outside [1,33554432] at runtime, before any syscall.
 // Input size is kept unchanged in the specified register (RDI or RSI).
 expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
     x64MovImm64(edit code, 1, 0)
@@ -28,9 +28,9 @@ expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
     hold patch_offset_28 = code.bytes.length
     x64PatchRelative(edit code, good_min, patch_offset_28)
 
-    x64MovImm64(edit code, 1, 1048576)
+    x64MovImm64(edit code, 1, 33554432)
     x64CmpReg(edit code, reg, 1)
-    x64SetCondition(edit code, 9) // signed > max
+    x64SetCondition(edit code, 8) // signed > max
     x64TestRax(edit code)
     hold good_max = x64ConditionalPlaceholder(edit code, true)
     heapDynExit(edit code, 122)
@@ -39,7 +39,7 @@ expose flow heapDynSizeGuard(code: edit X64Code, reg: Int) {
 }
 
 // Given a validated positive size in RSI, round it up to 4 KiB without
-// arithmetic overflow. Bound 1 MiB guarantees size+4095 fits signed Int.
+// arithmetic overflow. Bound 32 MiB guarantees size+4095 fits signed Int.
 // This new primitive is emitted as AND rsi,-4096 after adding 4095.
 expose flow heapDynPageRoundRsi(code: edit X64Code) {
     x64MovImm64(edit code, 1, 4095)

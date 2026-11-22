@@ -1,7 +1,7 @@
 // ELE v2 syntax adapter for source borrowing. Both spellings share
 // Stage 1's existing ownership and loan verification without new semantics.
 // Returns 0 (not a borrow), 1 (view/shared), or 2 (edit/exclusive).
-fn semaBorrowSyntaxKind(source: &Text, start: Int, end: Int) -> Int {
+pub fn semaBorrowSyntaxKind(source: &Text, start: Int, end: Int) -> Int {
     if start < 0 || end <= start || end > source.byteLength { return 0 }
     let first = source.byteAt(start)
     if first == 38 {

@@ -79,7 +79,9 @@ pub fn semaStmtLet(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id
             let own_path = ctx.symbols.symbols[sym_id].move_path
             lirLetBind(&mut ctx, own_path, val_type, loan >= 0)
             if loan >= 0 {
-                loanBind(&mut ctx.flow, own_path, loan)
+                if !loanBindReferenceRoot(&mut ctx.flow, own_path, loan) {
+                    semaAddError(&mut ctx, "L0012", "vínculo de préstamo local inválido", stmt.start, stmt.end)
+                }
                 semaOrigin(&mut ctx, own_path, semaValueOrigin(source, tree, val_e))
             } else {
                 semaOwn(&mut ctx, source, tree, own_path, val_type, semaValueOrigin(source, tree, val_e))

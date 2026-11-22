@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "self_hosting_generations",
+  "category": "self_hosting",
+  "source_file": "compiler-l/src/main_driver.l",
+  "generations": {
+    "windows_pe32": {
+      "target": "windows-x86_64-pe",
+      "gen1": {
+        "binary_name": "ele_gen1.exe",
+        "builder": "Gen 0 (Rust Stage 0 compiler)",
+        "binary_size_bytes": 1508352,
+        "external_compiler_invocations": 1
+      },
+      "gen2": {
+        "binary_name": "ele_gen2.exe",
+        "builder": "Gen 1 (ele_gen1.exe build main_driver.l --target pe)",
+        "binary_size_bytes": 1508352,
+        "sha256": "F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D",
+        "external_compiler_invocations": 0
+      },
+      "gen3": {
+        "binary_name": "ele_gen3.exe",
+        "builder": "Gen 2 (ele_gen2.exe build main_driver.l --target pe)",
+        "binary_size_bytes": 1508352,
+        "sha256": "F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D",
+        "external_compiler_invocations": 0
+      },
+      "bitwise_identical_fixpoint": true,
+      "functional_execution_verified": true
+    },
+    "linux_elf64": {
+      "target": "linux-x86_64-elf",
+      "gen1": {
+        "binary_name": "ele_gen1.elf",
+        "builder": "Gen 1 (driver build main_driver.l --target elf)",
+        "binary_size_bytes": 1511424,
+        "external_compiler_invocations": 0
+      },
+      "gen2": {
+        "binary_name": "ele_gen2.elf",
+        "builder": "Gen 1 (ele_gen1.elf build main_driver.l --target elf)",
+        "binary_size_bytes": 1511424,
+        "sha256": "4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9",
+        "external_compiler_invocations": 0
+      },
+      "gen3": {
+        "binary_name": "ele_gen3.elf",
+        "builder": "Gen 2 (ele_gen2.elf build main_driver.l --target elf)",
+        "binary_size_bytes": 1511424,
+        "sha256": "4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9",
+        "external_compiler_invocations": 0
+      },
+      "bitwise_identical_fixpoint": true,
+      "functional_execution_verified": true
+    }
+  }
+}

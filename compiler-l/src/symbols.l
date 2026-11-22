@@ -81,12 +81,14 @@ pub fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b
     let len_b = b_end - b_start
     if len_a != len_b { return false }
     if len_a <= 0 { return true }
+    when a_start == b_start { give true }
     if a_start < 0 || a_end > source.byteLength { return false }
     if b_start < 0 || b_end > source.byteLength { return false }
+    when source@byteAt(a_start) != source@byteAt(b_start) { give false }
 
-    for i in 0..len_a {
-        if source.byteAt(a_start + i) != source.byteAt(b_start + i) {
-            return false
+    each i among 1..len_a {
+        when source@byteAt(a_start + i) != source@byteAt(b_start + i) {
+            give false
         }
     }
     return true
@@ -98,10 +100,11 @@ pub fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, targe
     if len_a != len_t { return false }
     if len_a <= 0 { return true }
     if name_start < 0 || name_end > source.byteLength { return false }
+    when source@byteAt(name_start) != target@byteAt(0) { give false }
 
-    for i in 0..len_a {
-        if source.byteAt(name_start + i) != target.byteAt(i) {
-            return false
+    each i among 1..len_a {
+        when source@byteAt(name_start + i) != target@byteAt(i) {
+            give false
         }
     }
     return true

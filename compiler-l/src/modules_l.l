@@ -152,6 +152,15 @@ fn loadModuleRecursive(
         return 0
     }
 
+    // Match Stage 0's MAX_IMPORT_DEPTH: bound active recursion, not the
+    // total number of files in a shallow (wide or diamond-shaped) graph.
+    // Check after cycle detection so cyclic imports keep their own L0014.
+    // A loader diagnostic is printed once; the caller propagates -14.
+    if loading_stack.length >= 128 {
+        printError("error[L0014]: profundidad de imports excede el límite de 128 módulos: {path}")
+        return -14
+    }
+
     let stack_path = "{path}"
     loading_stack.push(stack_path)
 
@@ -164,36 +173,44 @@ fn loadModuleRecursive(
                     parseProgram(&mut temp_tree, &mod_source, &mod_tokens, 0)
                     var direct_deps: List<Int> = List[]
 
+                    // Defer import errors until after the loop. Returning from
+                    // inside the nested match/for left owned path temporaries
+                    // live in Stage 1's emitted LIR (L0007 in build-lir).
+                    // Once an import fails, do not load any subsequent import.
+                    change import_error = 0
                     let std_io = "std.io.print"
                     for d in 0..temp_tree.declarations.length {
-                        let decl = &temp_tree.declarations[d]
-                        match decl.kind {
-                            AstDeclKind.Import => {
-                                if !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) {
-                                    let imp_name = pathSubstring(mod_source, decl.a, decl.b)
-                                    let dep_path = "{own_dir}/{importRelativePath(&imp_name)}"
-                                    let res = loadModuleRecursive(&dep_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
-                                    if res != 0 {
-                                        loading_stack.pop()
-                                        return res
+                        when import_error == 0 {
+                            let decl = &temp_tree.declarations[d]
+                            match decl.kind {
+                                AstDeclKind.Import => {
+                                    if !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) {
+                                        let imp_name = pathSubstring(mod_source, decl.a, decl.b)
+                                        let dep_path = "{own_dir}/{importRelativePath(&imp_name)}"
+                                        let res = loadModuleRecursive(&dep_path, &mut loading_stack, &mut loaded_paths, &mut combined_source, &mut tree, &mut module_paths, &mut module_starts, &mut module_first_decl, &mut module_decl_count, &mut dep_first, &mut dep_counts, &mut dep_ids)
+                                        when res != 0 {
+                                            import_error = res
+                                        } otherwise {
+                                            let dep_id = listTextIndexOf(loaded_paths, &dep_path)
+                                            when dep_id < 0 {
+                                                import_error = 3
+                                            } otherwise {
+                                                var seen = false
+                                                for j in 0..direct_deps.length {
+                                                    if direct_deps[j] == dep_id { seen = true }
+                                                }
+                                                if !seen { direct_deps.push(dep_id) }
+                                            }
+                                        }
                                     }
-                                    let dep_id = listTextIndexOf(loaded_paths, &dep_path)
-                                    if dep_id < 0 {
-                                        loading_stack.pop()
-                                        return 3
-                                    }
-                                    var seen = false
-                                    for j in 0..direct_deps.length {
-                                        if direct_deps[j] == dep_id { seen = true }
-                                    }
-                                    if !seen { direct_deps.push(dep_id) }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
 
                     loading_stack.pop()
+                    when import_error != 0 { give import_error }
                     let loaded_path = "{path}"
                     loaded_paths.push(loaded_path)
 
@@ -238,7 +255,7 @@ fn loadModuleRecursive(
     }
 }
 
-fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
+pub fn loadProgram(entry_path: &Text) -> Result<LoadedProgram, Int> {
     var loading_stack: List<Text> = List[]
     var loaded_paths: List<Text> = List[]
     var combined_source = ""

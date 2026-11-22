@@ -193,17 +193,53 @@ pub fn x64CallPlaceholder(code: &mut X64Code) -> Int {
     return at
 }
 
-pub fn x64FrameBegin(code: &mut X64Code, slots: Int) {
-    if slots < 0 || slots > 512 { code.error = 6; return }
-    x64Put(&mut code, 85) // push rbp
-    x64MovReg(&mut code, 5, 4) // mov rbp,rsp
-    var size = slots * 8
-    if size % 16 != 0 { size += 8 }
-    if size > 0 {
-        x64Put(&mut code, 72)
-        x64Put(&mut code, 129)
-        x64Put(&mut code, 236) // sub rsp,imm32
-        x64PutSigned(&mut code, size, 4)
+// Largest frame, in 8-byte slots. Slot k lives at [RBP - 8*(k+1)], a signed
+// disp32, and the prologue reserves the frame with SUB RSP,imm32 after
+// rounding it up to 16 bytes: both must fit a signed 32-bit field, so
+// 8 * slots + 8 <= 2^31 - 1. This is an encoding bound, not a policy.
+expose flow x64MaxFrameSlots() => Int {
+    give 268435454
+}
+
+// The prologue allocates a 16-byte-aligned frame and preserves RBP. A frame
+// larger than one 4 KiB page is reserved page by page, touching each page
+// (OR QWORD [RSP],0) before moving below it: Windows commits the stack only
+// through its single guard page, and on Linux a large SUB could jump over
+// the stack guard gap. A frame beyond the stack limit therefore faults
+// deterministically on the guard instead of writing past it. R11 is the loop
+// counter; it is scratch at every function entry of this backend.
+expose flow x64FrameBegin(code: edit X64Code, slots: Int) {
+    when slots < 0 || slots > x64MaxFrameSlots() { code.error = 6; give }
+    x64Put(edit code, 85) // push rbp
+    x64MovReg(edit code, 5, 4) // mov rbp,rsp
+    change size = slots * 8
+    when size % 16 != 0 { size += 8 }
+    change rest = size
+    when size > 4096 {
+        hold pages = size / 4096
+        rest = size % 4096
+        x64MovImm64(edit code, 11, pages)
+        // loop: sub rsp,4096 / or qword [rsp],0 / dec r11 / jnz loop
+        x64Put(edit code, 72)
+        x64Put(edit code, 129)
+        x64Put(edit code, 236)
+        x64PutSigned(edit code, 4096, 4)
+        x64Put(edit code, 72)
+        x64Put(edit code, 131)
+        x64Put(edit code, 12)
+        x64Put(edit code, 36)
+        x64Put(edit code, 0)
+        x64Put(edit code, 73)
+        x64Put(edit code, 255)
+        x64Put(edit code, 203)
+        x64Put(edit code, 117)
+        x64Put(edit code, 239) // rel8 -17: back to the SUB
+    }
+    when rest > 0 {
+        x64Put(edit code, 72)
+        x64Put(edit code, 129)
+        x64Put(edit code, 236) // sub rsp,imm32
+        x64PutSigned(edit code, rest, 4)
     }
 }
 
@@ -242,6 +278,15 @@ pub fn x64LoadMem64(code: &mut X64Code, dst: Int, base: Int, displacement: Int) 
     x64MemoryAddress(&mut code, dst, base, displacement)
 }
 
+expose flow x64LoadMem32(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    when dst >= 8 || base >= 8 {
+        x64Put(edit code, 64 + (dst / 8) * 4 + base / 8)
+    }
+    x64Put(edit code, 139) // mov r32, r/m32
+    x64MemoryAddress(edit code, dst, base, displacement)
+}
+
 pub fn x64StoreMem64(code: &mut X64Code, base: Int, displacement: Int, src: Int) {
     if !x64MemoryValid(&mut code, src, base, displacement) { return }
     x64RexRegRm(&mut code, src, base)
@@ -270,14 +315,15 @@ pub fn x64StoreMem8(code: &mut X64Code, base: Int, displacement: Int, src: Int) 
     x64MemoryAddress(&mut code, src, base, displacement)
 }
 
-pub fn x64LoadSlot(code: &mut X64Code, dst: Int, slot: Int) {
-    if slot < 0 || slot >= 512 { code.error = 7; return }
-    x64LoadMem64(&mut code, dst, 5, -8 * (slot + 1))
+// Slot accesses within the frame bound of x64MaxFrameSlots (disp32).
+expose flow x64LoadSlot(code: edit X64Code, dst: Int, slot: Int) {
+    when slot < 0 || slot >= x64MaxFrameSlots() { code.error = 7; give }
+    x64LoadMem64(edit code, dst, 5, -8 * (slot + 1))
 }
 
-pub fn x64StoreSlot(code: &mut X64Code, slot: Int, src: Int) {
-    if slot < 0 || slot >= 512 { code.error = 7; return }
-    x64StoreMem64(&mut code, 5, -8 * (slot + 1), src)
+expose flow x64StoreSlot(code: edit X64Code, slot: Int, src: Int) {
+    when slot < 0 || slot >= x64MaxFrameSlots() { code.error = 7; give }
+    x64StoreMem64(edit code, 5, -8 * (slot + 1), src)
 }
 
 pub fn x64TestRax(code: &mut X64Code) {
@@ -375,4 +421,57 @@ pub fn x64PatchAbsolute64(code: &mut X64Code, at: Int, value: Int) {
         code.bytes[at + i] = n % 256
         n = n / 256
     }
+}
+
+// ----- Forms used by the Windows x64 (PE32+) target. -----
+// None of them is emitted by the ELF64 path, whose images stay unchanged.
+
+// CALL [RIP+disp32] (FF 15): indirect call through an import address table
+// slot. Returns the position of the displacement, which the image writer
+// patches once the slot's RVA is known. The displacement is relative to the
+// end of the instruction, i.e. to the position returned plus 4.
+expose flow x64CallRipPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 255)
+    x64Put(edit code, 21)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
+}
+
+// CALL r64 (FF /2), used for an OS function resolved at runtime.
+expose flow x64CallReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    when reg >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 255)
+    x64Put(edit code, 208 + reg % 8)
+}
+
+// LEA r64,[RIP+disp32] (REX.W 8D, ModRM mod=00 r/m=101). Returns the
+// displacement position; it ends the instruction, so x64PatchRelative can
+// point it at a later byte of the same code buffer.
+expose flow x64LeaRipPlaceholder(code: edit X64Code, dst: Int) => Int {
+    when !x64RegisterValid(dst) { code.error = 3; give -1 }
+    change rex = 72
+    when dst >= 8 { rex += 4 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 141)
+    x64Put(edit code, 5 + (dst % 8) * 8)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
+}
+
+// LEA r64,[base+disp32] (REX.W 8D), e.g. the address of a stack local
+// passed by pointer to a Windows API.
+expose flow x64LeaMem(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    x64RexRegRm(edit code, dst, base)
+    x64Put(edit code, 141)
+    x64MemoryAddress(edit code, dst, base, displacement)
+}
+
+// TEST EAX,EAX (85 C0): a Win32 BOOL is defined only in its low 32 bits.
+expose flow x64TestEax(code: edit X64Code) {
+    x64Put(edit code, 133)
+    x64Put(edit code, 192)
 }

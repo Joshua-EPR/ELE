@@ -1,0 +1,37 @@
+{
+  "benchmark_id": "native_coverage_evolution",
+  "category": "coverage",
+  "total_source_files": 102,
+  "stages": [
+    {
+      "stage": "Stage 3.1",
+      "date": "2026-11-18",
+      "lexer_parser_files": 102,
+      "semantic_analysis_files": 102,
+      "lir_lowering_files": 102,
+      "native_backend_files": 18,
+      "percent_backend_standalone": 90.0,
+      "notes": "Autonomous driver proof-of-concept"
+    },
+    {
+      "stage": "Stage 3.2",
+      "date": "2026-11-19",
+      "lexer_parser_files": 102,
+      "semantic_analysis_files": 102,
+      "lir_lowering_files": 102,
+      "native_backend_files": 19,
+      "percent_backend_standalone": 95.0,
+      "notes": "Self-rebuilding generational driver (PR #118)"
+    },
+    {
+      "stage": "Stage 3.3",
+      "date": "2026-11-20",
+      "lexer_parser_files": 102,
+      "semantic_analysis_files": 102,
+      "lir_lowering_files": 102,
+      "native_backend_files": 20,
+      "percent_backend_standalone": 100.0,
+      "notes": "native_pe_demo resolved; 100% of standalone executables compiled natively"
+    }
+  ]
+}

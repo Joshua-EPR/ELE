@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" width="760" height="360">
+
+    <style>
+      .bg { fill: #ffffff; }
+      .text-title { font-family: system-ui, -apple-system, sans-serif; font-size: 18px; font-weight: 700; fill: #1f2328; }
+      .text-subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #656d76; }
+      .text-label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1f2328; }
+      .text-muted { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #656d76; }
+      .text-val { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: #1f2328; }
+      .grid { stroke: #e1e4e8; stroke-dasharray: 3 3; }
+      .axis { stroke: #d0d7de; stroke-width: 1.5; }
+      .border { stroke: #d0d7de; stroke-width: 1; fill: none; }
+      .bar-ele { fill: #0969da; }
+      .bar-rust { fill: #d9381e; }
+      .bar-gcc { fill: #1a7f37; }
+      .bar-neutral { fill: #8250df; }
+      .badge-bg { fill: #dafbe1; stroke: #aceebb; }
+      .badge-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1a7f37; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #0d1117; }
+        .text-title { fill: #f0f6fc; }
+        .text-subtitle { fill: #8b949e; }
+        .text-label { fill: #e6edf3; }
+        .text-muted { fill: #8b949e; }
+        .text-val { fill: #f0f6fc; }
+        .grid { stroke: #21262d; }
+        .axis { stroke: #30363d; }
+        .border { stroke: #30363d; }
+        .bar-ele { fill: #2f81f7; }
+        .bar-rust { fill: #f85149; }
+        .bar-gcc { fill: #3fb950; }
+        .bar-neutral { fill: #a371f7; }
+        .badge-bg { fill: #1f3524; stroke: #2ea043; }
+        .badge-text { fill: #3fb950; }
+      }
+    </style>
+
+<rect width="760" height="360" rx="8" class="bg border"/>
+<text x="30" y="38" class="text-title">Native Pipeline Coverage Evolution</text>
+<text x="30" y="58" class="text-subtitle">Compiler source files (102 total in compiler-l/src) passing each pipeline stage</text>
+<line x1="180.0" y1="75" x2="180.0" y2="265" class="grid"/>
+<text x="180.0" y="283" text-anchor="middle" class="text-muted">0 files</text>
+<line x1="274.11764705882354" y1="75" x2="274.11764705882354" y2="265" class="grid"/>
+<text x="274.11764705882354" y="283" text-anchor="middle" class="text-muted">20 files</text>
+<line x1="368.2352941176471" y1="75" x2="368.2352941176471" y2="265" class="grid"/>
+<text x="368.2352941176471" y="283" text-anchor="middle" class="text-muted">40 files</text>
+<line x1="462.3529411764706" y1="75" x2="462.3529411764706" y2="265" class="grid"/>
+<text x="462.3529411764706" y="283" text-anchor="middle" class="text-muted">60 files</text>
+<line x1="556.4705882352941" y1="75" x2="556.4705882352941" y2="265" class="grid"/>
+<text x="556.4705882352941" y="283" text-anchor="middle" class="text-muted">80 files</text>
+<line x1="650.5882352941176" y1="75" x2="650.5882352941176" y2="265" class="grid"/>
+<text x="650.5882352941176" y="283" text-anchor="middle" class="text-muted">100 files</text>
+<line x1="180" y1="75" x2="180" y2="265" class="axis"/>
+<text x="165" y="100" text-anchor="end" class="text-label" style="font-size: 11px;">Lexer &amp; Parser Phase</text>
+<rect x="180" y="85" width="480.0" height="18" rx="3" class="bar-neutral"/>
+<text x="668.0" y="99" class="text-val" style="font-size: 11px;">102/102 (100%)</text>
+<text x="165" y="128" text-anchor="end" class="text-label" style="font-size: 11px;">Semantic Analysis Phase</text>
+<rect x="180" y="113" width="480.0" height="18" rx="3" class="bar-neutral"/>
+<text x="668.0" y="127" class="text-val" style="font-size: 11px;">102/102 (100%)</text>
+<text x="165" y="156" text-anchor="end" class="text-label" style="font-size: 11px;">ELE-LIR Lowering Phase</text>
+<rect x="180" y="141" width="480.0" height="18" rx="3" class="bar-neutral"/>
+<text x="668.0" y="155" class="text-val" style="font-size: 11px;">102/102 (100%)</text>
+<text x="165" y="184" text-anchor="end" class="text-label" style="font-size: 11px;">Stage 3.1 Backend Reach</text>
+<rect x="180" y="169" width="84.7" height="18" rx="3" class="bar-ele"/>
+<text x="272.7" y="183" class="text-val" style="font-size: 11px;">18/102 (90.0% standalone)</text>
+<text x="165" y="212" text-anchor="end" class="text-label" style="font-size: 11px;">Stage 3.2 Backend Reach</text>
+<rect x="180" y="197" width="89.4" height="18" rx="3" class="bar-ele"/>
+<text x="277.4" y="211" class="text-val" style="font-size: 11px;">19/102 (95.0% standalone)</text>
+<text x="165" y="240" text-anchor="end" class="text-label" style="font-size: 11px;">Stage 3.3/3.4 Backend Reach</text>
+<rect x="180" y="225" width="94.1" height="18" rx="3" class="bar-gcc"/>
+<text x="282.1" y="239" class="text-val" style="font-size: 11px;">20/102 (100% standalone binaries)</text>
+<text x="30" y="345" class="text-muted">100% of standalone executable entries in compiler-l/src reach native ELF64 and PE32+ generation.</text>
+</svg>

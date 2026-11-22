@@ -1,0 +1,62 @@
+name: Documentation & Benchmark Validation
+
+on:
+  push:
+    branches: [main, docs/**]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Windows runners may default Python stdout to a legacy charmap.
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  validate-docs-and-benchmarks:
+    name: Validate Docs, Benchmarks & SVG Charts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Validate Benchmark JSON Results & Integrity
+        run: python benchmarks/scripts/validate_results.py
+
+      - name: Ensure README performance claims match versioned measurements
+        run: python -m unittest discover -s tests -p test_benchmark_readme_consistency.py -v
+
+      - name: Verify Deterministic SVG Chart Generation
+        run: |
+          python benchmarks/scripts/generate_charts.py
+          git diff --exit-code assets/benchmarks/
+
+      - name: Verify Documentation Links and Assets
+        run: python benchmarks/scripts/validate_doc_links.py
+
+      - name: Validate ELE v2 grammar and optional color theme
+        run: |
+          python tests/test_syntax_grammar.py
+          node editors/vscode/test.js
+
+      - name: Check Formatting & Clippy Quality Gates
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Verify Canonical ELE v2 Syntax Ratchet
+        run: cargo test -p project-l --test ele_v2_legacy_ratchet -- --test-threads=1

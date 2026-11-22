@@ -74,7 +74,7 @@ impl ModuleFixture {
 #[test]
 fn import_local_single_module() {
     let fix = ModuleFixture::new("single");
-    fix.write_file("helper.l", "fn sumar(a: Int, b: Int) -> Int = a + b\n");
+    fix.write_file("helper.l", "pub fn sumar(a: Int, b: Int) -> Int = a + b\n");
     fix.write_file(
         "main.l",
         "import helper\n\nfn main() {\n    print(sumar(15, 27))\n}\n",
@@ -85,10 +85,10 @@ fn import_local_single_module() {
 #[test]
 fn import_multiple_modules() {
     let fix = ModuleFixture::new("multiple");
-    fix.write_file("calc.l", "fn cuadrado(x: Int) -> Int = x * x\n");
+    fix.write_file("calc.l", "pub fn cuadrado(x: Int) -> Int = x * x\n");
     fix.write_file(
         "saludo.l",
-        "fn saludar(nombre: Text) -> Text = \"Hola {nombre}!\"\n",
+        "pub fn saludar(nombre: Text) -> Text = \"Hola {nombre}!\"\n",
     );
     fix.write_file(
         "main.l",
@@ -100,10 +100,10 @@ fn import_multiple_modules() {
 #[test]
 fn import_transitive_dependencies() {
     let fix = ModuleFixture::new("transitive");
-    fix.write_file("datos.l", "fn base() -> Int = 100\n");
+    fix.write_file("datos.l", "pub fn base() -> Int = 100\n");
     fix.write_file(
         "logica.l",
-        "import datos\n\nfn calcular() -> Int = base() + 25\n",
+        "import datos\n\npub fn calcular() -> Int = base() + 25\n",
     );
     fix.write_file(
         "main.l",
@@ -117,15 +117,15 @@ fn import_diamond_dependency_deduplication() {
     let fix = ModuleFixture::new("diamond");
     fix.write_file(
         "comun.l",
-        "struct Ajustes {\n    puerto: Int\n}\n\nfn obtenerAjustes() -> Ajustes = Ajustes(puerto: 8080)\n",
+        "struct Ajustes {\n    puerto: Int\n}\n\npub fn obtenerAjustes() -> Ajustes = Ajustes(puerto: 8080)\n",
     );
     fix.write_file(
         "servicio_a.l",
-        "import comun\n\nfn puertoA() -> Int = obtenerAjustes().puerto\n",
+        "import comun\n\npub fn puertoA() -> Int = obtenerAjustes().puerto\n",
     );
     fix.write_file(
         "servicio_b.l",
-        "import comun\n\nfn puertoB() -> Int = obtenerAjustes().puerto + 1\n",
+        "import comun\n\npub fn puertoB() -> Int = obtenerAjustes().puerto + 1\n",
     );
     fix.write_file(
         "main.l",
@@ -171,7 +171,7 @@ fn import_cycle_detection() {
 #[test]
 fn import_submodule_with_dots() {
     let fix = ModuleFixture::new("submodule");
-    fix.write_file("sub/motor.l", "fn potencia() -> Int = 750\n");
+    fix.write_file("sub/motor.l", "pub fn potencia() -> Int = 750\n");
     fix.write_file(
         "main.l",
         "import sub.motor\n\nfn main() {\n    print(potencia())\n}\n",
@@ -208,8 +208,8 @@ fn import_relative_file_path_cannot_escape_project_root() {
 #[test]
 fn import_semicolon_and_newlines() {
     let fix = ModuleFixture::new("semicolon");
-    fix.write_file("mod1.l", "fn f1() -> Int = 10\n");
-    fix.write_file("mod2.l", "fn f2() -> Int = 20\n");
+    fix.write_file("mod1.l", "pub fn f1() -> Int = 10\n");
+    fix.write_file("mod2.l", "pub fn f2() -> Int = 20\n");
     fix.write_file(
         "main.l",
         "import mod1; import mod2;\r\n\r\nfn main() {\n    print(f1() + f2())\n}\n",
@@ -222,7 +222,7 @@ fn import_unicode_directory_and_spaces() {
     let fix = ModuleFixture::new("unicode_dir");
     fix.write_file(
         "directorio café 👋/util.l",
-        "fn saludo() -> Text = \"éxito en carpeta unicode\"\n",
+        "pub fn saludo() -> Text = \"éxito en carpeta unicode\"\n",
     );
     fix.write_file(
         "directorio café 👋/main.l",
@@ -238,11 +238,11 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     let fix = ModuleFixture::new("diagnostic-file");
     fix.write_file(
         "sub/ayudante.l",
-        "fn ayuda() -> Int {\n    return 1\n}\n\nfn rota() -> Int {\n    return verdadero\n}\n",
+        "pub fn ayuda() -> Int {\n    return 1\n}\n\nfn rota() -> Int {\n    return verdadero\n}\n",
     );
     fix.write_file(
         "intermedio.l",
-        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * 2\n",
+        "import sub.ayudante\n\npub fn doble() -> Int = ayuda() * 2\n",
     );
     fix.write_file(
         "main.l",
@@ -267,7 +267,10 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     assert!(!first.contains("main.l"), "{err}");
 
     // The same program with the error moved to the entry file names it.
-    fix.write_file("sub/ayudante.l", "fn ayuda() -> Int {\n    return 1\n}\n");
+    fix.write_file(
+        "sub/ayudante.l",
+        "pub fn ayuda() -> Int {\n    return 1\n}\n",
+    );
     fix.write_file(
         "main.l",
         "import intermedio\n\nfn main() {\n    print(doble())\n    print(nada)\n}\n",
@@ -283,7 +286,7 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     );
     fix.write_file(
         "intermedio.l",
-        "import sub.ayudante\n\nfn doble() -> Int = ayuda() * verdad\n",
+        "import sub.ayudante\n\npub fn doble() -> Int = ayuda() * verdad\n",
     );
     fix.write_file(
         "main.l",
@@ -292,7 +295,44 @@ fn semantic_errors_in_imported_modules_name_their_own_file() {
     let error = project_l::check_file(&fix.dir.join("main.l")).unwrap_err();
     let file = error.file.expect("file of an imported module");
     assert!(file.ends_with("intermedio.l"), "{file}");
-    assert_eq!((error.span.line, error.span.column), (3, 31));
+    assert_eq!((error.span.line, error.span.column), (3, 35));
+}
+
+#[test]
+fn unambiguous_private_function_stays_in_its_module() {
+    let fix = ModuleFixture::new("private_single_nonexported");
+    fix.write_file("lib.l", "flow secret() => Int { give 42 }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(secret()) }\n");
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("función no definida: secret"),
+            "{backend}: {err}"
+        );
+        assert!(err.contains("main.l"), "{backend}: {err}");
+    }
+}
+
+#[test]
+fn unambiguous_private_generic_stays_in_its_module() {
+    let fix = ModuleFixture::new("private_generic_nonexported");
+    fix.write_file("lib.l", "flow secret of[T](value: T) => Int { give 42 }\n");
+    fix.write_file(
+        "main.l",
+        "take lib\nflow main() { print(secret of[Int](0)) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("función no definida: secret"),
+            "{backend}: {err}"
+        );
+        assert!(err.contains("main.l"), "{backend}: {err}");
+    }
 }
 
 #[test]
@@ -391,4 +431,549 @@ fn homonymous_generic_declaration_in_one_module_still_fails() {
             "{backend}: {stderr}"
         );
     }
+}
+
+#[test]
+fn public_symbol_from_unrelated_sibling_is_not_visible() {
+    // main's import of b must never make b's exports visible inside a.
+    let fix = ModuleFixture::new("sibling_public_not_imported");
+    fix.write_file("a.l", "expose flow from_a() => Int { give only_b() }\n");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("a.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn transitive_public_symbol_requires_direct_import() {
+    // a may call b after take b, but main may not call b without take b.
+    let fix = ModuleFixture::new("transitive_public_not_imported");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b() }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(only_b()) }\n");
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn direct_import_in_dependency_still_resolves() {
+    let fix = ModuleFixture::new("nested_direct_import_valid");
+    fix.write_file("b.l", "expose flow only_b() => Int { give 42 }\n");
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b() }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(from_a()) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn public_generic_from_sibling_is_not_visible() {
+    let fix = ModuleFixture::new("sibling_generic_not_imported");
+    fix.write_file(
+        "a.l",
+        "expose flow from_a() => Int { give only_b of[Int](0) }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow only_b of[T](value: T) => Int { give 42 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función no definida: only_b"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("a.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn direct_generic_import_in_dependency_still_resolves() {
+    let fix = ModuleFixture::new("nested_generic_direct_valid");
+    fix.write_file(
+        "b.l",
+        "expose flow only_b of[T](value: T) => Int { give 42 }\n",
+    );
+    fix.write_file(
+        "a.l",
+        "take b\nexpose flow from_a() => Int { give only_b of[Int](0) }\n",
+    );
+    fix.write_file("main.l", "take a\nflow main() { print(from_a()) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn identical_public_names_in_unrelated_modules_keep_identity() {
+    let fix = ModuleFixture::new("public_same_name_per_module");
+    fix.write_file(
+        "a.l",
+        "expose flow shared() => Int { give 1 }\nexpose flow from_a() => Int { give shared() }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow shared() => Int { give 41 }\nexpose flow from_b() => Int { give shared() }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(from_a() + from_b()) }\n",
+    );
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn two_direct_public_imports_with_same_name_are_ambiguous() {
+    let fix = ModuleFixture::new("ambiguous_direct_public");
+    fix.write_file("a.l", "expose flow shared() => Int { give 1 }\n");
+    fix.write_file("b.l", "expose flow shared() => Int { give 41 }\n");
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(shared()) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función ambigua: shared"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn two_direct_public_generic_imports_are_ambiguous() {
+    let fix = ModuleFixture::new("ambiguous_direct_generic");
+    fix.write_file(
+        "a.l",
+        "expose flow shared of[T](value: T) => Int { give 1 }\n",
+    );
+    fix.write_file(
+        "b.l",
+        "expose flow shared of[T](value: T) => Int { give 41 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take a\ntake b\nflow main() { print(shared of[Int](0)) }\n",
+    );
+    for backend in BACKENDS {
+        let out = fix.build("main.l", backend, false);
+        assert!(!out.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("función genérica ambigua: shared"),
+            "{backend}: {stderr}"
+        );
+        assert!(stderr.contains("main.l"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn entry_main_wins_over_public_main_in_imported_module() {
+    // The dependency is declared before the entry source in the merged AST.
+    // Its public main must not override the entry file's private main.
+    let fix = ModuleFixture::new("entry_main_vs_public_import");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn entry_main_wins_over_private_main_in_imported_module() {
+    // Private names can be reused across modules without entry ambiguity.
+    let fix = ModuleFixture::new("entry_main_vs_private_import");
+    fix.write_file("lib.l", "flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn imported_public_main_is_not_an_implicit_entry_point() {
+    // Importing a library with a public main does not make it the executable's
+    // entry point when the root module has not declared its own main.
+    let fix = ModuleFixture::new("imported_main_without_entry");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nflow helper() { print(42) }\n");
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("falta fn main()"), "{backend}: {stderr}");
+    }
+}
+
+#[test]
+fn entry_public_main_wins_over_imported_public_main() {
+    let fix = ModuleFixture::new("entry_public_main_vs_public_import");
+    fix.write_file("lib.l", "expose flow main() { print(13) }\n");
+    fix.write_file("main.l", "take lib\nexpose flow main() { print(42) }\n");
+    fix.check("main.l", "42\n");
+}
+
+#[test]
+fn oversized_entry_source_is_rejected_before_parsing() {
+    let fix = ModuleFixture::new("source_size_entry");
+    let source = fix.dir.join("main.l");
+    // A sparse file avoids allocating 16 MiB in the test itself.
+    fs::File::create(&source)
+        .unwrap()
+        .set_len(project_l::modules::MAX_MODULE_BYTES as u64 + 1)
+        .unwrap();
+
+    let diag = project_l::modules::load_program_files(&source).unwrap_err();
+    assert_eq!(diag.code, "L0014");
+    assert!(diag.message.contains("archivo excede límite de 16 MiB"));
+    assert!(
+        diag.file.as_deref().is_some_and(|p| p.ends_with("main.l")),
+        "{diag:?}"
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("archivo excede límite de 16 MiB"),
+            "{backend}: {error}"
+        );
+    }
+}
+
+#[test]
+fn oversized_import_is_attributed_to_the_dependency() {
+    let fix = ModuleFixture::new("source_size_import");
+    fix.write_file("main.l", "take huge\nflow main() {}\n");
+    let dependency = fix.dir.join("huge.l");
+    fs::File::create(&dependency)
+        .unwrap()
+        .set_len(project_l::modules::MAX_MODULE_BYTES as u64 + 1)
+        .unwrap();
+
+    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
+    assert_eq!(diag.code, "L0014");
+    assert!(diag.message.contains("archivo excede límite de 16 MiB"));
+    assert!(
+        diag.file.as_deref().is_some_and(|p| p.ends_with("huge.l")),
+        "{diag:?}"
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("huge.l"), "{backend}: {error}");
+        assert!(
+            error.contains("archivo excede límite de 16 MiB"),
+            "{backend}: {error}"
+        );
+    }
+}
+
+#[test]
+fn invalid_utf8_in_small_module_has_a_file_diagnostic() {
+    // Reading as bounded bytes must not allow malformed source to reach the
+    // parser or change the file attribution of input errors.
+    let fix = ModuleFixture::new("source_invalid_utf8");
+    fs::write(fix.dir.join("main.l"), b"flow main() {}\n\xff").unwrap();
+    let diag = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
+    assert_eq!(diag.code, "L0014");
+    assert!(
+        diag.file.as_deref().is_some_and(|p| p.ends_with("main.l")),
+        "{diag:?}"
+    );
+}
+
+#[test]
+fn diamond_imports_reuse_canonical_module_file_ids() {
+    // Three direct imports of shared.l through two branches and main itself
+    // must all resolve to the same source ID without reloading the module.
+    let fix = ModuleFixture::new("stable_file_id_diamond");
+    fix.write_file("shared.l", "expose flow common() => Int { give 41 }\n");
+    fix.write_file(
+        "left.l",
+        "take shared\nexpose flow left() => Int { give common() }\n",
+    );
+    fix.write_file(
+        "right.l",
+        "take shared\nexpose flow right() => Int { give common() + 1 }\n",
+    );
+    fix.write_file(
+        "main.l",
+        "take left\ntake right\ntake shared\nflow main() { print(left() + right()) }\n",
+    );
+
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    assert_eq!(files.len(), 4, "a diamond must load shared.l only once");
+    assert!(files[0].ends_with("main.l"));
+    let file_id = |name: &str| {
+        u32::try_from(
+            files
+                .iter()
+                .position(|file| file.ends_with(name))
+                .expect("imported module missing")
+                + 1,
+        )
+        .unwrap()
+    };
+    let shared_id = file_id("shared.l");
+    let left_id = file_id("left.l");
+    let right_id = file_id("right.l");
+    let shared_imports: Vec<_> = program
+        .imports
+        .iter()
+        .filter(|import| import.path == "shared")
+        .collect();
+    assert_eq!(shared_imports.len(), 3);
+    assert!(
+        shared_imports
+            .iter()
+            .all(|import| import.target_file == Some(shared_id))
+    );
+
+    let mut importing_files: Vec<_> = shared_imports
+        .iter()
+        .map(|import| import.span.file)
+        .collect();
+    importing_files.sort_unstable();
+    importing_files.dedup();
+    assert_eq!(importing_files.len(), 3);
+    assert!(importing_files.contains(&1));
+    assert!(importing_files.contains(&left_id));
+    assert!(importing_files.contains(&right_id));
+    assert_eq!(
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "left")
+            .unwrap()
+            .target_file,
+        Some(left_id)
+    );
+    assert_eq!(
+        program
+            .imports
+            .iter()
+            .find(|import| import.path == "right")
+            .unwrap()
+            .target_file,
+        Some(right_id)
+    );
+
+    // Verify the unchanged semantics across both native backends as well.
+    fix.check("main.l", "83\n");
+}
+
+fn write_fanout_module_graph(fix: &ModuleFixture, leaves: usize) {
+    // Shallow graph with many direct imports and a shared dependency:
+    // exercises canonical path lookup without making the test depend on
+    // the compiler's recursive nesting limits.
+    fix.write_file("shared.l", "expose flow value() => Int { give 42 }\n");
+    let mut entry = String::new();
+    for i in 0..leaves {
+        let name = format!("leaf{i:04}");
+        fix.write_file(
+            &format!("{name}.l"),
+            &format!("take shared\nexpose flow {name}() => Int {{ give value() }}\n"),
+        );
+        entry.push_str(&format!("take {name}\n"));
+    }
+    entry.push_str("flow main() {}\n");
+    fix.write_file("main.l", &entry);
+}
+
+fn verify_fanout_graph(program: &project_l::parser::Program, files: &[String], leaves: usize) {
+    use std::collections::HashMap;
+    assert_eq!(files.len(), leaves + 2);
+    assert_eq!(program.imports.len(), leaves * 2);
+    assert!(files[0].ends_with("main.l"));
+    let file_ids: HashMap<_, _> = files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| {
+            (
+                std::path::Path::new(file)
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                u32::try_from(index + 1).unwrap(),
+            )
+        })
+        .collect();
+    let shared_id = file_ids["shared"];
+    let shared_edges: Vec<_> = program
+        .imports
+        .iter()
+        .filter(|import| import.path == "shared")
+        .collect();
+    assert_eq!(shared_edges.len(), leaves);
+    assert!(
+        shared_edges
+            .iter()
+            .all(|edge| edge.target_file == Some(shared_id))
+    );
+    for import in &program.imports {
+        assert_eq!(
+            import.target_file,
+            Some(file_ids[import.path.as_str()]),
+            "incorrect target_file for {}",
+            import.path
+        );
+        assert!(
+            import.span.file >= 1 && import.span.file <= files.len() as u32,
+            "invalid importing source ID for {}",
+            import.path
+        );
+    }
+}
+
+#[test]
+fn fanout_module_graph_preserves_source_and_import_ids() {
+    let fix = ModuleFixture::new("fanout_graph_ids_48");
+    write_fanout_module_graph(&fix, 48);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    verify_fanout_graph(&program, &files, 48);
+}
+
+#[test]
+#[ignore = "manual benchmark; use --ignored --nocapture and compare runs on the same machine"]
+fn benchmark_fanout_module_loader() {
+    // Keep file generation and assertions outside the timed section.
+    // This times Stage 0 module loading only, not compilation or a backend.
+    // Deliberately do not assert wall-clock thresholds in CI.
+    for leaves in [32, 128, 512] {
+        let fix = ModuleFixture::new(&format!("fanout_benchmark_{leaves}"));
+        write_fanout_module_graph(&fix, leaves);
+        let entry = fix.dir.join("main.l");
+        let (program, files) = project_l::modules::load_program_files(&entry).unwrap();
+        verify_fanout_graph(&program, &files, leaves);
+
+        let mut nanos = Vec::new();
+        for _ in 0..7 {
+            let start = std::time::Instant::now();
+            let (program, files) = project_l::modules::load_program_files(&entry).unwrap();
+            let elapsed = start.elapsed();
+            verify_fanout_graph(&program, &files, leaves);
+            nanos.push(elapsed.as_nanos());
+        }
+        nanos.sort_unstable();
+        println!(
+            "stage0 module_loader leaves={leaves} files={} imports={} median_ns={} min_ns={} max_ns={}",
+            files.len(),
+            program.imports.len(),
+            nanos[nanos.len() / 2],
+            nanos[0],
+            nanos[nanos.len() - 1],
+        );
+    }
+}
+
+fn write_import_chain(fix: &ModuleFixture, count: usize) {
+    assert!(count >= 1);
+    for index in 0..count {
+        let name = if index == 0 {
+            "main.l".to_owned()
+        } else {
+            format!("m{index:03}.l")
+        };
+        let mut source = String::new();
+        if index + 1 < count {
+            source.push_str(&format!("take m{:03}\n", index + 1));
+        }
+        if index == 0 {
+            source.push_str("flow main() {}\n");
+        } else {
+            source.push_str(&format!("flow item{index:03}() {{}}\n"));
+        }
+        fix.write_file(&name, &source);
+    }
+}
+
+#[test]
+fn module_import_chain_at_depth_limit_is_accepted() {
+    let fix = ModuleFixture::new("module_import_chain_at_limit");
+    let depth = project_l::modules::MAX_IMPORT_DEPTH;
+    write_import_chain(&fix, depth);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    assert_eq!(files.len(), depth);
+    assert_eq!(program.imports.len(), depth - 1);
+    assert!(files[0].ends_with("main.l"));
+    assert!(
+        program
+            .imports
+            .iter()
+            .all(|import| import.target_file == import.span.file.checked_add(1))
+    );
+}
+
+#[test]
+fn module_import_chain_above_limit_has_a_precise_diagnostic() {
+    let fix = ModuleFixture::new("module_import_chain_above_limit");
+    let depth = project_l::modules::MAX_IMPORT_DEPTH;
+    write_import_chain(&fix, depth + 1);
+    let diagnostic = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap_err();
+    assert_eq!(diagnostic.code, "L0014");
+    assert_eq!(diagnostic.category, "módulos");
+    // Import spans point at the module name after the "take " keyword.
+    assert_eq!((diagnostic.span.line, diagnostic.span.column), (1, 6));
+    assert!(
+        diagnostic
+            .message
+            .contains("profundidad de imports excede el límite"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        diagnostic
+            .file
+            .as_deref()
+            .is_some_and(|file| file.ends_with(&format!("m{:03}.l", depth - 1))),
+        "{diagnostic:?}"
+    );
+    for backend in BACKENDS {
+        let output = fix.build("main.l", backend, false);
+        assert!(!output.status.success(), "{backend}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("L0014"), "{backend}: {error}");
+        assert!(
+            error.contains("profundidad de imports excede el límite"),
+            "{backend}: {error}"
+        );
+    }
+}
+
+#[test]
+fn wide_module_graph_is_not_subject_to_import_depth_limit() {
+    let fix = ModuleFixture::new("module_import_wide_beyond_depth_limit");
+    let leaves = project_l::modules::MAX_IMPORT_DEPTH + 8;
+    write_fanout_module_graph(&fix, leaves);
+    let (program, files) = project_l::modules::load_program_files(&fix.dir.join("main.l")).unwrap();
+    verify_fanout_graph(&program, &files, leaves);
 }

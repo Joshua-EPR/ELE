@@ -1,0 +1,181 @@
+{
+  "Function (flow)": {
+    "prefix": "flow",
+    "body": [
+      "flow ${1:name}(${2:params}) => ${3:Type} {",
+      "\t${0:give 0}",
+      "}"
+    ],
+    "description": "ELE v2 function declaration"
+  },
+  "Data shape (shape)": {
+    "prefix": "shape",
+    "body": [
+      "shape ${1:Name} {",
+      "\t${2:field}: ${3:Type},",
+      "}"
+    ],
+    "description": "ELE v2 nominal data shape (struct)"
+  },
+  "Choice enum (choice)": {
+    "prefix": "choice",
+    "body": [
+      "choice ${1:Name} {",
+      "\t${2:Variant},",
+      "}"
+    ],
+    "description": "ELE v2 algebraic choice enum"
+  },
+  "Type extension (extend)": {
+    "prefix": "extend",
+    "body": [
+      "extend ${1:Type} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 type method extension (impl)"
+  },
+  "Contract implementation (extend Contract on Type)": {
+    "prefix": "extend on",
+    "body": [
+      "extend ${1:Contract} on ${2:Type} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 contract implementation on a type"
+  },
+  "Contract interface (contract)": {
+    "prefix": "contract",
+    "body": [
+      "contract ${1:Name} {",
+      "\tflow ${2:method}(${3:params}) => ${4:Type}",
+      "}"
+    ],
+    "description": "ELE v2 contract interface declaration (trait)"
+  },
+  "Immutable variable (hold)": {
+    "prefix": "hold",
+    "body": [
+      "hold ${1:name} = ${2:value}"
+    ],
+    "description": "ELE v2 immutable variable declaration (let)"
+  },
+  "Mutable variable (change)": {
+    "prefix": "change",
+    "body": [
+      "change ${1:name} = ${2:value}"
+    ],
+    "description": "ELE v2 mutable variable declaration (var)"
+  },
+  "Constant declaration (fixed)": {
+    "prefix": "fixed",
+    "body": [
+      "fixed ${1:NAME}: ${2:Type} = ${3:value}"
+    ],
+    "description": "ELE v2 constant declaration (const)"
+  },
+  "Return statement (give)": {
+    "prefix": "give",
+    "body": [
+      "give ${1:value}"
+    ],
+    "description": "ELE v2 explicit return statement"
+  },
+  "Conditional branch (when)": {
+    "prefix": "when",
+    "body": [
+      "when ${1:condition} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 conditional branch (if)"
+  },
+  "Alternative branch (otherwise)": {
+    "prefix": "otherwise",
+    "body": [
+      "otherwise {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 alternative branch (else)"
+  },
+  "Conditional loop (during)": {
+    "prefix": "during",
+    "body": [
+      "during ${1:condition} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 condition-controlled loop (while)"
+  },
+  "Iteration loop (each among)": {
+    "prefix": "each",
+    "body": [
+      "each ${1:item} among ${2:collection} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 iteration loop (for ... in)"
+  },
+  "Import module (take)": {
+    "prefix": "take",
+    "body": [
+      "take ${1:module}"
+    ],
+    "description": "ELE v2 module import declaration"
+  },
+  "Export visibility (expose)": {
+    "prefix": "expose",
+    "body": [
+      "expose ${1:declaration}"
+    ],
+    "description": "ELE v2 exported public visibility modifier"
+  },
+  "Pattern matching (choose)": {
+    "prefix": "choose",
+    "body": [
+      "choose ${1:expr} {",
+      "\t${2:Pattern}: {",
+      "\t\t${0}",
+      "\t},",
+      "}"
+    ],
+    "description": "ELE v2 exhaustive pattern matching (match)"
+  },
+  "Unconditional loop (repeat)": {
+    "prefix": "repeat",
+    "body": [
+      "repeat {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 infinite loop (loop)"
+  },
+  "Exclusive method (exclusive flow)": {
+    "prefix": "exclusive flow",
+    "body": [
+      "exclusive flow ${1:name}(${2:params}) => ${3:Type} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 mutable receiver method (mut flow)"
+  },
+  "Direct associated function (direct flow)": {
+    "prefix": "direct flow",
+    "body": [
+      "direct flow ${1:name}(${2:params}) => ${3:Type} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 associated direct function (static fn)"
+  },
+  "Async function (later flow)": {
+    "prefix": "later flow",
+    "body": [
+      "later flow ${1:name}(${2:params}) => ${3:Type} {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "ELE v2 asynchronous function (async fn)"
+  }
+}

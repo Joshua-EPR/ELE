@@ -193,6 +193,8 @@ struct Env {
     functions: RefCell<HashMap<String, usize>>,
     /// Every declared free function, identified by source file and name.
     module_functions: RefCell<HashMap<(u32, String), usize>>,
+    /// Imported file IDs keyed by the importing source file (one edge per take/import).
+    direct_imports: HashMap<u32, HashSet<u32>>,
     /// IDs of exported free functions (which win unqualified lookup).
     public_functions: RefCell<HashSet<usize>>,
     /// Names with multiple private definitions and no unique unqualified binding.
@@ -250,24 +252,79 @@ type BorrowSigResult = (
 );
 
 impl Env {
-    /// Resolve a function in its defining source module first. The fallback
-    /// preserves unambiguous historical imports during the bootstrap migration;
-    /// homonymous private functions must never resolve to an arbitrary module.
-    fn free_function(&self, name: &str, source_file: u32) -> Option<usize> {
-        self.module_functions
+    /// Module-local declarations win. For modular sources, only explicitly
+    /// imported public functions are considered; transitive/sibling modules
+    /// cannot leak through the legacy global lookup table.
+    /// Source file 0 remains the standalone (non-modular) compilation path.
+    fn free_function(
+        &self,
+        name: &str,
+        source_file: u32,
+        span: Span,
+    ) -> Result<Option<usize>, Diagnostic> {
+        if let Some(id) = self
+            .module_functions
             .borrow()
             .get(&(source_file, name.to_owned()))
             .copied()
-            .or_else(|| self.functions.borrow().get(name).copied())
+        {
+            return Ok(Some(id));
+        }
+        if source_file == 0 {
+            return Ok(self.functions.borrow().get(name).copied());
+        }
+        let Some(imports) = self.direct_imports.get(&source_file) else {
+            return Ok(None);
+        };
+        let definitions = self.module_functions.borrow();
+        let exported = self.public_functions.borrow();
+        let mut found = None;
+        let key = name.to_owned();
+        for &file in imports {
+            if let Some(&id) = definitions.get(&(file, key.clone()))
+                && exported.contains(&id)
+                && found.replace(id).is_some()
+            {
+                return Err(
+                    err(span, format!("función ambigua: {name}")).classify("L0014", "módulos")
+                );
+            }
+        }
+        Ok(found)
     }
 
-    /// Stage 0 compatibility: a private generic is always resolved locally;
-    /// an unambiguous legacy import is retained until full module visibility.
-    fn free_template(&self, name: &str, source_file: u32) -> Option<usize> {
-        self.module_fn_templates
+    /// Generic templates follow exactly the same local/direct-import rules.
+    fn free_template(
+        &self,
+        name: &str,
+        source_file: u32,
+        span: Span,
+    ) -> Result<Option<usize>, Diagnostic> {
+        if let Some(id) = self
+            .module_fn_templates
             .get(&(source_file, name.to_owned()))
             .copied()
-            .or_else(|| self.fn_template_ids.get(name).copied())
+        {
+            return Ok(Some(id));
+        }
+        if source_file == 0 {
+            return Ok(self.fn_template_ids.get(name).copied());
+        }
+        let Some(imports) = self.direct_imports.get(&source_file) else {
+            return Ok(None);
+        };
+        let mut found = None;
+        let key = name.to_owned();
+        for &file in imports {
+            if let Some(&id) = self.module_fn_templates.get(&(file, key.clone()))
+                && self.public_fn_templates.contains(&id)
+                && found.replace(id).is_some()
+            {
+                return Err(err(span, format!("función genérica ambigua: {name}"))
+                    .classify("L0014", "módulos"));
+            }
+        }
+        Ok(found)
     }
 
     fn region_name(&self, r: usize) -> String {
@@ -2757,7 +2814,7 @@ impl Checker<'_> {
                 ));
             };
             let result = env
-                .free_function(name, self.source_file)
+                .free_function(name, self.source_file, arg.span)?
                 .and_then(|id| env.sigs.borrow()[id].result)
                 .and_then(|ty| match ty {
                     Type::Future(task) => Some(env.futures.borrow()[task].result),
@@ -2838,6 +2895,7 @@ impl Checker<'_> {
                 PlatformOp::ArgCount => Type::Int,
                 PlatformOp::PrintError => Type::Unit,
                 PlatformOp::WriteBytes => unreachable!("handled before generic platform calls"),
+                PlatformOp::SameFile => Type::Int,
                 PlatformOp::Arg | PlatformOp::ReadText => {
                     let id = env.template_ids["Result"];
                     Type::Enum(env.instantiate(id, vec![Type::Text, Type::Int], span)?)
@@ -2882,7 +2940,7 @@ impl Checker<'_> {
                 Ok((target_ty, ValueKind::Convert(Box::new(val), target_ty)))
             };
         }
-        if let Some(tid) = env.free_template(n, self.source_file) {
+        if let Some(tid) = env.free_template(n, self.source_file, span)? {
             let template = &env.fn_templates[tid];
             let param_names: Vec<String> = template
                 .func
@@ -2931,7 +2989,7 @@ impl Checker<'_> {
             return Ok((result, ValueKind::Call(fid, args)));
         }
         let id = env
-            .free_function(n, self.source_file)
+            .free_function(n, self.source_file, span)?
             .ok_or_else(|| err(span, format!("función no definida: {n}")))?;
         let (args, result) = self.call(id, args, span, depth)?;
         Ok((result, ValueKind::Call(id, args)))
@@ -4653,6 +4711,15 @@ fn declare<'a>(
     program: &'a parser::Program,
     prelude: &'a parser::Program,
 ) -> Result<(Env, Decls<'a>), Diagnostic> {
+    let mut direct_imports: HashMap<u32, HashSet<u32>> = HashMap::new();
+    for import in &program.imports {
+        if let Some(target_file) = import.target_file {
+            direct_imports
+                .entry(import.span.file)
+                .or_default()
+                .insert(target_file);
+        }
+    }
     let env = Env {
         structs: RefCell::new(Vec::new()),
         join_pairs: RefCell::new(HashMap::new()),
@@ -4684,6 +4751,7 @@ fn declare<'a>(
         generic_trait_impls: Vec::new(),
         functions: RefCell::new(HashMap::new()),
         module_functions: RefCell::new(HashMap::new()),
+        direct_imports,
         public_functions: RefCell::new(HashSet::new()),
         ambiguous_private_functions: RefCell::new(HashSet::new()),
         methods: RefCell::new(HashMap::new()),
@@ -4944,9 +5012,7 @@ fn declare<'a>(
             }
             let previous = env.fn_template_ids.get(&f.name).copied();
             if f.public || f.span.file == 0 {
-                if previous.is_some_and(|id| env.public_fn_templates.contains(&id))
-                    || (f.span.file == 0 && previous.is_some())
-                {
+                if f.span.file == 0 && previous.is_some() {
                     return Err(err(
                         f.span,
                         format!("función duplicada o reservada: {}", f.name),
@@ -5012,9 +5078,7 @@ fn declare<'a>(
             }
             let previous = env.functions.borrow().get(&f.name).copied();
             if f.public || f.span.file == 0 {
-                if previous.is_some_and(|id| env.public_functions.borrow().contains(&id))
-                    || (f.span.file == 0 && previous.is_some())
-                {
+                if f.span.file == 0 && previous.is_some() {
                     return Err(err(
                         f.span,
                         format!("función duplicada o reservada: {}", f.name),
@@ -5727,10 +5791,19 @@ pub fn check(program: parser::Program) -> Result<Program, Diagnostic> {
     let (mut env, decls) = declare(&program, &prelude)?;
     let globals = global_constants(&program.constants, &env)?;
     check_defaults(&mut env, &program, &globals)?;
+    // The loader assigns file 1 to the entry source, even though imported
+    // declarations are merged first. A dependency's public or private main
+    // must never become the program's entry point through the global table.
+    // Standalone (non-modular) parsing uses file 0.
+    let entry_file = if program.functions.iter().any(|f| f.span.file != 0) {
+        1
+    } else {
+        0
+    };
     let main = *env
-        .functions
+        .module_functions
         .borrow()
-        .get("main")
+        .get(&(entry_file, "main".to_owned()))
         .ok_or_else(|| err(Span::at(1, 1), "falta fn main()"))?;
 
     let mut lowered: Vec<Option<Function>> = Vec::new();
@@ -5772,7 +5845,10 @@ pub fn check(program: parser::Program) -> Result<Program, Diagnostic> {
     }
     let functions: Vec<Function> = lowered.into_iter().flatten().collect();
     let entry = &functions[main];
-    let main_decl = decls.iter().find(|d| d.0.name == "main").map(|d| d.0);
+    let main_decl = decls
+        .iter()
+        .find(|d| d.0.name == "main" && d.0.span.file == entry_file)
+        .map(|d| d.0);
     let has_exit_code = entry.result == Type::Int
         && !entry.is_async
         && entry.borrow_return.is_none()

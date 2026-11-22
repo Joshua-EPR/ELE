@@ -19,6 +19,25 @@ const SHARE_READ_WRITE_DELETE: u32 = 7;
 const OPEN_EXISTING: u32 = 3;
 const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
 const FILE_TYPE_DISK: u32 = 1;
+const CREATE_NEW: u32 = 1;
+const MOVEFILE_REPLACE_EXISTING: u32 = 1;
+const MOVEFILE_WRITE_THROUGH: u32 = 8;
+const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+
+#[repr(C)]
+struct ByHandleFileInformation {
+    file_attributes: u32,
+    creation_time: [u32; 2],
+    last_access_time: [u32; 2],
+    last_write_time: [u32; 2],
+    volume_serial_number: u32,
+    file_size_high: u32,
+    file_size_low: u32,
+    number_of_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
 include!("../platform_contract.inc.rs");
 static FILE_OPENS: AtomicU64 = AtomicU64::new(0);
 static FILE_CLOSES: AtomicU64 = AtomicU64::new(0);
@@ -74,6 +93,11 @@ unsafe extern "system" {
         overlapped: Handle,
     ) -> i32;
     fn CloseHandle(handle: Handle) -> i32;
+    fn GetFileInformationByHandle(handle: Handle, info: *mut ByHandleFileInformation) -> i32;
+    fn GetFileAttributesW(path: *const u16) -> u32;
+    fn FlushFileBuffers(handle: Handle) -> i32;
+    fn MoveFileExW(existing: *const u16, new_file: *const u16, flags: u32) -> i32;
+    fn DeleteFileW(path: *const u16) -> i32;
     fn GetLastError() -> u32;
     fn GetFileType(handle: Handle) -> u32;
     fn QueryPerformanceCounter(ticks: *mut i64) -> i32;
@@ -81,6 +105,14 @@ unsafe extern "system" {
     fn l_rt_alloc(bytes: usize) -> *mut u8;
     fn l_rt_realloc(data: *mut u8, bytes: usize) -> *mut u8;
     fn l_rt_free(data: *mut u8);
+}
+
+// Windows CNG supplies OS-backed entropy for exclusive temporary names.
+// Only the Rust Stage 0 bootstrap object uses bcrypt; native ELE Gen 2/3
+// continue to use their own platform-specific entropy implementations.
+#[link(name = "bcrypt")]
+unsafe extern "system" {
+    fn BCryptGenRandom(algorithm: Handle, buffer: *mut u8, len: u32, flags: u32) -> i32;
 }
 
 // The output is zero initialized by the caller. A successful nonempty
@@ -389,7 +421,7 @@ pub unsafe extern "system" fn l_platform_read_text(
     0
 }
 
-/// Bootstrap Win64 binary writer for ELE's writeBytes(Text, List<Int>).
+/// Bootstrap Win64 binary writer for ELE's writeBytes(Text, List<Int>) with Atomic Write & Safe Publish Contract.
 /// Takes borrowed pointers with layout verified by Stage 1 and the backend.
 /// 0=ok; 1=invalid argument/byte, 2=open failure, 3=write/close failure.
 /// No file is opened until all byte values have been verified.
@@ -418,21 +450,71 @@ pub unsafe extern "system" fn l_platform_write_bytes(
     };
     if size <= 0 { return 1; }
     unsafe { dest.add(size as usize).write(0) };
-    let handle = unsafe {
-        CreateFileW(
-            dest, GENERIC_WRITE, SHARE_READ_WRITE_DELETE, ptr::null_mut(),
-            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, ptr::null_mut(),
-        )
-    };
+
+    // Destination + ".tmp." + 32 hexadecimal digits + NUL, in UTF-16 units.
+    // Never reuse the former predictable ".tmp.0" .. ".tmp.9" names.
+    let mut tmp_wide = Buffer::new();
+    tmp_wide.grow((size as usize + 38) * 2);
+    if tmp_wide.data.is_null() {
+        return 2;
+    }
+    let tmp_dest = tmp_wide.data.cast::<u16>();
+    for i in 0..size as usize {
+        unsafe { tmp_dest.add(i).write(*dest.add(i)) };
+    }
+    const HEX: [u16; 16] = [
+        48, 49, 50, 51, 52, 53, 54, 55,
+        56, 57, 97, 98, 99, 100, 101, 102,
+    ];
+    let suffix: [u16; 5] = [46, 116, 109, 112, 46];
+    for (j, &c) in suffix.iter().enumerate() {
+        unsafe { tmp_dest.add(size as usize + j).write(c) };
+    }
+
+    let mut attempt = 0u8;
+    let mut handle = ptr::null_mut();
+    while attempt < 16 {
+        let mut nonce = [0u8; 16];
+        if unsafe {
+            BCryptGenRandom(
+                ptr::null_mut(), nonce.as_mut_ptr(), nonce.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        } != 0 {
+            return 2; // Entropy failure: fail closed without opening the destination.
+        }
+        for (i, &byte) in nonce.iter().enumerate() {
+            let offset = size as usize + 5 + 2 * i;
+            unsafe {
+                tmp_dest.add(offset).write(HEX[(byte >> 4) as usize]);
+                tmp_dest.add(offset + 1).write(HEX[(byte & 15) as usize]);
+            }
+        }
+        unsafe { tmp_dest.add(size as usize + 37).write(0) };
+        handle = unsafe {
+            CreateFileW(
+                tmp_dest, GENERIC_WRITE, SHARE_READ_WRITE_DELETE, ptr::null_mut(),
+                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, ptr::null_mut(),
+            )
+        };
+        if handle as usize != usize::MAX {
+            break;
+        }
+        let err = unsafe { GetLastError() };
+        if err != 80 && err != 183 { // ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS
+            return 2;
+        }
+        attempt += 1;
+    }
     if handle as usize == usize::MAX { return 2; }
-    // A 4096-byte stack array emits __chkstk and memset on MSVC. This
-    // standalone no_std platform object is linked with /NODEFAULTLIB, so
-    // neither CRT helper is available. Use the existing ELE allocator for
-    // scratch bytes instead, preserving the same bounded chunked writes.
+
     let mut chunk = Buffer::new();
     chunk.grow(4096);
     if chunk.data.is_null() {
-        unsafe { CloseHandle(handle) };
+        unsafe {
+            CloseHandle(handle);
+            DeleteFileW(tmp_dest);
+        };
         return 3;
     }
     let mut error = 0;
@@ -441,7 +523,6 @@ pub unsafe extern "system" fn l_platform_write_bytes(
         let amount = (count as usize - pos).min(chunk.capacity);
         let mut offset = 0usize;
         while offset < amount {
-            // Each source byte was validated before opening the file.
             unsafe { chunk.data.add(offset).write(*data.add(pos + offset) as u8) };
             offset += 1;
         }
@@ -461,6 +542,119 @@ pub unsafe extern "system" fn l_platform_write_bytes(
         if error != 0 { break; }
         pos += amount;
     }
-    if unsafe { CloseHandle(handle) } == 0 { error = 3; }
-    error
+    if error != 0 {
+        unsafe {
+            CloseHandle(handle);
+            DeleteFileW(tmp_dest);
+        }
+        return 3;
+    }
+    if unsafe { FlushFileBuffers(handle) } == 0 {
+        unsafe {
+            CloseHandle(handle);
+            DeleteFileW(tmp_dest);
+        }
+        return 3;
+    }
+    if unsafe { CloseHandle(handle) } == 0 {
+        unsafe { DeleteFileW(tmp_dest); }
+        return 3;
+    }
+    if unsafe { MoveFileExW(tmp_dest, dest, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
+        unsafe { DeleteFileW(tmp_dest); }
+        return 3;
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn l_platform_same_file(
+    path_a: *const u8,
+    len_a: usize,
+    path_b: *const u8,
+    len_b: usize,
+) -> i64 {
+    if len_a == 0 || len_a > L_MAX_PATH_BYTES || len_b == 0 || len_b > L_MAX_PATH_BYTES {
+        return 2;
+    }
+    let bytes_a = unsafe { core::slice::from_raw_parts(path_a, len_a) };
+    let bytes_b = unsafe { core::slice::from_raw_parts(path_b, len_b) };
+    if !l_platform_path_valid(bytes_a) || !l_platform_path_valid(bytes_b) {
+        return 2;
+    }
+    let mut wide_a = Buffer::new();
+    wide_a.grow((len_a + 1) * 2);
+    let dest_a = wide_a.data.cast::<u16>();
+    let size_a = unsafe { MultiByteToWideChar(UTF8, INVALID_UTF8, path_a, len_a as i32, dest_a, len_a as i32) };
+    if size_a <= 0 { return 2; }
+    unsafe { dest_a.add(size_a as usize).write(0) };
+
+    let mut wide_b = Buffer::new();
+    wide_b.grow((len_b + 1) * 2);
+    let dest_b = wide_b.data.cast::<u16>();
+    let size_b = unsafe { MultiByteToWideChar(UTF8, INVALID_UTF8, path_b, len_b as i32, dest_b, len_b as i32) };
+    if size_b <= 0 { return 2; }
+    unsafe { dest_b.add(size_b as usize).write(0) };
+
+    // Establish the source identity before accepting an absent destination.
+    let handle_b = unsafe {
+        CreateFileW(
+            dest_b,
+            GENERIC_READ,
+            SHARE_READ_WRITE_DELETE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            ptr::null_mut(),
+        )
+    };
+    if handle_b as usize == usize::MAX {
+        return 2;
+    }
+
+    let handle_a = unsafe {
+        CreateFileW(
+            dest_a,
+            GENERIC_READ,
+            SHARE_READ_WRITE_DELETE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            ptr::null_mut(),
+        )
+    };
+    if handle_a as usize == usize::MAX {
+        let error = unsafe { GetLastError() };
+        let attributes = unsafe { GetFileAttributesW(dest_a) };
+        unsafe { CloseHandle(handle_b) };
+        // ERROR_FILE_NOT_FOUND with no reparse point is a different file.
+        return if error == 2 && attributes == u32::MAX { 0 } else { 2 };
+    }
+
+    let mut info_a = core::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
+    let mut info_b = core::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
+
+    let ok_a = unsafe { GetFileInformationByHandle(handle_a, info_a.as_mut_ptr()) };
+    let ok_b = unsafe { GetFileInformationByHandle(handle_b, info_b.as_mut_ptr()) };
+
+    unsafe {
+        CloseHandle(handle_a);
+        CloseHandle(handle_b);
+    }
+
+    if ok_a == 0 || ok_b == 0 {
+        return 2;
+    }
+
+    let info_a = unsafe { info_a.assume_init() };
+    let info_b = unsafe { info_b.assume_init() };
+
+    if info_a.volume_serial_number == info_b.volume_serial_number
+        && info_a.file_index_high == info_b.file_index_high
+        && info_a.file_index_low == info_b.file_index_low
+    {
+        1
+    } else {
+        0
+    }
 }

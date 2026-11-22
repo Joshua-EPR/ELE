@@ -45,7 +45,7 @@ fn parserSynchronize(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexT
     }
 }
 
-fn parseProgram(tree: &mut AstTree, source: &Text, tokens: &List<LexToken>, fileId: Int) -> Bool {
+pub fn parseProgram(tree: &mut AstTree, source: &Text, tokens: &List<LexToken>, fileId: Int) -> Bool {
     var cursor = cursorNew(fileId)
     parserSkipSeparators(source, &mut cursor, tokens)
 

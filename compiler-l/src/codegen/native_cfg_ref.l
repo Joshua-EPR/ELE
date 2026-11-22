@@ -1,6 +1,7 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
+take native_cfg_returnref
 
 // Reference parameters (`view T` / `edit T`) and Text queries of the
 // ELE-written CFG backend.
@@ -89,6 +90,7 @@ expose flow cfgCheckTextQuery(p: view CfgProgram, f: Int, inst: view CfgInst) =>
 
 // Whether function `f` writes through its reference parameter `v`.
 expose flow cfgParamNeedsMut(p: view CfgProgram, f: Int, v: Int) => Bool {
+    when cfgReturnsParamMut(p, f, v) { give true }
     hold first_block = p.functions[f].first_block
     each b among first_block..(first_block + p.functions[f].blocks) {
         hold first = p.blocks[b].first

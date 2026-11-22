@@ -150,6 +150,7 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         if op_code == 2 { op_name = "readtext" }
         if op_code == 3 { op_name = "printerror" }
         if op_code == 4 { op_name = "writebytes" }
+        when op_code == 5 { op_name = "samefile" }
         var out = "i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]
@@ -183,7 +184,7 @@ fn lirTermText(l: &LirFn, body: &LirBody, source: &Text, b: Int) -> Text {
     return "t unreachable"
 }
 
-fn lirWriteFunction(lines: &mut List<Text>, starts: &List<Int>, l: &LirFn, body: &LirBody, source: &Text, types: &TypeTable, lm: &LirModule, fn_index: Int, name_start: Int, name_end: Int) {
+pub fn lirWriteFunction(lines: &mut List<Text>, starts: &List<Int>, l: &LirFn, body: &LirBody, source: &Text, types: &TypeTable, lm: &LirModule, fn_index: Int, name_start: Int, name_end: Int) {
     let name = lirSpanText(source, name_start, name_end)
     let params = l.params
     let result = lirTypeCode(types, lm, lm.fn_ret[fn_index])

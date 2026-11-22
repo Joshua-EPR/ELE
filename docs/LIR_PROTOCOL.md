@@ -1,11 +1,15 @@
 # Protocolo LIR de ELE, versión 1
 
+> Actualización 2026-11-18: `List.pop()` implementado verticalmente: emitido
+> por Stage 1 hacia `Option<T>`, validado por `lir_verify.l` y `lir_protocol.rs`,
+> soportado en el backend nativo ELE (instrucción 23 `listpop`) y en el runtime
+> con paridad Stage 0 y balance exacto de memoria (`allocs == frees`). Desbloquea
+> `loans_l.l:133` y `ownership_l.l:123`.
+
 > Actualización 2026-11-11: el backend ELE de `feat/native-list-cfg`
 > verifica `list lN`, `i listlit`, `i listpush`, `i listreserve`, `i cap`,
 > lugares indexados y `i loan` en el subconjunto probado por
-> `crates/l/tests/native_list_l.rs`. Existe código para serializar
-> `i listpop`, pero Stage 1 aún no representa su resultado `Option<T>` en
-> ELE-LIR ni el backend ELE lo acepta. Véase
+> `crates/l/tests/native_list_l.rs`. Véase
 > [NATIVE_LIST_LOANS_PHASE.md](NATIVE_LIST_LOANS_PHASE.md). Las notas
 > históricas inferiores describen el estado de fases anteriores.
 
@@ -155,3 +159,40 @@ de estas instrucciones en el texto LIR no prueba compilación ni ejecución nati
 ## Ampliación provisional de listas en fase 8.3
 
 `i cap vN <lugar>` baja a `Rvalue::Cap` y exige una lista. `list lN <elemento>`, `i listlit`, `i listpush`, `i listreserve` y los lugares indexados tienen pruebas verticales y de LIR malformada. Se conserva `ELE-LIR 1` provisionalmente. [Detalle](PHASE_8_3.md).
+
+## Payloads propietarios de Option/Result (#5)
+
+`i payload vD pN eE V` acepta además payloads **propietarios**: `t`, `lK`
+o un struct/enum construido recursivamente con `i`, `b`, `t` y listas
+(`payload_ok` en `lir_protocol.rs`). Si el payload necesita drop, la
+instrucción **mueve** el payload y **consume** el enum completo: el lector Rust
+añade el marcador `Moved(pN)` de Stage 0 justo después de la lectura, de modo
+que `drops::verify` rechaza cualquier uso, segunda extracción, drop o fuga
+posterior del enum. `i variant` mueve su operando propietario; `drop vN` de
+un enum libera solo el payload de la variante activa. La lectura de una
+variante inactiva sigue protegida por la comprobación dinámica del
+discriminante (Cranelift: `acceso a variante enum inactiva`). El backend ELE
+nativo aún no tiene layout verificado para payloads propietarios y rechaza el
+módulo (código 82) sin escribir imagen.
+
+
+## Semántica de `i listpop` (#3)
+
+La instrucción `i listpop vD pN` recibe como origen un lugar de tipo
+`List<T>` y como destino un valor `Option<T>` con el mismo `T`;
+un desacuerdo de elemento o tipo de destino debe rechazarse antes de
+generar código nativo. La operación lee el último elemento de la lista:
+
+- Si está vacía, produce `None` y no intenta leer memoria del buffer.
+- Si contiene elementos, reduce la longitud en una unidad y produce
+  `Some(elemento)`, transfiriendo la propiedad del último elemento al
+  payload cuando `T` necesita drop.
+- El elemento movido ya no pertenece a la lista; el drop de su lista
+  original no debe liberarlo de nuevo.
+- Las variantes, el índice y la vida del origen deben seguir pasando por
+  el verificador de ELE-LIR y los controles de ownership.
+
+Las rutas de Stage 0/Cranelift y el backend nativo ELE requieren pruebas de
+conformidad, incluidos casos vacíos, elementos propietarios y LIR malformada.
+Un soporte de `listpop` no implica que el backend ELE ya sepa generar código
+nativo para **todas** las variantes propietarias de `Option/Result`.

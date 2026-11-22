@@ -16,6 +16,7 @@ import sema_ops
 import sema_collection_ops
 import stmt_lower
 import sema_builtin_union
+take lir_builtin_union
 
 fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
     let decl = &tree.declarations[decl_id]
@@ -36,7 +37,7 @@ fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, ex
     semaConstructorFinish(&mut ctx, tree, expr, decl_id, struct_t, &seen, &slots)
 }
 
-fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
+pub fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
     return semaExprMode(&mut ctx, source, tree, expr_id, ACCESS_READ)
 }
 
@@ -66,7 +67,10 @@ fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     if site != SITE_ARG && ctx.lir.borrowed >= 0 {
         var mutable = 0
         if is_mut { mutable = 1 }
-        lirSetVal(&mut ctx, lirNew(&mut ctx, semaRefElem(ctx, ty), true, LIR_LOAN, ctx.lir.borrowed, mutable, 0))
+        let referent = semaRefElem(ctx, ty)
+        let borrowed_place = ctx.lir.borrowed
+        let value = lirNew(&mut ctx, referent, true, LIR_LOAN, borrowed_place, mutable, 0)
+        lirSetVal(&mut ctx, value)
     }
     return ty
 }
@@ -121,7 +125,7 @@ fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int,
 
 // A value read by print or an interpolation that is not a place and not a
 // literal is an owned temporary of the enclosing statement.
-fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
+pub fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
     ctx.expression_path = -1
     if expr_id < 0 || expr_id >= tree.expressions.length {
         return 7
@@ -195,7 +199,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 flowLink(&mut ctx.flow, rhs_block, join)
                 ctx.flow.current = rhs_block
                 rhs_t = semaCheckExpr(&mut ctx, source, tree, expr.b)
-                lirAt(&mut ctx, LIR_USE, result, lirTakeOperand(&mut ctx, rhs_t), 0, 0)
+                let rhs_value = lirTakeOperand(&mut ctx, rhs_t)
+                lirAt(&mut ctx, LIR_USE, result, rhs_value, 0, 0)
                 flowLink(&mut ctx.flow, join, -1)
                 ctx.flow.current = join
                 rhs = result
@@ -217,7 +222,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 }
             }
             let sub_t = semaCheckExpr(&mut ctx, source, tree, expr.a)
-            return semaUnaryFinish(&mut ctx, source, tree, expr_id, sub_t, lirTakeOperand(&mut ctx, sub_t))
+            let operand = lirTakeOperand(&mut ctx, sub_t)
+            return semaUnaryFinish(&mut ctx, source, tree, expr_id, sub_t, operand)
         }
         AstExprKind.Call => {
             let name_start = expr.a
@@ -235,8 +241,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                     let ty = semaCheckExpr(&mut ctx, source, tree, arg)
                     semaReadTemp(&mut ctx, source, tree, arg, ty, mark)
                     if ty >= 1 && ty <= 5 {
-                        lirAt(&mut ctx, LIR_PRINT, -1, lirTakeArg(&mut ctx, ty), 0, 0)
-                        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+                        let printed = lirTakeArg(&mut ctx, ty)
+                        lirAt(&mut ctx, LIR_PRINT, -1, printed, 0, 0)
+                        let unit = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+                        lirSetVal(&mut ctx, unit)
                         return 6
                     }
                 }
@@ -250,8 +258,10 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             if builtin_variant >= 0 && arg_count == 1 {
                 // A nested expression must not inherit the result union type
                 // of its constructor's own expected destination.
+                // Only a nested Option/Result payload type is propagated
+                // (e.g. `Some(Ok(x))` against Option<Result<T, E>>).
                 let contextual = ctx.expected_union_type
-                ctx.expected_union_type = -1
+                ctx.expected_union_type = semaBuiltinPayloadExpected(ctx, contextual, builtin_variant)
                 let arg_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
                 let payload = lirTakeOperand(&mut ctx, arg_t)
                 ctx.expected_union_type = contextual
@@ -259,11 +269,21 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             }
             let name_print_err = "printError"
             if symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
+                hold mark = ctx.pending_temps.length
                 let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
+                semaReadTemp(edit ctx, source, tree, tree.extra[first_arg], ty, mark)
                 if ty == 5 || semaRefElem(ctx, ty) == 5 {
+                    when ctx.lir.place < 0 {
+                        when ctx.pending_temps.length == mark {
+                            semaTemp(edit ctx, source, tree, 5, expr.start, expr.end)
+                        }
+                        hold temp_var = ctx.lir.val
+                        when temp_var >= 0 { ctx.lir.place = lirPlaceVar(edit ctx.lir, temp_var) }
+                    }
+                    if ctx.lir.place < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
                     var args: List<Int> = List[]
                     args.push(lirTakeArg(&mut ctx, ty))
-                    semaPlatformEmit(&mut ctx, 3, &args, 6, false)
+                    semaPlatformEmit(&mut ctx, LIR_PLATFORM_PRINT_ERROR, &args, 6, false)
                     return 6
                 }
                 semaAddError(&mut ctx, "L0004", "printError requiere un argumento Text o &Text", expr.start, expr.end)
@@ -280,8 +300,11 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 let ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
                 if ty == 1 {
                     var args: List<Int> = List[]
-                    args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, 1), false))
+                    let operand = lirTakeOperand(&mut ctx, 1)
+                    let argument = lirArg(&mut ctx.lir, false, operand, false)
+                    args.push(argument)
                     let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+                    when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                     semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
                     return res_t
                 }
@@ -289,19 +312,84 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 return 7
             }
             let name_read_text = "readText"
-            if symbolNameEqualsText(source, name_start, name_end, name_read_text) && arg_count == 2 {
-                let path_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_PLACE)
-                let len_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
-                if (path_t == 5 || semaRefElem(ctx, path_t) == 5) && len_t == 1 {
-                    var args: List<Int> = List[]
-                    args.push(lirTakeArg(&mut ctx, path_t))
-                    args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, 1), false))
-                    let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                    semaPlatformEmit(&mut ctx, 2, &args, res_t, true)
-                    return res_t
+            if symbolNameEqualsText(source, name_start, name_end, name_read_text) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
                 }
-                semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
-                return 7
+                // Do not consume ctx.lir after visiting the second argument:
+                // it replaces the expression channel used by the first.
+                let path_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                if path_t != 5 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
+                }
+                let path_loan = semaPlatformArgLoan(&mut ctx, path_t, expr.start, expr.end)
+                let path = ctx.lir.borrowed
+                let len_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+                let len = lirTakeOperand(&mut ctx, len_t)
+                if len_t != 1 {
+                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    return 7
+                }
+                if path < 0 || path_loan < 0 {
+                    semaAddError(&mut ctx, "L0016", "readText requiere un lugar Text prestable; los temporales propietarios no están soportados", expr.start, expr.end)
+                    return 7
+                }
+                // The loan covers the full Result<Text, Int>, not only the
+                // primitive success path: preserve the source through max_len.
+                let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+                var loans: List<Int> = List[]
+                loans.push(path_loan)
+                semaCallLoans(&mut ctx, &loans, res_t, SITE_NONE, expr.start, expr.end)
+                var args: List<Int> = List[]
+                let path_arg = lirArg(&mut ctx.lir, true, path, false)
+                args.push(path_arg)
+                let len_arg = lirArg(&mut ctx.lir, false, len, false)
+                args.push(len_arg)
+                // Result<Text, Int> owns its active Text (#5): a registered
+                // builtin union with an atomic drop obligation.
+                when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
+                return res_t
+            }
+            let name_write_bytes = "writeBytes"
+            if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
+                if arg_count != 2 {
+                    semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", expr.start, expr.end)
+                    return 7
+                }
+                // Materialize each shared loan before evaluating the next argument:
+                // a plain FLOW_READ does not protect a previous argument.
+                let path_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                let path_loan = semaPlatformArgLoan(&mut ctx, path_ty, expr.start, expr.end)
+                let path = ctx.lir.borrowed
+                let bytes_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                let bytes_loan = semaPlatformArgLoan(&mut ctx, bytes_ty, expr.start, expr.end)
+                let bytes = ctx.lir.borrowed
+                var loans: List<Int> = List[]
+                loans.push(path_loan)
+                loans.push(bytes_loan)
+                semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
+                return semaWriteBytes(&mut ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
+            }
+            hold name_same_file = "sameFile"
+            when symbolNameEqualsText(source, name_start, name_end, name_same_file) {
+                when arg_count != 2 {
+                    semaAddError(edit ctx, "L0004", "sameFile requiere (Text, Text)", expr.start, expr.end)
+                    give 7
+                }
+                hold path_a_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold path_a_loan = semaPlatformArgLoan(edit ctx, path_a_ty, expr.start, expr.end)
+                hold path_a = ctx.lir.borrowed
+                hold path_b_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                hold path_b_loan = semaPlatformArgLoan(edit ctx, path_b_ty, expr.start, expr.end)
+                hold path_b = ctx.lir.borrowed
+                change loans: List of[Int] = List[]
+                loans@push(path_a_loan)
+                loans@push(path_b_loan)
+                semaCallLoans(edit ctx, view loans, 4, SITE_NONE, expr.start, expr.end)
+                give semaSameFile(edit ctx, expr.start, expr.end, path_a_ty, path_a, path_b_ty, path_b)
             }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
@@ -334,12 +422,17 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                             let param_t = semaResolveAstType(&mut ctx, source, tree, param.type_id)
                             if semaRefElem(ctx, param_t) >= 0 {
                                 loans.push(semaRefArg(&mut ctx, source, tree, arg_eid, param_t, a))
-                                args.push(lirArg(&mut ctx.lir, true, ctx.lir.borrowed, semaIsMutRef(ctx, param_t)))
+                                let place = ctx.lir.borrowed
+                                let is_mut = semaIsMutRef(ctx, param_t)
+                                let argument = lirArg(&mut ctx.lir, true, place, is_mut)
+                                args.push(argument)
                             } else {
                                 loans.push(-1)
                                 ctx.expected_list_type = param_t
                                 let arg_t = semaExprMode(&mut ctx, source, tree, arg_eid, ACCESS_MOVE)
-                                args.push(lirArg(&mut ctx.lir, false, lirTakeOperand(&mut ctx, arg_t), false))
+                                let operand = lirTakeOperand(&mut ctx, arg_t)
+                                let argument = lirArg(&mut ctx.lir, false, operand, false)
+                                args.push(argument)
                                 if !semTypeEquals(&ctx.types, arg_t, param_t) {
                                     semaAddError(&mut ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
                                 }
@@ -430,4 +523,64 @@ fn semaCollectionLit(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr:
         elements.push(lirTakeOperand(&mut ctx, ti))
     }
     return semaFinishCollectionLit(&mut ctx, expr, is_array, elem_t, &elements)
+}
+
+// A qualified enum variant constructor is parsed as a MethodCall on an
+// enum name. Never type-check the enum name as a runtime object.
+// Return -1 when this is an ordinary method call.
+fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
+    if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
+    let base = &tree.expressions[expr.a]
+    match base.kind {
+        AstExprKind.Name => {}
+        _ => { return -1 }
+    }
+    let sym_id = semaLookupVisible(&mut ctx, source, base.start, base.end)
+    if sym_id < 0 { return -1 }
+    match ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Enum => {}
+        _ => { return -1 }
+    }
+    let decl_id = ctx.symbols.symbols[sym_id].decl_id
+    let enum_ty = ctx.symbols.symbols[sym_id].type_id
+    if decl_id < 0 || decl_id >= tree.declarations.length { return 7 }
+    let decl = &tree.declarations[decl_id]
+    let first = expr.d
+    let argc = tree.extra[first]
+    for v in 0..decl.d {
+        let variant = &tree.variants[decl.c + v]
+        if !symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) { continue }
+        if argc != variant.payload_count {
+            semaAddError(&mut ctx, "L0004", "cantidad de argumentos incorrecta para la variante", expr.start, expr.end)
+            return 7
+        }
+        if argc > 1 {
+            semaAddError(&mut ctx, "L0016", "Stage 1 solo admite un payload primitivo por variante", expr.start, expr.end)
+            return 7
+        }
+        var payload = LIR_NONE
+        if argc == 1 {
+            let expected = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index])
+            let actual = semaExprMode(&mut ctx, source, tree, tree.extra[first + 1], ACCESS_MOVE)
+            if expected != actual {
+                semaAddError(&mut ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
+                return 7
+            }
+            if expected != 1 && expected != 4 {
+                semaAddError(&mut ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
+                return 7
+            }
+            payload = lirTakeOperand(&mut ctx, actual)
+        }
+        var enum_id = -1
+        for k in 0..ctx.lir_module.en_decl.length {
+            if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+        }
+        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start); return 7 }
+        let value = lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload)
+        lirSetVal(&mut ctx, value)
+        return enum_ty
+    }
+    semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
+    return 7
 }

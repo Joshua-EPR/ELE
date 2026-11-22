@@ -3,6 +3,7 @@ import sema_types
 import lir_build
 import lir_finish
 import lir_verify_core
+take lir_verify_own
 
 // Verified call/terminator contracts and dataflow join for Stage 1.
 pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, callee: Int, first: Int, count: Int, check: Bool) -> Int {
@@ -15,6 +16,66 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
         if l.args[arg].by_ref != lm.param_ref[p] { return 4 }
         if l.args[arg].by_ref && l.args[arg].mutable != lm.param_mut[p] { return 4 }
         if !lirTypesCompat(types, lm, lirArgType(l, types, lm, arg), lm.param_ty[p]) { return 4 }
+        if !lirArgDefined(&mut v, l, arg, check) { return 5 }
+    }
+    return 0
+}
+
+
+// Validate every platform call independently of the semantic lowering.
+// This closes the old verifier gap where LIR_PLATFORM unconditionally
+// accepted the destination's own type and never inspected the arguments.
+// Rules: 1 invalid ids/opcode, 3 type/result, 4 arity/borrow mode,
+// 5 use-before-initialization.
+pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, op: Int, first: Int, count: Int, dst: Int, check: Bool) -> Int {
+    if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 3 }
+    var arity = -1
+    if op == LIR_PLATFORM_ARG_COUNT { arity = 0 }
+    if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR { arity = 1 }
+    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
+    if arity < 0 { return 1 }
+    if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
+    let result = l.vars[dst].ty
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES {
+        if result != 1 { return 3 }
+    } else if op == LIR_PLATFORM_PRINT_ERROR {
+        if result != 6 { return 3 }
+    } else {
+        when op == LIR_PLATFORM_SAME_FILE {
+            when result != 1 { give 3 }
+        } otherwise {
+            // processArg/readText produce Result<Text,Int>: an owned union
+            // whose active Text is dropped once (or moved out by a match).
+            if result < 8 || result >= types.types.length { return 3 }
+            match types.types[result].kind {
+                SemTypeKind.Result => {
+                    if types.types[result].elem_type != 5 || types.types[result].nominal_id != 1 { return 3 }
+                }
+                _ => { return 3 }
+            }
+        }
+    }
+    for i in 0..count {
+        let arg = l.operands[first + i]
+        if arg < 0 || arg >= l.args.length { return 1 }
+        var borrowed = false
+        var expected = 1
+        if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE {
+            borrowed = true
+            expected = 5
+        }
+        if l.args[arg].by_ref != borrowed { return 4 }
+        if borrowed && l.args[arg].mutable { return 4 }
+        let ty = lirArgType(l, types, lm, arg)
+        if op == LIR_PLATFORM_WRITE_BYTES && i == 1 {
+            if ty < 8 || ty >= types.types.length { return 3 }
+            match types.types[ty].kind {
+                SemTypeKind.List => { if types.types[ty].elem_type != 1 { return 3 } }
+                _ => { return 3 }
+            }
+        } else if ty != expected {
+            return 3
+        }
         if !lirArgDefined(&mut v, l, arg, check) { return 5 }
     }
     return 0
@@ -57,7 +118,48 @@ pub fn lirVerifyFlow(v: &mut LirVerifier, target: Int, vars: Int) {
             v.table[cell] = false
             changed = true
         }
+        // May-analysis for owned-union moves: moved on any incoming edge.
+        when cell < v.mtable.length && i < v.moved.length {
+            hold gone = v.moved[i]
+            when first {
+                v.mtable[cell] = gone
+            } otherwise when gone && !v.mtable[cell] {
+                v.mtable[cell] = true
+                changed = true
+            }
+        }
+        when v.has_flags {
+            when i < v.flag_root.length && v.flag_root[i] >= 0 {
+                hold f_in = v.flags[i]
+                when cell < v.ftable.length {
+                    when first {
+                        v.ftable[cell] = f_in
+                    } otherwise when v.ftable[cell] != f_in {
+                        // Paths that disagree join to Unknown; a forged
+                        // value (3) stays forged.
+                        change joined = 2
+                        when v.ftable[cell] == 3 || f_in == 3 { joined = 3 }
+                        when v.ftable[cell] != joined {
+                            v.ftable[cell] = joined
+                            changed = true
+                        }
+                    }
+                }
+                // Ownership of the place this flag guards (per flag, not
+                // per root: fields of one struct are owned independently).
+                when i < v.owned.length && cell < v.otable.length {
+                    hold o_in = v.owned[i]
+                    when first {
+                        v.otable[cell] = o_in
+                    } otherwise when v.otable[cell] != o_in && v.otable[cell] != 2 {
+                        v.otable[cell] = 2
+                        changed = true
+                    }
+                }
+            }
+        }
     }
+    when lirLeafJoin(edit v, target, first) { changed = true }
     v.seen[target] = true
     if changed && !v.pending[target] {
         v.pending[target] = true

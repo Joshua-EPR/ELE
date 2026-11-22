@@ -1,0 +1,317 @@
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "ELE Graphite Dark",
+  "type": "dark",
+  "colors": {
+    "focusBorder": "#5799AD",
+    "foreground": "#D6E0E9",
+    "descriptionForeground": "#8FA1AF",
+    "editor.background": "#10161D",
+    "editor.foreground": "#D8E2EB",
+    "editorCursor.foreground": "#80CFD0",
+    "editorLineNumber.foreground": "#536576",
+    "editorLineNumber.activeForeground": "#AFC0CE",
+    "editor.lineHighlightBackground": "#18212B",
+    "editor.selectionBackground": "#284C5B",
+    "editor.inactiveSelectionBackground": "#223843",
+    "editor.wordHighlightBackground": "#2B47564D",
+    "editor.wordHighlightStrongBackground": "#315D6966",
+    "editor.findMatchBackground": "#365F69",
+    "editor.findMatchHighlightBackground": "#28434F",
+    "editorIndentGuide.background1": "#293542",
+    "editorIndentGuide.activeBackground1": "#536778",
+    "editorBracketMatch.background": "#25445166",
+    "editorBracketMatch.border": "#75B8C4",
+    "editorBracketHighlight.foreground1": "#A9C2D0",
+    "editorBracketHighlight.foreground2": "#83BFC4",
+    "editorBracketHighlight.foreground3": "#D5B790",
+    "editorBracketHighlight.foreground4": "#94BCA2",
+    "editorBracketHighlight.foreground5": "#C0A3A0",
+    "editorBracketHighlight.foreground6": "#9BB8DC",
+    "editorWhitespace.foreground": "#40505C",
+    "editorGutter.background": "#10161D",
+    "editorError.foreground": "#E88484",
+    "editorWarning.foreground": "#E1B978",
+    "editorInfo.foreground": "#82B4D4",
+    "sideBar.background": "#121A22",
+    "sideBar.foreground": "#AFC0CA",
+    "activityBar.background": "#0C1219",
+    "activityBar.foreground": "#C8D8E1",
+    "activityBar.inactiveForeground": "#768C9E",
+    "titleBar.activeBackground": "#0C1219",
+    "titleBar.activeForeground": "#D7E0E9",
+    "statusBar.background": "#14212A",
+    "statusBar.foreground": "#B4CED0",
+    "tab.activeBackground": "#10161D",
+    "tab.inactiveBackground": "#151D25",
+    "tab.activeForeground": "#E3EBF0",
+    "tab.inactiveForeground": "#8394A4",
+    "panel.background": "#121A22",
+    "terminal.background": "#10161D",
+    "terminal.foreground": "#D8E2EB"
+  },
+  "tokenColors": [
+    {
+      "name": "Comments",
+      "scope": [
+        "comment",
+        "punctuation.definition.comment"
+      ],
+      "settings": {
+        "foreground": "#708494",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Strings",
+      "scope": [
+        "string",
+        "punctuation.definition.string"
+      ],
+      "settings": {
+        "foreground": "#A5CEAA"
+      }
+    },
+    {
+      "name": "Escapes",
+      "scope": [
+        "constant.character.escape"
+      ],
+      "settings": {
+        "foreground": "#D9B784"
+      }
+    },
+    {
+      "name": "Numbers",
+      "scope": [
+        "constant.numeric"
+      ],
+      "settings": {
+        "foreground": "#D7A88C"
+      }
+    },
+    {
+      "name": "Booleans/constants",
+      "scope": [
+        "constant.language"
+      ],
+      "settings": {
+        "foreground": "#D7A88C"
+      }
+    },
+    {
+      "name": "Keywords",
+      "scope": [
+        "keyword",
+        "storage"
+      ],
+      "settings": {
+        "foreground": "#89BBD0"
+      }
+    },
+    {
+      "name": "Types",
+      "scope": [
+        "support.type",
+        "entity.name.type"
+      ],
+      "settings": {
+        "foreground": "#E3C18C"
+      }
+    },
+    {
+      "name": "Functions",
+      "scope": [
+        "entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#86C2E3"
+      }
+    },
+    {
+      "name": "Variables",
+      "scope": [
+        "variable"
+      ],
+      "settings": {
+        "foreground": "#B7D6D2"
+      }
+    },
+    {
+      "name": "ELE local variables",
+      "scope": [
+        "variable.other.declaration.ele",
+        "variable.other.readwrite.ele"
+      ],
+      "settings": {
+        "foreground": "#B6D7C7"
+      }
+    },
+    {
+      "name": "ELE parameters",
+      "scope": [
+        "variable.parameter.ele"
+      ],
+      "settings": {
+        "foreground": "#AEC9E6"
+      }
+    },
+    {
+      "name": "ELE member fields",
+      "scope": [
+        "variable.other.member.ele"
+      ],
+      "settings": {
+        "foreground": "#CECEAB"
+      }
+    },
+    {
+      "name": "ELE named constants",
+      "scope": [
+        "variable.other.constant.declaration.ele",
+        "constant.other.identifier.ele"
+      ],
+      "settings": {
+        "foreground": "#E8B68D",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Operators/punctuation",
+      "scope": [
+        "keyword.operator",
+        "punctuation"
+      ],
+      "settings": {
+        "foreground": "#A6B6C3"
+      }
+    },
+    {
+      "name": "ELE declarations",
+      "scope": [
+        "keyword.declaration.ele",
+        "keyword.other.generic.ele",
+        "keyword.other.on.ele"
+      ],
+      "settings": {
+        "foreground": "#83C6BC",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "ELE control flow",
+      "scope": [
+        "keyword.control.ele",
+        "keyword.control.async.ele"
+      ],
+      "settings": {
+        "foreground": "#D8AD98"
+      }
+    },
+    {
+      "name": "ELE ownership and borrowing",
+      "scope": [
+        "storage.modifier.ownership.ele"
+      ],
+      "settings": {
+        "foreground": "#B9C5E0"
+      }
+    },
+    {
+      "name": "ELE legacy aliases (noncanonical)",
+      "scope": [
+        "keyword.declaration.legacy.ele",
+        "keyword.control.legacy.ele",
+        "storage.modifier.legacy.ele"
+      ],
+      "settings": {
+        "foreground": "#89929D"
+      }
+    },
+    {
+      "name": "ELE types",
+      "scope": [
+        "support.type.primitive.ele",
+        "support.type.collection.ele",
+        "entity.name.type.ele"
+      ],
+      "settings": {
+        "foreground": "#E7C38C"
+      }
+    },
+    {
+      "name": "ELE functions and methods",
+      "scope": [
+        "entity.name.function.ele",
+        "entity.name.function.method.ele"
+      ],
+      "settings": {
+        "foreground": "#82BFE9"
+      }
+    },
+    {
+      "name": "ELE @ method separator",
+      "scope": [
+        "keyword.operator.method.ele"
+      ],
+      "settings": {
+        "foreground": "#8EABA8"
+      }
+    },
+    {
+      "name": "ELE flow arrows",
+      "scope": [
+        "keyword.operator.arrow.ele"
+      ],
+      "settings": {
+        "foreground": "#9BC4C9"
+      }
+    },
+    {
+      "name": "ELE comparisons and assignments",
+      "scope": [
+        "keyword.operator.comparison.ele",
+        "keyword.operator.assignment.ele",
+        "keyword.operator.logical.ele",
+        "keyword.operator.arithmetic.ele",
+        "keyword.operator.colon.ele"
+      ],
+      "settings": {
+        "foreground": "#9EAFC0"
+      }
+    },
+    {
+      "name": "ELE numbers",
+      "scope": [
+        "constant.numeric.float.ele",
+        "constant.numeric.integer.ele",
+        "constant.numeric.hex.ele",
+        "constant.numeric.binary.ele"
+      ],
+      "settings": {
+        "foreground": "#DCAA87"
+      }
+    },
+    {
+      "name": "ELE strings",
+      "scope": [
+        "string.quoted.double.ele"
+      ],
+      "settings": {
+        "foreground": "#A7CFA0"
+      }
+    },
+    {
+      "name": "ELE interpolation",
+      "scope": [
+        "punctuation.definition.interpolation.begin.ele",
+        "punctuation.definition.interpolation.end.ele"
+      ],
+      "settings": {
+        "foreground": "#77C5C5",
+        "fontStyle": "bold"
+      }
+    }
+  ]
+}

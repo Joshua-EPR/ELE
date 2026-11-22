@@ -11,8 +11,8 @@ import loans_l
 //    live immediately after it.
 
 const LOAN_OK = 0
-const LOAN_CONFLICT = 1
-const LOAN_LIMIT = 2
+pub const LOAN_CONFLICT = 1
+pub const LOAN_LIMIT = 2
 
 struct LoanCheck {
     status: Int
@@ -248,7 +248,7 @@ fn loanResolveThrough(graph: &mut FlowGraph) {
     }
 }
 
-fn loanVerify(graph: &mut FlowGraph) -> LoanCheck {
+pub fn loanVerify(graph: &mut FlowGraph) -> LoanCheck {
     let loans = graph.loans.length
     let blocks = graph.blocks.length
     if loans == 0 || blocks == 0 { return loanCheckNew(LOAN_OK) }

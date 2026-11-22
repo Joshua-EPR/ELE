@@ -1,10 +1,10 @@
-import codegen.x86_64
-import codegen.elf64
-import codegen.native_heap_dynamic
+take codegen.x86_64
+take codegen.elf64
+take codegen.native_heap_dynamic
 
 // Stage-0-compiled ELE generator of standalone Linux ELF64 tests.
 // Modes: t=two-page success(42), z=zero length(122), n=negative(122),
-// h=over 1 MiB(122), u=unaligned munmap(124).
+// h=over 32 MiB(122), u=unaligned munmap(124).
 // Unlike the previous fixed-size fixture, length enters machine code as a
 // register at runtime and is rounded to pages by the emitted instructions.
 flow main() => Int {
@@ -12,7 +12,7 @@ flow main() => Int {
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
-            hold kind = mode.byteAt(0)
+            hold kind = mode@byteAt(0)
             when kind != 116 && kind != 122 && kind != 110 && kind != 104 && kind != 117 { give 4 }
             change code = x64New()
             x64FrameBegin(edit code, 2)
@@ -49,14 +49,14 @@ flow main() => Int {
             } otherwise {
                 when kind == 122 { x64MovImm64(edit code, 7, 0) }
                 when kind == 110 { x64MovImm64(edit code, 7, -1) }
-                when kind == 104 { x64MovImm64(edit code, 7, 1048577) }
+                when kind == 104 { x64MovImm64(edit code, 7, 33554433) }
                 when !heapEmitDynamicMap(edit code) { give 7 }
                 x64MovImm64(edit code, 7, 90)
                 x64MovImm64(edit code, 0, 60)
                 x64Syscall(edit code)
             }
             when code.error != 0 { give 8 }
-            hold image = elf64Executable(&code.bytes)
+            hold image = elf64Executable(view code.bytes)
             when image.length <= 4096 { give 9 }
             choose processArg(1) {
                 Ok(path): { give writeBytes(path, image) },

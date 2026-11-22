@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 340" width="760" height="340">
+
+    <style>
+      .bg { fill: #ffffff; }
+      .text-title { font-family: system-ui, -apple-system, sans-serif; font-size: 18px; font-weight: 700; fill: #1f2328; }
+      .text-subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #656d76; }
+      .text-label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1f2328; }
+      .text-muted { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #656d76; }
+      .text-val { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: #1f2328; }
+      .grid { stroke: #e1e4e8; stroke-dasharray: 3 3; }
+      .axis { stroke: #d0d7de; stroke-width: 1.5; }
+      .border { stroke: #d0d7de; stroke-width: 1; fill: none; }
+      .bar-ele { fill: #0969da; }
+      .bar-rust { fill: #d9381e; }
+      .bar-gcc { fill: #1a7f37; }
+      .bar-neutral { fill: #8250df; }
+      .badge-bg { fill: #dafbe1; stroke: #aceebb; }
+      .badge-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1a7f37; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #0d1117; }
+        .text-title { fill: #f0f6fc; }
+        .text-subtitle { fill: #8b949e; }
+        .text-label { fill: #e6edf3; }
+        .text-muted { fill: #8b949e; }
+        .text-val { fill: #f0f6fc; }
+        .grid { stroke: #21262d; }
+        .axis { stroke: #30363d; }
+        .border { stroke: #30363d; }
+        .bar-ele { fill: #2f81f7; }
+        .bar-rust { fill: #f85149; }
+        .bar-gcc { fill: #3fb950; }
+        .bar-neutral { fill: #a371f7; }
+        .badge-bg { fill: #1f3524; stroke: #2ea043; }
+        .badge-text { fill: #3fb950; }
+      }
+    </style>
+
+<rect width="760" height="340" rx="8" class="bg border"/>
+<text x="30" y="38" class="text-title">Compiled Binary Footprint Comparison</text>
+<text x="30" y="58" class="text-subtitle">Executable image size on disk · Lower is better · Fibonacci benchmark</text>
+<line x1="240.0" y1="75" x2="240.0" y2="261" class="grid"/>
+<text x="240.0" y="279" text-anchor="middle" class="text-muted">0 KiB</text>
+<line x1="345.0" y1="75" x2="345.0" y2="261" class="grid"/>
+<text x="345.0" y="279" text-anchor="middle" class="text-muted">1300 KiB</text>
+<line x1="450.0" y1="75" x2="450.0" y2="261" class="grid"/>
+<text x="450.0" y="279" text-anchor="middle" class="text-muted">2600 KiB</text>
+<line x1="555.0" y1="75" x2="555.0" y2="261" class="grid"/>
+<text x="555.0" y="279" text-anchor="middle" class="text-muted">3900 KiB</text>
+<line x1="660.0" y1="75" x2="660.0" y2="261" class="grid"/>
+<text x="660.0" y="279" text-anchor="middle" class="text-muted">5200 KiB</text>
+<line x1="240" y1="75" x2="240" y2="261" class="axis"/>
+<text x="225" y="104" text-anchor="end" class="text-label">ELE PE32+ (autonomous native)</text>
+<rect x="240" y="85" width="4.0" height="28" rx="4" class="bar-ele"/>
+<text x="254.0" y="104" class="text-val">5.1 KiB (0 external runtime)</text>
+<text x="225" y="148" text-anchor="end" class="text-label">ELE ELF64 (Linux autonomous)</text>
+<rect x="240" y="129" width="4.0" height="28" rx="4" class="bar-ele"/>
+<text x="254.0" y="148" class="text-val">5.9 KiB (0 external runtime)</text>
+<text x="225" y="192" text-anchor="end" class="text-label">C (GCC -O2 Linux ELF64)</text>
+<rect x="240" y="173" width="4.0" height="28" rx="4" class="bar-gcc"/>
+<text x="254.0" y="192" class="text-val">16.7 KiB (glibc dynamic)</text>
+<text x="225" y="236" text-anchor="end" class="text-label">Rust (release -O3 MSVC)</text>
+<rect x="240" y="217" width="401.1" height="28" rx="4" class="bar-rust"/>
+<text x="651.1" y="236" class="text-val">5,085 KiB (~5.08 MiB stdlib static)</text>
+<text x="30" y="322" class="text-muted">ELE binaries are 100% self-contained direct machine code with zero CRT or standard library overhead.</text>
+</svg>

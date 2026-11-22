@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" width="760" height="360">
+
+    <style>
+      .bg { fill: #ffffff; }
+      .text-title { font-family: system-ui, -apple-system, sans-serif; font-size: 18px; font-weight: 700; fill: #1f2328; }
+      .text-subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #656d76; }
+      .text-label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1f2328; }
+      .text-muted { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #656d76; }
+      .text-val { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: #1f2328; }
+      .grid { stroke: #e1e4e8; stroke-dasharray: 3 3; }
+      .axis { stroke: #d0d7de; stroke-width: 1.5; }
+      .border { stroke: #d0d7de; stroke-width: 1; fill: none; }
+      .bar-ele { fill: #0969da; }
+      .bar-rust { fill: #d9381e; }
+      .bar-gcc { fill: #1a7f37; }
+      .bar-neutral { fill: #8250df; }
+      .badge-bg { fill: #dafbe1; stroke: #aceebb; }
+      .badge-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1a7f37; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #0d1117; }
+        .text-title { fill: #f0f6fc; }
+        .text-subtitle { fill: #8b949e; }
+        .text-label { fill: #e6edf3; }
+        .text-muted { fill: #8b949e; }
+        .text-val { fill: #f0f6fc; }
+        .grid { stroke: #21262d; }
+        .axis { stroke: #30363d; }
+        .border { stroke: #30363d; }
+        .bar-ele { fill: #2f81f7; }
+        .bar-rust { fill: #f85149; }
+        .bar-gcc { fill: #3fb950; }
+        .bar-neutral { fill: #a371f7; }
+        .badge-bg { fill: #1f3524; stroke: #2ea043; }
+        .badge-text { fill: #3fb950; }
+      }
+    </style>
+
+<rect width="760" height="360" rx="8" class="bg border"/>
+<text x="30" y="38" class="text-title">Self-Hosting Generational Cycle &amp; Fixpoint</text>
+<text x="30" y="58" class="text-subtitle">3-Generation bit-for-bit reproducible self-rebuilding of the complete ELE compiler driver</text>
+<text x="30" y="100" class="text-title" style="font-size: 14px;">Windows x86-64 (PE32+)</text>
+<rect x="40" y="115" width="180" height="75" rx="6" class="bg border"/>
+<text x="130" y="135" text-anchor="middle" class="text-label">Gen 1 (Rust Bootstrap)</text>
+<text x="130" y="155" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen1.exe (1,508,352 B)</text>
+<text x="130" y="175" text-anchor="middle" class="text-muted">Built by Stage 0</text>
+<rect x="260" y="115" width="180" height="75" rx="6" class="bg border"/>
+<text x="350" y="135" text-anchor="middle" class="text-label">Gen 2 (Autonomous)</text>
+<text x="350" y="155" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen2.exe (1,508,352 B)</text>
+<text x="350" y="175" text-anchor="middle" class="text-muted">SHA: F0CE6F57...</text>
+<rect x="480" y="115" width="180" height="75" rx="6" class="bg border"/>
+<text x="570" y="135" text-anchor="middle" class="text-label">Gen 3 (Autonomous)</text>
+<text x="570" y="155" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen3.exe (1,508,352 B)</text>
+<text x="570" y="175" text-anchor="middle" class="text-muted">SHA: F0CE6F57...</text>
+<line x1="225" y1="152" x2="255" y2="152" stroke="#0969da" stroke-width="2"/>
+<polygon points="255,148 263,152 255,156" fill="#0969da"/>
+<line x1="445" y1="152" x2="475" y2="152" stroke="#0969da" stroke-width="2"/>
+<polygon points="475,148 483,152 475,156" fill="#0969da"/>
+<text x="460" y="142" text-anchor="middle" class="badge-text" style="font-size: 10px;">100% BITWISE EQUAL</text>
+<text x="30" y="235" class="text-title" style="font-size: 14px;">Linux x86-64 (ELF64)</text>
+<rect x="40" y="250" width="180" height="75" rx="6" class="bg border"/>
+<text x="130" y="270" text-anchor="middle" class="text-label">Gen 1 (Native ELF)</text>
+<text x="130" y="290" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen1.elf (1,511,424 B)</text>
+<text x="130" y="310" text-anchor="middle" class="text-muted">Built by ELE Driver</text>
+<rect x="260" y="250" width="180" height="75" rx="6" class="bg border"/>
+<text x="350" y="270" text-anchor="middle" class="text-label">Gen 2 (Autonomous)</text>
+<text x="350" y="290" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen2.elf (1,511,424 B)</text>
+<text x="350" y="310" text-anchor="middle" class="text-muted">SHA: 4C952A75...</text>
+<rect x="480" y="250" width="180" height="75" rx="6" class="bg border"/>
+<text x="570" y="270" text-anchor="middle" class="text-label">Gen 3 (Autonomous)</text>
+<text x="570" y="290" text-anchor="middle" class="text-val" style="font-size: 11px;">ele_gen3.elf (1,511,424 B)</text>
+<text x="570" y="310" text-anchor="middle" class="text-muted">SHA: 4C952A75...</text>
+<line x1="225" y1="287" x2="255" y2="287" stroke="#1a7f37" stroke-width="2"/>
+<polygon points="255,283 263,287 255,291" fill="#1a7f37"/>
+<line x1="445" y1="287" x2="475" y2="287" stroke="#1a7f37" stroke-width="2"/>
+<polygon points="475,283 483,287 475,291" fill="#1a7f37"/>
+<text x="460" y="277" text-anchor="middle" class="badge-text" style="font-size: 10px;">100% BITWISE EQUAL</text>
+<text x="30" y="345" class="text-muted">Zero external compiler invocations during Gen 2 and Gen 3 self-rebuilding.</text>
+</svg>

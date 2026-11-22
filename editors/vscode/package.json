@@ -1,0 +1,101 @@
+{
+  "name": "ele-vscode",
+  "displayName": "ELE Language Support",
+  "description": "Rich language support for ELE v2: syntax highlighting, snippets, and compiler diagnostic integration.",
+  "version": "0.1.6",
+  "publisher": "ele-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Themes"
+  ],
+  "keywords": [
+    "ele",
+    "ele-v2",
+    "programming-language",
+    "systems-programming",
+    "syntax-highlighting"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Joshua-EPR/ELE"
+  },
+  "bugs": {
+    "url": "https://github.com/Joshua-EPR/ELE/issues"
+  },
+  "homepage": "https://github.com/Joshua-EPR/ELE",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "ele",
+        "aliases": [
+          "ELE",
+          "ele"
+        ],
+        "extensions": [
+          ".l"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/ele-icon-v016.png",
+          "dark": "./images/ele-icon-v016.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ele",
+        "scopeName": "source.ele",
+        "path": "./syntaxes/ele.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ele",
+        "path": "./snippets/ele.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "ELE Graphite Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/ele-graphite-color-theme.json"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "ele",
+        "label": "ELE Compiler Diagnostics",
+        "owner": "ele",
+        "source": "ele",
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(error|warning)\\[([^\\]]+)\\]:\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        }
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "ele-file-icons",
+        "label": "ELE File Icons",
+        "path": "./fileicons/ele-file-icon-theme.json"
+      }
+    ]
+  },
+  "icon": "./images/ele-logo.png"
+}

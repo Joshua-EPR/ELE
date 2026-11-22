@@ -7,16 +7,16 @@ import flow_cfg
 import loans_l
 import lir_build
 
-const ACCESS_READ = 0
-const ACCESS_MOVE = 1
-const ACCESS_PLACE = 2
+pub const ACCESS_READ = 0
+pub const ACCESS_MOVE = 1
+pub const ACCESS_PLACE = 2
 
 // Syntactic positions where a borrow or a borrowed call result may appear.
-const SITE_NONE = 0
-const SITE_LET = 1
-const SITE_VAR = 2
-const SITE_ARG = 3
-const SITE_RETURN = 4
+pub const SITE_NONE = 0
+pub const SITE_LET = 1
+pub const SITE_VAR = 2
+pub const SITE_ARG = 3
+pub const SITE_RETURN = 4
 
 pub struct SemaError {
     code: Text
@@ -62,6 +62,9 @@ pub struct SemaContext {
     scope_marks: List<Int>
     loop_mark: Int
     pending_temps: List<Int>
+    // Symbols whose value a `choose` arm with a non-Copy binding examines:
+    // assigning them inside that arm is L0005 (SEMANTICS.md, Stage 0).
+    frozen_symbols: List of[Int]
     dump_drops: Bool
     drop_fault: Int
     drop_ops: Int
@@ -75,6 +78,8 @@ pub struct SemaContext {
     lir_module: LirModule
     emit_lir: Bool
     lir_fault: Int
+    // Test hook: forged-instruction patch applied before verification.
+    lir_patch: Text
     lir_lines: List<Text>
     lir_functions: List<Text>
     lir_line_starts: List<Int>
@@ -94,6 +99,7 @@ pub fn semaContextNew() -> SemaContext {
     let owned_locals: List<Int> = List[]
     let scope_marks: List<Int> = List[]
     let pending_temps: List<Int> = List[]
+    hold frozen_symbols: List of[Int] = List[]
     return SemaContext(
         types: typeTableNew(),
         symbols: symbolTableNew(),
@@ -123,6 +129,7 @@ pub fn semaContextNew() -> SemaContext {
         scope_marks: scope_marks,
         loop_mark: 0,
         pending_temps: pending_temps,
+        frozen_symbols: frozen_symbols,
         dump_drops: false,
         drop_fault: 0,
         drop_ops: 0,
@@ -133,6 +140,7 @@ pub fn semaContextNew() -> SemaContext {
         lir_module: lirModuleNew(),
         emit_lir: false,
         lir_fault: 0,
+        lir_patch: "",
         lir_lines: List[],
         lir_functions: List[],
         lir_line_starts: List[],
@@ -146,13 +154,13 @@ pub fn semaContextNew() -> SemaContext {
     )
 }
 
-fn semaInitPath(ctx: &mut SemaContext, symbol: Int, start: Int, end: Int) {
+pub fn semaInitPath(ctx: &mut SemaContext, symbol: Int, start: Int, end: Int) {
     let path = flowRoot(&mut ctx.flow, symbol)
     ctx.symbols.symbols[symbol].move_path = path
     flowEvent(&mut ctx.flow, FLOW_INIT, path, start, end)
 }
 
-fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
+pub fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
     ctx.expression_path = path
     if path < 0 || mode == ACCESS_PLACE { return }
     if ty < 0 || ty >= ctx.types.types.length { return }
@@ -169,7 +177,7 @@ fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, 
 }
 
 // Referent of a reference type, or -1 when `ty` is not a reference.
-fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
+pub fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
     if ty < 8 || ty >= ctx.types.types.length { return -1 }
     let t = &ctx.types.types[ty]
     match t.kind {
@@ -179,7 +187,7 @@ fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
     }
 }
 
-fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
+pub fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
     if ty < 8 || ty >= ctx.types.types.length { return false }
     match ctx.types.types[ty].kind {
         SemTypeKind.MutRef => { return true }
@@ -187,7 +195,7 @@ fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
     }
 }
 
-fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, end: Int) -> Int {
+pub fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, end: Int) -> Int {
     let decl = &tree.declarations[declaration]
     for i in decl.c..(decl.c + decl.d) {
         let field = &tree.fields[i]
@@ -196,7 +204,7 @@ fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, en
     return -1
 }
 
-fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr) -> Int {
+pub fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr) -> Int {
     match arg.kind {
         AstExprKind.Named => { return semaFindField(source, tree, declaration, arg.a, arg.b) }
         _ => { return -1 }
@@ -207,7 +215,7 @@ pub fn semaAddError(ctx: &mut SemaContext, code: Text, message: Text, start: Int
     ctx.errors.push(SemaError(code: code, message: message, start: start, end: end))
 }
 
-fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
+pub fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
     if decl < 0 || decl >= ctx.decl_module.length { return 0 }
     return ctx.decl_module[decl]
 }
@@ -223,7 +231,7 @@ pub fn semaSetModuleAccess(ctx: &mut SemaContext, access: &List<Int>, module_cou
     for i in 0..access.length { ctx.module_access.push(access[i]) }
 }
 
-fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) -> Int {
+pub fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) -> Int {
     let found = scopeLookupAllVisible(&ctx.scopes, &ctx.symbols, source, start, end, ctx.current_module, &ctx.module_access, ctx.module_count)
     if found == -2 {
         semaAddError(&mut ctx, "L0014", "nombre ambiguo: varias declaraciones públicas importadas", start, end)

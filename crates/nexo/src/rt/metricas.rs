@@ -36,22 +36,32 @@ pub struct Metricas {
 impl Metricas {
     pub fn acceso(&mut self, n: Nivel) {
         match n {
-            Nivel::Estatico => self.accesos_estaticos += 1,
-            Nivel::Congelado => self.accesos_congelados += 1,
-            Nivel::Comprobado => self.accesos_comprobados += 1,
+            Nivel::Estatico => self.accesos_estaticos = self.accesos_estaticos.saturating_add(1),
+            Nivel::Congelado => self.accesos_congelados = self.accesos_congelados.saturating_add(1),
+            Nivel::Comprobado => {
+                self.accesos_comprobados = self.accesos_comprobados.saturating_add(1)
+            }
         }
     }
 
     pub fn revalidacion(&mut self, n: Nivel) {
         match n {
-            Nivel::Estatico => self.revalidaciones_estaticas += 1,
-            Nivel::Congelado => self.revalidaciones_congeladas += 1,
-            Nivel::Comprobado => self.revalidaciones_comprobadas += 1,
+            Nivel::Estatico => {
+                self.revalidaciones_estaticas = self.revalidaciones_estaticas.saturating_add(1)
+            }
+            Nivel::Congelado => {
+                self.revalidaciones_congeladas = self.revalidaciones_congeladas.saturating_add(1)
+            }
+            Nivel::Comprobado => {
+                self.revalidaciones_comprobadas = self.revalidaciones_comprobadas.saturating_add(1)
+            }
         }
     }
 
     pub fn accesos_totales(&self) -> u64 {
-        self.accesos_estaticos + self.accesos_congelados + self.accesos_comprobados
+        self.accesos_estaticos
+            .saturating_add(self.accesos_congelados)
+            .saturating_add(self.accesos_comprobados)
     }
 
     fn pct(x: u64, t: u64) -> f64 {

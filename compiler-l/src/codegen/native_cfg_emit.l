@@ -3,10 +3,18 @@ take native_cfg_types
 take native_cfg_verify
 take x86_64
 take elf64
+take pe64
+take win64_rt
+take win64_heap
 take native_rt
 take native_cfg_text
 take native_cfg_arith
 take native_cfg_list_emit
+take native_cfg_fields
+take native_cfg_ir
+take native_cfg_platform
+take native_rt_platform
+take win64_rt_platform
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -29,8 +37,10 @@ flow cfgPlaceKind(p: view CfgProgram, f: Int, variable: Int, field: Int, subfiel
 // The place may be reached through a reference parameter or a list index.
 flow cfgStoreField(code: edit X64Code, p: view CfgProgram, f: Int, variable: Int, field: Int, subfield: Int, ext: Int, value: view NativeOperand, fix: edit CfgFix) {
     hold ty = cfgPlaceKind(p, f, variable, field, subfield, ext)
-    when ext >= 0 && cfgOwnsHeap(p, ty) {
+    hold whole_referent = field < 0 && ext < 0
+    when (ext >= 0 || whole_referent) && cfgOwnsHeap(p, ty) {
         // Indexed owners have no partial-move flag: the old element is live.
+        // A whole referent is live too (native_cfg_verify requires it whole).
         // Drop it before loading the source, then recompute the address since
         // drop glue may clobber caller-saved registers.
         cfgPlaceAddressRax(edit code, p, f, variable, field, subfield, ext, edit fix)
@@ -183,8 +193,13 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
             }
             when inst.argc == 1 {
                 hold payload = p.variants[kind.first_variant + inst.place_field].payload_type
-                when payload >= 2 {
-                    // A drop-free shape/choice moved in (the verifier kills
+                when payload == cfgTextType() {
+                    cfgTextWords(edit code, p, f, view inst.a, edit fix)
+                    x64StoreMem64(edit code, 5, dest + 8, 0)
+                    x64StoreMem64(edit code, 5, dest + 16, 2)
+                    x64StoreMem64(edit code, 5, dest + 24, 1)
+                } otherwise when payload >= 2 {
+                    // A shape/choice moved in (the verifier kills
                     // the source): copy its layout into the payload area.
                     cfgCopyValue(edit code, p, payload, 5, dest + 8, 5, cfgVarBase(p, f, inst.a.value))
                 } otherwise {
@@ -211,8 +226,8 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         fix.bad_variant_at@push(x64ConditionalPlaceholder(edit code, false))
         hold e = view p.enums[inst.op]
         hold payload = p.variants[e.first_variant + inst.place_field].payload_type
-        when payload >= 2 {
-            // Aggregate payload: copied by layout only after the check. The
+        when payload >= 2 || payload == cfgTextType() {
+            // Aggregate or Text payload: copied by layout only after the check. The
             // verifier treats this as a move of the whole (owned) enum.
             cfgCopyValue(edit code, p, payload, 5, cfgVarBase(p, f, inst.dst), at.base, owner + 8)
         } otherwise when payload == 1 {
@@ -224,12 +239,14 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         }
     } otherwise when inst.kind == 16 {
         cfgEmitUnary(edit code, p, f, inst, edit fix)
-    } otherwise when inst.kind >= 18 && inst.kind <= 21 {
+    } otherwise when (inst.kind >= 18 && inst.kind <= 21) || inst.kind == 23 {
         cfgEmitList(edit code, p, f, inst, edit fix)
     } otherwise when inst.kind == 22 {
         // loan: the address of the place becomes the local reference.
         cfgPlaceAddressRax(edit code, p, f, inst.place_var, inst.place_field, inst.place_subfield, inst.place_ext, edit fix)
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
+    } otherwise when inst.kind == 24 {
+        cfgEmitPlatform(edit code, p, f, inst, edit fix)
     } otherwise {
         cfgEmitText(edit code, p, f, inst, edit fix)
     }
@@ -264,6 +281,10 @@ flow cfgEmitTerm(code: edit X64Code, p: view CfgProgram, f: Int, block: view Cfg
         fix.jump_to@push(func.first_block + block.no)
     } otherwise when block.term == 4 {
         x64Unreachable(edit code)
+    } otherwise when block.term == 5 {
+        // returnref: the reference's slot holds the referent's address.
+        x64LoadSlot(edit code, 0, p.slot_start[cfgVarIndex(p, f, block.value.value)])
+        x64FrameEnd(edit code)
     } otherwise {
         code.error = 11
     }
@@ -285,12 +306,43 @@ flow cfgEmitParams(code: edit X64Code, p: view CfgProgram, f: Int) {
     }
 }
 
+// The drop glue table (cfgEmitDropGlue) is emitted when a list type exists,
+// when some `i drop` releases a whole union (cfgEmitUnionGlue), or when a
+// shape- or union-typed value is released by `dropfield` or replaced by a
+// whole `store` through a reference. Other programs keep their glue-free
+// image.
+flow cfgNeedsGlue(p: view CfgProgram) => Bool {
+    when p.decl_lists > 0 { give true }
+    hold first_enum = 2 + p.decl_structs
+    each f among 0..p.functions.length {
+        hold func = view p.functions[f]
+        each b among func.first_block..(func.first_block + func.blocks) {
+            hold block = view p.blocks[b]
+            each i among block.first..(block.first + block.count) {
+                hold inst = view p.insts[i]
+                when inst.kind == 13 {
+                    hold owner = p.types_code[func.first_var + inst.place_var]
+                    when owner >= first_enum && owner < first_enum + p.decl_enums { give true }
+                }
+                hold whole_store = inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0
+                when inst.kind == 17 || whole_store {
+                    hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
+                    hold ty = cfgPlaceType(p, f, view place)
+                    when ty >= 2 && cfgOwnsHeap(p, ty) { give true }
+                }
+            }
+        }
+    }
+    give false
+}
+
 flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     // A list type brings its growth routine and drop glue, which release
-    // Text elements through the runtime.
-    when p.decl_lists > 0 { give true }
+    // Text elements through the runtime; so does an owning union.
+    when cfgNeedsGlue(p) { give true }
     each i among 0..p.insts.length {
-        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { give true }
+        // The platform runtime allocates and releases through native_rt.
+        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 || p.insts[i].kind == 24 { give true }
     }
     give false
 }
@@ -303,6 +355,28 @@ flow cfgUsesKind(p: view CfgProgram, kind: Int) => Bool {
 }
 
 expose flow cfgBuild(p: view CfgProgram) => CfgImage {
+    give cfgBuildFor(p, 0)
+}
+
+// Process exit with a constant status: Linux sys_exit on ELF64 (target 0),
+// ExitProcess through the IAT on PE32+ (target 1).
+flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, status: Int) {
+    when target == 1 {
+        w64EmitExit(edit code, edit imports, status)
+        give
+    }
+    x64MovImm64(edit code, 7, status)
+    x64MovImm64(edit code, 0, 60)
+    x64Syscall(edit code)
+}
+
+// Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, whose
+// runtime (win64_rt output, win64_heap owned Text and lists on
+// VirtualAlloc/VirtualFree) provides the same entries as native_rt and
+// native_rt_list. A call to a runtime entry the target does not have is
+// rejected with error 73 instead of emitting Linux system calls. A
+// rejection by the PE writer (pe64.l codes 1..8) is reported as 111..118.
+expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change result = CfgImage(image: List[], error: 0)
     hold verified = cfgVerify(p)
     when verified != 0 {
@@ -315,36 +389,85 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[])
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
+    when target != 0 && target != 1 {
+        result.error = 73
+        give result
+    }
+    // Platform builtins (native_cfg_platform): native_rt_platform on Linux
+    // ELF64, win64_rt_platform (KERNEL32 only) on Windows PE32+.
+    hold platform = cfgUsesKind(p, 24)
+    change imports = pe64NewImports()
+    // Immediates holding the address of the ELF read-write data page.
+    change data_at: List of[Int] = List[]
 
-    // ELF entry point: sys_exit(main()).
-    cfgCall(edit code, edit fix, p.main)
-    x64MovReg(edit code, 7, 0)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    when target == 1 {
+        // PE entry point: ExitProcess(main()).
+        hold main_call = w64EmitEntry(edit code, edit imports)
+        fix.call_at@push(main_call)
+        fix.call_to@push(p.main)
+    } otherwise {
+        when platform {
+            // Keep the initial stack pointer (argc, argv) in the first word
+            // of the data page for native_rt_platform. At process entry RSP
+            // is 16-byte aligned; the CALL below leaves main's frame as
+            // before.
+            x64MovImm64(edit code, 0, 0)
+            data_at@push(code.bytes.length - 8)
+            x64MovReg(edit code, 1, 4)
+            x64StoreMem64(edit code, 0, 0, 1)
+        }
+        // ELF entry point: sys_exit(main()).
+        cfgCall(edit code, edit fix, p.main)
+        x64MovReg(edit code, 7, 0)
+        x64MovImm64(edit code, 0, 60)
+        x64Syscall(edit code)
+    }
     hold overflow_handler = code.bytes.length
-    x64MovImm64(edit code, 7, 125)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    cfgEmitExit(edit code, edit imports, target, 125)
 
     hold bad_variant_handler = code.bytes.length
-    x64MovImm64(edit code, 7, 126)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
+    cfgEmitExit(edit code, edit imports, target, 126)
 
     // Index out of range (byteAt, list element): exit 127, emitted only when
     // used.
     change bad_index_handler = -1
     when cfgUsesKind(p, 15) || p.proj_kind.length > 0 {
         bad_index_handler = code.bytes.length
-        x64MovImm64(edit code, 7, 127)
-        x64MovImm64(edit code, 0, 60)
-        x64Syscall(edit code)
+        cfgEmitExit(edit code, edit imports, target, 127)
     }
 
     // The runtime is emitted only for programs that print or own Text.
     change runtime_at: List of[Int] = List[]
-    when cfgNeedsRuntime(p) { runtime_at = rtEmitAll(edit code) }
-    when p.decl_lists > 0 { cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at) }
+    when cfgNeedsRuntime(p) {
+        when target == 1 {
+            runtime_at = w64EmitHeapRuntime(edit code, edit imports)
+        } otherwise {
+            runtime_at = rtEmitAll(edit code)
+        }
+    }
+    when cfgNeedsGlue(p) {
+        when target == 1 {
+            // list_reserve is already rtListReserve() of the Windows runtime.
+            cfgEmitDropGlue(edit code, p, edit fix, edit runtime_at, 1)
+        } otherwise {
+            cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
+        }
+    }
+    // Runtime and drop-glue indexes share the call target space with the
+    // platform routines from cfgPlatformBase() on: they must stay below it.
+    when runtime_at.length >= cfgPlatformBase() {
+        result.error = 74
+        give result
+    }
+    change platform_at: List of[Int] = List[]
+    when platform {
+        hold rt = PfRuntime(text_new: runtime_at[rtTextNew()], text_drop: runtime_at[rtTextDrop()])
+        when target == 1 {
+            platform_at = w64EmitPlatform(edit code, edit imports, view rt)
+        } otherwise {
+            platform_at = pfEmitAll(edit code, view rt, edit data_at)
+        }
+    }
 
     each f among 0..p.functions.length {
         hold func = view p.functions[f]
@@ -371,12 +494,27 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
         result.error = 70
         give result
     }
+    // A runtime routine this target lacks: a safety net, since win64_heap
+    // provides every entry of native_rt and native_rt_list.
+    change missing_routine = false
     each i among 0..fix.call_at.length {
-        hold target = fix.call_to[i]
-        when target >= 0 {
-            x64PatchRelative(edit code, fix.call_at[i], func_at[target])
-        } otherwise when -1 - target < runtime_at.length {
-            x64PatchRelative(edit code, fix.call_at[i], runtime_at[-1 - target])
+        hold routine = -1 - fix.call_to[i] - cfgPlatformBase()
+        hold platform_routine = routine >= 0 && routine < platform_at.length
+        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine { missing_routine = true }
+    }
+    when missing_routine {
+        result.error = 73
+        give result
+    }
+    each i among 0..fix.call_at.length {
+        hold callee = fix.call_to[i]
+        hold routine = -1 - callee - cfgPlatformBase()
+        when callee >= 0 {
+            x64PatchRelative(edit code, fix.call_at[i], func_at[callee])
+        } otherwise when routine >= 0 && routine < platform_at.length {
+            x64PatchRelative(edit code, fix.call_at[i], platform_at[routine])
+        } otherwise when -1 - callee < runtime_at.length {
+            x64PatchRelative(edit code, fix.call_at[i], runtime_at[-1 - callee])
         } otherwise {
             code.error = 13
         }
@@ -402,14 +540,36 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
             code.bytes@push(p.text_bytes[p.text_start[t] + i])
         }
     }
+    change code_address = elf64CodeAddress()
+    when target == 1 { code_address = pe64CodeAddress() }
     each i among 0..fix.text_at.length {
-        x64PatchAbsolute64(edit code, fix.text_at[i], elf64CodeAddress() + literal_at[fix.text_id[i]])
+        x64PatchAbsolute64(edit code, fix.text_at[i], code_address + literal_at[fix.text_id[i]])
+    }
+    // The data page follows the final code and literals (elf64.l).
+    hold data_address = elf64DataAddress(code.bytes.length)
+    each i among 0..data_at.length {
+        x64PatchAbsolute64(edit code, data_at[i], data_address)
     }
     when code.error != 0 {
         result.error = 71
         give result
     }
-    result.image = elf64Executable(view code.bytes)
+    when target == 1 {
+        // The Text literal addresses are the only absolute addresses in
+        // the code: each gets a DIR64 base relocation, so the image is
+        // relocatable (DYNAMIC_BASE, HIGH_ENTROPY_VA) instead of fixed.
+        hold pe = pe64ExecutableRelocatable(view code.bytes, 0, view imports, view fix.text_at)
+        when pe.error != 0 {
+            // pe64.l writer codes 1..8 are reported as 111..118.
+            result.error = 110 + pe.error
+            give result
+        }
+        result.image = pe.bytes
+    } otherwise {
+        change data_pages = 0
+        when data_at.length > 0 { data_pages = 1 }
+        result.image = elf64ExecutableData(view code.bytes, data_pages)
+    }
     when result.image.length == 0 { result.error = 72 }
     give result
 }
@@ -417,4 +577,9 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
 expose flow cfgCompile(source: view Text) => CfgImage {
     hold parsed = cfgParse(source)
     give cfgBuild(view parsed)
+}
+
+expose flow cfgCompileFor(source: view Text, target: Int) => CfgImage {
+    hold parsed = cfgParse(source)
+    give cfgBuildFor(view parsed, target)
 }

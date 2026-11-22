@@ -1,7 +1,7 @@
-import lir_tokens
-import native_cfg_defs
-import native_cfg_types
-import native_layout
+take lir_tokens
+take native_cfg_defs
+take native_cfg_types
+take native_layout
 
 // Text fields of shapes in the ELE-written CFG backend: projected sources
 // of `print`/`append` (`ref pN.k[.j] 0`) and `i dropfield <place> v<flag>|-`
@@ -47,11 +47,14 @@ expose flow cfgReadDropField(p: edit CfgProgram, f: Int, source: view Text, read
     }
 }
 
-// A dropfield names a Text or list field (not a whole variable, and not a
-// place inside a list) and an optional Bool flag.
+// A dropfield names a field that owns heap storage (not a whole variable,
+// and not a place inside a list) and an optional Bool flag. A Text or list
+// field is released directly; a shape- or union-typed field through its drop
+// glue (cfgEmitShapeGlue, cfgEmitUnionGlue). A field that owns nothing has
+// nothing to release and stays rejected (92).
 expose flow cfgCheckDropField(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     hold place = CfgPlace(variable: inst.place_var, field: inst.place_field, subfield: inst.place_subfield, ext: -1)
-    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgHeapDirect(p, cfgPlaceType(p, f, view place)) { give 92 }
+    when inst.place_field < 0 || inst.place_ext >= 0 || !cfgOwnsHeap(p, cfgPlaceType(p, f, view place)) { give 92 }
     when inst.op >= 0 {
         when inst.op >= p.functions[f].vars { give 94 }
         hold first = p.functions[f].first_var
@@ -61,17 +64,36 @@ expose flow cfgCheckDropField(p: view CfgProgram, f: Int, inst: view CfgInst) =>
 }
 
 // Whether a value of type `ty` owns heap storage: a Text or a list, directly
-// or in a nested field. Only such values need drops; the others may be
-// copied bitwise. A list answers without looking at its element, so a shape
-// that holds a list of itself terminates.
+// or in a nested field, or an enum variant with an owned payload. Only such
+// values need drops; the others may be copied bitwise. A list answers without
+// looking at its element, so a shape that holds a list of itself terminates.
 expose flow cfgOwnsHeap(p: view CfgProgram, ty: Int) => Bool {
     when cfgHeapDirect(p, ty) { give true }
-    when ty < 2 || ty - 2 >= p.structs.length { give false }
-    hold first = p.structs[ty - 2].first_field
-    each k among 0..p.structs[ty - 2].fields {
-        when cfgOwnsHeap(p, p.fields[first + k].ty) { give true }
+    when ty < 2 { give false }
+    when ty - 2 < p.structs.length {
+        hold first = p.structs[ty - 2].first_field
+        each k among 0..p.structs[ty - 2].fields {
+            when cfgOwnsHeap(p, p.fields[first + k].ty) { give true }
+        }
+        give false
+    }
+    hold enum_id = ty - 2 - p.structs.length
+    when enum_id >= 0 && enum_id < p.enums.length {
+        hold first = p.enums[enum_id].first_variant
+        each v among first..(first + p.enums[enum_id].variants) {
+            hold payload = p.variants[v].payload_type
+            when payload != -1 && cfgOwnsHeap(p, payload) { give true }
+        }
     }
     give false
+}
+
+// Whether `ty` is a union (enum) with at least one variant whose payload owns
+// heap storage: the only unions that a whole `i drop` may release.
+expose flow cfgOwningUnion(p: view CfgProgram, ty: Int) => Bool {
+    hold enum_id = ty - 2 - p.structs.length
+    when ty < 2 || enum_id < 0 || enum_id >= p.enums.length { give false }
+    give cfgOwnsHeap(p, ty)
 }
 
 // Declaration layouts (after cfgReadStruct/cfgReadEnum in native_cfg_types).
@@ -91,7 +113,7 @@ flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
         p.fields[k].offset = offset
     }
     hold size = nativeLayoutSeal(edit layout)
-    when size <= 0 || size > 512 { give 63 }
+    when size <= 0 || size > cfgMaxValueBytes() { give 63 }
     p.structs[s].size = size
     p.structs[s].align = layout.align
     give 1
@@ -100,24 +122,24 @@ flow cfgLayoutStruct(p: edit CfgProgram, s: Int) => Int {
 // Enum layout: an 8-byte tag at offset 0 and, when some variant carries a
 // payload, a payload area at offset 8 sized by the largest payload rounded
 // up to whole words. Every alignment in this backend is at most 8, so
-// offset 8 suits any payload. A payload that owns a Text or a list,
-// directly or in a nested field, is rejected (82): enums stay drop-free.
+// offset 8 suits any payload. Payloads may own heap storage (Text, list,
+// nested aggregates) and are sized accordingly; alignment > 8 is rejected (82).
 flow cfgLayoutEnum(p: edit CfgProgram, e: Int) => Int {
     hold first = p.enums[e].first_variant
     hold count = p.enums[e].variants
     change largest = 0
     each v among first..(first + count) {
         hold payload = p.variants[v].payload_type
-        when payload >= 0 {
+        when payload != -1 {
             when cfgTypeSize(p, payload) <= 0 { give 0 }
-            when cfgOwnsHeap(p, payload) || cfgTypeAlign(p, payload) > 8 { give 82 }
+            when cfgTypeAlign(p, payload) > 8 { give 82 }
             hold size = cfgTypeSize(p, payload)
             when size > largest { largest = size }
         }
     }
     change size = 8
     when largest > 0 { size = 8 + 8 * ((largest + 7) / 8) }
-    when size > 520 { give 63 }
+    when size > 8 + cfgMaxValueBytes() { give 63 }
     p.enums[e].size = size
     p.enums[e].align = 8
     give 1

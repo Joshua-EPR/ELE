@@ -6,6 +6,7 @@ take native_cfg_arith
 take native_cfg_fields
 take native_cfg_list
 take native_cfg_loan
+take native_cfg_platform
 
 // Source of `print` and `append`: `val <operand>` fills `inst.a` and returns
 // -1; `ref p<N> 0` returns the referenced variable.
@@ -87,7 +88,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         inst.place_field = nativeNumber(source, edit reader)
         inst.argc = nativeNumber(source, edit reader)
         when inst.argc < 0 || inst.argc > 1 { p.error = 83 }
-        when inst.argc == 1 { inst.a = nativeOperand(source, edit reader) }
+        when inst.argc == 1 { inst.a = cfgOperand(edit p, source, edit reader) }
     } otherwise when nativeEquals(source, view kind, "disc") {
         inst.kind = 8
         inst.dst = nativeId(source, edit reader, 118)
@@ -142,6 +143,8 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         cfgReadTextQuery(edit p, f, source, edit reader, edit inst, 14)
     } otherwise when nativeEquals(source, view kind, "byteat") {
         cfgReadTextQuery(edit p, f, source, edit reader, edit inst, 15)
+    } otherwise when nativeEquals(source, view kind, "platform") {
+        cfgReadPlatform(edit p, f, source, edit reader, edit inst)
     } otherwise when nativeEquals(source, view kind, "loan") {
         cfgReadLoan(edit p, f, source, edit reader, edit inst)
     } otherwise when !cfgReadListInst(edit p, f, source, edit reader, edit inst, view kind) {
@@ -149,7 +152,8 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     }
     nativeEndLineSpan(source, edit reader)
     hold has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17 && inst.kind != 19 && inst.kind != 20
-    when reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars)) {
+    // An earlier, more precise rejection (e.g. 31 unknown instruction) wins.
+    when p.error == 0 && (reader.error != 0 || (has_dst && (inst.dst < 0 || inst.dst >= p.functions[f].vars))) {
         p.error = 33
     }
     when p.error != 0 { give }
@@ -165,7 +169,8 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     when inst.kind == 14 || inst.kind == 15 { p.error = cfgCheckTextQuery(p, f, view inst) }
     when inst.kind == 16 { p.error = cfgCheckUnary(p, f, view inst) }
     when inst.kind == 17 { p.error = cfgCheckDropField(p, f, view inst) }
-    when inst.kind >= 18 && inst.kind <= 21 { p.error = cfgCheckListInst(p, f, view inst) }
+    when inst.kind == 24 { p.error = cfgCheckPlatform(p, f, view inst) }
+    when (inst.kind >= 18 && inst.kind <= 21) || inst.kind == 23 { p.error = cfgCheckListInst(p, f, view inst) }
     when p.error != 0 { give }
     change dest_type = -1
     when has_dst { dest_type = p.types_code[p.functions[f].first_var + inst.dst] }
@@ -182,9 +187,13 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         when inst.place_var < 0 || inst.place_var >= p.functions[f].vars {
             p.error = 92
         } otherwise {
-            // `append` writes a Text buffer; `drop` releases a Text or a list.
+            // `append` writes a Text buffer; `drop` releases a Text, a list or
+            // a whole union whose variants own heap storage (union drop glue
+            // in native_cfg_list_emit). A whole shape, or a union that owns
+            // nothing, is still rejected.
             hold owner = p.types_code[p.functions[f].first_var + inst.place_var]
-            when owner != cfgTextType() && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
+            hold union_owner = inst.kind == 13 && cfgOwningUnion(p, owner)
+            when owner != cfgTextType() && !union_owner && (inst.kind == 12 || cfgListIndex(p, owner) < 0) { p.error = 92 }
         }
         // Appending a buffer to itself would read storage that growth moves.
         when inst.kind == 12 && inst.op == inst.place_var { p.error = 93 }
@@ -230,7 +239,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
             } otherwise {
                 hold variant = view p.variants[item.first_variant + inst.place_field]
                 change required = 0
-                when variant.payload_type >= 0 { required = 1 }
+                when variant.payload_type != -1 { required = 1 }
                 when inst.argc != required || (required == 1 && first_type != variant.payload_type) { p.error = 86 }
             }
         }
@@ -255,11 +264,11 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
             } otherwise {
                 hold payload = p.variants[e.first_variant + inst.place_field].payload_type
                 // A unit variant cannot be projected. Payloads are Int/Bool
-                // (copied) or drop-free aggregates (cfgLayoutEnum), whose
+                // (copied) or aggregates/Text (cfgLayoutEnum), whose
                 // extraction MOVES the whole enum (native_cfg_verify). Moving
                 // out of a referent is not allowed.
-                when payload < 0 || dest_type != payload { p.error = 89 }
-                when payload >= 2 && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
+                when (payload < 0 && payload != cfgTextType()) || dest_type != payload { p.error = 89 }
+                when (payload >= 2 || payload == cfgTextType()) && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
             }
         }
     }
@@ -276,7 +285,11 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         // buffer. A field of an owned shape moves out, and a store may refill
         // a field whose value was moved or released (native_cfg_paths).
         when inst.kind == 5 && cfgOwnsHeap(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
-        when inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) { p.error = 95 }
+        // A whole store through a reference (`i store pN vM`) replaces an
+        // owning referent: the emitter releases the old value through its
+        // drop glue, then moves the new one in (the verifier requires the
+        // old value whole). The source cannot be the reference itself.
+        when inst.kind == 6 && inst.place_field < 0 && inst.place_ext < 0 && cfgOwnsHeap(p, ty) && inst.a.is_var && inst.a.value == inst.place_var { p.error = 104 }
         // Moving an owner out of an indexed place is not tracked by move
         // paths. A store releases the old element before transferring its
         // replacement; the source cannot be the collection itself.

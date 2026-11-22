@@ -5,6 +5,7 @@ import lir_finish
 import lir_verify_core
 import lir_verify_helpers
 import lir_builtin_union
+take lir_verify_own
 
 // Verifier of one lowered function. It does not trust the lowering: every
 // id is range-checked before use, so a corrupt function is rejected instead
@@ -18,9 +19,77 @@ import lir_builtin_union
 //   7 return value does not match the function result
 //   8 field projection on a non-struct or out of range
 //   9 instruction listed in the wrong block
+//  10 an owned value is leaked: overwritten, or still owned at a return
+//     (reported only when no other rule is violated)
+// Every owned value, not only unions, is tracked per leaf by
+// `lir_verify_own.l`: a use, move or loan of a moved/dropped value is rule
+// 5, an unflagged drop of it rule 6; a drop flag must agree with the
+// ownership of the place it guards (rule 6), so a flag that is a parameter
+// or is assigned anything but a Bool constant is rejected. A reference is
+// usable only while the places it borrows are owned (rule 5) and a
+// borrowed return may only borrow from reference parameters (rule 7).
+// Owned unions (#5): a by-value use of an Option/Result owning heap storage,
+// an owned payload moved into `variant` and an owned `payload` extraction
+// (which consumes its union) mark the variable moved (may-analysis). Using,
+// borrowing, matching or extracting it afterwards is rule 5 (use after
+// move); an unflagged drop of it is rule 6 (double drop).
+
+// Option/Result whose payloads own heap storage.
+flow lirOwnedUnion(types: view TypeTable, drop_memo: view List of[Int], ty: Int) => Bool {
+    when ty < 0 || ty >= types.types.length || ty >= drop_memo.length || drop_memo[ty] != 2 { give false }
+    choose types.types[ty].kind {
+        SemTypeKind.Option : { give true }
+        SemTypeKind.Result : { give true }
+        _ : { give false }
+    }
+}
+
+// Ownership of the places guarded by drop flags under `root`: every guard
+// inside `place` (-1: the whole variable) becomes `state`. With `overlap`,
+// a guard that contains `place` is updated too (moving or dropping part
+// of a guarded place leaves it owning less than all of it).
+flow lirGuardSet(v: edit LirVerifier, l: view LirFn, root: Int, place: Int, state: Int, overlap: Bool) {
+    when !v.has_flags { give }
+    hold target = lirPlacePath(l, place)
+    each f among 0..v.flag_root.length {
+        when v.flag_root[f] == root && f < v.owned.length && f < v.flag_place.length {
+            hold guard = lirPlacePath(l, v.flag_place[f])
+            when lirPathCovers(target, guard) || (overlap && lirPathCovers(guard, target)) {
+                v.owned[f] = state
+            }
+        }
+    }
+}
+
+// A by-value operand consuming an owned union marks it moved; with `any`,
+// every owned operand is marked (an owned payload moved into a union).
+flow lirMoveOut(v: edit LirVerifier, l: view LirFn, types: view TypeTable, drop_memo: view List of[Int], operand: Int, any: Bool) {
+    when !lirIsVar(operand) || !lirVarOk(l, operand) || l.vars[operand].is_ref || operand >= v.moved.length { give }
+    hold ty = l.vars[operand].ty
+    when lirOwnedUnion(types, drop_memo, ty) || (any && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2) {
+        v.moved[operand] = true
+    }
+    when v.has_flags && ty >= 0 && ty < drop_memo.length && drop_memo[ty] == 2 {
+        lirGuardSet(edit v, l, operand, -1, 0, true)
+    }
+}
+
+// Root of a place definitely assigned and not moved.
+flow lirRootLive(v: edit LirVerifier, l: view LirFn, place: Int) => Bool {
+    hold root = l.places[place].root
+    give v.defined[root] && !(root < v.moved.length && v.moved[root])
+}
+
+// Check one instruction, then its ownership and loan effects
+// (`lir_verify_own.l`). Returns a status.
+flow lirVerifyInst(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], id: Int, block: Int, check: Bool) => Int {
+    hold status = lirVerifyInstCore(edit v, l, types, lm, drop_memo, id, block, check)
+    when status != 0 { give status }
+    give lirOwnInst(edit v, l, types, lm, drop_memo, id, check)
+}
 
 // Check one instruction and apply its definition. Returns a status.
-fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, id: Int, block: Int, check: Bool) -> Int {
+fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, id: Int, block: Int, check: Bool) -> Int {
     if id < 0 || id >= l.insts.length { return 1 }
     let inst = &l.insts[id]
     if inst.block != block { return 9 }
@@ -43,7 +112,11 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if ty == LIR_TY_ERR { return 8 }
         if !lirTypesCompat(types, lm, lirOperandType(l, inst.b), ty) { return 3 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
+        lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
+        // The stored place owns its new value (the drop plan released the
+        // old one before the store).
+        lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 1, false)
         return 0
     }
     if kind == LIR_LIST_PUSH || kind == LIR_LIST_RESERVE {
@@ -56,8 +129,9 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         var expected = types.types[ty].elem_type
         if kind == LIR_LIST_RESERVE { expected = 1 }
         if lirOperandType(l, inst.b) != expected { return 3 }
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
+        lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
         return 0
     }
     if kind == LIR_DROP || kind == LIR_DROPFIELD {
@@ -66,16 +140,36 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 6 }
             ty = l.vars[dst].ty
             if check && !v.defined[dst] { return 5 }
+            // An unflagged drop of a (maybe) moved owned union is a double
+            // drop; afterwards the union owns nothing.
+            when check && inst.a < 0 && dst < v.moved.length && v.moved[dst] { give 6 }
         } else {
             ty = lirPlaceType(l, types, lm, inst.a)
             if ty == LIR_TY_ERR { return 8 }
         }
         if ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { return 6 }
         var flag = inst.a
-        if kind == LIR_DROPFIELD { flag = inst.b }
+        change root = dst
+        when kind == LIR_DROPFIELD {
+            flag = inst.b
+            root = l.places[inst.a].root
+        }
         if flag >= 0 {
             if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
             if check && !v.defined[flag] { return 5 }
+            when check && v.has_flags {
+                when root < 0 || flag >= v.flag_root.length || v.flag_root[flag] != root { give 6 }
+                when flag >= v.owned.length || flag >= v.flags.length { give 6 }
+                when v.flags[flag] != v.owned[flag] { give 6 }
+            }
+        }
+        when kind == LIR_DROP && dst < v.moved.length && lirOwnedUnion(types, drop_memo, ty) { v.moved[dst] = true }
+        when v.has_flags {
+            when kind == LIR_DROP {
+                lirGuardSet(edit v, l, dst, -1, 0, true)
+            } otherwise {
+                lirGuardSet(edit v, l, root, inst.a, 0, true)
+            }
         }
         return 0
     }
@@ -92,6 +186,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             result = lirOperandType(l, inst.a)
         }
         if !lirUse(&mut v, l, inst.a, check) { return 5 }
+        lirMoveOut(edit v, l, types, drop_memo, inst.a, false)
     } else if kind == LIR_UNARY {
         let ty = lirOperandType(l, inst.b)
         if (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
@@ -107,6 +202,10 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
     } else if kind == LIR_CALL {
         let status = lirVerifyCall(&mut v, l, types, lm, inst.a, inst.b, inst.c, check)
         if status != 0 { return status }
+        each i among 0..inst.c {
+            hold arg = l.operands[inst.b + i]
+            when !l.args[arg].by_ref { lirMoveOut(edit v, l, types, drop_memo, l.args[arg].value, false) }
+        }
         result = lm.fn_ret[inst.a]
         result_ref = lm.fn_ret_ref[inst.a]
     } else if kind == LIR_STRUCT {
@@ -116,6 +215,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let operand = l.operands[inst.b + i]
             if lirOperandType(l, operand) != lm.field_ty[lm.st_first[inst.a] + i] { return 3 }
             if !lirUse(&mut v, l, operand, check) { return 5 }
+            lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
         if lirStructOf(types, lm, dst_t) == inst.a { result = dst_t }
     } else if kind == LIR_VARIANT {
@@ -127,6 +227,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let payload_ty = lm.variant_type[which]
             if !lirBuiltinPayloadOk(types, lm, payload_ty) || lirOperandType(l, inst.c) != payload_ty { return 3 }
             if !lirUse(&mut v, l, inst.c, check) { return 5 }
+            lirMoveOut(edit v, l, types, drop_memo, inst.c, true)
         } else if count != 0 { return 3 }
         else if inst.c != LIR_NONE { return 3 }
         if dst_t < 0 || dst_t >= types.types.length { return 3 }
@@ -169,7 +270,12 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             }
             _ => { return 3 }
         }
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
+        // An owned payload is moved out: the whole union is consumed.
+        when lirBuiltinPayloadOwned(types, lm, payload_ty) && root < v.moved.length {
+            v.moved[root] = true
+            lirGuardSet(edit v, l, root, -1, 0, true)
+        }
         result = payload_ty
     } else if kind == LIR_DISC {
         let enum_t = lirPlaceType(l, types, lm, inst.a)
@@ -186,7 +292,7 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             }
             _ => { return 3 }
         }
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
     } else if kind == LIR_LIST_LIT {
         if inst.a < 0 || inst.a >= lm.list_elem.length || inst.c < 0 || inst.b < 0 || inst.c > l.operands.length || inst.b > l.operands.length - inst.c { return 1 }
         if dst_t < 0 || dst_t >= types.types.length { return 3 }
@@ -200,13 +306,19 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
             let operand = l.operands[inst.b + i]
             if lirOperandType(l, operand) != lm.list_elem[inst.a] { return 3 }
             if !lirUse(&mut v, l, operand, check) { return 5 }
+            lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
         result = dst_t
     } else if kind == LIR_READ || kind == LIR_LOAN {
         result = lirPlaceType(l, types, lm, inst.a)
         if result == LIR_TY_ERR { return 8 }
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
+        when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         result_ref = kind == LIR_LOAN
+        when kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
+            // Moving an owned value out of a place releases only the
+            // guards inside (or containing) that place.
+            lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 0, true)
+        }
     } else if kind == LIR_TEXTBUF {
         result = 5
     } else if kind == LIR_LEN || kind == LIR_CAP {
@@ -225,15 +337,54 @@ fn lirVerifyInst(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModu
         if check && !v.defined[l.places[inst.a].root] { return 5 }
         if !lirUse(&mut v, l, inst.b, check) { return 5 }
     } else if kind == LIR_LIST_POP {
+        hold list_t = lirPlaceType(l, types, lm, inst.a)
+        when list_t < 0 || list_t >= types.types.length { give 8 }
+        choose types.types[list_t].kind {
+            SemTypeKind.List : {}
+            _ : { give 3 }
+        }
+        when dst_t < 0 || dst_t >= types.types.length { give 3 }
+        choose types.types[dst_t].kind {
+            SemTypeKind.Option : {
+                when types.types[dst_t].elem_type != types.types[list_t].elem_type { give 3 }
+            }
+            _ : { give 3 }
+        }
         result = dst_t
         if check && !v.defined[l.places[inst.a].root] { return 5 }
     } else if kind == LIR_PLATFORM {
+        let status = lirVerifyPlatform(&mut v, l, types, lm, inst.a, inst.b, inst.c, dst, check)
+        if status != 0 { return status }
         result = dst_t
     } else {
         return 1
     }
     if result == LIR_TY_ERR || !lirTypesCompat(types, lm, result, dst_t) || result_ref != dst_ref { return 3 }
     v.defined[dst] = true
+    when dst < v.moved.length { v.moved[dst] = false }
+    when v.has_flags {
+        when dst < v.flag_root.length && v.flag_root[dst] >= 0 {
+            when kind == LIR_USE && !lirIsVar(inst.a) {
+                hold cid = lirConstId(inst.a)
+                when cid >= 0 && cid < l.consts.length && l.consts[cid].kind == LIR_CONST_BOOL {
+                    when l.consts[cid].value != 0 {
+                        v.flags[dst] = 1
+                    } otherwise {
+                        v.flags[dst] = 0
+                    }
+                } otherwise {
+                    v.flags[dst] = 3
+                }
+            } otherwise {
+                // Any other value is forged (3): unlike Unknown (2), which
+                // only joins paths where the flag agreed with ownership, it
+                // is not tied to ownership, so no drop may trust it.
+                v.flags[dst] = 3
+            }
+        } otherwise when !dst_ref {
+            lirGuardSet(edit v, l, dst, -1, 1, false)
+        }
+    }
     return 0
 }
 
@@ -245,25 +396,136 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
         let status = lirVerifyInst(&mut v, l, types, lm, drop_memo, body.order[i], b, check)
         if status != 0 { return status }
     }
-    return lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
+    when check && v.has_flags {
+        hold term = body.term[b]
+        when term == LIR_T_JUMP || term == LIR_T_BRANCH {
+            each f among 0..v.flag_root.length {
+                hold root = v.flag_root[f]
+                when root >= 0 {
+                    when f >= v.owned.length || f >= v.flags.length { give 6 }
+                    when v.flags[f] != v.owned[f] { give 6 }
+                    hold guarded = v.flag_place[f]
+                    hold value = v.flags[f]
+                    when !lirLeafAgrees(edit v, l, root, guarded, value) { give 6 }
+                }
+            }
+        }
+    }
+    hold term = lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
+    when term != 0 { give term }
+    give lirOwnTerm(edit v, l, body, b, check)
 }
 
-fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
+pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
     let blocks = body.term.length
     let vars = l.vars.length
     if fn_index < 0 || fn_index >= lm.fn_first.length || blocks == 0 { return LirCheck(status: 1, block: -1, inst: -1) }
     if body.first.length != blocks || body.count.length != blocks || body.ta.length != blocks || body.tb.length != blocks || body.top.length != blocks {
         return LirCheck(status: 2, block: -1, inst: -1)
     }
-    var v = LirVerifier(defined: List[], table: List[], seen: List[], pending: List[], queue: List[], status: 0)
-    for i in 0..vars { v.defined.push(false) }
-    for i in 0..(blocks * vars) { v.table.push(true) }
+    change v = LirVerifier(
+        defined: List[],
+        table: List[],
+        seen: List[],
+        pending: List[],
+        queue: List[],
+        status: 0,
+        moved: List[],
+        mtable: List[],
+        flags: List[],
+        ftable: List[],
+        owned: List[],
+        otable: List[],
+        flag_root: List[],
+        flag_place: List[],
+        has_flags: false,
+        leaf_var: List[],
+        leaf_first: List[],
+        leaf_len: List[],
+        leaf_path: List[],
+        lown: List[],
+        lgone: List[],
+        lotable: List[],
+        lgtable: List[],
+        org_ref: List[],
+        org_root: List[],
+        org_place: List[],
+        stale: List[],
+        stable: List[],
+        leaked: false,
+    )
+    each i among 0..vars {
+        v.defined@push(false)
+        v.moved@push(false)
+        v.flags@push(0)
+        v.owned@push(0)
+        v.flag_root@push(-1)
+        v.flag_place@push(-1)
+    }
+    each id among 0..l.insts.length {
+        hold kind = l.insts[id].kind
+        when kind == LIR_DROP || kind == LIR_DROPFIELD {
+            change f = l.insts[id].a
+            change root = l.insts[id].dst
+            change guarded = -1
+            when kind == LIR_DROPFIELD {
+                f = l.insts[id].b
+                hold place = l.insts[id].a
+                when f >= 0 {
+                    when place < 0 || place >= l.places.length {
+                        give LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                    }
+                    root = l.places[place].root
+                    guarded = place
+                }
+            }
+            // One flag guards one place: every drop it guards names it.
+            when f >= 0 && lirVarOk(l, f) && v.flag_root[f] >= 0 {
+                hold known = lirPlacePath(l, v.flag_place[f])
+                hold named = lirPlacePath(l, guarded)
+                when !lirPathCovers(known, named) || !lirPathCovers(named, known) {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+            }
+            when f >= 0 {
+                // A parameter's value is chosen by the caller: as a drop
+                // flag it could claim ownership of anything.
+                when f < l.params {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+                when !lirVarOk(l, f) || l.vars[f].ty != 4 || l.vars[f].is_ref {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+                when !lirVarOk(l, root) {
+                    give LirCheck(status: 1, block: l.insts[id].block, inst: id)
+                }
+                when v.flag_root[f] >= 0 && v.flag_root[f] != root {
+                    give LirCheck(status: 6, block: l.insts[id].block, inst: id)
+                }
+                v.flag_root[f] = root
+                v.flag_place[f] = guarded
+                v.has_flags = true
+            }
+        }
+    }
+    lirLeafSetup(edit v, l, types, lm, drop_memo, blocks)
+    lirLoanSetup(edit v, l)
+    each i among 0..(blocks * vars) {
+        v.table@push(true)
+        v.mtable@push(false)
+        v.ftable@push(0)
+        v.otable@push(0)
+    }
     for b in 0..blocks {
         v.seen.push(b == 0)
         v.pending.push(b == 0)
     }
     // Parameters are assigned on entry.
-    for i in 0..vars { v.table[i] = i < l.params }
+    each i among 0..vars {
+        v.table[i] = i < l.params
+        // A guard of a parameter starts owning its place.
+        when v.flag_root[i] >= 0 && v.flag_root[i] < l.params { v.otable[i] = 1 }
+    }
     v.queue.push(0)
     var steps = 0
     while v.queue.length > 0 {
@@ -275,7 +537,15 @@ fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_
         v.pending[b] = false
         steps += 1
         if steps > 100000 { return LirCheck(status: 2, block: b, inst: -1) }
-        for i in 0..vars { v.defined[i] = v.table[b * vars + i] }
+        each i among 0..vars {
+            v.defined[i] = v.table[b * vars + i]
+            v.moved[i] = v.mtable[b * vars + i]
+            when v.has_flags {
+                v.flags[i] = v.ftable[b * vars + i]
+                v.owned[i] = v.otable[b * vars + i]
+            }
+        }
+        lirLeafLoad(edit v, b)
         let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, false)
         if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
         let kind = body.term[b]
@@ -284,13 +554,25 @@ fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_
         }
         if kind == LIR_T_BRANCH { lirVerifyFlow(&mut v, body.tb[b], vars) }
     }
+    change leak_block = -1
     for b in 0..blocks {
         if v.seen[b] {
-            for i in 0..vars { v.defined[i] = v.table[b * vars + i] }
+            each i among 0..vars {
+                v.defined[i] = v.table[b * vars + i]
+                v.moved[i] = v.mtable[b * vars + i]
+                when v.has_flags {
+                    v.flags[i] = v.ftable[b * vars + i]
+                    v.owned[i] = v.otable[b * vars + i]
+                }
+            }
+            lirLeafLoad(edit v, b)
             let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, true)
             if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
+            when v.leaked && leak_block < 0 { leak_block = b }
         }
     }
+    // A leak only once no memory-safety rule is violated anywhere.
+    when leak_block >= 0 { give LirCheck(status: 10, block: leak_block, inst: -1) }
     return LirCheck(status: 0, block: -1, inst: steps)
 }
 

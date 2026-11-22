@@ -8,8 +8,9 @@ import loans_l
 import lir_build
 import sema_context
 import sema_lower
+take lir_builtin_union
 
-fn semaExpectedListElem(ctx: &SemaContext) -> Int {
+pub fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     let expected = ctx.expected_list_type
     if expected >= 0 && expected < ctx.types.types.length {
         match ctx.types.types[expected].kind {
@@ -20,7 +21,7 @@ fn semaExpectedListElem(ctx: &SemaContext) -> Int {
     return 0
 }
 
-fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool, elem_t: Int, elements: &List<Int>) -> Int {
+pub fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool, elem_t: Int, elements: &List<Int>) -> Int {
     if is_array {
         lirMarkUnsupported(&mut ctx.lir, expr.start)
         return semTypeMakeArray(&mut ctx.types, elem_t)
@@ -32,7 +33,9 @@ fn semaFinishCollectionLit(ctx: &mut SemaContext, expr: &AstExpr, is_array: Bool
     }
     let list_index = lirListRegister(&mut ctx.lir_module, elem_t)
     let first = lirSequence(&mut ctx, elements)
-    lirSetVal(&mut ctx, lirNew(&mut ctx, list_t, false, LIR_LIST_LIT, list_index, first, elements.length))
+    // Preserve literal element order while ending the nested mutable borrow.
+    let value = lirNew(&mut ctx, list_t, false, LIR_LIST_LIT, list_index, first, elements.length)
+    lirSetVal(&mut ctx, value)
     return list_t
 }
 
@@ -59,7 +62,7 @@ fn semaMethodMutable(ctx: &mut SemaContext, base_t: Int, base_path: Int, start: 
     return true
 }
 
-fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, base_t: Int, bp: Int, base_path: Int, count: Int, arg_t: Int, arg_op: Int) -> Int {
+pub fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, base_t: Int, bp: Int, base_path: Int, count: Int, arg_t: Int, arg_op: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     var base_place = bp
     if base_place < 0 {
@@ -89,7 +92,9 @@ fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_PUSH, -1, base_place, arg_op, 0) }
-        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+        // A separate statement ends the mutable loan of ctx.lir before lirSetVal.
+        let unit_value = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+        lirSetVal(&mut ctx, unit_value)
         return 6
     }
     if symbolNameEqualsText(source, expr.b, expr.c, name_pop) {
@@ -103,11 +108,10 @@ fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
         }
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         let opt_t = semTypeMakeOption(&mut ctx.types, elem_t)
-        // List.pop requires a verified bridge from List storage to the
-        // Some/None tagged value and ownership-aware element transfer.
-        // Option<T> match support alone does not make this operation safe.
-        // Keep Stage 1 semantic/ownership checking, but fail --emit-lir.
-        lirMarkUnsupported(&mut ctx.lir, expr.start)
+        hold enum_id = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, opt_t)
+        when enum_id < 0 {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
+        }
         let dst = lirVar(&mut ctx.lir, opt_t, false)
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_POP, dst, base_place, 0, 0) }
@@ -126,7 +130,9 @@ fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
         if !semaMethodMutable(&mut ctx, base_t, base_path, expr.start, expr.end) { return 7 }
         if base_path >= 0 { flowEvent(&mut ctx.flow, FLOW_MUTATE, base_path, expr.start, expr.end) }
         if base_place >= 0 { lirAt(&mut ctx, LIR_LIST_RESERVE, -1, base_place, arg_op, 0) }
-        lirSetVal(&mut ctx, lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0))
+        // A separate statement ends the mutable loan of ctx.lir before lirSetVal.
+        let unit_value = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+        lirSetVal(&mut ctx, unit_value)
         return 6
     }
     if symbolNameEqualsText(source, expr.b, expr.c, name_byte_at) {
@@ -144,7 +150,7 @@ fn semaMethodFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_i
     return 7
 }
 
-fn semaIndexFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_t: Int, bp: Int, parent_path: Int, idx_t: Int, idx_op: Int) -> Int {
+pub fn semaIndexFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int, base_t: Int, bp: Int, parent_path: Int, idx_t: Int, idx_op: Int) -> Int {
     let expr = &tree.expressions[expr_id]
     if idx_t != 1 {
         semaAddError(&mut ctx, "L0003", "el índice debe ser Int", expr.start, expr.end)

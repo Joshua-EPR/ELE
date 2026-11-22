@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" width="760" height="360">
+
+    <style>
+      .bg { fill: #ffffff; }
+      .text-title { font-family: system-ui, -apple-system, sans-serif; font-size: 18px; font-weight: 700; fill: #1f2328; }
+      .text-subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #656d76; }
+      .text-label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1f2328; }
+      .text-muted { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #656d76; }
+      .text-val { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: #1f2328; }
+      .grid { stroke: #e1e4e8; stroke-dasharray: 3 3; }
+      .axis { stroke: #d0d7de; stroke-width: 1.5; }
+      .border { stroke: #d0d7de; stroke-width: 1; fill: none; }
+      .bar-ele { fill: #0969da; }
+      .bar-rust { fill: #d9381e; }
+      .bar-gcc { fill: #1a7f37; }
+      .bar-neutral { fill: #8250df; }
+      .badge-bg { fill: #dafbe1; stroke: #aceebb; }
+      .badge-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 600; fill: #1a7f37; }
+      @media (prefers-color-scheme: dark) {
+        .bg { fill: #0d1117; }
+        .text-title { fill: #f0f6fc; }
+        .text-subtitle { fill: #8b949e; }
+        .text-label { fill: #e6edf3; }
+        .text-muted { fill: #8b949e; }
+        .text-val { fill: #f0f6fc; }
+        .grid { stroke: #21262d; }
+        .axis { stroke: #30363d; }
+        .border { stroke: #30363d; }
+        .bar-ele { fill: #2f81f7; }
+        .bar-rust { fill: #f85149; }
+        .bar-gcc { fill: #3fb950; }
+        .bar-neutral { fill: #a371f7; }
+        .badge-bg { fill: #1f3524; stroke: #2ea043; }
+        .badge-text { fill: #3fb950; }
+      }
+    </style>
+
+<rect width="760" height="360" rx="8" class="bg border"/>
+<text x="30" y="38" class="text-title">ELE Native Compilation Time</text>
+<text x="30" y="58" class="text-subtitle">Median wall-clock time (10 iterations) · Lower is better · Windows x86-64</text>
+<rect x="610" y="25" width="120" height="24" rx="12" class="badge-bg"/>
+<text x="670" y="41" text-anchor="middle" class="badge-text">✓ Autonomous</text>
+<line x1="200.0" y1="75" x2="200.0" y2="310" class="grid"/>
+<text x="200.0" y="328" text-anchor="middle" class="text-muted">0 ms</text>
+<line x1="298.57142857142856" y1="75" x2="298.57142857142856" y2="310" class="grid"/>
+<text x="298.57142857142856" y="328" text-anchor="middle" class="text-muted">15 ms</text>
+<line x1="397.1428571428571" y1="75" x2="397.1428571428571" y2="310" class="grid"/>
+<text x="397.1428571428571" y="328" text-anchor="middle" class="text-muted">30 ms</text>
+<line x1="495.7142857142857" y1="75" x2="495.7142857142857" y2="310" class="grid"/>
+<text x="495.7142857142857" y="328" text-anchor="middle" class="text-muted">45 ms</text>
+<line x1="594.2857142857142" y1="75" x2="594.2857142857142" y2="310" class="grid"/>
+<text x="594.2857142857142" y="328" text-anchor="middle" class="text-muted">60 ms</text>
+<line x1="200" y1="75" x2="200" y2="310" class="axis"/>
+<text x="185" y="105" text-anchor="end" class="text-label">hello.l (minimal)</text>
+<rect x="200" y="85" width="210.6" height="30" rx="4" class="bar-ele"/>
+<text x="420.6" y="105" class="text-val">32.0 ms</text>
+<text x="185" y="150" text-anchor="end" class="text-label">arithmetic.l</text>
+<rect x="200" y="130" width="216.2" height="30" rx="4" class="bar-ele"/>
+<text x="426.2" y="150" class="text-val">32.9 ms</text>
+<text x="185" y="195" text-anchor="end" class="text-label">fibonacci.l</text>
+<rect x="200" y="175" width="234.9" height="30" rx="4" class="bar-ele"/>
+<text x="444.9" y="195" class="text-val">35.8 ms</text>
+<text x="185" y="240" text-anchor="end" class="text-label">text_processing.l</text>
+<rect x="200" y="220" width="231.6" height="30" rx="4" class="bar-ele"/>
+<text x="441.6" y="240" class="text-val">35.2 ms</text>
+<text x="185" y="285" text-anchor="end" class="text-label">multimodule (main.l)</text>
+<rect x="200" y="265" width="219.2" height="30" rx="4" class="bar-ele"/>
+<text x="429.2" y="285" class="text-val">33.4 ms</text>
+<text x="30" y="340" class="text-muted">Large self-hosting compiler sources: main_sema.l (45k lines LIR) = 3.2s · main_driver.l (72k lines LIR) = 5.2s</text>
+</svg>

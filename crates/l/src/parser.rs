@@ -197,6 +197,9 @@ pub struct ImportDecl {
     pub path: String,
     pub is_file_path: bool,
     pub span: Span,
+    /// Resolved direct dependency's source file ID, set by the module loader.
+    /// None for standalone parsing or prelude-only imports.
+    pub target_file: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -1661,8 +1664,13 @@ fn parse_inner(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
             p.sep();
             imports.push(ImportDecl {
                 path,
+<<<<<<< HEAD
                 is_file_path,
                 span,
+=======
+                span,
+                target_file: None,
+>>>>>>> edbee369923ef67b0986a0191cce2594b8ef94fa
             });
             continue;
         }

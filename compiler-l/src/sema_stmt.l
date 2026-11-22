@@ -25,7 +25,17 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     let scrut_t = semaExprMode(&mut ctx, source, tree, scrut_e, ACCESS_READ)
     // Move path of a place scrutinee (-1 for temporaries), consumed when an
     // arm binds a non-Copy payload (lirMatchArmBind).
-    let scrut_path = ctx.expression_path
+    change scrut_path = ctx.expression_path
+    // An owned union scrutinee must be a directly owned variable: a field
+    // projection or a borrowed referent would be copied by `read`, aliasing
+    // its owner (L0016, never an unchecked copy).
+    hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
+    hold scrut_place = ctx.lir.place
+    when owned_scrut && scrut_place >= 0 {
+        when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
+        }
+    }
     var match_covered = false
     if scrut_t >= 0 && scrut_t < ctx.types.types.length {
         match ctx.types.types[scrut_t].kind {
@@ -57,6 +67,11 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
     }
     let scrut_var = lirMatchScrutVar(&mut ctx, scrut_t)
     let join = flowBlock(&mut ctx.flow)
+    // The scope of an owned temporary scrutinee is the whole match.
+    semaScopeEnter(edit ctx)
+    when owned_scrut && scrut_path < 0 && scrut_place < 0 {
+        scrut_path = semaOwnScrutinee(edit ctx, source, tree, scrut_var, scrut_t, expr.start, expr.end)
+    }
 
     for i in 0..arm_count {
         let p_start = tree.extra[first_arm + 3 * i]
@@ -68,8 +83,10 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = arm_body
         scopePush(&mut ctx.scopes)
         semaScopeEnter(&mut ctx)
+        hold frozen_mark = ctx.frozen_symbols.length
         lirMatchArmBind(&mut ctx, source, tree, p_start, p_end, scrut_var, scrut_t, scrut_path)
         if body_stmt >= 0 { semaCheckStmt(&mut ctx, source, tree, body_stmt) }
+        during ctx.frozen_symbols.length > frozen_mark { ctx.frozen_symbols@pop() }
         semaScopeExit(&mut ctx, p_end, p_end)
         scopePop(&mut ctx.scopes)
         flowLink(&mut ctx.flow, join, -1)
@@ -77,9 +94,10 @@ fn semaCheckMatch(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id:
         ctx.flow.current = next_test
     }
     ctx.flow.current = join
+    semaScopeExit(edit ctx, expr.end, expr.end)
 }
 
-fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: Int) -> Int {
+pub fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: Int) -> Int {
     if stmt_id < 0 || stmt_id >= tree.statements.length {
         return 0
     }
@@ -107,6 +125,11 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
                 semaAddError(&mut ctx, "L0016", "destino de asignación no verificado", stmt.start, stmt.end)
             } else {
                 let sym = ctx.flow.paths[target].symbol
+                each f among 0..ctx.frozen_symbols.length {
+                    when sym >= 0 && ctx.frozen_symbols[f] == sym {
+                        semaAddError(edit ctx, "L0005", "no se puede modificar un valor mientras match examina sus datos", stmt.start, stmt.end)
+                    }
+                }
                 let loan = loanOfPath(&ctx.flow, target)
                 if loan >= 0 {
                     // Writing through a reference binding requires &mut.
@@ -216,7 +239,9 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             let start_t = semaCheckExpr(&mut ctx, source, tree, stmt.c)
             let start_v = lirTakeOperand(&mut ctx, 1)
             let end_t = semaCheckExpr(&mut ctx, source, tree, stmt.d)
-            let counter = lirForInit(&mut ctx, start_v, lirTakeOperand(&mut ctx, 1))
+            // Evaluate the end operand before taking an exclusive loan for for-initialization.
+            let end_v = lirTakeOperand(&mut ctx, 1)
+            let counter = lirForInit(&mut ctx, start_v, end_v)
             if !semTypeEquals(&ctx.types, start_t, 1) || !semTypeEquals(&ctx.types, end_t, 1) {
                 semaAddError(&mut ctx, "L0003", "el rango del bucle 'for' debe ser de tipo Int", stmt.start, stmt.end)
             }
@@ -230,11 +255,13 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             ctx.flow.continue_to = step
             scopePush(&mut ctx.scopes)
             semaScopeEnter(&mut ctx)
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, 1, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
+            let current_scope = ctx.scopes.current_scope
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, 1, current_scope, false, false, -1, stmt.a, stmt.b)
             scopeAddSymbol(&mut ctx.scopes, sym_id)
             semaInitPath(&mut ctx, sym_id, stmt.a, stmt.b)
             ctx.lir.val = counter
-            lirLetBind(&mut ctx, ctx.symbols.symbols[sym_id].move_path, 1, false)
+            let bind_path = ctx.symbols.symbols[sym_id].move_path
+            lirLetBind(&mut ctx, bind_path, 1, false)
             let body_stmt = tree.extra[stmt.e + 1]
             if body_stmt >= 0 {
                 semaCheckStmt(&mut ctx, source, tree, body_stmt)
@@ -317,14 +344,16 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             ctx.flow.continue_to = step
             scopePush(&mut ctx.scopes)
             semaScopeEnter(&mut ctx)
-            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, bind_t, ctx.scopes.current_scope, false, false, -1, stmt.a, stmt.b)
+            let current_scope = ctx.scopes.current_scope
+            let sym_id = symbolAdd(&mut ctx.symbols, SymbolKind.Var, stmt.a, stmt.b, bind_t, current_scope, false, false, -1, stmt.a, stmt.b)
             scopeAddSymbol(&mut ctx.scopes, sym_id)
             semaInitPath(&mut ctx, sym_id, stmt.a, stmt.b)
 
             if col_place >= 0 {
                 let elem_place = lirPlaceIndex(&mut ctx.lir, col_place, counter)
                 if by_ref {
-                    lirSetVal(&mut ctx, lirNew(&mut ctx, elem_t, true, LIR_LOAN, elem_place, 0, 0))
+                    let loan_value = lirNew(&mut ctx, elem_t, true, LIR_LOAN, elem_place, 0, 0)
+                    lirSetVal(&mut ctx, loan_value)
                 } else {
                     let elem_var = lirVar(&mut ctx.lir, elem_t, false)
                     lirAt(&mut ctx, LIR_READ, elem_var, elem_place, 0, 0)
@@ -333,7 +362,9 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             }
             let loop_path = ctx.symbols.symbols[sym_id].move_path
             lirLetBind(&mut ctx, loop_path, bind_t, by_ref && loop_loan >= 0)
-            if loop_loan >= 0 { loanBind(&mut ctx.flow, loop_path, loop_loan) }
+            if loop_loan >= 0 && !loanBindReferenceRoot(&mut ctx.flow, loop_path, loop_loan) {
+                semaAddError(&mut ctx, "L0012", "vínculo de préstamo del bucle inválido", stmt.start, stmt.end)
+            }
             let body_stmt = stmt.d
             if body_stmt >= 0 {
                 semaCheckStmt(&mut ctx, source, tree, body_stmt)
@@ -357,12 +388,16 @@ fn semaCheckStmt(ctx: &mut SemaContext, source: &Text, tree: &AstTree, stmt_id: 
             ctx.loop_mark = outer_mark
         }
         AstStmtKind.Break => {
-            if ctx.flow.break_to >= 0 { semaDropFrom(&mut ctx, ctx.loop_mark, stmt.start, stmt.end) }
-            semaJumpLoop(&mut ctx, ctx.flow.break_to, stmt.start, stmt.end)
+            let target = ctx.flow.break_to
+            let mark = ctx.loop_mark
+            if target >= 0 { semaDropFrom(&mut ctx, mark, stmt.start, stmt.end) }
+            semaJumpLoop(&mut ctx, target, stmt.start, stmt.end)
         }
         AstStmtKind.Continue => {
-            if ctx.flow.continue_to >= 0 { semaDropFrom(&mut ctx, ctx.loop_mark, stmt.start, stmt.end) }
-            semaJumpLoop(&mut ctx, ctx.flow.continue_to, stmt.start, stmt.end)
+            let target = ctx.flow.continue_to
+            let mark = ctx.loop_mark
+            if target >= 0 { semaDropFrom(&mut ctx, mark, stmt.start, stmt.end) }
+            semaJumpLoop(&mut ctx, target, stmt.start, stmt.end)
         }
         AstStmtKind.Block => {
             scopePush(&mut ctx.scopes)

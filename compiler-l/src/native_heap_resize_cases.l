@@ -1,12 +1,12 @@
-import codegen.x86_64
-import codegen.elf64
-import codegen.native_heap_owner
+take codegen.x86_64
+take codegen.elf64
+take codegen.native_heap_owner
 
 // Linux ELF64 owner resize integration tests, emitted by code written in ELE.
 // g: 8 -> 4097 bytes, preserved 40 + second page 2 => 42
 // s: 4097 -> 8 bytes, preserved first 42 => 42
 // t: move owner, then grow and free => 42
-// z/h: resize to zero or >1 MiB => exit 122 (original owner intact)
+// z/h: resize to zero or >32 MiB => exit 122 (original owner intact)
 // m: resize a moved-from owner => exit 121
 flow main() => Int {
     change invalid = x64New()
@@ -16,7 +16,7 @@ flow main() => Int {
     choose processArg(0) {
         Ok(mode): {
             when mode.byteLength != 1 { give 3 }
-            hold kind = mode.byteAt(0)
+            hold kind = mode@byteAt(0)
             when kind != 103 && kind != 115 && kind != 116 && kind != 122 && kind != 104 && kind != 109 { give 4 }
             change code = x64New()
             x64FrameBegin(edit code, 9)
@@ -39,7 +39,7 @@ flow main() => Int {
                 heapOwnerMove(edit code, 0, 1, 2, 3, 4, 5)
             }
             when kind == 122 { x64MovImm64(edit code, 7, 0) }
-            when kind == 104 { x64MovImm64(edit code, 7, 1048577) }
+            when kind == 104 { x64MovImm64(edit code, 7, 33554433) }
             when kind == 115 { x64MovImm64(edit code, 7, 8) }
             when kind == 103 || kind == 116 || kind == 109 {
                 x64MovImm64(edit code, 7, 4097)
@@ -73,7 +73,7 @@ flow main() => Int {
             x64MovImm64(edit code, 0, 60)
             x64Syscall(edit code)
             when code.error != 0 { give 5 }
-            hold image = elf64Executable(&code.bytes)
+            hold image = elf64Executable(view code.bytes)
             when image.length <= 4096 { give 6 }
             choose processArg(1) {
                 Ok(path): { give writeBytes(path, image) },

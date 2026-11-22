@@ -1,0 +1,9 @@
+# ELE Language File Attributes
+# *.l is the canonical extension of the ELE Systems Programming Language.
+# Configured as linguist-language=Text to prevent GitHub from misclassifying .l sources as Lex/Flex.
+# Official TextMate grammar for editor support is maintained at syntaxes/ele.tmLanguage.json.
+*.l linguist-language=Text
+
+# Benchmarks and artifacts
+*.svg binary=false
+*.json text

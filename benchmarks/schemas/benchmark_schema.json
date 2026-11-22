@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ELEBenchmarkResult",
+  "description": "Standard schema for auditable ELE compiler and runtime benchmarks",
+  "type": "object",
+  "required": [
+    "benchmark_id",
+    "category",
+    "language",
+    "compiler",
+    "compiler_version",
+    "compiler_sha",
+    "target",
+    "optimization",
+    "iterations",
+    "warmups",
+    "status"
+  ],
+  "properties": {
+    "benchmark_id": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": ["compilation", "runtime", "memory", "comparison", "self_hosting", "coverage"]
+    },
+    "language": { "type": "string" },
+    "compiler": { "type": "string" },
+    "compiler_version": { "type": "string" },
+    "compiler_sha": { "type": "string" },
+    "target": { "type": "string" },
+    "optimization": { "type": "string" },
+    "iterations": { "type": "integer", "minimum": 1 },
+    "warmups": { "type": "integer", "minimum": 0 },
+    "source_file": { "type": ["string", "null"] },
+    "source_lines": { "type": ["integer", "null"] },
+    "source_bytes": { "type": ["integer", "null"] },
+    "median_compile_ms": { "type": ["number", "null"] },
+    "min_compile_ms": { "type": ["number", "null"] },
+    "max_compile_ms": { "type": ["number", "null"] },
+    "stddev_compile_ms": { "type": ["number", "null"] },
+    "compile_times_ms": {
+      "type": ["array", "null"],
+      "items": { "type": "number" }
+    },
+    "median_runtime_ms": { "type": ["number", "null"] },
+    "min_runtime_ms": { "type": ["number", "null"] },
+    "max_runtime_ms": { "type": ["number", "null"] },
+    "stddev_runtime_ms": { "type": ["number", "null"] },
+    "runtimes_ms": {
+      "type": ["array", "null"],
+      "items": { "type": "number" }
+    },
+    "peak_rss_mib": { "type": ["number", "null"] },
+    "binary_size_bytes": { "type": ["integer", "null"] },
+    "binary_sha256": { "type": ["string", "null"] },
+    "exit_code": { "type": ["integer", "null"] },
+    "status": {
+      "type": "string",
+      "enum": ["PASSED", "FAILED", "UNSUPPORTED", "NOT_MEASURED"]
+    },
+    "notes": { "type": "string" }
+  }
+}

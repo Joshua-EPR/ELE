@@ -197,6 +197,8 @@ pub enum Rvalue {
     /// Removes the last element of a non-empty list and returns it (the list
     /// no longer owns it). Only emitted after checking the length.
     ListTakeLast(Place),
+    /// Removes the last element of a list and returns Option<T> (None if empty, Some(item) if not).
+    ListPop(Place, Type),
     /// Explicit numeric conversion to the target primitive type.
     Convert(Operand, Type),
 }
@@ -2889,7 +2891,9 @@ impl Verifier<'_> {
                     self.expect(*ty, actual, "operación de plataforma")?;
                 }
                 match (op, result) {
-                    (PlatformOp::ArgCount, Type::Int) | (PlatformOp::PrintError, Type::Unit) => {}
+                    (PlatformOp::ArgCount, Type::Int)
+                    | (PlatformOp::PrintError, Type::Unit)
+                    | (PlatformOp::SameFile, Type::Int) => {}
                     (PlatformOp::Arg | PlatformOp::ReadText, Type::Enum(id))
                         if self.module.enums.get(*id).is_some_and(|e| {
                             matches!(
@@ -3196,6 +3200,25 @@ impl Verifier<'_> {
                 }
                 t => return self.fail(format!("pop de {t:?}")),
             },
+            Rvalue::ListPop(p, opt_ty) => {
+                let list_ty = self.place(p)?;
+                let Some(elem) = self.module.elem_of(list_ty) else {
+                    return self.fail("pop de no-lista");
+                };
+                let Type::Enum(e) = opt_ty else {
+                    return self.fail("resultado de listpop debe ser un enum (Option)");
+                };
+                let Some(enum_decl) = self.module.enums.get(*e) else {
+                    return self.fail("enum inexistente");
+                };
+                if enum_decl.variants.len() != 2
+                    || !enum_decl.variants[0].1.is_empty()
+                    || enum_decl.variants[1].1.as_slice() != [elem]
+                {
+                    return self.fail("enum no compatible con Option<T>");
+                }
+                VarTy::Value(*opt_ty)
+            }
             Rvalue::BytesGet(p, i) => {
                 if !matches!(self.place(p)?, Type::Bytes(_) | Type::Text) {
                     return self.fail("lectura de byte sobre algo que no es Bytes o Text");
@@ -3294,7 +3317,8 @@ pub(crate) fn uses_defs(kind: &InstKind) -> (Vec<VarId>, Option<VarId>) {
                 | Rvalue::TextEq(p, _)
                 | Rvalue::Len(p)
                 | Rvalue::Cap(p)
-                | Rvalue::ListTakeLast(p) => place_uses(p, &mut uses),
+                | Rvalue::ListTakeLast(p)
+                | Rvalue::ListPop(p, _) => place_uses(p, &mut uses),
                 Rvalue::ArrayLit(_, ops) | Rvalue::ListLit(_, ops) => {
                     ops.iter().for_each(|o| operand_uses(o, &mut uses))
                 }

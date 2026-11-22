@@ -472,6 +472,9 @@ fn two_distinct_public_names_reachable_only_transitively_are_ambiguous() {
 
 #[test]
 fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
+    // Stage 0 requires a direct import for unqualified public calls.
+    // Explicitly importing common does not load it a second time even
+    // though left and right also import it through the diamond.
     compare_multi(
         "diamond_direct_export",
         "main.l",
@@ -487,7 +490,7 @@ fn diamond_imports_do_not_duplicate_the_same_public_symbol() {
             ),
             (
                 "main.l",
-                "import left\nimport right\nfn main() -> Int { return answer() }\n",
+                "import left\nimport right\nimport common\nfn main() -> Int { return answer() }\n",
             ),
         ],
     );
@@ -611,4 +614,137 @@ fn private_nominal_is_not_usable_in_importing_module_signature() {
     assert_eq!(out.code, Some(1), "{}", out.stderr);
     assert!(out.stderr.contains("parser.l:"), "{}", out.stderr);
     assert!(out.stderr.contains("error[L0001]"), "{}", out.stderr);
+}
+
+const STAGE1_IMPORT_DEPTH_LIMIT: usize = 128;
+
+fn stage1_import_chain_fixture(name: &str, depth: usize) -> PathBuf {
+    let dir = case_dir(name);
+    for index in 0..depth {
+        let filename = if index == 0 {
+            "main.l".to_owned()
+        } else {
+            format!("m{index:03}.l")
+        };
+        let mut source = String::new();
+        if index + 1 < depth {
+            source.push_str(&format!("take m{:03}\n", index + 1));
+        }
+        if index == 0 {
+            source.push_str("flow main() => Int { give 0 }\n");
+        } else {
+            source.push_str(&format!("flow unused{index:03}() => Int {{ give 0 }}\n"));
+        }
+        fs::write(dir.join(filename), source).unwrap();
+    }
+    dir
+}
+
+fn check_stage1_directory(dir: &Path) -> Output {
+    exec(
+        Command::new(sema_exe())
+            .arg(dir.join("main.l"))
+            .arg("--check-ownership")
+            .env("PATH", ""),
+    )
+}
+
+#[test]
+fn stage1_accepts_import_chain_at_depth_limit() {
+    let dir =
+        stage1_import_chain_fixture("stage1_import_depth_at_limit", STAGE1_IMPORT_DEPTH_LIMIT);
+    let result = check_stage1_directory(&dir);
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains("error[L0014]"), "{}", result.stderr);
+}
+
+#[test]
+fn stage1_rejects_import_chain_over_depth_limit_with_l0014() {
+    let dir = stage1_import_chain_fixture(
+        "stage1_import_depth_above_limit",
+        STAGE1_IMPORT_DEPTH_LIMIT + 1,
+    );
+    let stage1 = check_stage1_directory(&dir);
+    assert_eq!(stage1.code, Some(1), "{}", stage1.stderr);
+    assert!(stage1.stderr.contains("error[L0014]"), "{}", stage1.stderr);
+    assert!(
+        stage1
+            .stderr
+            .contains("profundidad de imports excede el límite de 128 módulos"),
+        "{}",
+        stage1.stderr
+    );
+    assert!(!stage1.stderr.contains("error[ICE]"), "{}", stage1.stderr);
+
+    // Stage 0 and Stage 1 must reject the same acyclic import chain.
+    let stage0 = exec(
+        Command::new(env!("CARGO_BIN_EXE_l"))
+            .arg("check")
+            .arg(dir.join("main.l")),
+    );
+    assert_ne!(stage0.code, Some(0), "{}", stage0.stderr);
+    assert!(stage0.stderr.contains("L0014"), "{}", stage0.stderr);
+}
+
+#[test]
+fn stage1_accepts_wide_graph_with_more_than_128_modules() {
+    // Depth=2, width>128: avoid imposing a total-file limit.
+    let dir = case_dir("stage1_import_depth_wide_graph");
+    let mut source = String::new();
+    for index in 0..(STAGE1_IMPORT_DEPTH_LIMIT + 8) {
+        let name = format!("m{index:03}");
+        fs::write(
+            dir.join(format!("{name}.l")),
+            format!("flow unused{index:03}() => Int {{ give 0 }}\n"),
+        )
+        .unwrap();
+        source.push_str(&format!("take {name}\n"));
+    }
+    source.push_str("flow main() => Int { give 0 }\n");
+    fs::write(dir.join("main.l"), source).unwrap();
+
+    let result = check_stage1_directory(&dir);
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains("error[L0014]"), "{}", result.stderr);
+}
+
+#[test]
+fn public_borrow_site_constants_are_imported_without_exposing_private_constants() {
+    // The real Stage 1 sema_context declares SITE_* values as constants.
+    // Sibling semantic modules must import their exported values, but an
+    // unrelated private constant must remain inaccessible.
+    let shared = (
+        "positions.l",
+        "pub const SITE_NONE = 0\npub const SITE_ARG = 3\nconst PRIVATE_SITE = 9\n",
+    );
+    let valid = check_modules_with_stage1(
+        "stage1_b1_public_site_constants",
+        &[
+            shared,
+            (
+                "main.l",
+                "take positions\nflow main() => Int { give SITE_ARG + SITE_NONE }\n",
+            ),
+        ],
+    );
+    assert_eq!(valid.code, Some(0), "{}", valid.stderr);
+    assert!(!valid.stderr.contains("error["), "{}", valid.stderr);
+
+    let private = check_modules_with_stage1(
+        "stage1_b1_private_site_constant",
+        &[
+            shared,
+            (
+                "main.l",
+                "take positions\nflow main() => Int { give PRIVATE_SITE }\n",
+            ),
+        ],
+    );
+    assert_eq!(private.code, Some(1), "{}", private.stderr);
+    assert!(private.stderr.contains("main.l:"), "{}", private.stderr);
+    assert!(
+        private.stderr.contains("error[L0001]"),
+        "{}",
+        private.stderr
+    );
 }

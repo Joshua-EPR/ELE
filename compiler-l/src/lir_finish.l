@@ -73,7 +73,7 @@ fn lirOpKey(plan: &DropPlan, index: Int) -> Int {
     return op.event
 }
 
-fn lirFinish(l: &mut LirFn, graph: &FlowGraph, plan: &DropPlan, field_local: &List<Int>) -> LirBody {
+pub fn lirFinish(l: &mut LirFn, graph: &FlowGraph, plan: &DropPlan, field_local: &List<Int>) -> LirBody {
     let blocks = graph.blocks.length
     var body = LirBody(order: List[], first: List[], count: List[], term: List[], ta: List[], tb: List[], top: List[], flag_vars: List[])
     lirBlocks(&mut l, blocks)
