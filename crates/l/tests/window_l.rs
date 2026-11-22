@@ -151,6 +151,11 @@ fn window_headless_elf64_reports_no_graphical_session() {
 fn window_rejects_unsafe_programs() {
     let cases = [
         ("leak", "L0005", "Window abierto al salir"),
+        ("overwrite_direct", "L0005", "Window abierto al salir"),
+        ("overwrite_edit", "L0005", "Window abierto al salir"),
+        ("overwrite_conditional", "L0005", "Window abierto al salir"),
+        ("overwrite_maybe", "L0005", "Window abierto al salir"),
+        ("overwrite_loop", "L0005", "Window abierto al salir"),
         ("double_close", "L0005", "uso de valor movido"),
         ("use_after_close", "L0005", "uso de valor movido"),
         ("forged_int", "L0004", "(ventana: Window)"),

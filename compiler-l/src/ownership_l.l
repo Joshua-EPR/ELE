@@ -135,6 +135,22 @@ flow flowDropsLinear(graph: view FlowGraph, state: view List of[Int], root: Int)
     give -1
 }
 
+// A write to an owned place releases its old value, just like a scope drop.
+// A write through `edit` instead releases the referent; its binding path is
+// a reference and therefore has no owned drop leaf. The event carries the
+// referent type so it cannot evade the linear check through that binding.
+flow flowReleasesLinear(graph: view FlowGraph, state: view List of[Int], event: view FlowEvent) => Int {
+    when event.kind == FLOW_DROP_REF {
+        when flowIsLinear(graph, event.data) { give event.data }
+        give -1
+    }
+    when event.kind == FLOW_DROP { give flowDropsLinear(graph, state, event.path) }
+    when event.kind == FLOW_WRITE {
+        give flowDropsLinear(graph, state, event.path)
+    }
+    give -1
+}
+
 pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
     let paths = graph.paths.length
     let blocks = graph.blocks.length
@@ -172,11 +188,9 @@ pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
             var event = block.first
             while event >= 0 {
                 let instruction = &graph.events[event]
-                when instruction.kind == FLOW_DROP {
-                    hold leaked = flowDropsLinear(graph, view work.scratch, instruction.path)
-                    when leaked >= 0 {
-                        give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps, linear: leaked)
-                    }
+                hold leaked = flowReleasesLinear(graph, view work.scratch, instruction)
+                when leaked >= 0 {
+                    give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps, linear: leaked)
                 }
                 if !flowApply(graph, &mut work.scratch, instruction, true) {
                     return FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps, linear: -1)

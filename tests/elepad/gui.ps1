@@ -16,6 +16,7 @@ using System.Runtime.InteropServices;
 public static class EleGuiDriver {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string title);
     [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
 }
 '@
 
@@ -39,16 +40,78 @@ function Post($hwnd, [uint32]$msg, [long]$wp) {
     if (-not [EleGuiDriver]::PostMessageW($hwnd, $msg, [IntPtr]$wp, [IntPtr]::Zero)) { throw "PostMessageW $msg failed" }
 }
 
+function Send-Key($hwnd, [uint32]$msg, [long]$wp, [long]$lp = 0) {
+    # SendMessage delivers the key event without TranslateMessage adding a
+    # second synthetic character. WM_CHAR is posted explicitly below.
+    [void][EleGuiDriver]::SendMessageW($hwnd, $msg, [IntPtr]$wp, [IntPtr]$lp)
+}
+
+# A sent message overtakes every posted one. Let the editor consume what was
+# posted before sending a release, so it arrives after it as on a keyboard.
+function Settle { Start-Sleep -Milliseconds 200 }
+
+function Open-Path($hwnd, [string]$path) {
+    Post $hwnd $WM_CHAR 15
+    foreach ($c in $path.ToCharArray()) { Post $hwnd $WM_CHAR ([int]$c) }
+    Post $hwnd $WM_KEYDOWN 13
+    Settle
+}
+
+function Cancel-Prompt($hwnd) {
+    Post $hwnd $WM_KEYDOWN 27
+    Settle
+}
+
+function Same-Content([string]$file, [string]$expected) {
+    $actual = [IO.File]::ReadAllBytes($file)
+    $wanted = $utf8.GetBytes($expected)
+    if ($actual.Length -ne $wanted.Length) { return $false }
+    for ($j = 0; $j -lt $actual.Length; $j++) {
+        if ($actual[$j] -ne $wanted[$j]) { return $false }
+    }
+    return $true
+}
+
 function Wait-Content([string]$file, [string]$expected) {
     for ($i = 0; $i -lt 200; $i++) {
-        if ([IO.File]::ReadAllText($file, $utf8) -ceq $expected) { return }
+        if (Same-Content $file $expected) { return }
         Start-Sleep -Milliseconds 25
     }
-    throw "file content stayed '$([IO.File]::ReadAllText($file, $utf8))'"
+    throw "file bytes differ from expected UTF-8 ($(([IO.File]::ReadAllBytes($file)).Length) bytes)"
 }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
-$WM_KEYDOWN = 256; $WM_CHAR = 258; $WM_CLOSE = 16; $VK_END = 35
+$WM_KEYDOWN = 256; $WM_KEYUP = 257; $WM_CHAR = 258; $WM_CLOSE = 16
+$WM_SYSKEYDOWN = 260; $WM_SYSKEYUP = 261
+$WM_SYSCOMMAND = 274; $SC_CLOSE = 61536; $ALT_DOWN = 536870912
+$VK_END = 35; $VK_CONTROL = 17; $VK_MENU = 18; $VK_Q = 81; $VK_F4 = 115
+
+function Ctrl-Q($hwnd) {
+    Send-Key $hwnd $WM_KEYDOWN $VK_CONTROL
+    Send-Key $hwnd $WM_KEYDOWN $VK_Q
+    Post $hwnd $WM_CHAR 17
+    Settle
+    Send-Key $hwnd $WM_KEYUP $VK_Q
+    Send-Key $hwnd $WM_KEYUP $VK_CONTROL
+}
+
+function Alt-F4($hwnd) {
+    # No WM_CLOSE here: DefWindowProc derives it from F4 with Alt down.
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_MENU $ALT_DOWN
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_F4 $ALT_DOWN
+    Settle
+    Send-Key $hwnd $WM_SYSKEYUP $VK_F4 $ALT_DOWN
+    Send-Key $hwnd $WM_SYSKEYUP $VK_MENU
+}
+
+function Assert-Running($p, [string]$name) {
+    if ($p.WaitForExit(800)) { throw "$name closed on first request (exit $($p.ExitCode))" }
+}
+
+function Assert-Closed($p, [string]$name) {
+    if (-not $p.WaitForExit(10000)) { $p.Kill(); throw "$name ignored confirmed close" }
+    if ($p.ExitCode -ne 0) { throw "$name exited $($p.ExitCode)" }
+}
 try {
     & $elePath build (Join-Path $root 'apps/elepad/src/gui.l') --lib $root --target pe --output $exe | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { throw 'ELEPad GUI build failed' }
@@ -75,8 +138,81 @@ try {
     Post $hwnd $WM_CLOSE 0
     if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad ignored the second close' }
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after discarding" }
-    if ([IO.File]::ReadAllText($file, $utf8) -cne $edited) { throw 'discarded change reached the file' }
+    if (-not (Same-Content $file $edited)) { throw 'discarded change reached the file' }
     Write-Host 'PASS unsaved change needs a second close and is discarded'
+
+    # Complete keyboard sequences: modifier down, key down, translated char,
+    # key up, modifier up. A held Q may emit repeated WM_CHAR events.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Send-Key $hwnd $WM_KEYDOWN $VK_CONTROL
+    Send-Key $hwnd $WM_KEYDOWN $VK_Q
+    Post $hwnd $WM_CHAR 17
+    Settle
+    Send-Key $hwnd $WM_KEYDOWN $VK_Q
+    Post $hwnd $WM_CHAR 17
+    Assert-Running $p 'repeated Ctrl+Q'
+    Send-Key $hwnd $WM_KEYUP $VK_Q
+    Send-Key $hwnd $WM_KEYUP $VK_CONTROL
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'second deliberate Ctrl+Q'
+    Write-Host 'PASS Ctrl+Q modifiers, repeat and second gesture'
+
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_MENU $ALT_DOWN
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_F4 $ALT_DOWN
+    Settle
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_F4 $ALT_DOWN
+    Assert-Running $p 'repeated Alt+F4'
+    Send-Key $hwnd $WM_SYSKEYUP $VK_F4
+    Send-Key $hwnd $WM_SYSKEYUP $VK_MENU
+    Alt-F4 $hwnd
+    Assert-Closed $p 'second deliberate Alt+F4'
+    Write-Host 'PASS Alt+F4 modifiers, repeat and second gesture'
+
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Ctrl-Q $hwnd
+    Assert-Running $p 'first Ctrl+Q before Escape'
+    Send-Key $hwnd $WM_KEYDOWN 27
+    Send-Key $hwnd $WM_KEYUP 27
+    Ctrl-Q $hwnd
+    Assert-Running $p 'Ctrl+Q after Escape'
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'Ctrl+Q after new confirmation'
+    Write-Host 'PASS Escape cancels close confirmation'
+
+    $p, $hwnd = Start-Editor $file
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'Ctrl+Q on a clean document'
+    Write-Host 'PASS Ctrl+Q closes a clean document at once'
+
+    $p, $hwnd = Start-Editor $file
+    Alt-F4 $hwnd
+    Assert-Closed $p 'Alt+F4 on a clean document'
+    Write-Host 'PASS Alt+F4 closes a clean document at once'
+
+    # The title bar button reaches the editor as SC_CLOSE, without any key.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Post $hwnd $WM_SYSCOMMAND $SC_CLOSE
+    Assert-Running $p 'close button'
+    Post $hwnd $WM_SYSCOMMAND $SC_CLOSE
+    Assert-Closed $p 'second close button'
+    Write-Host 'PASS close button needs a second click'
+
+    # Typing between two requests withdraws the first one.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Ctrl-Q $hwnd
+    Post $hwnd $WM_CHAR 120
+    Ctrl-Q $hwnd
+    Assert-Running $p 'Ctrl+Q after typing'
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'Ctrl+Q confirmed after typing'
+    if (-not (Same-Content $file $edited)) { throw 'discarded typing reached the file' }
+    Write-Host 'PASS typing cancels close confirmation'
 
     # Undo back to the saved text is clean: one close is enough.
     $p, $hwnd = Start-Editor $file
@@ -100,8 +236,49 @@ try {
     Post $hwnd $WM_CLOSE 0
     if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad did not close after Ctrl+O' }
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after Ctrl+O" }
-    if ([IO.File]::ReadAllText($file, $utf8) -cne $edited) { throw 'Ctrl+O changed the first file' }
+    if (-not (Same-Content $file $edited)) { throw 'Ctrl+O changed the first file' }
     Write-Host 'PASS Ctrl+O opens, edits and saves another file'
+
+    # A path outside ASCII (Latin and CJK; this script stays ASCII).
+    $unicode = Join-Path $work ("caf" + [char]0xE9 + "-" + [char]0x65E5 + ".l")
+    [IO.File]::WriteAllText($unicode, "two", $utf8)
+    $p, $hwnd = Start-Editor $file
+    Open-Path $hwnd $unicode
+    Post $hwnd $WM_CHAR 120
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $unicode "xtwo"
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after a Unicode open'
+    if (-not (Same-Content $file $edited)) { throw 'Unicode open changed the first file' }
+    Write-Host 'PASS Ctrl+O opens a Unicode path'
+
+    # A failed open keeps the document: its next save goes to its own file.
+    $invalid = Join-Path $work 'invalid.l'
+    [IO.File]::WriteAllBytes($invalid, [byte[]](0x61, 0xC3, 0x28))
+    $p, $hwnd = Start-Editor $file
+    Open-Path $hwnd $invalid
+    Cancel-Prompt $hwnd
+    Post $hwnd $WM_CHAR 107
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $file ("k" + $edited)
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after an invalid open'
+    $bytes = [IO.File]::ReadAllBytes($invalid)
+    if (($bytes -join ',') -cne '97,195,40') { throw 'invalid UTF-8 file was modified' }
+    Write-Host 'PASS Ctrl+O rejects invalid UTF-8 and keeps the document'
+
+    # Unsaved changes are never discarded by an open.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 109
+    Open-Path $hwnd $second
+    Cancel-Prompt $hwnd
+    Post $hwnd $WM_CHAR 19
+    Wait-Content $file ("mk" + $edited)
+    Post $hwnd $WM_CLOSE 0
+    Assert-Closed $p 'close after a refused open'
+    if (-not (Same-Content $second "xone")) { throw 'refused open touched the other file' }
+    Write-Host 'PASS Ctrl+O with unsaved changes is refused'
 } finally {
+    if ($p -and -not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
     Remove-Item -LiteralPath $work -Recurse -Force
 }

@@ -2,9 +2,9 @@ name: Distribution & Packaging CI
 
 on:
   push:
-    branches: [main, feat/**]
-  pull_request:
     branches: [main]
+  pull_request:
+    # Package the exact head of every stacked PR.
   workflow_dispatch:
 
 concurrency:

@@ -284,7 +284,10 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         // Moving a Text or a list out of a referent would duplicate its
         // buffer. A field of an owned shape moves out, and a store may refill
         // a field whose value was moved or released (native_cfg_paths).
-        when inst.kind == 5 && cfgOwnsHeap(p, ty) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
+        when inst.kind == 5 && (cfgOwnsHeap(p, ty) || cfgIsLinear(ty)) && cfgIsRef(p, f, inst.place_var) { p.error = 95 }
+        // A linear referent is live for the entire borrow. Replacing it would
+        // discard the original OS resource without a consuming close.
+        when inst.kind == 6 && cfgIsLinear(ty) { p.error = 104 }
         // A whole store through a reference (`i store pN vM`) replaces an
         // owning referent: the emitter releases the old value through its
         // drop glue, then moves the new one in (the verifier requires the

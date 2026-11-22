@@ -113,8 +113,9 @@ expose flow semTypeIsFile(table: view TypeTable, ty: Int) => Bool {
 // implicit drop of a (maybe) live value is a compile error, and it can
 // never be stored in an aggregate. Below sema it is one machine word.
 // Adding a resource kind means extending semTypeIsLinear and
-// semTypeCloser; flow analysis, the aggregate rule, drops and the LIR
-// serialization then apply to it unchanged.
+// semTypeCloser; flow analysis, the aggregate rule and drops then apply to
+// it unchanged. Its LIR identity is not inherited: lirTypeCode and the native
+// reader (cfgType, cfgIsLinear) need a code of their own for each kind.
 
 // The single Window type, created on first use like File.
 expose flow semTypeMakeWindow(table: edit TypeTable) => Int {
