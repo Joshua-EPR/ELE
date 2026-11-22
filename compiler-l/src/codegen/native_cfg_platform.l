@@ -24,14 +24,15 @@ take x86_64
 //   consolemode 1 val <Int>        -> Int (codes 6 and 7: raw console
 //   readevent 0                    -> Int  input, see win64_rt_platform)
 //   writeconsole 1 ref <List of[Int]> 0 -> Int (binary stdout, no newline)
-// File streams (codes 9..16). A File is an Int below sema: shared `ref`
-// for operations on an open file, `val` only for the consuming close.
-//   fileopen 2 ref <Text> 0 val <Int>                       -> Int
-//   fileread 3 ref <Int> 0 ref <List of[Int]> 1 val <Int>   -> Int
-//   filewrite 3 ref <Int> 0 ref <List of[Int]> 0 val <Int>  -> Int
-//   fileseek 3 ref <Int> 0 val <Int> val <Int>              -> Int
-//   filesize 1 ref <Int> 0 / fileflush 1 ref <Int> 0         -> Int
-//   fileclose 1 val <Int> / filestatus 1 ref <Int> 0         -> Int
+// File streams (codes 9..16). File has the distinct LIR type `h`, stored
+// as one word. Only fileopen produces one; close consumes it by value.
+// Other operations borrow it without changing ownership.
+//   fileopen 2 ref <Text> 0 val <Int>                        -> File
+//   fileread 3 ref <File> 0 ref <List of[Int]> 1 val <Int>   -> Int
+//   filewrite 3 ref <File> 0 ref <List of[Int]> 0 val <Int>  -> Int
+//   fileseek 3 ref <File> 0 val <Int> val <Int>              -> Int
+//   filesize 1 ref <File> 0 / fileflush 1 ref <File> 0     -> Int
+//   fileclose 1 val <File> / filestatus 1 ref <File> 0     -> Int
 // fileread is the only platform call with an exclusive borrow: it stores
 // into the elements of the caller's list.
 // Result<Text,Int> is any declared enum with exactly two variants whose
@@ -94,12 +95,13 @@ flow cfgPlatformArity(op: Int) => Int {
     give 2
 }
 
-// File argument `k`: 0 `val` Int, 1 shared `ref` to an Int (the File),
-// 2 shared `ref` to a List of[Int], 3 exclusive `ref` to a List of[Int].
+// File argument `k`: 0 `val` Int, 1 shared `ref` File,
+// 2 shared `ref` List<Int>, 3 exclusive `ref` List<Int>, 4 `val` File.
 flow cfgFileArgOk(p: view CfgProgram, f: Int, k: Int, want: Int) => Bool {
     hold ty = cfgPlatformArgType(p, f, k)
     when want == 0 { give p.call_ref[k] == -1 && ty == 0 }
-    when want == 1 { give p.call_ref[k] == 0 && ty == 0 }
+    when want == 1 { give p.call_ref[k] == 0 && ty == cfgFileType() }
+    when want == 4 { give p.call_ref[k] == -1 && ty == cfgFileType() }
     when want == 2 && p.call_ref[k] != 0 { give false }
     when want == 3 && p.call_ref[k] != 1 { give false }
     hold index = cfgListIndex(p, ty)
@@ -112,7 +114,7 @@ flow cfgCheckFilePlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Boo
     when inst.op == 10 { give cfgFileArgOk(p, f, first, 1) && cfgFileArgOk(p, f, first + 1, 3) && cfgFileArgOk(p, f, first + 2, 0) }
     when inst.op == 11 { give cfgFileArgOk(p, f, first, 1) && cfgFileArgOk(p, f, first + 1, 2) && cfgFileArgOk(p, f, first + 2, 0) }
     when inst.op == 12 { give cfgFileArgOk(p, f, first, 1) && cfgFileArgOk(p, f, first + 1, 0) && cfgFileArgOk(p, f, first + 2, 0) }
-    when inst.op == 15 { give cfgFileArgOk(p, f, first, 0) }
+    when inst.op == 15 { give cfgFileArgOk(p, f, first, 4) }
     give cfgFileArgOk(p, f, first, 1)
 }
 
@@ -164,7 +166,8 @@ expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => 
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
     when (inst.op == 0 || inst.op == 4) && dest != 0 { give 132 }
     when inst.op == 3 && dest != cfgUnitType() { give 132 }
-    when inst.op >= 5 && dest != 0 { give 132 }
+    when inst.op == 9 && dest != cfgFileType() { give 132 }
+    when inst.op >= 5 && inst.op != 9 && dest != 0 { give 132 }
     when (inst.op == 1 || inst.op == 2) && !cfgIsTextResult(p, dest) { give 132 }
     give 0
 }

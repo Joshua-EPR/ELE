@@ -489,6 +489,107 @@ fn hostile_lir_is_rejected_with_specific_codes_and_writes_nothing() {
     );
 }
 
+/// File handles must have a distinct LIR type and a real producer. These
+/// inputs bypass source semantics and exercise the autonomous LIR reader.
+#[test]
+fn forged_file_handles_are_rejected_before_image_creation() {
+    let cases = [
+        (
+            "file_constant_close",
+            main_only(
+                &["i"],
+                &["i platform v0 fileclose 1 val ci123"],
+                "return v0",
+            ),
+            131,
+        ),
+        (
+            "file_constant_typed",
+            main_only(&["h"], &["i use v0 ci123"], "return ci0"),
+            34,
+        ),
+        (
+            "file_arithmetic_typed",
+            main_only(&["h"], &["i binary v0 add ci1 ci2"], "return ci0"),
+            36,
+        ),
+        (
+            "file_forged_var_close",
+            main_only(
+                &["i", "i"],
+                &["i use v0 ci123", "i platform v1 fileclose 1 val v0"],
+                "return v1",
+            ),
+            131,
+        ),
+        (
+            "file_double_close",
+            main_only(
+                &["t", "h", "i", "i"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                    "i platform v2 fileclose 1 val v1",
+                    "i platform v3 fileclose 1 val v1",
+                ],
+                "return ci0",
+            ),
+            57,
+        ),
+        (
+            "file_live_on_exit",
+            main_only(
+                &["t", "h"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                ],
+                "return ci0",
+            ),
+            59,
+        ),
+        (
+            "file_overwritten",
+            main_only(
+                &["t", "h"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                ],
+                "return ci0",
+            ),
+            59,
+        ),
+    ];
+    for (name, lir, code) in cases {
+        for target in TARGETS {
+            let built = compile(name, lir.as_bytes(), target);
+            rejection(&built, Some(code))
+                .unwrap_or_else(|why| panic!("{name} [{target:?}]: {why}"));
+        }
+    }
+}
+
+#[test]
+fn typed_file_open_and_close_is_accepted() {
+    let lir = main_only(
+        &["t", "h", "i"],
+        &[
+            "i use v0 ct1:120",
+            "i platform v1 fileopen 2 ref p0 0 val ci0",
+            "i platform v2 fileclose 1 val v1",
+            "i drop v0 -",
+        ],
+        "return v2",
+    );
+    for target in TARGETS {
+        let built = compile("typed_file_open_close", lir.as_bytes(), target);
+        assert_eq!(built.status, Some(0), "{target:?}: {}", built.stderr);
+        assert!(built.image.is_some(), "{target:?}: no image produced");
+    }
+}
+
 /// Every strict prefix of a valid multi-function program (except the one
 /// that only lacks the final line feed) is rejected without an image.
 #[test]
