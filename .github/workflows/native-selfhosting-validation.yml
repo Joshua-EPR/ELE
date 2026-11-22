@@ -100,6 +100,11 @@ jobs:
         run: |
           cargo test -p project-l --test ele_build_driver_l driver_library_ -- --test-threads=1
           cargo test -p project-l --test ele_build_driver_l driver_resolves_elepad_std_console_with_explicit_library_root -- --test-threads=1
+      # P0-D windows: on Linux windowOpen must report -7 (no graphical
+      # backend yet); Windows runs the real window test in the full suite.
+      - name: Native windows report no graphical session (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test window_l -- --test-threads=1
       # P0-B file streams: the ELF64 image runs natively here (Windows runs
       # the PE32+ half inside the full suite below).
       - name: Native file streams (Linux ELF64)
@@ -132,6 +137,18 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: >-
           cargo test -p project-l --no-fail-fast -- --test-threads=1
+      # P0-D: 200 open/draw/close cycles must not leak GDI or USER objects.
+      - name: Native window resource audit (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          cargo build -p project-l --bin l
+          New-Item -ItemType Directory -Force target/ele-driver | Out-Null
+          Push-Location target/ele-driver
+          ../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift
+          Pop-Location
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          ./tests/native_backend/win64_window_resources.ps1 -Ele $driver
       # std/io/console.l through the autonomous driver: decoder over
       # redirected bytes, then a real console (AllocConsole +
       # WriteConsoleInputW) read with ReadConsoleInputW, and the console

@@ -11,6 +11,12 @@
 > Rust del protocolo 1 tampoco admite las operaciones nativas de File y
 > las rechaza; no hay degradación silenciosa a `Int`.
 
+> Extensión de seguridad 1.2 (2026-11-22): `w` identifica el recurso lineal
+> `Window`, con las reglas de `h`. Solo `platform windowopen` produce un `w`
+> y `windowclose` lo consume. `w`, `h` e `i` no son intercambiables: una
+> constante, una dirección o un File no pueden usarse como Window. Un valor
+> `h` o `w` vive en todas las aristas que entran en un bloque o en ninguna.
+
 > Actualización 2026-11-18: `List.pop()` implementado verticalmente: emitido
 > por Stage 1 hacia `Option<T>`, validado por `lir_verify.l` y `lir_protocol.rs`,
 > soportado en el backend nativo ELE (instrucción 23 `listpop`) y en el runtime
@@ -67,7 +73,7 @@ Una versión distinta de `ELE-LIR 1` se rechaza. No puede haber contenido
 después de `end`.
 
 **Tipos.** `i` (Int), `f` (Float), `b` (Bool), `t` (Text), `u` (Unit),
-`h` (File, extensión 1.1) y
+`h` (File, extensión 1.1), `w` (Window, extensión 1.2) y
 `s<k>` (struct `k`). Una variable `ref` contiene una referencia a un valor
 de ese tipo.
 

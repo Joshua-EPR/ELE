@@ -162,6 +162,15 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         when op_code == 14 { op_name = "fileflush" }
         when op_code == 15 { op_name = "fileclose" }
         when op_code == 16 { op_name = "filestatus" }
+        when op_code == 17 { op_name = "windowopen" }
+        when op_code == 18 { op_name = "windowstatus" }
+        when op_code == 19 { op_name = "windownext" }
+        when op_code == 20 { op_name = "windowfill" }
+        when op_code == 21 { op_name = "windowtext" }
+        when op_code == 22 { op_name = "windowpresent" }
+        when op_code == 23 { op_name = "windowsend" }
+        when op_code == 24 { op_name = "windowpixel" }
+        when op_code == 25 { op_name = "windowclose" }
         var out ="i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]

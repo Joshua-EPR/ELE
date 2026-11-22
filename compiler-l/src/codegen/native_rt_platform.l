@@ -1529,11 +1529,25 @@ expose flow pfEmitFileStatus(code: edit X64Code) => Int {
     give entry
 }
 
+// Window operations on Linux (codes 17..25): no graphical backend exists
+// yet, so they answer honestly instead of pretending. windowOpen gives a
+// Window holding -7 (no graphical session); every operation on it reports
+// -6 (not open), its status is -7 (pfEmitFileStatus), and closing it is 0.
+// An X11 backend replaces these routines (docs/native-window-and-callbacks-
+// design.md, section 2.4).
+expose flow pfEmitConstant(code: edit X64Code, value: Int) => Int {
+    hold entry = code.bytes.length
+    x64FrameBegin(edit code, 0)
+    pfReturnConst(edit code, value)
+    give entry
+}
+
 // Emits the platform runtime; returns the entry of each operation, indexed
 // by the ELE-LIR platform codes pfArgCount() .. pfWriteBytes(), then
-// samefile, consolemode and readevent (codes 5, 6, 7), writeconsole (8)
-// and the file streams (9..16, only when `files` holds; -1 otherwise).
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool) => List of[Int] {
+// samefile, consolemode and readevent (codes 5, 6, 7), writeconsole (8),
+// the file streams (9..16, only when `files` holds; -1 otherwise) and the
+// window operations (17..25, only when `windows` holds).
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -1565,6 +1579,15 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
         at@push(pfEmitFileStatus(edit code))
     } otherwise {
         each k among 0..8 { at@push(-1) }
+    }
+    when windows {
+        at@push(pfEmitConstant(edit code, -7))         // open
+        at@push(pfEmitFileStatus(edit code))           // status
+        hold not_open = pfEmitConstant(edit code, -6)
+        each k among 0..6 { at@push(not_open) }        // next .. pixel
+        at@push(pfEmitConstant(edit code, 0))          // close
+    } otherwise {
+        each k among 0..9 { at@push(-1) }
     }
     give at
 }

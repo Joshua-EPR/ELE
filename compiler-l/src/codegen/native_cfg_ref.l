@@ -60,8 +60,8 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
     p.call_field@push(-1)
     p.call_sub@push(-1)
     p.call_ext@push(-1)
-    // By value: primitives, Text, a whole shape/choice, or a linear File.
-    when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType() && arg_type != cfgFileType()) { give 37 }
+    // By value: primitives, Text, a whole shape/choice, or a linear resource.
+    when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType() && !cfgIsLinear(arg_type)) { give 37 }
     give 0
 }
 

@@ -1211,3 +1211,199 @@ fn driver_io_failures_write_nothing() {
         assert!(as_dir.is_dir(), "{target:?}");
     }
 }
+
+/// Window handles are addresses of runtime state, so a forged one would be
+/// an arbitrary pointer. Each case bypasses source semantics and must be
+/// rejected by the autonomous reader on both targets, with no image.
+#[test]
+fn forged_window_handles_are_rejected_before_image_creation() {
+    let title = "i use v0 ct1:120";
+    let open = "i platform v1 windowopen 3 ref p0 0 val ci200 val ci100";
+    let file = "i platform v1 fileopen 2 ref p0 0 val ci0";
+    let window = ["t", "w", "i", "i", "w"];
+    let as_file = ["t", "h", "i", "i"];
+    let as_int = ["t", "i", "i", "i"];
+    let case = |name: &'static str, vars: &[&str], body: &[&str], code: u32| {
+        (name, main_only(vars, body, "return ci0"), code)
+    };
+    let cases = [
+        case(
+            "window_constant_close",
+            &as_int,
+            &["i platform v2 windowclose 1 val ci4096"],
+            131,
+        ),
+        case("window_constant_typed", &window, &["i use v1 ci4096"], 34),
+        case(
+            "window_arithmetic_typed",
+            &window,
+            &["i binary v1 add ci4096 ci8"],
+            36,
+        ),
+        case("window_unary_typed", &window, &["i unary v1 neg ci4096"], 0),
+        case(
+            "int_as_window_borrow",
+            &as_int,
+            &["i use v1 ci4096", "i platform v2 windowpresent 1 ref p1 0"],
+            131,
+        ),
+        case(
+            "int_as_window_close",
+            &as_int,
+            &["i use v1 ci4096", "i platform v2 windowclose 1 val v1"],
+            131,
+        ),
+        case(
+            "file_as_window_borrow",
+            &as_file,
+            &[title, file, "i platform v2 windowpresent 1 ref p1 0"],
+            131,
+        ),
+        case(
+            "file_as_window_close",
+            &as_file,
+            &[title, file, "i platform v2 windowclose 1 val v1"],
+            131,
+        ),
+        case(
+            "window_as_file_close",
+            &window,
+            &[title, open, "i platform v2 fileclose 1 val v1"],
+            131,
+        ),
+        case(
+            "window_as_file_borrow",
+            &window,
+            &[title, open, "i platform v2 filesize 1 ref p1 0"],
+            131,
+        ),
+        case("window_opened_as_int", &as_int, &[title, open], 132),
+        case("window_opened_as_file", &as_file, &[title, open], 132),
+        case("window_from_fileopen", &window, &[title, file], 132),
+        case("window_as_int", &window, &[title, open, "i use v2 v1"], 34),
+        case(
+            "window_never_opened",
+            &window,
+            &["i platform v2 windowclose 1 val v1"],
+            57,
+        ),
+        case(
+            "window_double_close",
+            &window,
+            &[
+                title,
+                open,
+                "i platform v2 windowclose 1 val v1",
+                "i platform v3 windowclose 1 val v1",
+            ],
+            57,
+        ),
+        case(
+            "window_use_after_close",
+            &window,
+            &[
+                title,
+                open,
+                "i platform v2 windowclose 1 val v1",
+                "i platform v3 windowpresent 1 ref p1 0",
+            ],
+            57,
+        ),
+        case(
+            "window_use_after_move",
+            &window,
+            &[
+                title,
+                open,
+                "i use v4 v1",
+                "i platform v2 windowpresent 1 ref p1 0",
+            ],
+            57,
+        ),
+        case("window_live_on_exit", &window, &[title, open], 59),
+        case("window_overwritten", &window, &[title, open, open], 59),
+        (
+            "window_open_on_one_branch",
+            format!(
+                "ELE-LIR 1\nmodule structs 0 funcs 1 main f0\n\
+                 func f0 4:109,97,105,110 params 0 result i 0 0 vars 3 blocks 4\n\
+                 var v0 val t\nvar v1 val w\nvar v2 val b\n\
+                 block 0 2\n{title}\ni use v2 cb1\nt branch v2 1 2\n\
+                 block 1 1\n{open}\nt jump 3\nblock 2 0\nt jump 3\n\
+                 block 3 1\ni drop v0 -\nt return ci0\nendfunc\nend\n"
+            ),
+            59,
+        ),
+        (
+            "window_returned_constant",
+            "ELE-LIR 1\nmodule structs 0 funcs 2 main f0\n\
+             func f0 4:109,97,105,110 params 0 result i 0 0 vars 0 blocks 1\n\
+             block 0 0\nt return ci0\nendfunc\n\
+             func f1 1:114 params 0 result w 0 0 vars 0 blocks 1\n\
+             block 0 0\nt return ci4096\nendfunc\nend\n"
+                .to_string(),
+            41,
+        ),
+        (
+            "window_replaced_through_edit",
+            "ELE-LIR 1\nmodule structs 0 funcs 2 main f0\n\
+             func f0 4:109,97,105,110 params 0 result i 0 0 vars 0 blocks 1\n\
+             block 0 0\nt return ci0\nendfunc\n\
+             func f1 1:114 params 1 result u 0 0 vars 3 blocks 1\n\
+             var v0 ref w\nvar v1 val t\nvar v2 val w\n\
+             block 0 3\ni use v1 ct1:120\n\
+             i platform v2 windowopen 3 ref p1 0 val ci200 val ci100\n\
+             i store p0 v2\nt return cu\nendfunc\nend\n"
+                .to_string(),
+            104,
+        ),
+        (
+            "window_in_struct",
+            "ELE-LIR 1\nmodule structs 1 funcs 1 main f0\n\
+             struct s0 1:80 fields 1\nfield 1:97 w\n\
+             func f0 4:109,97,105,110 params 0 result i 0 0 vars 0 blocks 1\n\
+             block 0 0\nt return ci0\nendfunc\nend\n"
+                .to_string(),
+            0,
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (name, lir, code) in cases {
+        for target in TARGETS {
+            let built = compile(name, lir.as_bytes(), target);
+            // 0: rejected, but the code belongs to a reader that is not
+            // specific to linear resources.
+            let expected = (code != 0).then_some(code);
+            let checked = if expected.is_some() {
+                rejection(&built, expected)
+            } else if built.status == Some(3) && built.image.is_none() {
+                Ok(())
+            } else {
+                Err(format!("accepted: {:?} {}", built.status, built.stderr))
+            };
+            if let Err(why) = checked {
+                failures.push(format!("{name} [{target:?}]: {why}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn typed_window_open_and_close_is_accepted() {
+    let lir = main_only(
+        &["t", "w", "i"],
+        &[
+            "i use v0 ct1:120",
+            "i platform v1 windowopen 3 ref p0 0 val ci200 val ci100",
+            "i platform v2 windowclose 1 val v1",
+            "i drop v0 -",
+        ],
+        "return v2",
+    );
+    for target in TARGETS {
+        let built = compile("typed_window_open_close", lir.as_bytes(), target);
+        assert_eq!(built.status, Some(0), "{target:?}: {}", built.stderr);
+        assert!(built.image.is_some(), "{target:?}: no image produced");
+    }
+}

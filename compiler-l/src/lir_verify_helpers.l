@@ -28,43 +28,12 @@ pub fn lirVerifyCall(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
 // Rules: 1 invalid ids/opcode, 3 type/result, 4 arity/borrow mode,
 // 5 use-before-initialization.
 // ---- Linear resource operations ------------------------------------------
-// Each resource family (today: File streams, codes 9..16) is described by a
-// small table: which ops belong to it, their arity, which op opens (its
-// result is the resource), which op closes (it takes the resource by
-// value), and the kind of every other argument. A new family adds rows
-// here and its type in lirIsOpResource; the checks below are shared.
-//
-// Argument kinds: 0 val Int, 1 shared ref resource, 2 shared ref
-// List<Int>, 3 exclusive ref List<Int>, 4 shared ref Text, 5 val resource.
-
-flow lirIsResourceOp(op: Int) => Bool {
-    give op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_FILE_STATUS
-}
-
-flow lirResourceOpens(op: Int) => Bool {
-    give op == LIR_PLATFORM_FILE_OPEN
-}
-
-flow lirResourceArity(op: Int) => Int {
-    when op == LIR_PLATFORM_FILE_OPEN { give 2 }
-    when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { give 3 }
-    give 1
-}
-
-flow lirResourceArgKind(op: Int, i: Int) => Int {
-    when op == LIR_PLATFORM_FILE_OPEN {
-        when i == 0 { give 4 }
-        give 0
-    }
-    when op == LIR_PLATFORM_FILE_CLOSE { give 5 }
-    when i == 0 { give 1 }
-    when i == 1 && op == LIR_PLATFORM_FILE_READ { give 3 }
-    when i == 1 && op == LIR_PLATFORM_FILE_WRITE { give 2 }
-    give 0
-}
+// The per-family table (ops, arity, opener, argument kinds) lives in
+// lir_build.l, shared with sema. Here: the resource type of each family.
 
 // Whether `ty` is the linear resource type of the family of `op`.
 flow lirIsOpResource(types: view TypeTable, op: Int, ty: Int) => Bool {
+    when lirIsWindowOp(op) { give semTypeIsWindow(types, ty) }
     give semTypeIsFile(types, ty)
 }
 

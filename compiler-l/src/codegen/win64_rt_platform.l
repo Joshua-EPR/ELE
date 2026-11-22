@@ -2,6 +2,7 @@ take x86_64
 take pe64
 take win64_rt
 take native_rt_platform
+take win64_window
 
 // Platform runtime of the ELE-written Windows x64 (PE32+) backend: the five
 // `i platform` operations of ELE-LIR 1 (processArgCount, processArg,
@@ -1991,7 +1992,9 @@ flow wpfEmitFileUnary(code: edit X64Code, imports: edit Pe64Imports, close: Bool
 // reached RIP-relative), so it adds no base relocation.
 // The console input routines (codes 6, 7) are emitted only when `console`
 // holds; otherwise their entries are -1 and their imports stay out.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool) => List of[Int] {
+// Window routines (codes 17..25, codegen/win64_window.l) likewise only
+// when `windows` holds.
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -2025,6 +2028,12 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
         at@push(pfEmitFileStatus(edit code))
     } otherwise {
         each k among 0..8 { at@push(-1) }
+    }
+    when windows {
+        hold window_at = w64EmitWindows(edit code, edit imports, rt, path_z, wide_z)
+        each k among 0..window_at.length { at@push(window_at[k]) }
+    } otherwise {
+        each k among 0..9 { at@push(-1) }
     }
     give at
 }

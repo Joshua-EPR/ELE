@@ -7,6 +7,7 @@ expose flow cfgType(p: view CfgProgram, source: view Text, reader: edit NativeRe
     when nativeEquals(source, view w, "i") { give 0 }
     when nativeEquals(source, view w, "b") { give 1 }
     when nativeEquals(source, view w, "h") { give cfgFileType() }
+    when nativeEquals(source, view w, "w") { give cfgWindowType() }
     when w.start < w.end && source@byteAt(w.start) == 115 {
         hold id = nativeDecimal(source, edit reader, view w, 1)
         when id >= 0 && id < p.structs.length { give 2 + id }
@@ -37,12 +38,16 @@ expose flow cfgTextType() => Int {
 // integer constant or arithmetic expression has this type.
 expose flow cfgFileType() => Int { give -4 }
 
+// An opaque, linear Window: the address of the runtime's state block. Only
+// windowopen produces one, so no Int, File or forged address has this type.
+expose flow cfgWindowType() => Int { give -5 }
+
 // Values that own an OS resource only their close operation may release.
-expose flow cfgIsLinear(ty: Int) => Bool { give ty == cfgFileType() }
+expose flow cfgIsLinear(ty: Int) => Bool { give ty == cfgFileType() || ty == cfgWindowType() }
 
 // Values whose assignment transfers ownership instead of copying.
 expose flow cfgIsMove(ty: Int) => Bool {
-    give ty >= 2 || ty == cfgTextType() || ty == cfgFileType()
+    give ty >= 2 || ty == cfgTextType() || cfgIsLinear(ty)
 }
 
 // Value types plus `u` and `t`. Callers decide where each is acceptable;
@@ -62,7 +67,7 @@ expose flow cfgTypeOrUnit(p: view CfgProgram, source: view Text, reader: edit Na
 }
 
 expose flow cfgTypeSize(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 || ty == cfgFileType() { give 8 }
+    when ty == 0 || cfgIsLinear(ty) { give 8 }
     // A unit variable owns one never-read slot so that slot math stays uniform.
     when ty == cfgUnitType() { give 8 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 24 }
@@ -82,7 +87,7 @@ expose flow cfgMaxValueBytes() => Int {
 }
 
 expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 || ty == cfgFileType() { give 8 }
+    when ty == 0 || cfgIsLinear(ty) { give 8 }
     when ty == 1 { give 1 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 8 }
     when ty >= 2 && ty - 2 < p.structs.length { give p.structs[ty - 2].align }
@@ -148,8 +153,8 @@ flow cfgDeclType(p: view CfgProgram, source: view Text, reader: edit NativeReade
         give -1
     }
     hold ty = cfgType(p, source, edit reader)
-    // Source-level File cannot be embedded in shapes, choices or lists.
-    when ty == cfgFileType() { reader.error = 30; give -1 }
+    // A linear resource cannot be embedded in shapes, choices or lists.
+    when cfgIsLinear(ty) { reader.error = 30; give -1 }
     give ty
 }
 

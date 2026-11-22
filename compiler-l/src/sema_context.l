@@ -290,6 +290,8 @@ pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, 
             // The built-in opaque File, unless a program shape shadows it.
             hold file_name = "File"
             when symbolNameEqualsText(source, at.a, at.b, file_name) { give semTypeMakeFile(edit ctx.types) }
+            hold window_name = "Window"
+            when symbolNameEqualsText(source, at.a, at.b, window_name) { give semTypeMakeWindow(edit ctx.types) }
             semaAddError(&mut ctx, "L0001", "tipo desconocido", at.start, at.end)
             return 7
         }

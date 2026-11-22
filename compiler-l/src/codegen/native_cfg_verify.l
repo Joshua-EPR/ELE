@@ -165,7 +165,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         // Overwriting a live owned Text or list would leak its buffer. A
         // reference owns nothing: a loop may take its loan again.
         hold dst_slot = p.functions[f].first_var + inst.dst
-        when live[inst.dst] && !p.var_ref[dst_slot] && (cfgHeapDirect(p, p.types_code[dst_slot]) || p.types_code[dst_slot] == cfgFileType()) { give 59 }
+        when live[inst.dst] && !p.var_ref[dst_slot] && (cfgHeapDirect(p, p.types_code[dst_slot]) || cfgIsLinear(p.types_code[dst_slot])) { give 59 }
         live[inst.dst] = true
     }
     give 0
@@ -426,10 +426,10 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
                 when paths.text[k] && root < func.params && p.var_ref[func.first_var + root] && !live[vars + k] { give 95 }
                 when paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { give 59 }
             }
-            // Every owned Text, list or File must have been consumed by now.
+            // Every owned Text, list or linear resource must have been consumed by now.
             // A reference parameter does not own its referent.
             each v among 0..vars {
-                when live[v] && !p.var_ref[func.first_var + v] && (cfgHeapDirect(p, p.types_code[func.first_var + v]) || p.types_code[func.first_var + v] == cfgFileType()) { give 59 }
+                when live[v] && !p.var_ref[func.first_var + v] && (cfgHeapDirect(p, p.types_code[func.first_var + v]) || cfgIsLinear(p.types_code[func.first_var + v])) { give 59 }
             }
         }
     }

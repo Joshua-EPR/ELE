@@ -124,6 +124,7 @@ pub fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
     if ty == 6 { return "u" }
     // The runtime stores one word, but the LIR must retain linear identity.
     when semTypeIsFile(types, ty) { give "h" }
+    when semTypeIsWindow(types, ty) { give "w" }
     if ty >= 0 && ty < types.types.length {
         match types.types[ty].kind {
             SemTypeKind.Struct => {

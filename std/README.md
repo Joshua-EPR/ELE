@@ -18,6 +18,53 @@ Terminal Processing enabled to interpret ANSI sequences.
 The native positive/negative test is `python tests/std/console_output.py
 <driver> <pe|elf>`.
 
+## Native windows (`Window`, `std/ui/window.l`)
+
+Windows x64 only for now. On Linux `windowOpen` reports -7 (no graphical
+session), because no X11/Wayland backend exists yet. `Window` follows the
+same compile-time rules as `File`:
+
+- it comes only from `windowOpen`;
+- `windowClose` consumes it;
+- leaks, double close and use after close are L0005;
+- an `Int` or a `File` is never a `Window` (L0004);
+- it cannot be stored in aggregates (L0016).
+
+| Operation | Result |
+|---|---|
+| `windowOpen(title: Text, width: Int, height: Int) => Window` | 1..16384 per side (outer size). Check `windowStatus`: 0, -1 invalid argument, -5 system failure, -7 no graphical session. |
+| `windowEvent(w, edit reader) => WindowEvent` (`take std.ui.window`) | Blocks until an event exists: key (the `KEY_*` codes of `std.io.console`), char (surrogate pairs joined), mouse, wheel, resize, focus, close request, error. |
+| `windowFill(w, x, y, width, height, rgb)` | Fills a rectangle of the back buffer (clipped). `rgb` is `0xRRGGBB`. |
+| `windowText(w, x, y, text, rgb)` | UTF-8 text in Consolas 16 px, transparent background. |
+| `windowPresent(w)` | Shows the back buffer (the window repaints from it). |
+| `windowPixel(w, x, y) => Int` | Reads the back buffer (tests, screenshots). |
+| `windowSend(w, message, wparam, lparam)` | Posts a synthetic input or close message to this window only (WM_KEY*, WM_CHAR, mouse buttons and move, wheel, WM_CLOSE); anything else is -1. |
+| `windowClose(w) => Int` | Destroys the window and frees its buffer, DC, font and DLL references. |
+
+`WINDOW_CLOSE` is a request: the window stays open until the program calls
+`windowClose`, so it can ask about unsaved work. A resize recreates the back
+buffer, cleared, before the resize event is reported; redraw everything. No
+ELE code runs inside the window procedure: it only queues events (256, then
+a `WINDOW_ERROR` with status -8 reports that some were dropped) and copies
+the back buffer when Windows asks for a repaint. The image still imports
+only KERNEL32: user32 and gdi32 are loaded from system32 at open.
+
+Tests:
+
+- `cargo test -p project-l --test window_l`:
+  - the real window on Windows, with drawing read back pixel by pixel and
+    synthetic input through the real message loop;
+  - the -7 report on Linux (or WSL with `ELE_TEST_WSL_DISTRO`);
+  - six programs that must be rejected.
+- `tests/native_backend/win64_window_resources.ps1`: 200 open/close cycles
+  end at about a dozen GDI objects. A mutant that skips one `DeleteObject`
+  ends at 212 and fails.
+
+Not yet: Linux graphics, real-input automation (focus, IME), DPI awareness,
+timers or `windowNext` timeouts, clipboard, title changes, font metrics, and
+a per-message `GetWindowLongPtrW` lookup that a writable data section will
+remove.
+
 ## File streams (`File`)
 
 The autonomous compiler (Stage 1) provides an opaque, linear `File` and
