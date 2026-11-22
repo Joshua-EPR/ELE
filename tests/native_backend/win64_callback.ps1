@@ -13,6 +13,10 @@ $negative = & $generator --self-check
 if ($LASTEXITCODE -ne 0 -or $negative -cne 'callback-negative-ok') { throw 'Callback target rejection failed' }
 & $generator $program
 if ($LASTEXITCODE -ne 0) { throw 'Callback PE generation failed' }
-$actual = & $program
-if ($LASTEXITCODE -ne 0 -or $actual -cne 'callback-ok') { throw "Native Win32 callback failed: $actual" }
+$actual = (& $program) -join "`n"
+$status = $LASTEXITCODE
+# Exit 7: RDI/RSI/RBX not preserved across a callback; 8: CallWindowProcW
+# did not return the callback's LRESULT; 2/6: a DLL or export is missing.
+$expected = "callback4-wndproc-ok`ncallback-ok`ncallback4-enum-ok`ncallback4-wndproc-ok"
+if ($status -ne 0 -or $actual -cne $expected) { throw "Native Win32 callbacks failed (exit $status): $actual" }
 Write-Output 'win64-callback-ok'
