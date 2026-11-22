@@ -183,7 +183,13 @@ flow wwFnGuarded(code: edit X64Code, block: Int, index: Int) {
     wwPatchHere(edit code, missing)
 }
 
+// A NUL-terminated UTF-16 string in the code section, 8-byte aligned:
+// RegisterClassExW and CreateWindowExW reject a misaligned WCHAR pointer
+// with ERROR_NOACCESS (998), so an odd offset (which depends on the size
+// of the rest of the image) made windowOpen fail in larger programs. The
+// padding sits between routines and is never executed.
 flow wwPushWide(code: edit X64Code, text: view Text) => Int {
+    during code.bytes.length % 8 != 0 { code.bytes@push(0) }
     hold at = code.bytes.length
     each i among 0..text.byteLength {
         code.bytes@push(text@byteAt(i))
