@@ -6,10 +6,30 @@ mod stage1_support;
 
 use std::{
     fs,
+    ops::Deref,
     path::{Path, PathBuf},
     process::Command,
-    sync::OnceLock,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
+
+struct ImportFixture(PathBuf);
+
+impl Deref for ImportFixture {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ImportFixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap();
+    }
+}
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -20,20 +40,40 @@ fn sema() -> &'static Path {
     EXE.get_or_init(|| stage1_support::build("main_sema", false))
 }
 
-fn prepare_imports() -> PathBuf {
+fn prepare_imports() -> ImportFixture {
     // The real imported ELE modules are copied as-is, including all of
     // their transitive dependencies. No fake interfaces or stubs are used.
     // Using a dedicated temp directory avoids touching compiler-l/src.
-    let dir = root().join("target/stage1-tests/b1-helper-exports");
-    fs::create_dir_all(&dir).unwrap();
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let parent = root().join("target/stage1-tests/b1-helper-exports");
+    fs::create_dir_all(&parent).unwrap();
+    let dir = parent.join(format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&dir).unwrap();
+    let fixture = ImportFixture(dir);
     for entry in fs::read_dir(root().join("compiler-l/src")).unwrap() {
         let entry = entry.unwrap();
         let file = entry.path();
         if file.extension().is_some_and(|ext| ext == "l") {
-            fs::copy(&file, dir.join(file.file_name().unwrap())).unwrap();
+            fs::copy(&file, fixture.join(file.file_name().unwrap())).unwrap();
         }
     }
-    dir
+    fixture
+}
+
+#[test]
+fn import_fixtures_do_not_share_mutable_sources() {
+    let first = prepare_imports();
+    let second = prepare_imports();
+    assert_ne!(
+        first.0, second.0,
+        "parallel tests must not share writable imports"
+    );
+    fs::write(first.join("fixture_isolation.l"), "first").unwrap();
+    assert!(!second.join("fixture_isolation.l").exists());
 }
 
 fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
