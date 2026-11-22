@@ -16,6 +16,8 @@ pub enum SemTypeKind {
     List
     Option
     Result
+    // Opaque, linear handle of an open file (P0-B). Below sema it is an Int.
+    File
 }
 
 pub struct SemType {
@@ -74,6 +76,33 @@ pub fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int
         kind = SemTypeKind.MutRef
     }
     return semTypeAdd(&mut table, kind, -1, -1, inner_id, -1)
+}
+
+// The single File type: created on first use, so programs without files
+// keep their type tables (and LIR) unchanged.
+expose flow semTypeMakeFile(table: edit TypeTable) => Int {
+    hold found = semTypeFindFile(table)
+    when found >= 0 { give found }
+    give semTypeAdd(edit table, SemTypeKind.File, -1, -1, -1, -1)
+}
+
+// The File type id, or -1 when the program never named or produced one.
+expose flow semTypeFindFile(table: view TypeTable) => Int {
+    each i among 8..table.types.length {
+        choose table.types[i].kind {
+            SemTypeKind.File : { give i }
+            _ : {}
+        }
+    }
+    give -1
+}
+
+expose flow semTypeIsFile(table: view TypeTable, ty: Int) => Bool {
+    when ty < 8 || ty >= table.types.length { give false }
+    choose table.types[ty].kind {
+        SemTypeKind.File : { give true }
+        _ : { give false }
+    }
 }
 
 pub fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
@@ -276,6 +305,7 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
     if type_id < 0 || type_id >= table.types.length {
         return "<invalid>"
     }
+    when semTypeIsFile(table, type_id) { give "File" }
     let t = &table.types[type_id]
     match t.kind {
         SemTypeKind.Unknown => { return "Unknown" }
@@ -320,5 +350,6 @@ pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
             let inner = semTypeName(table, source, t.elem_type)
             return "Result<{inner}>"
         }
+        SemTypeKind.File : { give "File" }
     }
 }

@@ -1,5 +1,16 @@
 # Protocolo LIR de ELE, versión 1
 
+> Extensión de seguridad 1.1 (2026-11-21): `h` identifica el recurso lineal
+> `File`. Ocupa una palabra en PE64/ELF64, pero conserva su identidad durante
+> serialización y verificación. Solo `platform fileopen` puede producir un
+> valor `h`; `fileclose` lo consume, y las demás operaciones de File reciben
+> un préstamo compartido. Constantes, aritmética y conversiones desde `i`
+> no producen `h`. El lector autónomo acepta el resto de LIR 1 sin cambios;
+> lectores anteriores que no reconozcan `h` rechazan programas con File.
+> `h` no está permitido como miembro de structs, enums ni listas. El lector
+> Rust del protocolo 1 tampoco admite las operaciones nativas de File y
+> las rechaza; no hay degradación silenciosa a `Int`.
+
 > Actualización 2026-11-18: `List.pop()` implementado verticalmente: emitido
 > por Stage 1 hacia `Option<T>`, validado por `lir_verify.l` y `lir_protocol.rs`,
 > soportado en el backend nativo ELE (instrucción 23 `listpop`) y en el runtime
@@ -55,7 +66,8 @@ end
 Una versión distinta de `ELE-LIR 1` se rechaza. No puede haber contenido
 después de `end`.
 
-**Tipos.** `i` (Int), `f` (Float), `b` (Bool), `t` (Text), `u` (Unit) y
+**Tipos.** `i` (Int), `f` (Float), `b` (Bool), `t` (Text), `u` (Unit),
+`h` (File, extensión 1.1) y
 `s<k>` (struct `k`). Una variable `ref` contiene una referencia a un valor
 de ese tipo.
 

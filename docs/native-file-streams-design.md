@@ -1,7 +1,38 @@
 # Native file streams: implementation contract
 
-Status: design for P0-B. The current platform operations are whole-file
-`readText` and `writeBytes`; this document does not declare stream support.
+Status (2026-11-21, branch `feat/p0b-file-streams-20261121`): the first
+stream slice is implemented in Stage 1 and the native backends: the linear
+`File` type and `fileOpen`, `fileRead`, `fileWrite`, `fileSeek`, `fileSize`,
+`fileFlush`, `fileClose`, `fileStatus`. The user-facing contract is in
+`std/README.md` ("File streams"). Still open from this design: existence
+and metadata queries, rename/replace, and publication through streams.
+
+## Implementation (verified slice)
+
+- Sema: `SemTypeKind.File`, created on first use. It is a move type tracked
+  like an owner. `flowVerify` returns status 4 (L0005) when a FLOW_DROP
+  reaches a File leaf that is LIVE or MAYBE live, so the File is linear:
+  it is never released by an implicit drop. Aggregates that would hold a
+  File are rejected (L0016).
+- LIR: platform codes 9..16 (`lir_build.l`). The verifier
+  (`lirVerifyFilePlatform`) requires the File type for every handle operand,
+  a shared borrow for operations and a by-value operand only for close.
+  `fileread` is the one platform call with an exclusive borrow (its
+  destination list). Below sema the File is serialized as `i`.
+- Native: `cfgUsesFiles` emits the routines only when used, so other images
+  keep their exact bytes and imports. Linux: `open`/`read`/`write`/`lseek`/
+  `fstat`/`fsync`/`close` with EINTR retries and errno mapping; Windows:
+  CreateFileW, ReadFile, WriteFile, SetFilePointerEx, GetFileSizeEx,
+  FlushFileBuffers, CloseHandle with GetLastError mapping. Two imports were
+  added to the PE64 table.
+- Evidence: `crates/l/tests/file_streams_l.rs`. A WSL strace run of the
+  ELF64 test showed 11 successful opens and 11 closes, with the intended
+  flags (`O_CLOEXEC|O_NONBLOCK`, `O_EXCL` for create-new).
+
+Known limits: Windows HANDLE values are assumed positive, which holds for
+kernel file handles. `write` errors lose their errno and report -5. Stage 0
+(Rust) does not implement these builtins: programs using `File` build only
+with the autonomous driver.
 
 ## Verified Linux metadata correction in this branch
 

@@ -154,7 +154,15 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         when op_code == 6 { op_name = "consolemode" }
         when op_code == 7 { op_name = "readevent" }
         when op_code == 8 { op_name = "writeconsole" }
-        var out = "i platform v{dst} {op_name} {count}"
+        when op_code == 9 { op_name = "fileopen" }
+        when op_code == 10 { op_name = "fileread" }
+        when op_code == 11 { op_name = "filewrite" }
+        when op_code == 12 { op_name = "fileseek" }
+        when op_code == 13 { op_name = "filesize" }
+        when op_code == 14 { op_name = "fileflush" }
+        when op_code == 15 { op_name = "fileclose" }
+        when op_code == 16 { op_name = "filestatus" }
+        var out ="i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]
             let piece = lirArgText(l, source, item)

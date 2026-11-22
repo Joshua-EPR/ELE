@@ -489,6 +489,193 @@ fn hostile_lir_is_rejected_with_specific_codes_and_writes_nothing() {
     );
 }
 
+/// File handles must have a distinct LIR type and a real producer. These
+/// inputs bypass source semantics and exercise the autonomous LIR reader.
+#[test]
+fn forged_file_handles_are_rejected_before_image_creation() {
+    let cases = [
+        (
+            "file_constant_close",
+            main_only(
+                &["i"],
+                &["i platform v0 fileclose 1 val ci123"],
+                "return v0",
+            ),
+            131,
+        ),
+        (
+            "file_constant_typed",
+            main_only(&["h"], &["i use v0 ci123"], "return ci0"),
+            34,
+        ),
+        (
+            "file_arithmetic_typed",
+            main_only(&["h"], &["i binary v0 add ci1 ci2"], "return ci0"),
+            36,
+        ),
+        (
+            "file_forged_var_close",
+            main_only(
+                &["i", "i"],
+                &["i use v0 ci123", "i platform v1 fileclose 1 val v0"],
+                "return v1",
+            ),
+            131,
+        ),
+        (
+            "file_double_close",
+            main_only(
+                &["t", "h", "i", "i"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                    "i platform v2 fileclose 1 val v1",
+                    "i platform v3 fileclose 1 val v1",
+                ],
+                "return ci0",
+            ),
+            57,
+        ),
+        (
+            "file_live_on_exit",
+            main_only(
+                &["t", "h"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                ],
+                "return ci0",
+            ),
+            59,
+        ),
+        (
+            "file_overwritten",
+            main_only(
+                &["t", "h"],
+                &[
+                    "i use v0 ct1:120",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                    "i platform v1 fileopen 2 ref p0 0 val ci0",
+                ],
+                "return ci0",
+            ),
+            59,
+        ),
+    ];
+    for (name, lir, code) in cases {
+        for target in TARGETS {
+            let built = compile(name, lir.as_bytes(), target);
+            rejection(&built, Some(code))
+                .unwrap_or_else(|why| panic!("{name} [{target:?}]: {why}"));
+        }
+    }
+}
+
+/// A File opened on only some paths into a join must not escape the exit
+/// check, which only sees values that are live on every path.
+#[test]
+fn file_live_on_some_paths_is_rejected() {
+    let program = |count: usize, blocks: &[&str]| {
+        format!(
+            "ELE-LIR 1\nmodule structs 0 funcs 1 main f0\n\
+             func f0 4:109,97,105,110 params 0 result i 0 0 vars 4 blocks {count}\n\
+             var v0 val t\nvar v1 val h\nvar v2 val b\nvar v3 val i\n{}\nendfunc\nend\n",
+            blocks.join("\n")
+        )
+    };
+    let open = "i platform v1 fileopen 2 ref p0 0 val ci0";
+    let text = "i use v0 ct1:120";
+    let flag = "i use v2 cb1";
+    let release = "i drop v0 -";
+    let cases = [
+        (
+            "file_open_on_one_branch",
+            program(
+                4,
+                &[
+                    "block 0 2",
+                    text,
+                    flag,
+                    "t branch v2 1 2",
+                    "block 1 1",
+                    open,
+                    "t jump 3",
+                    "block 2 0",
+                    "t jump 3",
+                    "block 3 1",
+                    release,
+                    "t return ci0",
+                ],
+            ),
+        ),
+        (
+            "file_reopened_in_loop",
+            program(
+                4,
+                &[
+                    "block 0 2",
+                    text,
+                    flag,
+                    "t jump 1",
+                    "block 1 0",
+                    "t branch v2 2 3",
+                    "block 2 1",
+                    open,
+                    "t jump 1",
+                    "block 3 1",
+                    release,
+                    "t return ci0",
+                ],
+            ),
+        ),
+        (
+            "file_reopened_through_entry",
+            program(
+                3,
+                &[
+                    "block 0 3",
+                    text,
+                    flag,
+                    open,
+                    "t branch v2 1 2",
+                    "block 1 1",
+                    release,
+                    "t jump 0",
+                    "block 2 2",
+                    release,
+                    "i platform v3 fileclose 1 val v1",
+                    "t return ci0",
+                ],
+            ),
+        ),
+    ];
+    for (name, lir) in cases {
+        for target in TARGETS {
+            let built = compile(name, lir.as_bytes(), target);
+            rejection(&built, Some(59)).unwrap_or_else(|why| panic!("{name} [{target:?}]: {why}"));
+        }
+    }
+}
+
+#[test]
+fn typed_file_open_and_close_is_accepted() {
+    let lir = main_only(
+        &["t", "h", "i"],
+        &[
+            "i use v0 ct1:120",
+            "i platform v1 fileopen 2 ref p0 0 val ci0",
+            "i platform v2 fileclose 1 val v1",
+            "i drop v0 -",
+        ],
+        "return v2",
+    );
+    for target in TARGETS {
+        let built = compile("typed_file_open_close", lir.as_bytes(), target);
+        assert_eq!(built.status, Some(0), "{target:?}: {}", built.stderr);
+        assert!(built.image.is_some(), "{target:?}: no image produced");
+    }
+}
+
 /// Every strict prefix of a valid multi-function program (except the one
 /// that only lacks the final line feed) is rejected without an image.
 #[test]

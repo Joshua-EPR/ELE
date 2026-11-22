@@ -58,6 +58,16 @@ expose fixed LIR_PLATFORM_CONSOLE_MODE = 6
 expose fixed LIR_PLATFORM_READ_EVENT = 7
 // Binary-safe stdout write: shared List<Int> loan, Int status.
 expose fixed LIR_PLATFORM_WRITE_CONSOLE = 8
+// File streams (P0-B): the File operand is a shared ref to the linear
+// File, except for the consuming close, which takes it by value.
+expose fixed LIR_PLATFORM_FILE_OPEN = 9
+expose fixed LIR_PLATFORM_FILE_READ = 10
+expose fixed LIR_PLATFORM_FILE_WRITE = 11
+expose fixed LIR_PLATFORM_FILE_SEEK = 12
+expose fixed LIR_PLATFORM_FILE_SIZE = 13
+expose fixed LIR_PLATFORM_FILE_FLUSH = 14
+expose fixed LIR_PLATFORM_FILE_CLOSE = 15
+expose fixed LIR_PLATFORM_FILE_STATUS = 16
 
 // Terminators.
 pub const LIR_T_NONE = 0

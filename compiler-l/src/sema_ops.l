@@ -326,6 +326,17 @@ pub fn semaPlatformArgLoan(ctx: &mut SemaContext, ty: Int, start: Int, end: Int)
     return ctx.pending_loan
 }
 
+// The exclusive form, for fileRead's destination list: the runtime stores
+// into its elements, so no other access may overlap the call.
+expose flow semaPlatformArgLoanEdit(ctx: edit SemaContext, ty: Int, start: Int, end: Int) => Int {
+    hold place = ctx.lir.place
+    hold path = ctx.expression_path
+    ctx.lir.borrowed = -1
+    when place < 0 || path < 0 { give -1 }
+    semaBorrowPlace(edit ctx, path, ty, true, SITE_ARG, start, end)
+    give ctx.pending_loan
+}
+
 // writeBytes borrows the two stable places for the duration of the platform
 // operation. It must never move or duplicate the List<Int> heap owner.
 // The LIR verifier independently requires two immutable ref arguments.

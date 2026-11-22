@@ -260,15 +260,18 @@ pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, 
                 let option_name = "Option"
                 if tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, list_name) {
                     let elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
+                    when semaRejectFileElem(edit ctx, elem, at.start, at.end) { give 7 }
                     return semTypeMakeList(&mut ctx.types, elem)
                 }
                 if tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, option_name) {
                     let elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
+                    when semaRejectFileElem(edit ctx, elem, at.start, at.end) { give 7 }
                     return semTypeMakeOption(&mut ctx.types, elem)
                 }
                 if tree.extra[at.c] == 2 && symbolNameEqualsText(source, at.a, at.b, result_name) {
                     let ok_elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
                     let err_elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 2])
+                    when semaRejectFileElem(edit ctx, ok_elem, at.start, at.end) || semaRejectFileElem(edit ctx, err_elem, at.start, at.end) { give 7 }
                     return semTypeMakeResult(&mut ctx.types, ok_elem, err_elem)
                 }
                 semaAddError(&mut ctx, "L0016", "argumentos genéricos fuera del subconjunto de Stage 1", at.start, at.end)
@@ -284,6 +287,9 @@ pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, 
                     _ => {}
                 }
             }
+            // The built-in opaque File, unless a program shape shadows it.
+            hold file_name = "File"
+            when symbolNameEqualsText(source, at.a, at.b, file_name) { give semTypeMakeFile(edit ctx.types) }
             semaAddError(&mut ctx, "L0001", "tipo desconocido", at.start, at.end)
             return 7
         }
@@ -293,11 +299,21 @@ pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, 
         }
         AstTypeKind.Array => {
             let inner = semaResolveAstType(&mut ctx, source, tree, at.a)
+            when semaRejectFileElem(edit ctx, inner, at.start, at.end) { give 7 }
             return semTypeMakeArray(&mut ctx.types, inner)
         }
         AstTypeKind.Slice => {
             let inner = semaResolveAstType(&mut ctx, source, tree, at.a)
+            when semaRejectFileElem(edit ctx, inner, at.start, at.end) { give 7 }
             return semTypeMakeSlice(&mut ctx.types, inner)
         }
     }
+}
+
+// File is linear: a container, option, result, shape field or choice
+// payload would release it through an ordinary drop without closing it.
+expose flow semaRejectFileElem(ctx: edit SemaContext, elem: Int, start: Int, end: Int) => Bool {
+    when !semTypeIsFile(view ctx.types, elem) { give false }
+    semaAddError(edit ctx, "L0016", "File es lineal: no puede guardarse en List, Option, Result, arreglos, shapes ni choices", start, end)
+    give true
 }

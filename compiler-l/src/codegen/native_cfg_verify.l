@@ -111,7 +111,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
     }
     // The index variables of a place are read before the instruction runs.
     when !cfgExtLive(p, inst.place_ext, live) || !cfgExtLive(p, inst.src_ext, live) { give 57 }
-    when inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, view inst.a) >= 2 {
+    when inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgIsMove(cfgOperandType(p, f, view inst.a)) {
         give 58
     }
     when (inst.kind == 10 || inst.kind == 12 || inst.kind == 13 || inst.kind == 17) && inst.op >= 0 {
@@ -165,7 +165,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         // Overwriting a live owned Text or list would leak its buffer. A
         // reference owns nothing: a loop may take its loan again.
         hold dst_slot = p.functions[f].first_var + inst.dst
-        when live[inst.dst] && !p.var_ref[dst_slot] && cfgHeapDirect(p, p.types_code[dst_slot]) { give 59 }
+        when live[inst.dst] && !p.var_ref[dst_slot] && (cfgHeapDirect(p, p.types_code[dst_slot]) || p.types_code[dst_slot] == cfgFileType()) { give 59 }
         live[inst.dst] = true
     }
     give 0
@@ -279,6 +279,27 @@ flow cfgPathUses(p: view CfgProgram, f: Int, paths: view CfgPaths, inst: view Cf
     give true
 }
 
+// The liveness fixpoint is a MUST analysis (intersection at joins), so on
+// its own it forgets a resource opened on only some paths into a block: that
+// resource would be neither closed nor seen at return or at the next write.
+// An owned linear value must therefore be live on all edges into a block or
+// on none. The entry block also has the implicit edge from the caller.
+flow cfgLinearJoins(p: view CfgProgram, f: Int, inputs: view List of[Bool], outputs: view List of[Bool], pred_first: view List of[Int], preds: view List of[Int], bits: Int) => Bool {
+    hold func = view p.functions[f]
+    each v among 0..func.vars {
+        hold slot = func.first_var + v
+        when cfgIsLinear(p.types_code[slot]) && !p.var_ref[slot] {
+            when inputs[v] != (v < func.params) { give false }
+            each b among 0..func.blocks {
+                each n among pred_first[b]..pred_first[b + 1] {
+                    when outputs[preds[n] * bits + v] != inputs[b * bits + v] { give false }
+                }
+            }
+        }
+    }
+    give true
+}
+
 flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
     hold func = view p.functions[f]
     hold blocks = func.blocks
@@ -366,6 +387,7 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
         }
     }
 
+    when !cfgLinearJoins(p, f, view inputs, view outputs, view pred_first, view preds, bits) { give 59 }
     each b among 0..blocks {
         hold block = view p.blocks[func.first_block + b]
         change live: List of[Bool] = List[]
@@ -404,10 +426,10 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
                 when paths.text[k] && root < func.params && p.var_ref[func.first_var + root] && !live[vars + k] { give 95 }
                 when paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { give 59 }
             }
-            // Every owned Text or list must have been moved out or dropped by now.
+            // Every owned Text, list or File must have been consumed by now.
             // A reference parameter does not own its referent.
             each v among 0..vars {
-                when live[v] && !p.var_ref[func.first_var + v] && cfgHeapDirect(p, p.types_code[func.first_var + v]) { give 59 }
+                when live[v] && !p.var_ref[func.first_var + v] && (cfgHeapDirect(p, p.types_code[func.first_var + v]) || p.types_code[func.first_var + v] == cfgFileType()) { give 59 }
             }
         }
     }

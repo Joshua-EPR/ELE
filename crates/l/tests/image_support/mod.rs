@@ -241,7 +241,7 @@ pub struct Pe {
 
 /// KERNEL32 functions the ELE Windows runtime (codegen/win64_rt.l,
 /// codegen/win64_heap.l, codegen/win64_rt_platform.l) is allowed to import. Anything else is a violation.
-pub const ALLOWED_KERNEL32: [&str; 24] = [
+pub const ALLOWED_KERNEL32: [&str; 26] = [
     "GetStdHandle",
     "WriteFile",
     "ExitProcess",
@@ -270,6 +270,10 @@ pub const ALLOWED_KERNEL32: [&str; 24] = [
     "GetConsoleMode",
     "SetConsoleMode",
     "ReadConsoleInputW",
+    // File streams (fileSeek, fileSize), imported only by images that call
+    // those operations.
+    "SetFilePointerEx",
+    "GetFileSizeEx",
 ];
 
 const SCN_CODE: u32 = 0x20;

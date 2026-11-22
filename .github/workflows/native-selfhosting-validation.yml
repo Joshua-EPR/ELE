@@ -2,9 +2,10 @@ name: ELE native self-hosting validation
 
 on:
   push:
-    branches: [main, feat/ele-original-syntax-v2]
+    branches: [main]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax, feat/ele-v2-stage1-of-types]
+    # Stacked feature PRs target other feature branches. Run this gate for
+    # every PR head instead of silently omitting those integration changes.
   workflow_dispatch:
 
 concurrency:
@@ -99,6 +100,11 @@ jobs:
         run: |
           cargo test -p project-l --test ele_build_driver_l driver_library_ -- --test-threads=1
           cargo test -p project-l --test ele_build_driver_l driver_resolves_elepad_std_console_with_explicit_library_root -- --test-threads=1
+      # P0-B file streams: the ELF64 image runs natively here (Windows runs
+      # the PE32+ half inside the full suite below).
+      - name: Native file streams (Linux ELF64)
+        if: runner.os == 'Linux' && !cancelled()
+        run: cargo test -p project-l --test file_streams_l -- --test-threads=1
       # Suites restored by fixing Stage 0 diagnostics, the token limit and the
       # compiler stack. They build with Cranelift, which targets Windows only.
       - name: Stage 0 front end, modules, references and differential suites (MSVC)
