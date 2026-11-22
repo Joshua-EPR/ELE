@@ -38,7 +38,8 @@ Lo que hace:
   Ctrl+Y, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+F, Shift+flechas y Escape.
 - **Ratón:** clic izquierdo para mover el cursor y rueda para desplazarse.
 - **Cerrar:** cerrar la ventana con cambios sin guardar pide una segunda
-  confirmación, como Ctrl+Q.
+  confirmación, como Ctrl+Q y Alt+F4. La segunda solicitud debe ser una
+  pulsación nueva; mantener la tecla no descarta los cambios. Escape cancela.
 
 Los atajos Ctrl+letra se toman del carácter de control que genera Windows
 (WM_CHAR 1..26), no de la tecla pulsada. Así actúan una sola vez, y una
@@ -56,6 +57,9 @@ Pruebas:
 - `tests/elepad/gui.ps1` controla el ejecutable desde fuera:
   - editar y guardar (Ctrl+S como WM_CHAR 19);
   - el cierre con cambios necesita dos peticiones y los descarta;
+  - Ctrl+Q y Alt+F4 completos, con modificadores, liberación de teclas y
+    repetición; Escape cancela la solicitud;
+  - compara los bytes del archivo, incluidos BOM y saltos de línea;
   - deshacer hasta el texto guardado permite cerrar con una.
 
 Pendiente en la ventana:

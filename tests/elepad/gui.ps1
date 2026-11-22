@@ -16,6 +16,7 @@ using System.Runtime.InteropServices;
 public static class EleGuiDriver {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string title);
     [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
 }
 '@
 
@@ -39,16 +40,59 @@ function Post($hwnd, [uint32]$msg, [long]$wp) {
     if (-not [EleGuiDriver]::PostMessageW($hwnd, $msg, [IntPtr]$wp, [IntPtr]::Zero)) { throw "PostMessageW $msg failed" }
 }
 
+function Send-Key($hwnd, [uint32]$msg, [long]$wp) {
+    # SendMessage delivers the key event without TranslateMessage adding a
+    # second synthetic character. WM_CHAR is posted explicitly below.
+    [void][EleGuiDriver]::SendMessageW($hwnd, $msg, [IntPtr]$wp, [IntPtr]::Zero)
+}
+
+function Same-Content([string]$file, [string]$expected) {
+    $actual = [IO.File]::ReadAllBytes($file)
+    $wanted = $utf8.GetBytes($expected)
+    if ($actual.Length -ne $wanted.Length) { return $false }
+    for ($j = 0; $j -lt $actual.Length; $j++) {
+        if ($actual[$j] -ne $wanted[$j]) { return $false }
+    }
+    return $true
+}
+
 function Wait-Content([string]$file, [string]$expected) {
     for ($i = 0; $i -lt 200; $i++) {
-        if ([IO.File]::ReadAllText($file, $utf8) -ceq $expected) { return }
+        if (Same-Content $file $expected) { return }
         Start-Sleep -Milliseconds 25
     }
-    throw "file content stayed '$([IO.File]::ReadAllText($file, $utf8))'"
+    throw "file bytes differ from expected UTF-8 ($(([IO.File]::ReadAllBytes($file)).Length) bytes)"
 }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
-$WM_KEYDOWN = 256; $WM_CHAR = 258; $WM_CLOSE = 16; $VK_END = 35
+$WM_KEYDOWN = 256; $WM_KEYUP = 257; $WM_CHAR = 258; $WM_CLOSE = 16
+$WM_SYSKEYDOWN = 260; $WM_SYSKEYUP = 261
+$VK_END = 35; $VK_CONTROL = 17; $VK_MENU = 18; $VK_Q = 81; $VK_F4 = 115
+
+function Ctrl-Q($hwnd) {
+    Send-Key $hwnd $WM_KEYDOWN $VK_CONTROL
+    Send-Key $hwnd $WM_KEYDOWN $VK_Q
+    Post $hwnd $WM_CHAR 17
+    Send-Key $hwnd $WM_KEYUP $VK_Q
+    Send-Key $hwnd $WM_KEYUP $VK_CONTROL
+}
+
+function Alt-F4($hwnd) {
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_MENU
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_F4
+    Post $hwnd $WM_CLOSE 0
+    Send-Key $hwnd $WM_SYSKEYUP $VK_F4
+    Send-Key $hwnd $WM_SYSKEYUP $VK_MENU
+}
+
+function Assert-Running($p, [string]$name) {
+    if ($p.WaitForExit(800)) { throw "$name closed on first request (exit $($p.ExitCode))" }
+}
+
+function Assert-Closed($p, [string]$name) {
+    if (-not $p.WaitForExit(10000)) { $p.Kill(); throw "$name ignored confirmed close" }
+    if ($p.ExitCode -ne 0) { throw "$name exited $($p.ExitCode)" }
+}
 try {
     & $elePath build (Join-Path $root 'apps/elepad/src/gui.l') --lib $root --target pe --output $exe | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { throw 'ELEPad GUI build failed' }
@@ -75,8 +119,48 @@ try {
     Post $hwnd $WM_CLOSE 0
     if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'ELEPad ignored the second close' }
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after discarding" }
-    if ([IO.File]::ReadAllText($file, $utf8) -cne $edited) { throw 'discarded change reached the file' }
+    if (-not (Same-Content $file $edited)) { throw 'discarded change reached the file' }
     Write-Host 'PASS unsaved change needs a second close and is discarded'
+
+    # Complete keyboard sequences: modifier down, key down, translated char,
+    # key up, modifier up. A held Q may emit repeated WM_CHAR events.
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Send-Key $hwnd $WM_KEYDOWN $VK_CONTROL
+    Send-Key $hwnd $WM_KEYDOWN $VK_Q
+    Post $hwnd $WM_CHAR 17
+    Post $hwnd $WM_CHAR 17
+    Assert-Running $p 'repeated Ctrl+Q'
+    Send-Key $hwnd $WM_KEYUP $VK_Q
+    Send-Key $hwnd $WM_KEYUP $VK_CONTROL
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'second deliberate Ctrl+Q'
+    Write-Host 'PASS Ctrl+Q modifiers, repeat and second gesture'
+
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_MENU
+    Send-Key $hwnd $WM_SYSKEYDOWN $VK_F4
+    Post $hwnd $WM_CLOSE 0
+    Post $hwnd $WM_CLOSE 0
+    Assert-Running $p 'repeated Alt+F4'
+    Send-Key $hwnd $WM_SYSKEYUP $VK_F4
+    Send-Key $hwnd $WM_SYSKEYUP $VK_MENU
+    Alt-F4 $hwnd
+    Assert-Closed $p 'second deliberate Alt+F4'
+    Write-Host 'PASS Alt+F4 modifiers, repeat and second gesture'
+
+    $p, $hwnd = Start-Editor $file
+    Post $hwnd $WM_CHAR 122
+    Ctrl-Q $hwnd
+    Assert-Running $p 'first Ctrl+Q before Escape'
+    Send-Key $hwnd $WM_KEYDOWN 27
+    Send-Key $hwnd $WM_KEYUP 27
+    Ctrl-Q $hwnd
+    Assert-Running $p 'Ctrl+Q after Escape'
+    Ctrl-Q $hwnd
+    Assert-Closed $p 'Ctrl+Q after new confirmation'
+    Write-Host 'PASS Escape cancels close confirmation'
 
     # Undo back to the saved text is clean: one close is enough.
     $p, $hwnd = Start-Editor $file
@@ -87,5 +171,6 @@ try {
     if ($p.ExitCode -ne 0) { throw "exit $($p.ExitCode) after undo" }
     Write-Host 'PASS undo to the saved text closes at once'
 } finally {
+    if ($p -and -not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
     Remove-Item -LiteralPath $work -Recurse -Force
 }
