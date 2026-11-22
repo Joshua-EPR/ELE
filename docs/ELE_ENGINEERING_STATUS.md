@@ -130,7 +130,7 @@ This file is meant to let a new session resume without repeating investigations.
 2. Open Draft PRs and let CI validate them (no `gh` here). Merge order:
    1. `fix/elf-syscall-whitelist-20261121` (independent, smallest);
    2. `feat/elepad-terminal-history-20261121` (independent);
-   3. `feat/p0b-file-streams-20261121`, then `feat/linear-resources-20261121`, then `feat/p0d-window-api-20261121`, then `feat/elepad-gui-20261121` (stacked in that order; the last also merges the ELEPad history branch);
+   3. `feat/p0b-file-streams-20261121`, then `feat/linear-resources-20261121`, then `feat/p0d-window-api-20261121`, then `feat/elepad-gui-20261121`, then `feat/text-from-bytes-open-20261121` (stacked in that order; the GUI branch also merges the ELEPad history branch);
    4. `feat/p0c-callbacks-20261121`, then `feat/p0d-window-20261121` (probes and design doc; stacked).
 3. When P0-B programs join the ELF structure tests, also allow `lseek` (fileSeek). `fsync` is already listed.
 4. P0-B next: existence/metadata queries, rename/replace, then a `Text`-from-bytes primitive. That primitive also unblocks ELEPad Ctrl+O.
@@ -140,9 +140,18 @@ This file is meant to let a new session resume without repeating investigations.
    - Builtins `windowCell` (code 26) and `windowTextBytes` (code 27).
    - Evidence: `gui_test.l` and `tests/elepad/gui.ps1` pass, terminal tests are unchanged and green, a screenshot of the real window was inspected, and the full suite has only the 2 known failures.
    - A real bug was found and fixed: misaligned UTF-16 class name → `RegisterClassExW` ERROR_NOACCESS in larger images (commit `04e36a4`, also on the Window API branch).
-   - Next for the window editor: Ctrl+O and several documents (needs Text-from-bytes), system clipboard, mouse drag selection, dirty-region redraw.
-6. Design steps 4–6: a PE writable data section, `system flow`/`foreign flow`, and the X11 backend.
-7. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
+   - Next for the window editor: several documents, system clipboard, mouse drag selection, dirty-region redraw.
+6. `feat/text-from-bytes-open-20261121` (`bf419a3`, plus a CI commit; stacked on the window ELEPad branch) is done:
+   - The language gets `textFromBytes(bytes, count) => Result<Text, Int>`: platform code 28, a strict UTF-8 check, shared by PE and ELF, emitted only when used.
+   - ELEPad gets **Ctrl+O** in both frontends, via the shared prompt and `document_io.openDocument`; it refuses to open with unsaved changes.
+   - Evidence:
+     - `text_from_bytes_l` 3/3: PE, ELF via WSL, and bad arguments rejected.
+     - Unit checks of the prompt and of `openDocument` against real files.
+     - `terminal.ps1` 6/6, the Ctrl+O half of `terminal.sh` under WSL, `gui.ps1` 4/4.
+     - Full suite: 782 passed, plus the 2 known failures.
+   - Test-harness bug fixed: under PowerShell 5.1, `terminal.ps1` fed a UTF-8 BOM into ELEPad's stdin, and `File.ReadAllText` hid it. Its content checks are now byte-exact. This bug was latent in earlier `terminal.ps1` results; CI's pwsh 7 was never affected.
+7. Design steps 4–6: a PE writable data section, `system flow`/`foreign flow`, and the X11 backend.
+8. Re-run the self-coverage matrix on current `main` before any percentage is quoted.
 
 ## 5. Verification log
 
