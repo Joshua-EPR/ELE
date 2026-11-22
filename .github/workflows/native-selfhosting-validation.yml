@@ -2,7 +2,7 @@ name: ELE native self-hosting validation
 
 on:
   push:
-    branches: [main, feat/ele-original-syntax-v2]
+    branches: [main]
   pull_request:
     # Stacked feature PRs target other feature branches. Run this gate for
     # every PR head instead of silently omitting those integration changes.

@@ -2,7 +2,7 @@ name: Documentation & Benchmark Validation
 
 on:
   push:
-    branches: [main, docs/**]
+    branches: [main]
   pull_request:
     # Documentation and syntax checks also apply to stacked PR heads.
   workflow_dispatch:
