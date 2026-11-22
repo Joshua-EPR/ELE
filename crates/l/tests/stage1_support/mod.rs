@@ -1,7 +1,12 @@
 pub mod borrow_cases;
 pub mod drop_cases;
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::PathBuf,
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// Backends whose ELF64 output is only executed under
 /// `cfg(all(target_os = "linux", target_arch = "x86_64"))` in the tests.
@@ -49,17 +54,21 @@ pub fn build_self_executing(entry: &str) -> PathBuf {
 }
 
 fn build_entry(entry: &str, trace: bool) -> PathBuf {
-    // Tests of one binary run in parallel and may ask for the same entry;
-    // two compilers writing the same output directory corrupt each other.
-    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one_at_a_time = BUILDING
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Integration test binaries run concurrently in separate processes. A
+    // process-local Mutex cannot protect a shared Stage 1 executable from
+    // another test binary rebuilding it while Windows has it open. Give each
+    // build its own output directory, including repeated builds in one binary.
+    static NEXT_BUILD: AtomicU64 = AtomicU64::new(0);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let dir =
-        root.join("target/stage1-tests")
-            .join(entry)
-            .join(if trace { "traced" } else { "normal" });
+    let dir = root
+        .join("target/stage1-tests")
+        .join(entry)
+        .join(if trace { "traced" } else { "normal" })
+        .join(format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT_BUILD.fetch_add(1, Ordering::Relaxed)
+        ));
     fs::create_dir_all(&dir).unwrap();
     let source = root.join("compiler-l/src").join(format!("{entry}.l"));
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_l"));

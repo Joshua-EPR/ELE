@@ -122,8 +122,9 @@ pub fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
     if ty == 4 { return "b" }
     if ty == 5 { return "t" }
     if ty == 6 { return "u" }
-    // Below sema a linear resource is one word (an OS handle or an error).
-    when semTypeIsLinear(types, ty) { give "i" }
+    // The runtime stores one word, but the LIR must retain linear identity.
+    when semTypeIsFile(types, ty) { give "h" }
+    when semTypeIsWindow(types, ty) { give "w" }
     if ty >= 0 && ty < types.types.length {
         match types.types[ty].kind {
             SemTypeKind.Struct => {
