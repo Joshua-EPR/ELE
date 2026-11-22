@@ -3,6 +3,7 @@ take pe64
 take win64_rt
 take native_rt_platform
 take win64_window
+take win64_clipboard
 
 // Platform runtime of the ELE-written Windows x64 (PE32+) backend: the five
 // `i platform` operations of ELE-LIR 1 (processArgCount, processArg,
@@ -1994,7 +1995,7 @@ flow wpfEmitFileUnary(code: edit X64Code, imports: edit Pe64Imports, close: Bool
 // holds; otherwise their entries are -1 and their imports stay out.
 // Window routines (codes 17..25, codegen/win64_window.l) likewise only
 // when `windows` holds.
-expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool, windows: Bool) => List of[Int] {
+expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, console: Bool, console_output: Bool, files: Bool, windows: Bool, clipboard: Bool, list_reserve: Int) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
     hold write_handle = wpfEmitWriteHandle(edit code, edit imports)
@@ -2034,6 +2035,14 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
         each k among 0..window_at.length { at@push(window_at[k]) }
     } otherwise {
         each k among 0..11 { at@push(-1) }
+    }
+    when clipboard {
+        hold clip = wcEmitClipboard(edit code, edit imports, rt, list_reserve)
+        at@push(clip[0])
+        at@push(clip[1])
+    } otherwise {
+        at@push(-1)
+        at@push(-1)
     }
     give at
 }
