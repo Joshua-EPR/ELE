@@ -268,6 +268,9 @@ expose flow guiRender(w: view Window, editor: view Editor, title: view Text, v: 
         when v.message == GUI_MESSAGE_UNSAVED { note = "Cambios sin guardar: cerrar otra vez para descartarlos" }
         when v.message == GUI_MESSAGE_SAVED { note = "Guardado" }
         when v.message == GUI_MESSAGE_SAVE_FAILED { note = "Error al guardar" }
+        when editor.clipboard_status < 0 && editor.clipboard_status != CLIPBOARD_UNAVAILABLE && editor.clipboard_status != CLIPBOARD_NO_TEXT {
+            note = "Error del portapapeles: {editor.clipboard_status}"
+        }
         hold status_text = "Ln {cursor_line}, Col {cursor_col}    {note}"
         windowText(w, 8, bar_y + 4, status_text, COLOR_TEXT)
     }

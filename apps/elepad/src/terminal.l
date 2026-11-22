@@ -41,6 +41,9 @@ flow run(path: view Text, source: view Text) => Int {
             hold old_offset = editor.cursor.offset
             hold old_end = lineEnd(view editor.document, old_offset)
             hold action = dispatchEvent(edit editor, view ev)
+            when editor.clipboard_status < 0 && editor.clipboard_status != CLIPBOARD_UNAVAILABLE && editor.clipboard_status != CLIPBOARD_NO_TEXT {
+                printError("Error del portapapeles: {editor.clipboard_status}")
+            }
             when action == -1 { exit_code = 32; leave }
             when action == 3 {
                 when editor.document.dirty { exit_code = 33 }

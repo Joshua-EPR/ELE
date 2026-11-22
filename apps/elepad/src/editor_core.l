@@ -1,6 +1,7 @@
 take buffer
 take cursor
 take search
+take std.ui.clipboard
 
 // Shared document state for terminal and future graphical frontends.
 //
@@ -12,13 +13,14 @@ take search
 // "delete selection + insert" for paste/replace). h_saved is the h_top that
 // matches the file on disk, or -1 when that state is no longer reachable.
 //
-// The clipboard is internal to the process. It is not the system clipboard.
+// The internal clipboard is used only when the platform reports -7.
 expose shape Editor {
     document: Buffer
     cursor: Cursor
     newline_crlf: Bool
     anchor: Int
     clipboard: List of[Int]
+    clipboard_status: Int
     h_kind: List of[Int]
     h_offset: List of[Int]
     h_count: List of[Int]
@@ -70,7 +72,7 @@ expose flow newEditor(source: view Text) => Editor {
     change data: List of[Int] = List[]
     change query: List of[Int] = List[]
     change path_input: List of[Int] = List[]
-    give Editor(document: loadText(source), cursor: newCursor(), newline_crlf: crlf, anchor: -1, clipboard: clip, h_kind: kinds, h_offset: offsets, h_count: counts, h_start: starts, h_group: groups, h_cursor: cursors, h_data: data, h_top: 0, h_total: 0, h_group_next: 0, h_typing: false, h_saved: 0, mode: MODE_EDIT, query: query, query_len: 0, find_failed: false, path_input: path_input, path_len: 0, open_failed: 0)
+    give Editor(document: loadText(source), cursor: newCursor(), newline_crlf: crlf, anchor: -1, clipboard: clip, clipboard_status: 0, path_input: path_input, path_len: 0, open_failed: 0, h_kind: kinds, h_offset: offsets, h_count: counts, h_start: starts, h_group: groups, h_cursor: cursors, h_data: data, h_top: 0, h_total: 0, h_group_next: 0, h_typing: false, h_saved: 0, mode: MODE_EDIT, query: query, query_len: 0, find_failed: false)
 }
 
 flow setAt(list: edit List of[Int], index: Int, value: Int) {
@@ -338,6 +340,9 @@ expose flow editorCopy(editor: edit Editor) => Bool {
         clip@push(byteAt(view editor.document, i))
         i += 1
     }
+    hold status = clipboardWrite(view clip)
+    editor.clipboard_status = status
+    when status != 0 && status != CLIPBOARD_UNAVAILABLE { give false }
     editor.clipboard = clip
     give true
 }
@@ -351,12 +356,20 @@ expose flow editorCut(editor: edit Editor) => Bool {
 }
 
 expose flow editorPaste(editor: edit Editor) => Bool {
-    hold count = editor.clipboard.length
+    hold incoming = clipboardRead(CLIPBOARD_LIMIT)
+    editor.clipboard_status = incoming.status
+    when incoming.status < 0 && incoming.status != CLIPBOARD_UNAVAILABLE { give false }
+    change bytes: List of[Int] = List[]
+    when incoming.status == CLIPBOARD_UNAVAILABLE {
+        bytes@reserve(editor.clipboard.length)
+        each i among 0..editor.clipboard.length { bytes@push(editor.clipboard[i]) }
+    } otherwise { bytes = incoming.bytes }
+    hold count = bytes.length
     when count == 0 { give false }
     hold group = newGroup(edit editor)
     deleteSelectionIn(edit editor, group)
     hold at = editor.cursor.offset
-    when !insertBytes(edit editor.document, at, view editor.clipboard, 0, count) {
+    when !insertBytes(edit editor.document, at, view bytes, 0, count) {
         updateDirty(edit editor)
         give false
     }

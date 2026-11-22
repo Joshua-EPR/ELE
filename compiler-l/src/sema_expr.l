@@ -471,6 +471,8 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             when file_result != -1 { give file_result }
             hold window_result = semaWindowBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
             when window_result != -1 { give window_result }
+            hold clipboard_result = semaClipboardBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
+            when clipboard_result != -1 { give clipboard_result }
             let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
             if sym_id == -2 { return 7 }
             if sym_id < 0 {
@@ -802,6 +804,44 @@ flow semaFileBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTre
 }
 
 // ---- Native windows (P0-D) -----------------------------------------------
+
+// Native clipboard transfers UTF-8 bytes in List<Int>. The read loan is
+// exclusive and the backend commits the list only after a complete read.
+flow semaClipboardBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstTree, start: Int, end: Int, name_start: Int, name_end: Int, first_arg: Int, arg_count: Int) => Int {
+    change op = -1
+    hold write_name = "clipboardWriteBytes"
+    hold read_name = "clipboardReadBytes"
+    when symbolNameEqualsText(source, name_start, name_end, write_name) { op = LIR_PLATFORM_CLIPBOARD_WRITE }
+    when symbolNameEqualsText(source, name_start, name_end, read_name) { op = LIR_PLATFORM_CLIPBOARD_READ }
+    when op < 0 { give -1 }
+    when arg_count != 2 {
+        semaAddError(edit ctx, "L0004", "clipboard requiere (List<Int>, Int)", start, end)
+        give 7
+    }
+    hold b_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+    change b_loan = -1
+    when op == LIR_PLATFORM_CLIPBOARD_READ { b_loan = semaPlatformArgLoanEdit(edit ctx, b_t, start, end) }
+    otherwise { b_loan = semaPlatformArgLoan(edit ctx, b_t, start, end) }
+    hold b_place = ctx.lir.borrowed
+    hold n_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+    hold n = lirTakeOperand(edit ctx, n_t)
+    when !semaIsByteList(view ctx, b_t) || n_t != 1 {
+        semaAddError(edit ctx, "L0004", "clipboard requiere (List<Int>, Int)", start, end)
+        give 7
+    }
+    when b_place < 0 || b_loan < 0 {
+        semaAddError(edit ctx, "L0016", "clipboard requiere un lugar List<Int> prestable", start, end)
+        give 7
+    }
+    change loans: List of[Int] = List[]
+    loans@push(b_loan)
+    semaCallLoans(edit ctx, view loans, 1, SITE_NONE, start, end)
+    change args: List of[Int] = List[]
+    args@push(lirArg(edit ctx.lir, true, b_place, op == LIR_PLATFORM_CLIPBOARD_READ))
+    args@push(lirArg(edit ctx.lir, false, n, false))
+    semaPlatformEmit(edit ctx, op, view args, 1, true)
+    give 1
+}
 
 flow semaWindowOp(source: view Text, name_start: Int, name_end: Int) => Int {
     hold n_open = "windowOpen"

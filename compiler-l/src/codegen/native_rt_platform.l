@@ -1624,7 +1624,7 @@ expose flow pfEmitConstant(code: edit X64Code, value: Int) => Int {
 // samefile, consolemode and readevent (codes 5, 6, 7), writeconsole (8),
 // the file streams (9..16, only when `files` holds; -1 otherwise) and the
 // window operations (17..25, only when `windows` holds).
-expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool, text_bytes: Bool) => List of[Int] {
+expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List of[Int], console: Bool, console_output: Bool, files: Bool, windows: Bool, clipboard: Bool, text_bytes: Bool) => List of[Int] {
     hold utf8 = pfEmitUtf8(edit code)
     hold write_fd = pfEmitWriteFd(edit code)
     hold path_z = pfEmitPathZ(edit code, rt)
@@ -1667,6 +1667,14 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
         at@push(not_open)                              // text bytes
     } otherwise {
         each k among 0..11 { at@push(-1) }
+    }
+    when clipboard {
+        hold unavailable = pfEmitConstant(edit code, -7)
+        at@push(unavailable)
+        at@push(unavailable)
+    } otherwise {
+        at@push(-1)
+        at@push(-1)
     }
     when text_bytes { at@push(pfEmitTextFromBytes(edit code, rt, utf8)) }
     otherwise { at@push(-1) }

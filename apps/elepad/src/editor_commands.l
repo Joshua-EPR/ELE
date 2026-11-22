@@ -67,8 +67,6 @@ flow dispatchFind(editor: edit Editor, ev: view ConsoleEvent) => Int {
 
 // The editor command of one key event, shared by the terminal and window
 // frontends (terminal_dispatch.l, gui_dispatch.l): the one key table.
-// Open prompt (Ctrl+O): printable scalars edit the path, Enter asks the
-// frontend to open it, Escape returns to editing.
 flow dispatchOpen(editor: edit Editor, ev: view ConsoleEvent) => Int {
     when ev.key == KEY_ENTER {
         when editor.path_len == 0 { give 0 }
@@ -92,6 +90,7 @@ flow dispatchOpen(editor: edit Editor, ev: view ConsoleEvent) => Int {
 
 expose flow editorCommand(editor: edit Editor, ev: view ConsoleEvent) => Int {
     when ev.kind != EVENT_KEY || !ev.pressed { give 0 }
+    editor.clipboard_status = 0
     when isCtrl(ev, 115) { give 1 }
     when isCtrl(ev, 113) { give 2 }
     when editor.mode == MODE_FIND { give dispatchFind(edit editor, ev) }

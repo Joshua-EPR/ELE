@@ -173,7 +173,9 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         when op_code == 25 { op_name = "windowclose" }
         when op_code == 26 { op_name = "windowcell" }
         when op_code == 27 { op_name = "windowtextbytes" }
-        when op_code == 28 { op_name = "textfrombytes" }
+        when op_code == 28 { op_name = "clipboardwrite" }
+        when op_code == 29 { op_name = "clipboardread" }
+        when op_code == 30 { op_name = "textfrombytes" }
         var out ="i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]

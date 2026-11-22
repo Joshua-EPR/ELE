@@ -82,9 +82,10 @@ expose fixed LIR_PLATFORM_WINDOW_CLOSE = 25
 // of a List of[Int] (editors keep documents as bytes, not Text).
 expose fixed LIR_PLATFORM_WINDOW_CELL = 26
 expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
-// A Text from the UTF-8 bytes of a List of[Int]: shared List loan, Int
-// count, Result<Text,Int> (Err 1 bad count/byte, Err 4 not UTF-8).
-expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 28
+// UTF-8 clipboard transfer; returns a status or the number of bytes read.
+expose fixed LIR_PLATFORM_CLIPBOARD_WRITE = 28
+expose fixed LIR_PLATFORM_CLIPBOARD_READ = 29
+expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 
 // ---- Linear resource operation table ------------------------------------
 // Each resource family is a small table shared by sema (argument checking
