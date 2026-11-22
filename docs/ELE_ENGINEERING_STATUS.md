@@ -5,6 +5,30 @@ Status vocabulary: COMPLETADO Y VERIFICADO / IMPLEMENTADO, PENDIENTE DE VALIDACI
 
 This file is meant to let a new session resume without repeating investigations. Update it at each milestone.
 
+## 0. Recovery of the security integration (2026-11-22)
+
+Sections 1-5 are the 2026-11-21 snapshot. Where they differ, this section wins: `gh` is available, the PRs exist, #141, #143 and #144 are merged (`main` = `3f3e2b7`), and the earlier "rejected: leaks" claims only became true with the commits below.
+
+| Branch (PR) | Commit | Correction | Local tests |
+|---|---|---|---|
+| p0b-file-streams (#142) | `b0868c1` | File live on only some paths is rejected by the native reader (59) | adversarial LIR, File, CFG |
+| linear-resources (#146) | `b492058`, `f844454` | interrupted #142 merge completed, then the fix above | File, drops, LIR verifiers |
+| p0d-window-api (#147) | `47ddec4` | Window has LIR type `w`; forged, mixed, closed or overwritten handles rejected | Window, 24 forged LIR cases, GDI audit |
+| elepad-gui (#148) | `0be74e3` | two-gesture close integrated; tests with real event order | gui.ps1 10/10, terminal 4/4 |
+| text-from-bytes-open (#149) | `fc81b66` | all of the above, Ctrl+O with the new close state | gui.ps1 14/14, terminal 6/6 (Windows and WSL), real console |
+| p0d-window (#145) | `8f972c0` | unchanged | CI passed |
+
+Full validation of the tip: fmt and clippy clean; workspace suite 1180 passed, 1 failed (the ELF syscall list that #141 fixes on main, which this chain predates). Integration with main and fixpoint: in progress.
+
+Blockers and known limits:
+- CI must pass on every new head. Check the PRs; local results are not CI.
+- Forged LIR can still leak an owned `Text` opened on one path (reproduced; general verifier).
+- A File live at `t unreachable` is accepted (reproduced; that terminator does not return).
+- The Window runtime trusts verified LIR; it does not validate the block magic.
+- GUI tests inject messages; no physical-keyboard run.
+
+Next action: after CI and review, with the owner's authorization, merge #142, #146, #147, #148, #149 in that order, retargeting each to main. #145 is independent.
+
 ## 1. Repository state at verification
 
 | Item | Value | Status |
