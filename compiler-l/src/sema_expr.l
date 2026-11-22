@@ -789,6 +789,10 @@ flow semaWindowOp(source: view Text, name_start: Int, name_end: Int) => Int {
     when symbolNameEqualsText(source, name_start, name_end, n_send) { give LIR_PLATFORM_WINDOW_SEND }
     when symbolNameEqualsText(source, name_start, name_end, n_pixel) { give LIR_PLATFORM_WINDOW_PIXEL }
     when symbolNameEqualsText(source, name_start, name_end, n_close) { give LIR_PLATFORM_WINDOW_CLOSE }
+    hold n_cell = "windowCell"
+    hold n_text_bytes = "windowTextBytes"
+    when symbolNameEqualsText(source, name_start, name_end, n_cell) { give LIR_PLATFORM_WINDOW_CELL }
+    when symbolNameEqualsText(source, name_start, name_end, n_text_bytes) { give LIR_PLATFORM_WINDOW_TEXT_BYTES }
     give -1
 }
 
@@ -799,6 +803,7 @@ flow semaWindowUsage(op: Int) => Text {
     when op == LIR_PLATFORM_WINDOW_SEND { give "windowSend requiere (ventana: Window, mensaje: Int, wparam: Int, lparam: Int)" }
     when op == LIR_PLATFORM_WINDOW_PIXEL { give "windowPixel requiere (ventana: Window, x: Int, y: Int)" }
     when op == LIR_PLATFORM_WINDOW_CLOSE { give "windowClose requiere (ventana: Window), que se consume" }
+    when op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give "windowTextBytes requiere (ventana: Window, x: Int, y: Int, bytes: List<Int>, cantidad: Int, rgb: Int)" }
     give "la operación requiere (ventana: Window)"
 }
 
@@ -830,7 +835,7 @@ flow semaWindowBuiltin(ctx: edit SemaContext, source: view Text, tree: view AstT
             hold t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + i], ACCESS_READ)
             hold loan = semaPlatformArgLoan(edit ctx, t, start, end)
             hold place = ctx.lir.borrowed
-            when (kind == 1 && !semTypeIsWindow(view ctx.types, t)) || (kind == 4 && t != 5) {
+            when (kind == 1 && !semTypeIsWindow(view ctx.types, t)) || (kind == 4 && t != 5) || (kind == 2 && !semaIsByteList(view ctx, t)) {
                 semaAddError(edit ctx, "L0004", semaWindowUsage(op), start, end)
                 give 7
             }

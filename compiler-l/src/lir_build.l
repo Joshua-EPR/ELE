@@ -78,6 +78,10 @@ expose fixed LIR_PLATFORM_WINDOW_PRESENT = 22
 expose fixed LIR_PLATFORM_WINDOW_SEND = 23
 expose fixed LIR_PLATFORM_WINDOW_PIXEL = 24
 expose fixed LIR_PLATFORM_WINDOW_CLOSE = 25
+// Font cell size (width + height * 65536) and text drawn from UTF-8 bytes
+// of a List of[Int] (editors keep documents as bytes, not Text).
+expose fixed LIR_PLATFORM_WINDOW_CELL = 26
+expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
 
 // ---- Linear resource operation table ------------------------------------
 // Each resource family is a small table shared by sema (argument checking
@@ -91,11 +95,11 @@ expose fixed LIR_PLATFORM_WINDOW_CLOSE = 25
 // List<Int>, 3 exclusive ref List<Int>, 4 shared ref Text, 5 val resource.
 
 expose flow lirIsResourceOp(op: Int) => Bool {
-    give op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_WINDOW_CLOSE
+    give op >= LIR_PLATFORM_FILE_OPEN && op <= LIR_PLATFORM_WINDOW_TEXT_BYTES
 }
 
 expose flow lirIsWindowOp(op: Int) => Bool {
-    give op >= LIR_PLATFORM_WINDOW_OPEN && op <= LIR_PLATFORM_WINDOW_CLOSE
+    give op >= LIR_PLATFORM_WINDOW_OPEN && op <= LIR_PLATFORM_WINDOW_TEXT_BYTES
 }
 
 expose flow lirResourceOpens(op: Int) => Bool {
@@ -106,7 +110,7 @@ expose flow lirResourceArity(op: Int) => Int {
     when op == LIR_PLATFORM_FILE_OPEN { give 2 }
     when op == LIR_PLATFORM_FILE_READ || op == LIR_PLATFORM_FILE_WRITE || op == LIR_PLATFORM_FILE_SEEK { give 3 }
     when op == LIR_PLATFORM_WINDOW_OPEN || op == LIR_PLATFORM_WINDOW_PIXEL { give 3 }
-    when op == LIR_PLATFORM_WINDOW_FILL { give 6 }
+    when op == LIR_PLATFORM_WINDOW_FILL || op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give 6 }
     when op == LIR_PLATFORM_WINDOW_TEXT { give 5 }
     when op == LIR_PLATFORM_WINDOW_SEND { give 4 }
     give 1
@@ -122,6 +126,7 @@ expose flow lirResourceArgKind(op: Int, i: Int) => Int {
     when i == 1 && op == LIR_PLATFORM_FILE_READ { give 3 }
     when i == 1 && op == LIR_PLATFORM_FILE_WRITE { give 2 }
     when i == 3 && op == LIR_PLATFORM_WINDOW_TEXT { give 4 }
+    when i == 3 && op == LIR_PLATFORM_WINDOW_TEXT_BYTES { give 2 }
     give 0
 }
 

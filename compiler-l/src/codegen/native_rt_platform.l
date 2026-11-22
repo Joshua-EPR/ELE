@@ -1586,8 +1586,10 @@ expose flow pfEmitAll(code: edit X64Code, rt: view PfRuntime, data_at: edit List
         hold not_open = pfEmitConstant(edit code, -6)
         each k among 0..6 { at@push(not_open) }        // next .. pixel
         at@push(pfEmitConstant(edit code, 0))          // close
+        at@push(not_open)                              // cell
+        at@push(not_open)                              // text bytes
     } otherwise {
-        each k among 0..9 { at@push(-1) }
+        each k among 0..11 { at@push(-1) }
     }
     give at
 }

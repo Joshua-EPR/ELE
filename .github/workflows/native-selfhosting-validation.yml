@@ -148,6 +148,18 @@ jobs:
           Pop-Location
           $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
           ./tests/native_backend/win64_window_resources.ps1 -Ele $driver
+      # Window ELEPad: in-process render/dispatch test, then the real
+      # executable edited and saved through posted window messages.
+      - name: ELEPad window editor (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: pwsh
+        run: |
+          $driver = (Get-ChildItem target/ele-driver/target/cranelift -Recurse -Filter main_driver.exe | Select-Object -First 1).FullName
+          & $driver build apps/elepad/src/gui_test.l --lib . --target pe --output target/elepad-gui-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'gui_test build failed' }
+          $out = & ./target/elepad-gui-test.exe
+          if ($LASTEXITCODE -ne 0 -or $out -cne 'elepad-gui-ok') { throw "gui_test failed ($LASTEXITCODE): $out" }
+          ./tests/elepad/gui.ps1 -Ele $driver
       # std/io/console.l through the autonomous driver: decoder over
       # redirected bytes, then a real console (AllocConsole +
       # WriteConsoleInputW) read with ReadConsoleInputW, and the console

@@ -73,15 +73,17 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "windowsend") { give 23 }
     when nativeEquals(source, word, "windowpixel") { give 24 }
     when nativeEquals(source, word, "windowclose") { give 25 }
+    when nativeEquals(source, word, "windowcell") { give 26 }
+    when nativeEquals(source, word, "windowtextbytes") { give 27 }
     give -1
 }
 
-// Window ops (17..25), re-checked here independently of Stage 1's table:
+// Window ops (17..27), re-checked here independently of Stage 1's table:
 // the arity, then the kind of each argument as in cfgFileArgOk, plus
 // 4 = shared `ref` to a Text.
 flow cfgWindowArity(op: Int) => Int {
     when op == 17 || op == 24 { give 3 }
-    when op == 20 { give 6 }
+    when op == 20 || op == 27 { give 6 }
     when op == 21 { give 5 }
     when op == 23 { give 4 }
     give 1
@@ -95,6 +97,7 @@ flow cfgWindowArgKind(op: Int, i: Int) => Int {
     when op == 25 { give 0 }
     when i == 0 { give 1 }
     when op == 21 && i == 3 { give 4 }
+    when op == 27 && i == 3 { give 2 }
     give 0
 }
 
@@ -116,7 +119,7 @@ flow cfgEmitWindowArgs(code: edit X64Code, p: view CfgProgram, f: Int, inst: vie
     hold regs: List of[Int] = List[7, 6, 2, 1, 8, 9]
     each i among 0..inst.argc {
         hold kind = cfgWindowArgKind(inst.op, i)
-        when kind == 1 || kind == 4 {
+        when kind == 1 || kind == 2 || kind == 4 {
             cfgPlatformArgAddress(edit code, p, f, inst.arg_first + i, edit fix)
             when kind == 1 { x64LoadMem64(edit code, regs[i], 0, 0) }
             otherwise { x64MovReg(edit code, regs[i], 0) }
@@ -211,7 +214,7 @@ flow cfgIsTextResult(p: view CfgProgram, ty: Int) => Bool {
 }
 
 expose flow cfgCheckPlatform(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.op < 0 || inst.op > 25 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
+    when inst.op < 0 || inst.op > 27 || inst.argc != cfgPlatformArity(inst.op) { give 130 }
     hold first = inst.arg_first
     when inst.op >= 9 && inst.op <= 16 && !cfgCheckFilePlatform(p, f, inst) { give 131 }
     when inst.op >= 17 && !cfgCheckWindowPlatform(p, f, inst) { give 131 }

@@ -1,5 +1,6 @@
 take terminal_dispatch
 take terminal_render
+take document_io
 
 flow cursorLine(editor: view Editor) => Int {
     change line = 0
@@ -9,27 +10,6 @@ flow cursorLine(editor: view Editor) => Int {
         i += 1
     }
     give line
-}
-
-flow saveDocument(editor: edit Editor, path: view Text) => Int {
-    when length(view editor.document) > 16 * 1024 * 1024 { give 23 }
-    change bytes = toBytes(view editor.document)
-    hold status = writeBytes(path, bytes)
-    when status != 0 { give status }
-    // Do not clear the dirty marker until the published file can be read back.
-    choose readText(path, 16 * 1024 * 1024) {
-        Ok(reopened): {
-            when reopened.byteLength != length(view editor.document) { give 20 }
-            change i = 0
-            during i < reopened.byteLength {
-                when reopened@byteAt(i) != byteAt(view editor.document, i) { give 21 }
-                i += 1
-            }
-        },
-        Err(code): { give 22 },
-    }
-    editorMarkSaved(edit editor)
-    give 0
 }
 
 flow run(path: view Text, source: view Text) => Int {

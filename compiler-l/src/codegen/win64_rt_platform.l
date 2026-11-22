@@ -2033,7 +2033,7 @@ expose flow w64EmitPlatform(code: edit X64Code, imports: edit Pe64Imports, rt: v
         hold window_at = w64EmitWindows(edit code, edit imports, rt, path_z, wide_z)
         each k among 0..window_at.length { at@push(window_at[k]) }
     } otherwise {
-        each k among 0..9 { at@push(-1) }
+        each k among 0..11 { at@push(-1) }
     }
     give at
 }
