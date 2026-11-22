@@ -171,6 +171,8 @@ fn lirInstText(l: &LirFn, source: &Text, lm: &LirModule, id: Int) -> Text {
         when op_code == 23 { op_name = "windowsend" }
         when op_code == 24 { op_name = "windowpixel" }
         when op_code == 25 { op_name = "windowclose" }
+        when op_code == 26 { op_name = "windowcell" }
+        when op_code == 27 { op_name = "windowtextbytes" }
         var out ="i platform v{dst} {op_name} {count}"
         for i in 0..count {
             let item = l.operands[first + i]

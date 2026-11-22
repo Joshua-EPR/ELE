@@ -87,7 +87,8 @@ fixed WF_SETBKMODE = 22
 fixed WF_SETTEXTCOLOR = 23
 fixed WF_EXTTEXTOUT = 24
 fixed WF_GDIFLUSH = 25
-fixed WF_COUNT = 26
+fixed WF_GETTEXTMETRICS = 26
+fixed WF_COUNT = 27
 
 fixed WW_RESERVE = 128                  // shadow space + 12 stack args
 fixed WW_SYSTEM32 = 2048
@@ -234,7 +235,8 @@ flow wwFunctionName(index: Int) => Text {
     when index == 22 { give "SetBkMode" }
     when index == 23 { give "SetTextColor" }
     when index == 24 { give "ExtTextOutW" }
-    give "GdiFlush"
+    when index == 25 { give "GdiFlush" }
+    give "GetTextMetricsW"
 }
 
 // Strings used by the routines, emitted between routines (never executed).
@@ -1239,23 +1241,144 @@ flow wwEmitPixel(code: edit X64Code) => Int {
     give entry
 }
 
+// cell(RDI = block) -> tmAveCharWidth + tmHeight * 65536 of the window font
+// (one monospace cell). Slots: 0 block, 1..8 TEXTMETRICW (RBP-72).
+flow wwEmitCell(code: edit X64Code) => Int {
+    hold entry = code.bytes.length
+    wwBegin(edit code, 9)
+    x64StoreSlot(edit code, 0, 7)
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wwIf(edit code, 1, 0, 7)
+    x64LoadSlot(edit code, 10, 0)
+    x64LoadMem64(edit code, 1, 10, WB_MEMDC)
+    x64LeaMem(edit code, 2, 5, -72)
+    wwFn(edit code, 0, WF_GETTEXTMETRICS)
+    wwDword(edit code)
+    x64TestRax(edit code)
+    hold failed = x64ConditionalPlaceholder(edit code, true)
+    x64LoadMem32(edit code, 0, 5, -72)          // tmHeight
+    x64MovImm64(edit code, 10, 65536)
+    x64MulReg(edit code, 0, 10)
+    x64LoadMem32(edit code, 1, 5, -52)          // tmAveCharWidth (+20)
+    x64AddReg(edit code, 0, 1)
+    x64FrameEnd(edit code)
+    wwPatchHere(edit code, failed)
+    wwRet(edit code, -5)
+    wwPatchHere(edit code, not_open)
+    wwRet(edit code, -6)
+    give entry
+}
+
+// textbytes(RDI = block, RSI = x, RDX = y, RCX = List of[Int] header,
+// R8 = count, R9 = rgb): the first `count` elements, each 0..255, packed
+// into a temporary buffer and drawn through the text routine with a Text
+// header built on the stack. Slots: 0 block, 1 x, 2 y, 3 list, 4 count,
+// 5 rgb, 6 buffer, 7 capacity, 8 result, 9..11 Text header (RBP-96:
+// address, length, capacity).
+flow wwEmitTextBytes(code: edit X64Code, rt: view PfRuntime, text: Int) => Int {
+    hold entry = code.bytes.length
+    wwBegin(edit code, 12)
+    hold regs: List of[Int] = List[7, 6, 2, 1, 8, 9]
+    each k among 0..6 { x64StoreSlot(edit code, k, regs[k]) }
+    x64MovReg(edit code, 1, 7)
+    hold not_open = wwIf(edit code, 1, 0, 7)
+    change invalid: List of[Int] = List[]
+    x64LoadSlot(edit code, 1, 4)
+    invalid@push(wwIf(edit code, 1, 0, 6))
+    invalid@push(wwIf(edit code, 1, 65536, 8))
+    x64LoadSlot(edit code, 8, 3)
+    x64LoadMem64(edit code, 2, 8, 8)
+    invalid@push(wwIfReg(edit code, 1, 2, 8))
+    hold empty = wwIf(edit code, 1, 0, 4)
+    // Every byte 0..255 before anything is allocated.
+    x64MovImm64(edit code, 1, 0)
+    hold check = code.bytes.length
+    x64LoadSlot(edit code, 2, 4)
+    hold checked = wwIfReg(edit code, 1, 2, 9)
+    x64LoadSlot(edit code, 8, 3)
+    x64LoadMem64(edit code, 8, 8, 0)
+    x64MovReg(edit code, 9, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 9, 10)
+    x64AddReg(edit code, 8, 9)
+    x64LoadMem64(edit code, 0, 8, 0)
+    x64MovImm64(edit code, 10, 256)
+    x64CmpReg(edit code, 0, 10)
+    invalid@push(x64AboveEqualPlaceholder(edit code))
+    x64MovImm64(edit code, 10, 1)
+    x64AddReg(edit code, 1, 10)
+    wwJumpTo(edit code, check)
+    wwPatchHere(edit code, checked)
+    x64LoadSlot(edit code, 7, 4)
+    wwCall(edit code, rt.text_new)
+    x64StoreSlot(edit code, 6, 0)
+    x64StoreSlot(edit code, 7, 2)
+    x64MovImm64(edit code, 1, 0)
+    hold pack = code.bytes.length
+    x64LoadSlot(edit code, 2, 4)
+    hold packed = wwIfReg(edit code, 1, 2, 9)
+    x64LoadSlot(edit code, 8, 3)
+    x64LoadMem64(edit code, 8, 8, 0)
+    x64MovReg(edit code, 9, 1)
+    x64MovImm64(edit code, 10, 8)
+    x64MulReg(edit code, 9, 10)
+    x64AddReg(edit code, 8, 9)
+    x64LoadMem64(edit code, 2, 8, 0)
+    x64LoadSlot(edit code, 8, 6)
+    x64AddReg(edit code, 8, 1)
+    x64StoreMem8(edit code, 8, 0, 2)
+    x64MovImm64(edit code, 10, 1)
+    x64AddReg(edit code, 1, 10)
+    wwJumpTo(edit code, pack)
+    wwPatchHere(edit code, packed)
+    x64LoadSlot(edit code, 0, 6)
+    x64StoreSlot(edit code, 11, 0)
+    x64LoadSlot(edit code, 0, 4)
+    x64StoreSlot(edit code, 10, 0)
+    x64LoadSlot(edit code, 0, 7)
+    x64StoreSlot(edit code, 9, 0)
+    x64LoadSlot(edit code, 7, 0)
+    x64LoadSlot(edit code, 6, 1)
+    x64LoadSlot(edit code, 2, 2)
+    x64LeaMem(edit code, 1, 5, -96)
+    x64LoadSlot(edit code, 8, 5)
+    wwCall(edit code, text)
+    x64StoreSlot(edit code, 8, 0)
+    x64LoadSlot(edit code, 7, 6)
+    x64LoadSlot(edit code, 6, 7)
+    wwCall(edit code, rt.text_drop)
+    x64LoadSlot(edit code, 0, 8)
+    x64FrameEnd(edit code)
+    wwPatchHere(edit code, empty)
+    wwRet(edit code, 0)
+    wwPatchHere(edit code, not_open)
+    wwRet(edit code, -6)
+    wwPatchAll(edit code, view invalid)
+    wwRet(edit code, -1)
+    give entry
+}
+
 // Emits the window routines; returns their entries for platform codes
-// 17..25 (open, status, next, fill, text, present, send, pixel, close).
+// 17..27 (open, status, next, fill, text, present, send, pixel, close,
+// cell, text bytes).
 expose flow w64EmitWindows(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, path_z: Int, wide_z: Int) => List of[Int] {
     hold d = wwEmitData(edit code)
     hold target = wwEmitWndProc(edit code, edit imports, view d)
     hold wndproc = w64EmitCallback4(edit code, target)
     hold buffer = wwEmitBuffer(edit code)
     hold close = wwEmitClose(edit code, edit imports, rt)
+    hold text = wwEmitText(edit code, edit imports, rt)
     change at: List of[Int] = List[]
     at@push(wwEmitOpen(edit code, edit imports, rt, path_z, wide_z, view d, wndproc, buffer, close))
     at@push(pfEmitFileStatus(edit code))
     at@push(wwEmitNext(edit code, buffer))
     at@push(wwEmitFill(edit code))
-    at@push(wwEmitText(edit code, edit imports, rt))
+    at@push(text)
     at@push(wwEmitPresent(edit code))
     at@push(wwEmitSend(edit code))
     at@push(wwEmitPixel(edit code))
     at@push(close)
+    at@push(wwEmitCell(edit code))
+    at@push(wwEmitTextBytes(edit code, rt, text))
     give at
 }

@@ -43,6 +43,28 @@ flow drawChecks(w: view Window) => Int {
     hold empty = ""
     when windowText(w, 0, 0, empty, 0) != 0 { give 42 }
     when windowPresent(w) != 0 { give 43 }
+    // One monospace cell of the window font.
+    hold cell = windowCell(w)
+    hold cell_w = cell % 65536
+    hold cell_h = cell / 65536
+    when cell_w < 5 || cell_w > 30 || cell_h < 10 || cell_h > 40 { give 44 }
+    // Text drawn from UTF-8 bytes ("ELé"), as editors keep documents.
+    hold bytes: List of[Int] = List[69, 76, 195, 169]
+    when windowTextBytes(w, 100, 130, bytes, 4, 16777215) != 0 { give 45 }
+    change inked_bytes = false
+    change by = 130
+    during by < 130 + cell_h && !inked_bytes {
+        change bx = 100
+        during bx < 100 + 3 * cell_w && !inked_bytes {
+            when windowPixel(w, bx, by) != 1056816 { inked_bytes = true }
+            bx += 1
+        }
+        by += 1
+    }
+    when !inked_bytes { give 46 }
+    hold bad: List of[Int] = List[69, 300]
+    when windowTextBytes(w, 0, 0, bad, 2, 0) != -1 { give 47 }
+    when windowTextBytes(w, 0, 0, bytes, 5, 0) != -1 || windowTextBytes(w, 0, 0, bytes, 0, 0) != 0 { give 48 }
     give 0
 }
 

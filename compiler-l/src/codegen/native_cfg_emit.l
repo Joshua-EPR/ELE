@@ -384,7 +384,7 @@ flow cfgUsesFiles(p: view CfgProgram) => Bool {
 // Window routines (platform codes 17..25), likewise only when used.
 flow cfgUsesWindows(p: view CfgProgram) => Bool {
     each i among 0..p.insts.length {
-        when p.insts[i].kind == 24 && p.insts[i].op >= 17 && p.insts[i].op <= 25 { give true }
+        when p.insts[i].kind == 24 && p.insts[i].op >= 17 && p.insts[i].op <= 27 { give true }
     }
     give false
 }
