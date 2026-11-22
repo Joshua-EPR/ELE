@@ -111,7 +111,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
     }
     // The index variables of a place are read before the instruction runs.
     when !cfgExtLive(p, inst.place_ext, live) || !cfgExtLive(p, inst.src_ext, live) { give 57 }
-    when inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgOperandType(p, f, view inst.a) >= 2 {
+    when inst.kind == 1 && inst.a.is_var && inst.a.value == inst.dst && cfgIsMove(cfgOperandType(p, f, view inst.a)) {
         give 58
     }
     when (inst.kind == 10 || inst.kind == 12 || inst.kind == 13 || inst.kind == 17) && inst.op >= 0 {
@@ -165,7 +165,7 @@ flow cfgValidateInstruction(p: view CfgProgram, f: Int, inst: view CfgInst, live
         // Overwriting a live owned Text or list would leak its buffer. A
         // reference owns nothing: a loop may take its loan again.
         hold dst_slot = p.functions[f].first_var + inst.dst
-        when live[inst.dst] && !p.var_ref[dst_slot] && cfgHeapDirect(p, p.types_code[dst_slot]) { give 59 }
+        when live[inst.dst] && !p.var_ref[dst_slot] && (cfgHeapDirect(p, p.types_code[dst_slot]) || p.types_code[dst_slot] == cfgFileType()) { give 59 }
         live[inst.dst] = true
     }
     give 0
@@ -404,10 +404,10 @@ flow cfgCheckFunction(p: view CfgProgram, f: Int) => Int {
                 when paths.text[k] && root < func.params && p.var_ref[func.first_var + root] && !live[vars + k] { give 95 }
                 when paths.text[k] && !p.var_ref[func.first_var + root] && live[root] && live[vars + k] { give 59 }
             }
-            // Every owned Text or list must have been moved out or dropped by now.
+            // Every owned Text, list or File must have been consumed by now.
             // A reference parameter does not own its referent.
             each v among 0..vars {
-                when live[v] && !p.var_ref[func.first_var + v] && cfgHeapDirect(p, p.types_code[func.first_var + v]) { give 59 }
+                when live[v] && !p.var_ref[func.first_var + v] && (cfgHeapDirect(p, p.types_code[func.first_var + v]) || p.types_code[func.first_var + v] == cfgFileType()) { give 59 }
             }
         }
     }

@@ -6,6 +6,7 @@ expose flow cfgType(p: view CfgProgram, source: view Text, reader: edit NativeRe
     hold w = nativeWord(source, edit reader)
     when nativeEquals(source, view w, "i") { give 0 }
     when nativeEquals(source, view w, "b") { give 1 }
+    when nativeEquals(source, view w, "h") { give cfgFileType() }
     when w.start < w.end && source@byteAt(w.start) == 115 {
         hold id = nativeDecimal(source, edit reader, view w, 1)
         when id >= 0 && id < p.structs.length { give 2 + id }
@@ -32,9 +33,13 @@ expose flow cfgTextType() => Int {
     give -3
 }
 
+// An opaque, linear File handle. Its storage is one machine word, but no
+// integer constant or arithmetic expression has this type.
+expose flow cfgFileType() => Int { give -4 }
+
 // Values whose assignment transfers ownership instead of copying.
 expose flow cfgIsMove(ty: Int) => Bool {
-    give ty >= 2 || ty == cfgTextType()
+    give ty >= 2 || ty == cfgTextType() || ty == cfgFileType()
 }
 
 // Value types plus `u` and `t`. Callers decide where each is acceptable;
@@ -54,7 +59,7 @@ expose flow cfgTypeOrUnit(p: view CfgProgram, source: view Text, reader: edit Na
 }
 
 expose flow cfgTypeSize(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 { give 8 }
+    when ty == 0 || ty == cfgFileType() { give 8 }
     // A unit variable owns one never-read slot so that slot math stays uniform.
     when ty == cfgUnitType() { give 8 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 24 }
@@ -74,7 +79,7 @@ expose flow cfgMaxValueBytes() => Int {
 }
 
 expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 { give 8 }
+    when ty == 0 || ty == cfgFileType() { give 8 }
     when ty == 1 { give 1 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 8 }
     when ty >= 2 && ty - 2 < p.structs.length { give p.structs[ty - 2].align }
@@ -139,7 +144,10 @@ flow cfgDeclType(p: view CfgProgram, source: view Text, reader: edit NativeReade
         reader.error = 30
         give -1
     }
-    give cfgType(p, source, edit reader)
+    hold ty = cfgType(p, source, edit reader)
+    // Source-level File cannot be embedded in shapes, choices or lists.
+    when ty == cfgFileType() { reader.error = 30; give -1 }
+    give ty
 }
 
 // Read a complete enum descriptor from the official ELE-LIR 1 extension:
