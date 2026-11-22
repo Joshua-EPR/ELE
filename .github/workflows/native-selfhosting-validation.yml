@@ -4,7 +4,8 @@ on:
   push:
     branches: [main, feat/ele-original-syntax-v2]
   pull_request:
-    branches: [main, feat/ele-8.7.4.5-native-interop-ci, feat/ele-v2-generic-of-syntax, feat/ele-v2-stage1-of-types]
+    # Stacked feature PRs target other feature branches. Run this gate for
+    # every PR head instead of silently omitting those integration changes.
   workflow_dispatch:
 
 concurrency:

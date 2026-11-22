@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, feat/**]
   pull_request:
-    branches: [main]
+    # Package the exact head of every stacked PR.
   workflow_dispatch:
 
 concurrency:
