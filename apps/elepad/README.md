@@ -14,6 +14,20 @@ ELEPad es un editor nativo en desarrollo. El código de aplicación y las prueba
 
 ## Editor en ventana (Windows)
 
+`std.ui.clipboard` expone `clipboardWrite(List<Int>)` y
+`clipboardRead(límite)`. Los bytes de ELE son UTF-8; el backend Win64 usa
+`CF_UNICODETEXT` y conversión estricta UTF-8 ↔ UTF-16. La lectura no cambia
+el portapapeles. Los códigos negativos distinguen ausencia de texto (`-2`),
+fallo del sistema (`-5`) y plataforma sin backend (`-7`). ELEPad solo usa su
+portapapeles interno cuando recibe `-7`.
+
+Pruebas de interoperabilidad reales en Windows:
+
+```powershell
+.\tests\std\clipboard.ps1 -Ele .\target\cranelift\x86_64-pc-windows-gnu\main_driver.exe
+.\tests\elepad\clipboard.ps1 -Ele .\target\cranelift\x86_64-pc-windows-gnu\main_driver.exe
+```
+
 `src/gui.l` abre el archivo en una ventana nativa con el `Window` lineal de
 `std.ui.window`. Comparte con el editor de terminal:
 
@@ -65,7 +79,6 @@ Pruebas:
 Pendiente en la ventana:
 
 - Ctrl+O y varios documentos;
-- portapapeles del sistema (el interno funciona);
 - selección arrastrando el ratón;
 - grafemas y caracteres anchos;
 - DPI alto;
@@ -119,11 +132,11 @@ Edición avanzada (núcleo compartido `editor_core.l`, utilizable también por u
 | Ctrl+Z / Ctrl+Y | Deshacer / rehacer. Los caracteres escritos seguidos forman un solo paso (un espacio o tabulador cierra la palabra); pegar o escribir sobre una selección es un paso. Una edición nueva descarta la rama de rehacer. Volver al estado guardado quita el indicador `*`. |
 | Shift+flechas, Shift+Home/End/PgUp/PgDn | Selección con teclado, mostrada en vídeo inverso. Escape la cancela. |
 | Ctrl+A | Seleccionar todo. |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copiar / cortar / pegar con un portapapeles **interno del proceso**; no es el portapapeles del sistema. |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copiar / cortar / pegar con el portapapeles de Windows (`CF_UNICODETEXT`). En plataformas sin backend se usa el portapapeles interno. Un fallo real se muestra y cortar no borra si copiar falla. |
 | Ctrl+F | Modo búsqueda en la barra de estado: escribir la consulta, Enter (o Ctrl+F) selecciona la siguiente coincidencia y vuelve al principio una vez; Escape vuelve a editar. Búsqueda exacta por bytes UTF-8, sin mayúsculas/minúsculas. |
 
 El historial guarda las operaciones (no copias del documento). Si sus bytes superan 32 MiB, se descarta entero y el documento queda marcado como modificado hasta guardar.
 
-Pendiente: Ctrl+O (necesita una primitiva para construir `Text` a partir de bytes, que el lenguaje todavía no expone), portapapeles del sistema, selección con ratón, scroll horizontal, anchura visual de grafemas y caracteres anchos, activación automática de VT en Windows. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
+Pendiente: Ctrl+O (necesita una primitiva para construir `Text` a partir de bytes, que el lenguaje todavía no expone), selección con ratón, scroll horizontal, anchura visual de grafemas y caracteres anchos, activación automática de VT en Windows. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
 
 `terminal.ps1` verifica el ciclo nativo con entrada redirigida. `terminal_console.ps1` usa una consola Windows real, inyecta eventos de teclado, edita y guarda el archivo de prueba indicado, y comprueba la restauración del modo de entrada. Use un archivo de prueba desechable: la segunda prueba modifica su contenido.

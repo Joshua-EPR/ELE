@@ -67,6 +67,7 @@ flow dispatchFind(editor: edit Editor, ev: view ConsoleEvent) => Int {
 // frontends (terminal_dispatch.l, gui_dispatch.l): the one key table.
 expose flow editorCommand(editor: edit Editor, ev: view ConsoleEvent) => Int {
     when ev.kind != EVENT_KEY || !ev.pressed { give 0 }
+    editor.clipboard_status = 0
     when isCtrl(ev, 115) { give 1 }
     when isCtrl(ev, 113) { give 2 }
     when editor.mode == MODE_FIND { give dispatchFind(edit editor, ev) }
