@@ -1,65 +1,65 @@
-import lexer
-import tokens
-import cursor
-import ast
-import parse_util
-import expr
-import types
-import stmt
-import decl
+take lexer
+take tokens
+take cursor
+take ast
+take parse_util
+take expr
+take types
+take stmt
+take decl
 
 // Stage 0 allows a borrowed enum to be inspected through a reference
 // parameter, but does not allow taking a fresh borrow as a match scrutinee.
 // Encode only the three token categories needed for error recovery.
-fn parserRecoveryKind(kind: &LexKind) -> Int {
-    match kind {
-        LexKind.Eof => { return 0 }
-        LexKind.Symbol => { return 1 }
-        LexKind.Word => { return 2 }
-        _ => { return 3 }
+flow parserRecoveryKind(kind: view LexKind) => Int {
+    choose kind {
+        LexKind.Eof : { give 0 }
+        LexKind.Symbol : { give 1 }
+        LexKind.Word : { give 2 }
+        _ : { give 3 }
     }
 }
 
-fn parserSynchronize(source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>) {
+flow parserSynchronize(source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken]) {
     cursor.pos += 1
-    while cursor.pos < tokens.length {
-        let tok = &tokens[cursor.pos]
-        let kind = parserRecoveryKind(&tok.kind)
-        if kind == 0 { return }
-        if kind == 1 {
-            let len = tok.end - tok.start
-            if len == 1 {
-                let b = source.byteAt(tok.start)
-                if b == 59 || b == 125 {
+    during cursor.pos < tokens.length {
+        hold tok = view tokens[cursor.pos]
+        hold kind = parserRecoveryKind(view tok.kind)
+        when kind == 0 { give }
+        when kind == 1 {
+            hold len = tok.end - tok.start
+            when len == 1 {
+                hold b = source@byteAt(tok.start)
+                when b == 59 || b == 125 {
                     cursor.pos += 1
-                    return
+                    give
                 }
             }
         }
-        if kind == 2 {
-            if parserIsWord(source, tok, "fn") || parserIsWord(source, tok, "let") || parserIsWord(source, tok, "var") || parserIsWord(source, tok, "struct") || parserIsWord(source, tok, "enum") || parserIsWord(source, tok, "const") || parserIsWord(source, tok, "import") {
-                return
+        when kind == 2 {
+            when parserIsWord(source, tok, "fn") || parserIsWord(source, tok, "let") || parserIsWord(source, tok, "var") || parserIsWord(source, tok, "struct") || parserIsWord(source, tok, "enum") || parserIsWord(source, tok, "const") || parserIsWord(source, tok, "import") {
+                give
             }
         }
         cursor.pos += 1
     }
 }
 
-pub fn parseProgram(tree: &mut AstTree, source: &Text, tokens: &List<LexToken>, fileId: Int) -> Bool {
-    var cursor = cursorNew(fileId)
-    parserSkipSeparators(source, &mut cursor, tokens)
+expose flow parseProgram(tree: edit AstTree, source: view Text, tokens: view List of[LexToken], fileId: Int) => Bool {
+    change cursor = cursorNew(fileId)
+    parserSkipSeparators(source, edit cursor, tokens)
 
-    while !cursorIsAtEnd(&cursor, tokens) {
-        let before_pos = cursor.pos
-        let d = parseDecl(&mut tree, source, &mut cursor, tokens)
-        if d < 0 {
-            parserSynchronize(source, &mut cursor, tokens)
-            if cursor.pos == before_pos && cursor.pos < tokens.length {
+    during !cursorIsAtEnd(view cursor, tokens) {
+        hold before_pos = cursor.pos
+        hold d = parseDecl(edit tree, source, edit cursor, tokens)
+        when d < 0 {
+            parserSynchronize(source, edit cursor, tokens)
+            when cursor.pos == before_pos && cursor.pos < tokens.length {
                 cursor.pos += 1
             }
         }
-        parserSkipSeparators(source, &mut cursor, tokens)
+        parserSkipSeparators(source, edit cursor, tokens)
     }
 
-    return tree.errors.length == 0
+    give tree.errors.length == 0
 }

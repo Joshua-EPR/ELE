@@ -1,282 +1,282 @@
-import lexer
-import tokens
-import cursor
-import ast
-import parse_util
-import expr
-import types
+take lexer
+take tokens
+take cursor
+take ast
+take parse_util
+take expr
+take types
 
-expose flow parseBlock(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) => Int {
-    if depth > 128 {
-        let s = cursorSpanStart(cursor, tokens, source.byteLength)
-        let e = cursorSpanEnd(cursor, tokens, source.byteLength)
-        astAddError(&mut tree, ParseProblem.NestingLimitExceeded, "", s, e)
-        return -1
+expose flow parseBlock(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], depth: Int) => Int {
+    when depth > 128 {
+        hold s = cursorSpanStart(cursor, tokens, source.byteLength)
+        hold e = cursorSpanEnd(cursor, tokens, source.byteLength)
+        astAddError(edit tree, ParseProblem.NestingLimitExceeded, "", s, e)
+        give -1
     }
-    if cursor.pos >= tokens.length {
-        astAddError(&mut tree, ParseProblem.ExpectedToken, "{{", source.byteLength, source.byteLength)
-        return -1
+    when cursor.pos >= tokens.length {
+        astAddError(edit tree, ParseProblem.ExpectedToken, "{{", source.byteLength, source.byteLength)
+        give -1
     }
-    let openTok = &tokens[cursor.pos]
-    if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "{{") {
-        return -1
+    hold openTok = view tokens[cursor.pos]
+    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "{{") {
+        give -1
     }
 
-    var block_stmts: List<Int> = List[]
-    parserSkipSeparators(source, &mut cursor, tokens)
+    change block_stmts: List of[Int] = List[]
+    parserSkipSeparators(source, edit cursor, tokens)
 
-    while !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
-        let current_kind_token = &tokens[cursor.pos]
-        match tokenKindValue(&current_kind_token.kind) {
-            LexKind.Eof => {
-                astAddError(&mut tree, ParseProblem.UnclosedBlock, "}}", openTok.start, openTok.end)
-                return -1
+    during !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
+        hold current_kind_token = view tokens[cursor.pos]
+        choose tokenKindValue(view current_kind_token.kind) {
+            LexKind.Eof : {
+                astAddError(edit tree, ParseProblem.UnclosedBlock, "}}", openTok.start, openTok.end)
+                give -1
             }
-            _ => {}
+            _ : {}
         }
-        let before_pos = cursor.pos
-        let stmt = parseStmt(&mut tree, source, &mut cursor, tokens, depth + 1)
-        if stmt >= 0 {
-            block_stmts.push(stmt)
-        } else {
-            if cursor.pos == before_pos && cursor.pos < tokens.length {
+        hold before_pos = cursor.pos
+        hold stmt = parseStmt(edit tree, source, edit cursor, tokens, depth + 1)
+        when stmt >= 0 {
+            block_stmts@push(stmt)
+        } otherwise {
+            when cursor.pos == before_pos && cursor.pos < tokens.length {
                 cursor.pos += 1
             }
         }
-        parserSkipSeparators(source, &mut cursor, tokens)
+        parserSkipSeparators(source, edit cursor, tokens)
     }
 
-    parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "}}")
-    let end_pos = cursorPrevEnd(cursor, tokens, openTok.end)
-    let first_stmt = tree.extra.length
-    let count = block_stmts.length
-    for s in 0..count {
-        astAddExtra(&mut tree, block_stmts[s])
+    parserNeedSymbol(edit tree, source, edit cursor, tokens, "}}")
+    hold end_pos = cursorPrevEnd(cursor, tokens, openTok.end)
+    hold first_stmt = tree.extra.length
+    hold count = block_stmts.length
+    each s among 0..count {
+        astAddExtra(edit tree, block_stmts[s])
     }
-    return astAddStmt(&mut tree, AstStmtKind.Block, openTok.start, end_pos, first_stmt, count, 0, 0, 0)
+    give astAddStmt(edit tree, AstStmtKind.Block, openTok.start, end_pos, first_stmt, count, 0, 0, 0)
 }
 
-expose flow parseStmt(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) => Int {
-    if cursor.pos >= tokens.length { return -1 }
-    let tok = &tokens[cursor.pos]
+expose flow parseStmt(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], depth: Int) => Int {
+    when cursor.pos >= tokens.length { give -1 }
+    hold tok = view tokens[cursor.pos]
 
-    if parserAtWord(source, cursor, tokens, "const") {
+    when parserAtWord(source, cursor, tokens, "const") {
         cursor.pos += 1
-        if cursor.pos >= tokens.length {
-            astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
-            return -1
+        when cursor.pos >= tokens.length {
+            astAddError(edit tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
+            give -1
         }
-        let nameTok = &tokens[cursor.pos]
+        hold nameTok = view tokens[cursor.pos]
         cursor.pos += 1
-        var type_id = -1
-        if parserTakeSymbol(source, &mut cursor, tokens, ":") {
-            type_id = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
+        change type_id = -1
+        when parserTakeSymbol(source, edit cursor, tokens, ":") {
+            type_id = parseType(edit tree, source, edit cursor, tokens, depth + 1)
         }
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "=")
-        parserSkipNewlines(&mut cursor, tokens)
-        let val = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        let end_pos = astExprEnd(&tree, val, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.Const, tok.start, end_pos, nameTok.start, nameTok.end, type_id, val, 0)
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, "=")
+        parserSkipNewlines(edit cursor, tokens)
+        hold val = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        hold end_pos = astExprEnd(view tree, val, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.Const, tok.start, end_pos, nameTok.start, nameTok.end, type_id, val, 0)
     }
 
-    if parserAtWord(source, cursor, tokens, "let") || parserAtWord(source, cursor, tokens, "var") {
-        let is_mut = parserTakeWord(source, &mut cursor, tokens, "var")
-        if !is_mut {
-            parserTakeWord(source, &mut cursor, tokens, "let")
+    when parserAtWord(source, cursor, tokens, "let") || parserAtWord(source, cursor, tokens, "var") {
+        hold is_mut = parserTakeWord(source, edit cursor, tokens, "var")
+        when !is_mut {
+            parserTakeWord(source, edit cursor, tokens, "let")
         }
-        if cursor.pos >= tokens.length {
-            astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
-            return -1
+        when cursor.pos >= tokens.length {
+            astAddError(edit tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
+            give -1
         }
-        let nameTok = &tokens[cursor.pos]
+        hold nameTok = view tokens[cursor.pos]
         cursor.pos += 1
-        var type_id = -1
-        if parserTakeSymbol(source, &mut cursor, tokens, ":") {
-            type_id = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
+        change type_id = -1
+        when parserTakeSymbol(source, edit cursor, tokens, ":") {
+            type_id = parseType(edit tree, source, edit cursor, tokens, depth + 1)
         }
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "=")
-        parserSkipNewlines(&mut cursor, tokens)
-        let val = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        let end_pos = astExprEnd(&tree, val, tok.end)
-        let mut_flag = selectInt(is_mut, 1, 0)
-        return astAddStmt(&mut tree, AstStmtKind.Let, tok.start, end_pos, nameTok.start, nameTok.end, mut_flag, type_id, val)
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, "=")
+        parserSkipNewlines(edit cursor, tokens)
+        hold val = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        hold end_pos = astExprEnd(view tree, val, tok.end)
+        hold mut_flag = selectInt(is_mut, 1, 0)
+        give astAddStmt(edit tree, AstStmtKind.Let, tok.start, end_pos, nameTok.start, nameTok.end, mut_flag, type_id, val)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "return") {
-        if parserAtSymbol(source, cursor, tokens, ";") || parserAtSymbol(source, cursor, tokens, "}}") || cursor.pos >= tokens.length {
-            return astAddStmt(&mut tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "return") {
+        when parserAtSymbol(source, cursor, tokens, ";") || parserAtSymbol(source, cursor, tokens, "}}") || cursor.pos >= tokens.length {
+            give astAddStmt(edit tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
         }
-        let current_kind_token = &tokens[cursor.pos]
-        match tokenKindValue(&current_kind_token.kind) {
-            LexKind.Newline => {
-                return astAddStmt(&mut tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
+        hold current_kind_token = view tokens[cursor.pos]
+        choose tokenKindValue(view current_kind_token.kind) {
+            LexKind.Newline : {
+                give astAddStmt(edit tree, AstStmtKind.Return, tok.start, tok.end, -1, 0, 0, 0, 0)
             }
-            _ => {}
+            _ : {}
         }
-        let val = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        let end_pos = astExprEnd(&tree, val, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.Return, tok.start, end_pos, val, 0, 0, 0, 0)
+        hold val = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        hold end_pos = astExprEnd(view tree, val, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.Return, tok.start, end_pos, val, 0, 0, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "if") {
-        let cond = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        parserSkipNewlines(&mut cursor, tokens)
-        let then_block = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-        var else_stmt = -1
-        parserSkipNewlines(&mut cursor, tokens)
-        if parserTakeWord(source, &mut cursor, tokens, "else") {
-            parserSkipNewlines(&mut cursor, tokens)
-            if parserAtWord(source, cursor, tokens, "if") {
-                else_stmt = parseStmt(&mut tree, source, &mut cursor, tokens, depth + 1)
-            } else {
-                else_stmt = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
+    when parserTakeWord(source, edit cursor, tokens, "if") {
+        hold cond = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        parserSkipNewlines(edit cursor, tokens)
+        hold then_block = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+        change else_stmt = -1
+        parserSkipNewlines(edit cursor, tokens)
+        when parserTakeWord(source, edit cursor, tokens, "else") {
+            parserSkipNewlines(edit cursor, tokens)
+            when parserAtWord(source, cursor, tokens, "if") {
+                else_stmt = parseStmt(edit tree, source, edit cursor, tokens, depth + 1)
+            } otherwise {
+                else_stmt = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
             }
         }
-        var end_pos = tok.end
-        if else_stmt >= 0 {
+        change end_pos = tok.end
+        when else_stmt >= 0 {
             end_pos = tree.statements[else_stmt].end
-        } else if then_block >= 0 {
+        } otherwise when then_block >= 0 {
             end_pos = tree.statements[then_block].end
         }
-        return astAddStmt(&mut tree, AstStmtKind.If, tok.start, end_pos, cond, then_block, else_stmt, 0, 0)
+        give astAddStmt(edit tree, AstStmtKind.If, tok.start, end_pos, cond, then_block, else_stmt, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "while") {
-        let cond = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        parserSkipNewlines(&mut cursor, tokens)
-        let body = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let end_pos = astStmtEnd(&tree, body, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.While, tok.start, end_pos, cond, body, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "while") {
+        hold cond = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        parserSkipNewlines(edit cursor, tokens)
+        hold body = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+        hold end_pos = astStmtEnd(view tree, body, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.While, tok.start, end_pos, cond, body, 0, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "for") {
-        if cursor.pos >= tokens.length {
-            astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
-            return -1
+    when parserTakeWord(source, edit cursor, tokens, "for") {
+        when cursor.pos >= tokens.length {
+            astAddError(edit tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
+            give -1
         }
-        let varTok = &tokens[cursor.pos]
+        hold varTok = view tokens[cursor.pos]
         cursor.pos += 1
-        parserNeedWord(&mut tree, source, &mut cursor, tokens, "in")
-        let startExpr = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
+        parserNeedWord(edit tree, source, edit cursor, tokens, "in")
+        hold startExpr = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
 
-        let is_inclusive = parserTakeSymbol(source, &mut cursor, tokens, "..=")
-        if is_inclusive || parserTakeSymbol(source, &mut cursor, tokens, "..") {
-            let endExpr = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-            parserSkipNewlines(&mut cursor, tokens)
-            let body = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-            let end_pos = astStmtEnd(&tree, body, tok.end)
-            let inc_flag = selectInt(is_inclusive, 1, 0)
-            let extra_idx = astAddExtra(&mut tree, inc_flag)
-            astAddExtra(&mut tree, body)
-            return astAddStmt(&mut tree, AstStmtKind.For, tok.start, end_pos, varTok.start, varTok.end, startExpr, endExpr, extra_idx)
+        hold is_inclusive = parserTakeSymbol(source, edit cursor, tokens, "..=")
+        when is_inclusive || parserTakeSymbol(source, edit cursor, tokens, "..") {
+            hold endExpr = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+            parserSkipNewlines(edit cursor, tokens)
+            hold body = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+            hold end_pos = astStmtEnd(view tree, body, tok.end)
+            hold inc_flag = selectInt(is_inclusive, 1, 0)
+            hold extra_idx = astAddExtra(edit tree, inc_flag)
+            astAddExtra(edit tree, body)
+            give astAddStmt(edit tree, AstStmtKind.For, tok.start, end_pos, varTok.start, varTok.end, startExpr, endExpr, extra_idx)
         }
 
-        parserSkipNewlines(&mut cursor, tokens)
-        let body = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let end_pos = astStmtEnd(&tree, body, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.ForEach, tok.start, end_pos, varTok.start, varTok.end, startExpr, body, 0)
+        parserSkipNewlines(edit cursor, tokens)
+        hold body = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+        hold end_pos = astStmtEnd(view tree, body, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.ForEach, tok.start, end_pos, varTok.start, varTok.end, startExpr, body, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "loop") {
-        parserSkipNewlines(&mut cursor, tokens)
-        let body = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let end_pos = astStmtEnd(&tree, body, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.Loop, tok.start, end_pos, body, 0, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "loop") {
+        parserSkipNewlines(edit cursor, tokens)
+        hold body = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+        hold end_pos = astStmtEnd(view tree, body, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.Loop, tok.start, end_pos, body, 0, 0, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "break") {
-        return astAddStmt(&mut tree, AstStmtKind.Break, tok.start, tok.end, 0, 0, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "break") {
+        give astAddStmt(edit tree, AstStmtKind.Break, tok.start, tok.end, 0, 0, 0, 0, 0)
     }
-    if parserTakeWord(source, &mut cursor, tokens, "continue") {
-        return astAddStmt(&mut tree, AstStmtKind.Continue, tok.start, tok.end, 0, 0, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "continue") {
+        give astAddStmt(edit tree, AstStmtKind.Continue, tok.start, tok.end, 0, 0, 0, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "region") {
-        if cursor.pos >= tokens.length {
-            astAddError(&mut tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
-            return -1
+    when parserTakeWord(source, edit cursor, tokens, "region") {
+        when cursor.pos >= tokens.length {
+            astAddError(edit tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
+            give -1
         }
-        let nameTok = &tokens[cursor.pos]
+        hold nameTok = view tokens[cursor.pos]
         cursor.pos += 1
-        parserSkipNewlines(&mut cursor, tokens)
-        let body = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let end_pos = astStmtEnd(&tree, body, tok.end)
-        return astAddStmt(&mut tree, AstStmtKind.Region, tok.start, end_pos, nameTok.start, nameTok.end, body, 0, 0)
+        parserSkipNewlines(edit cursor, tokens)
+        hold body = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+        hold end_pos = astStmtEnd(view tree, body, tok.end)
+        give astAddStmt(edit tree, AstStmtKind.Region, tok.start, end_pos, nameTok.start, nameTok.end, body, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "match") {
-        let scrutinee = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        parserSkipNewlines(&mut cursor, tokens)
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "{{")
-        var arm_starts: List<Int> = List[]
-        var arm_ends: List<Int> = List[]
-        var arm_stmts: List<Int> = List[]
-        while !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
-            parserSkipSeparators(source, &mut cursor, tokens)
-            if parserAtSymbol(source, cursor, tokens, "}}") || cursor.pos >= tokens.length {
-                break
+    when parserTakeWord(source, edit cursor, tokens, "match") {
+        hold scrutinee = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        parserSkipNewlines(edit cursor, tokens)
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, "{{")
+        change arm_starts: List of[Int] = List[]
+        change arm_ends: List of[Int] = List[]
+        change arm_stmts: List of[Int] = List[]
+        during !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
+            parserSkipSeparators(source, edit cursor, tokens)
+            when parserAtSymbol(source, cursor, tokens, "}}") || cursor.pos >= tokens.length {
+                leave
             }
-            let p_start = cursorSpanStart(cursor, tokens, source.byteLength)
-            while !parserAtSymbol(source, cursor, tokens, "=>") && cursor.pos < tokens.length {
+            hold p_start = cursorSpanStart(cursor, tokens, source.byteLength)
+            during !parserAtSymbol(source, cursor, tokens, "=>") && cursor.pos < tokens.length {
                 cursor.pos += 1
             }
-            let p_end = cursorPrevEnd(cursor, tokens, source.byteLength)
-            parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "=>")
-            parserSkipNewlines(&mut cursor, tokens)
-            var body_stmt = -1
-            if parserAtSymbol(source, cursor, tokens, "{{") {
-                body_stmt = parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
-            } else if parserTakeWord(source, &mut cursor, tokens, "return") {
-                let ret_e = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-                let r_end = astExprEnd(&tree, ret_e, p_end)
-                body_stmt = astAddStmt(&mut tree, AstStmtKind.Return, p_start, r_end, ret_e, 0, 0, 0, 0)
-            } else {
-                let body_e = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-                let b_end = astExprEnd(&tree, body_e, p_end)
-                body_stmt = astAddStmt(&mut tree, AstStmtKind.Expr, p_start, b_end, body_e, 0, 0, 0, 0)
+            hold p_end = cursorPrevEnd(cursor, tokens, source.byteLength)
+            parserNeedSymbol(edit tree, source, edit cursor, tokens, "=>")
+            parserSkipNewlines(edit cursor, tokens)
+            change body_stmt = -1
+            when parserAtSymbol(source, cursor, tokens, "{{") {
+                body_stmt = parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
+            } otherwise when parserTakeWord(source, edit cursor, tokens, "return") {
+                hold ret_e = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+                hold r_end = astExprEnd(view tree, ret_e, p_end)
+                body_stmt = astAddStmt(edit tree, AstStmtKind.Return, p_start, r_end, ret_e, 0, 0, 0, 0)
+            } otherwise {
+                hold body_e = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+                hold b_end = astExprEnd(view tree, body_e, p_end)
+                body_stmt = astAddStmt(edit tree, AstStmtKind.Expr, p_start, b_end, body_e, 0, 0, 0, 0)
             }
-            arm_starts.push(p_start)
-            arm_ends.push(p_end)
-            arm_stmts.push(body_stmt)
-            parserTakeSymbol(source, &mut cursor, tokens, ",")
-            parserSkipSeparators(source, &mut cursor, tokens)
+            arm_starts@push(p_start)
+            arm_ends@push(p_end)
+            arm_stmts@push(body_stmt)
+            parserTakeSymbol(source, edit cursor, tokens, ",")
+            parserSkipSeparators(source, edit cursor, tokens)
         }
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "}}")
-        let end_pos = cursorPrevEnd(cursor, tokens, tok.end)
-        let first_arm = tree.extra.length
-        let arm_count = arm_starts.length
-        for a in 0..arm_count {
-            astAddExtra(&mut tree, arm_starts[a])
-            astAddExtra(&mut tree, arm_ends[a])
-            astAddExtra(&mut tree, arm_stmts[a])
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, "}}")
+        hold end_pos = cursorPrevEnd(cursor, tokens, tok.end)
+        hold first_arm = tree.extra.length
+        hold arm_count = arm_starts.length
+        each a among 0..arm_count {
+            astAddExtra(edit tree, arm_starts[a])
+            astAddExtra(edit tree, arm_ends[a])
+            astAddExtra(edit tree, arm_stmts[a])
         }
-        let match_expr = astAddExpr(&mut tree, AstExprKind.Match, tok.start, end_pos, scrutinee, first_arm, arm_count, 0)
-        return astAddStmt(&mut tree, AstStmtKind.Expr, tok.start, end_pos, match_expr, 0, 0, 0, 0)
+        hold match_expr = astAddExpr(edit tree, AstExprKind.Match, tok.start, end_pos, scrutinee, first_arm, arm_count, 0)
+        give astAddStmt(edit tree, AstStmtKind.Expr, tok.start, end_pos, match_expr, 0, 0, 0, 0)
     }
 
-    if parserAtSymbol(source, cursor, tokens, "{{") {
-        return parseBlock(&mut tree, source, &mut cursor, tokens, depth + 1)
+    when parserAtSymbol(source, cursor, tokens, "{{") {
+        give parseBlock(edit tree, source, edit cursor, tokens, depth + 1)
     }
 
-    let e = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-    if e < 0 { return -1 }
+    hold e = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+    when e < 0 { give -1 }
 
-    if parserAtSymbol(source, cursor, tokens, "=") || parserAtSymbol(source, cursor, tokens, "+=") || parserAtSymbol(source, cursor, tokens, "-=") || parserAtSymbol(source, cursor, tokens, "*=") || parserAtSymbol(source, cursor, tokens, "/=") || parserAtSymbol(source, cursor, tokens, "%=") {
-        let opTok = &tokens[cursor.pos]
-        let op_s = opTok.start
-        let op_e = opTok.end
+    when parserAtSymbol(source, cursor, tokens, "=") || parserAtSymbol(source, cursor, tokens, "+=") || parserAtSymbol(source, cursor, tokens, "-=") || parserAtSymbol(source, cursor, tokens, "*=") || parserAtSymbol(source, cursor, tokens, "/=") || parserAtSymbol(source, cursor, tokens, "%=") {
+        hold opTok = view tokens[cursor.pos]
+        hold op_s = opTok.start
+        hold op_e = opTok.end
         cursor.pos += 1
-        parserSkipNewlines(&mut cursor, tokens)
-        let val = parseExpr(&mut tree, source, &mut cursor, tokens, 0, 0, depth + 1)
-        let end_pos = astExprEnd(&tree, val, op_e)
+        parserSkipNewlines(edit cursor, tokens)
+        hold val = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, depth + 1)
+        hold end_pos = astExprEnd(view tree, val, op_e)
         // Read the target span before lending `tree` exclusively to astAddStmt.
-        let target_start = tree.expressions[e].start
-        return astAddStmt(&mut tree, AstStmtKind.Assign, target_start, end_pos, e, op_s, op_e, val, 0)
+        hold target_start = tree.expressions[e].start
+        give astAddStmt(edit tree, AstStmtKind.Assign, target_start, end_pos, e, op_s, op_e, val, 0)
     }
 
-    let explicit_semi = parserTakeSymbol(source, &mut cursor, tokens, ";")
-    let semi_flag = selectInt(explicit_semi, 1, 0)
-    let expr_start = tree.expressions[e].start
-    let expr_end = tree.expressions[e].end
-    return astAddStmt(&mut tree, AstStmtKind.Expr, expr_start, expr_end, e, semi_flag, 0, 0, 0)
+    hold explicit_semi = parserTakeSymbol(source, edit cursor, tokens, ";")
+    hold semi_flag = selectInt(explicit_semi, 1, 0)
+    hold expr_start = tree.expressions[e].start
+    hold expr_end = tree.expressions[e].end
+    give astAddStmt(edit tree, AstStmtKind.Expr, expr_start, expr_end, e, semi_flag, 0, 0, 0)
 }

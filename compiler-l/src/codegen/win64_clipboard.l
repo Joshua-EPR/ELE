@@ -543,7 +543,7 @@ flow wcEmitRead(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntim
     give entry
 }
 
-expose flow wcEmitClipboard(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, list_reserve: Int, utf8: Int) => List of[Int] {
+expose flow wcEmitClipboard(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, list_reserve: Int) => List of[Int] {
     hold d = wcData(edit code)
     change at: List of[Int] = List[]
     at@push(wcEmitWrite(edit code, edit imports, rt, view d))

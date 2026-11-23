@@ -114,14 +114,14 @@ with `of[...]` in declarations, annotations, and calls, including nested types.
 
 For each migrated file, run `ele check` (or the repository's equivalent), run
 its program when applicable, and retain the original positive and negative
-expectations. The `examples/` and `ejemplos/` trees have a v2-only ratchet;
-`compiler-l/src` has a decreasing legacy-syntax baseline to track the ongoing
-self-hosted source migration.
+expectations. The `examples/`, `ejemplos/`, and `compiler-l/src` trees have a
+v2-only ratchet. The compiler's own `.l` sources now use canonical ELE v2;
+the ratchet keeps them there while the remaining repository surfaces migrate.
 
 The Rust Stage 0 frontend accepts the documented v2 surface alongside legacy
 aliases during bootstrap. Stage 1 has a narrower supported subset; the current
 status, including generic and borrow limitations, is recorded in
 [`ELE_SYNTAX_V2.md`](ELE_SYNTAX_V2.md). Do not claim a feature works in Stage 1,
 Gen2, or Gen3 until that generation has compiled and exercised it. The
-standalone self-hosted parser's grammar is still legacy and is being migrated
-incrementally with its source modules.
+self-hosted parser still accepts legacy spellings as bootstrap aliases for
+input programs, alongside the canonical ELE v2 syntax.

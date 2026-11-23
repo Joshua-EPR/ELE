@@ -1,223 +1,223 @@
-import tokens
-import ast
-import sema_types
-import symbols
-import flow_cfg
-import drops_plan
-import lir_build
-import lir_finish
-import lir_verify
-import lir_emit
-import lir_write
-import lir_builtin_union
+take tokens
+take ast
+take sema_types
+take symbols
+take flow_cfg
+take drops_plan
+take lir_build
+take lir_finish
+take lir_verify
+take lir_emit
+take lir_write
+take lir_builtin_union
 take lir_patch
-import sema_context
-import sema_drop
+take sema_context
+take sema_drop
 
 // Module level of the ELE LIR: index tables, signatures, struct layouts,
 // the protocol header, and the per-function finish (splice the drop plan,
 // verify, serialize). Only `sema-l --emit-lir` finishes and writes LIR.
 
-pub fn semaLirSetup(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
-    for f in 0..tree.fields.length { ctx.lir_field_local.push(-1) }
-    var functions = 0
-    var structs = 0
-    for d in 0..tree.declarations.length {
-        ctx.lir_func_index.push(-1)
-        ctx.lir_struct_index.push(-1)
-        let decl = &tree.declarations[d]
-        match decl.kind {
-            AstDeclKind.Function => {
+expose flow semaLirSetup(ctx: edit SemaContext, source: view Text, tree: view AstTree) {
+    each f among 0..tree.fields.length { ctx.lir_field_local@push(-1) }
+    change functions = 0
+    change structs = 0
+    each d among 0..tree.declarations.length {
+        ctx.lir_func_index@push(-1)
+        ctx.lir_struct_index@push(-1)
+        hold decl = view tree.declarations[d]
+        choose decl.kind {
+            AstDeclKind.Function : {
                 ctx.lir_func_index[d] = functions
-                let main_name = "main"
-                if symbolNameEqualsText(source, decl.a, decl.b, main_name) { ctx.lir_main = functions }
+                hold main_name = "main"
+                when symbolNameEqualsText(source, decl.a, decl.b, main_name) { ctx.lir_main = functions }
                 functions += 1
             }
-            AstDeclKind.Struct => {
+            AstDeclKind.Struct : {
                 ctx.current_module = semaDeclModule(ctx, d)
                 ctx.lir_struct_index[d] = structs
-                for f in decl.c..(decl.c + decl.d) { ctx.lir_field_local[f] = f - decl.c }
-                ctx.lir_module.st_first.push(ctx.lir_module.field_ty.length)
-                ctx.lir_module.st_count.push(decl.d)
-                ctx.lir_module.st_decl.push(d)
-                for f in decl.c..(decl.c + decl.d) {
-                    let ty = semaFieldType(&mut ctx, source, tree, f)
-                    ctx.lir_module.field_ty.push(ty)
+                each f among decl.c..(decl.c + decl.d) { ctx.lir_field_local[f] = f - decl.c }
+                ctx.lir_module.st_first@push(ctx.lir_module.field_ty.length)
+                ctx.lir_module.st_count@push(decl.d)
+                ctx.lir_module.st_decl@push(d)
+                each f among decl.c..(decl.c + decl.d) {
+                    hold ty = semaFieldType(edit ctx, source, tree, f)
+                    ctx.lir_module.field_ty@push(ty)
                 }
                 structs += 1
             }
-            AstDeclKind.Enum => {
+            AstDeclKind.Enum : {
                 ctx.current_module = semaDeclModule(ctx, d)
-                ctx.lir_module.en_decl.push(d)
-                ctx.lir_module.en_builtin.push(-1)
-                ctx.lir_module.en_first.push(ctx.lir_module.variant_payload.length)
-                ctx.lir_module.en_count.push(decl.d)
-                var has_payload = false
-                for v in decl.c..(decl.c + decl.d) {
-                    let n = tree.variants[v].payload_count
-                    ctx.lir_module.variant_payload.push(n)
-                    var payload_ty = 6
-                    if n > 0 {
-                        payload_ty = semaResolveAstType(&mut ctx, source, tree, tree.extra[tree.variants[v].first_payload_index])
+                ctx.lir_module.en_decl@push(d)
+                ctx.lir_module.en_builtin@push(-1)
+                ctx.lir_module.en_first@push(ctx.lir_module.variant_payload.length)
+                ctx.lir_module.en_count@push(decl.d)
+                change has_payload = false
+                each v among decl.c..(decl.c + decl.d) {
+                    hold n = tree.variants[v].payload_count
+                    ctx.lir_module.variant_payload@push(n)
+                    change payload_ty = 6
+                    when n > 0 {
+                        payload_ty = semaResolveAstType(edit ctx, source, tree, tree.extra[tree.variants[v].first_payload_index])
                         has_payload = true
                     }
-                    ctx.lir_module.variant_type.push(payload_ty)
+                    ctx.lir_module.variant_type@push(payload_ty)
                 }
-                if !has_payload { ctx.lir_module.unit_enums.push(d) }
+                when !has_payload { ctx.lir_module.unit_enums@push(d) }
             }
-            _ => {}
+            _ : {}
         }
     }
-    for d in 0..tree.declarations.length {
-        let decl = &tree.declarations[d]
-        match decl.kind {
-            AstDeclKind.Function => { semaLirSignature(&mut ctx, source, tree, d) }
-            _ => {}
+    each d among 0..tree.declarations.length {
+        hold decl = view tree.declarations[d]
+        choose decl.kind {
+            AstDeclKind.Function : { semaLirSignature(edit ctx, source, tree, d) }
+            _ : {}
         }
     }
     // Signatures have resolved their concrete generic types. Newly inferred
     // Option/Result types are additionally registered as expressions lower.
-    for t in 8..ctx.types.types.length {
-        lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, t)
+    each t among 8..ctx.types.types.length {
+        lirBuiltinRegister(edit ctx.lir_module, view ctx.types, t)
     }
-    for t in 8..ctx.types.types.length {
-        match ctx.types.types[t].kind {
-            SemTypeKind.List => {
-                let elem = ctx.types.types[t].elem_type
-                var found = false
-                for k in 0..ctx.lir_module.list_elem.length {
-                    if ctx.lir_module.list_elem[k] == elem { found = true }
+    each t among 8..ctx.types.types.length {
+        choose ctx.types.types[t].kind {
+            SemTypeKind.List : {
+                hold elem = ctx.types.types[t].elem_type
+                change found = false
+                each k among 0..ctx.lir_module.list_elem.length {
+                    when ctx.lir_module.list_elem[k] == elem { found = true }
                 }
-                if !found {
-                    ctx.lir_module.list_elem.push(elem)
+                when !found {
+                    ctx.lir_module.list_elem@push(elem)
                 }
             }
-            _ => {}
+            _ : {}
         }
     }
 }
 
-pub fn semaLirComplete(ctx: &mut SemaContext, source: &Text, tree: &AstTree) {
-    if !ctx.emit_lir || ctx.errors.length > 0 { return }
+expose flow semaLirComplete(ctx: edit SemaContext, source: view Text, tree: view AstTree) {
+    when !ctx.emit_lir || ctx.errors.length > 0 { give }
     // Determine header function count before taking a mutable loan of ctx.
-    let function_count = ctx.lir_module.fn_first.length
-    semaLirHeader(&mut ctx, source, tree, function_count)
+    hold function_count = ctx.lir_module.fn_first.length
+    semaLirHeader(edit ctx, source, tree, function_count)
 }
 
-fn semaLirSignature(ctx: &mut SemaContext, source: &Text, tree: &AstTree, d: Int) {
+flow semaLirSignature(ctx: edit SemaContext, source: view Text, tree: view AstTree, d: Int) {
     ctx.current_module = semaDeclModule(ctx, d)
-    let decl = &tree.declarations[d]
-    ctx.lir_module.fn_first.push(ctx.lir_module.param_ty.length)
-    ctx.lir_module.fn_count.push(decl.e)
-    ctx.lir_module.fn_decl.push(d)
-    for p in 0..decl.e {
-        let ty = semaResolveAstType(&mut ctx, source, tree, tree.params[decl.d + p].type_id)
-        let elem = semaRefElem(ctx, ty)
-        if elem >= 0 {
-            ctx.lir_module.param_ty.push(elem)
-        } else {
-            ctx.lir_module.param_ty.push(ty)
+    hold decl = view tree.declarations[d]
+    ctx.lir_module.fn_first@push(ctx.lir_module.param_ty.length)
+    ctx.lir_module.fn_count@push(decl.e)
+    ctx.lir_module.fn_decl@push(d)
+    each p among 0..decl.e {
+        hold ty = semaResolveAstType(edit ctx, source, tree, tree.params[decl.d + p].type_id)
+        hold elem = semaRefElem(ctx, ty)
+        when elem >= 0 {
+            ctx.lir_module.param_ty@push(elem)
+        } otherwise {
+            ctx.lir_module.param_ty@push(ty)
         }
-        ctx.lir_module.param_ref.push(elem >= 0)
-        ctx.lir_module.param_mut.push(semaIsMutRef(ctx, ty))
+        ctx.lir_module.param_ref@push(elem >= 0)
+        ctx.lir_module.param_mut@push(semaIsMutRef(ctx, ty))
     }
-    var ret = 6
-    if decl.f >= 0 { ret = semaResolveAstType(&mut ctx, source, tree, decl.f) }
-    let elem = semaRefElem(ctx, ret)
-    ctx.lir_module.fn_ret_ref.push(elem >= 0)
-    ctx.lir_module.fn_ret_mut.push(semaIsMutRef(ctx, ret))
-    if elem >= 0 { ret = elem }
-    ctx.lir_module.fn_ret.push(ret)
+    change ret = 6
+    when decl.f >= 0 { ret = semaResolveAstType(edit ctx, source, tree, decl.f) }
+    hold elem = semaRefElem(ctx, ret)
+    ctx.lir_module.fn_ret_ref@push(elem >= 0)
+    ctx.lir_module.fn_ret_mut@push(semaIsMutRef(ctx, ret))
+    when elem >= 0 { ret = elem }
+    ctx.lir_module.fn_ret@push(ret)
 }
 
-fn semaLirHeader(ctx: &mut SemaContext, source: &Text, tree: &AstTree, functions: Int) {
-    let structs = ctx.lir_module.st_decl.length
-    let enums = ctx.lir_module.en_decl.length
-    let lists = ctx.lir_module.list_elem.length
-    let main = ctx.lir_main
-    ctx.lir_lines.push("ELE-LIR 1")
-    var header = "module structs {structs}"
-    if enums > 0 { header = "{header} enums {enums}" }
-    if lists > 0 { header = "{header} lists {lists}" }
-    ctx.lir_lines.push("{header} funcs {functions} main f{main}")
-    for k in 0..structs {
-        let decl = &tree.declarations[ctx.lir_module.st_decl[k]]
-        let name = lirSpanText(source, decl.a, decl.b)
-        let count = decl.d
-        ctx.lir_lines.push("struct s{k} {name} fields {count}")
-        for f in decl.c..(decl.c + decl.d) {
-            let field_name = lirSpanText(source, tree.fields[f].name_start, tree.fields[f].name_end)
-            let ty = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.field_ty[ctx.lir_module.st_first[k] + f - decl.c])
-            ctx.lir_lines.push("field {field_name} {ty}")
+flow semaLirHeader(ctx: edit SemaContext, source: view Text, tree: view AstTree, functions: Int) {
+    hold structs = ctx.lir_module.st_decl.length
+    hold enums = ctx.lir_module.en_decl.length
+    hold lists = ctx.lir_module.list_elem.length
+    hold main = ctx.lir_main
+    ctx.lir_lines@push("ELE-LIR 1")
+    change header = "module structs {structs}"
+    when enums > 0 { header = "{header} enums {enums}" }
+    when lists > 0 { header = "{header} lists {lists}" }
+    ctx.lir_lines@push("{header} funcs {functions} main f{main}")
+    each k among 0..structs {
+        hold decl = view tree.declarations[ctx.lir_module.st_decl[k]]
+        hold name = lirSpanText(source, decl.a, decl.b)
+        hold count = decl.d
+        ctx.lir_lines@push("struct s{k} {name} fields {count}")
+        each f among decl.c..(decl.c + decl.d) {
+            hold field_name = lirSpanText(source, tree.fields[f].name_start, tree.fields[f].name_end)
+            hold ty = lirTypeCode(view ctx.types, view ctx.lir_module, ctx.lir_module.field_ty[ctx.lir_module.st_first[k] + f - decl.c])
+            ctx.lir_lines@push("field {field_name} {ty}")
         }
     }
-    for k in 0..enums {
-        if ctx.lir_module.en_builtin[k] >= 0 {
-            let first_variant = ctx.lir_module.en_first[k]
-            let first_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant])
-            let second_code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
+    each k among 0..enums {
+        when ctx.lir_module.en_builtin[k] >= 0 {
+            hold first_variant = ctx.lir_module.en_first[k]
+            hold first_code = lirTypeCode(view ctx.types, view ctx.lir_module, ctx.lir_module.variant_type[first_variant])
+            hold second_code = lirTypeCode(view ctx.types, view ctx.lir_module, ctx.lir_module.variant_type[first_variant + 1])
             // An owned payload (e.g. a list type never registered) must have
             // a concrete LIR type code; `?` is never serialized.
             hold unit_first = ctx.lir_module.variant_payload[first_variant] == 0
             when (!unit_first && first_code.byteLength == 1 && first_code@byteAt(0) == 63) || (second_code.byteLength == 1 && second_code@byteAt(0) == 63) {
                 semaAddError(edit ctx, "L0016", "payload de Option/Result no representable en ELE-LIR 1", 0, 0)
             }
-            lirBuiltinHeader(&mut ctx, k, first_code, second_code)
-            continue
+            lirBuiltinHeader(edit ctx, k, first_code, second_code)
+            proceed
         }
-        let d = ctx.lir_module.en_decl[k]
+        hold d = ctx.lir_module.en_decl[k]
         ctx.current_module = semaDeclModule(ctx, d)
-        let decl = &tree.declarations[d]
-        let name = lirSpanText(source, decl.a, decl.b)
-        let count = decl.d
-        ctx.lir_lines.push("enum e{k} {name} variants {count}")
-        for v in decl.c..(decl.c + decl.d) {
-            let variant = &tree.variants[v]
-            let vname = lirSpanText(source, variant.name_start, variant.name_end)
-            let payload_count = variant.payload_count
-            var line = "variant {vname} types {payload_count}"
-            for i in 0..payload_count {
-                let ty = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index + i])
-                let code = lirTypeCode(&ctx.types, &ctx.lir_module, ty)
-                if code.byteLength == 1 && code.byteAt(0) == 63 {
-                    semaAddError(&mut ctx, "L0016", "payload de enum no representable en ELE-LIR 1", variant.start, variant.end)
+        hold decl = view tree.declarations[d]
+        hold name = lirSpanText(source, decl.a, decl.b)
+        hold count = decl.d
+        ctx.lir_lines@push("enum e{k} {name} variants {count}")
+        each v among decl.c..(decl.c + decl.d) {
+            hold variant = view tree.variants[v]
+            hold vname = lirSpanText(source, variant.name_start, variant.name_end)
+            hold payload_count = variant.payload_count
+            change line = "variant {vname} types {payload_count}"
+            each i among 0..payload_count {
+                hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index + i])
+                hold code = lirTypeCode(view ctx.types, view ctx.lir_module, ty)
+                when code.byteLength == 1 && code@byteAt(0) == 63 {
+                    semaAddError(edit ctx, "L0016", "payload de enum no representable en ELE-LIR 1", variant.start, variant.end)
                 }
                 line = "{line} {code}"
             }
-            ctx.lir_lines.push(line)
+            ctx.lir_lines@push(line)
         }
     }
-    for k in 0..lists {
-        let elem_t = ctx.lir_module.list_elem[k]
-        let elem_ty = lirTypeCode(&ctx.types, &ctx.lir_module, elem_t)
-        ctx.lir_lines.push("list l{k} {elem_ty}")
+    each k among 0..lists {
+        hold elem_t = ctx.lir_module.list_elem[k]
+        hold elem_ty = lirTypeCode(view ctx.types, view ctx.lir_module, elem_t)
+        ctx.lir_lines@push("list l{k} {elem_ty}")
     }
 }
 
 // Is every variable, signature and field type representable in LIR v1?
-fn semaLirTypesOk(ctx: &SemaContext, fn_index: Int) -> Bool {
-    for i in 0..ctx.lir.vars.length {
-        let code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir.vars[i].ty)
-        if code.byteLength == 1 && code.byteAt(0) == 63 { return false }
+flow semaLirTypesOk(ctx: view SemaContext, fn_index: Int) => Bool {
+    each i among 0..ctx.lir.vars.length {
+        hold code = lirTypeCode(view ctx.types, view ctx.lir_module, ctx.lir.vars[i].ty)
+        when code.byteLength == 1 && code@byteAt(0) == 63 { give false }
     }
-    for i in 0..ctx.lir_module.field_ty.length {
-        let code = lirTypeCode(&ctx.types, &ctx.lir_module, ctx.lir_module.field_ty[i])
-        if code.byteLength == 1 && code.byteAt(0) == 63 { return false }
+    each i among 0..ctx.lir_module.field_ty.length {
+        hold code = lirTypeCode(view ctx.types, view ctx.lir_module, ctx.lir_module.field_ty[i])
+        when code.byteLength == 1 && code@byteAt(0) == 63 { give false }
     }
-    return true
+    give true
 }
 
-pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan: &DropPlan, d: Int) {
-    if !ctx.emit_lir { return }
-    let decl = &tree.declarations[d]
-    let fn_index = ctx.lir_func_index[d]
-    if ctx.lir.unsupported >= 0 || !semaLirTypesOk(ctx, fn_index) {
-        var at = decl.start
-        if ctx.lir.unsupported >= 0 { at = ctx.lir.unsupported }
-        semaAddError(&mut ctx, "L0016", "construcción fuera del subconjunto de la LIR v1 de ELE", at, at)
-        return
+expose flow semaLirFinish(ctx: edit SemaContext, source: view Text, tree: view AstTree, plan: view DropPlan, d: Int) {
+    when !ctx.emit_lir { give }
+    hold decl = view tree.declarations[d]
+    hold fn_index = ctx.lir_func_index[d]
+    when ctx.lir.unsupported >= 0 || !semaLirTypesOk(ctx, fn_index) {
+        change at = decl.start
+        when ctx.lir.unsupported >= 0 { at = ctx.lir.unsupported }
+        semaAddError(edit ctx, "L0016", "construcción fuera del subconjunto de la LIR v1 de ELE", at, at)
+        give
     }
-    var body = lirFinish(&mut ctx.lir, &ctx.flow, plan, &ctx.lir_field_local)
+    change body = lirFinish(edit ctx.lir, view ctx.flow, plan, view ctx.lir_field_local)
     when ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(edit ctx.lir, edit body, ctx.lir_fault) }
     when ctx.lir_fault >= 14 { lirInjectUnionFault(edit ctx.lir, edit body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, ctx.lir_fault) }
     when ctx.lir_patch.byteLength > 0 {
@@ -227,17 +227,17 @@ pub fn semaLirFinish(ctx: &mut SemaContext, source: &Text, tree: &AstTree, plan:
             give
         }
     }
-    let checked = lirVerify(&ctx.lir, &body, &ctx.types, &ctx.lir_module, &ctx.drop_memo, fn_index)
-    if checked.status != 0 {
-        let rule = checked.status
-        let block = checked.block
-        semaAddError(&mut ctx, "ICE", "error interno del compilador: LIR inválida (regla {rule}, bloque {block})", decl.start, decl.end)
-        return
+    hold checked = lirVerify(view ctx.lir, view body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, fn_index)
+    when checked.status != 0 {
+        hold rule = checked.status
+        hold block = checked.block
+        semaAddError(edit ctx, "ICE", "error interno del compilador: LIR inválida (regla {rule}, bloque {block})", decl.start, decl.end)
+        give
     }
     ctx.lir_insts += body.order.length
     ctx.lir_blocks += body.term.length
-    if ctx.lir_line_starts.length == 0 { ctx.lir_line_starts = lirLineStarts(source) }
-    lirWriteFunction(&mut ctx.lir_functions, &ctx.lir_line_starts, &ctx.lir, &body, source, &ctx.types, &ctx.lir_module, fn_index, decl.a, decl.b)
+    when ctx.lir_line_starts.length == 0 { ctx.lir_line_starts = lirLineStarts(source) }
+    lirWriteFunction(edit ctx.lir_functions, view ctx.lir_line_starts, view ctx.lir, view body, source, view ctx.types, view ctx.lir_module, fn_index, decl.a, decl.b)
 }
 
 // Test hook (`sema-l archivo.l --lir-fault=K`): corrupt a verified
@@ -326,69 +326,69 @@ flow lirInjectUnionFault(l: edit LirFn, body: edit LirBody, types: view TypeTabl
     }
 }
 
-fn lirInjectFault(l: &mut LirFn, body: &mut LirBody, fault: Int) {
-    for n in 0..body.order.length {
-        let id = body.order[n]
-        let kind = l.insts[id].kind
-        if fault == 1 && kind == LIR_USE {
+flow lirInjectFault(l: edit LirFn, body: edit LirBody, fault: Int) {
+    each n among 0..body.order.length {
+        hold id = body.order[n]
+        hold kind = l.insts[id].kind
+        when fault == 1 && kind == LIR_USE {
             l.insts[id].dst = l.vars.length + 3
-            return
+            give
         }
-        if fault == 3 && kind == LIR_BINARY {
-            l.insts[id].c = lirConst(&mut l, LIR_CONST_BOOL, 1, 0, 0)
-            return
+        when fault == 3 && kind == LIR_BINARY {
+            l.insts[id].c = lirConst(edit l, LIR_CONST_BOOL, 1, 0, 0)
+            give
         }
-        if fault == 5 && kind == LIR_CALL {
+        when fault == 5 && kind == LIR_CALL {
             l.insts[id].c = l.insts[id].c + 1
-            return
+            give
         }
-        if fault == 6 && kind == LIR_DROP {
-            l.insts[id].dst = lirVar(&mut l, 1, false)
-            return
+        when fault == 6 && kind == LIR_DROP {
+            l.insts[id].dst = lirVar(edit l, 1, false)
+            give
         }
-        if kind == LIR_PLATFORM {
-            if fault == 9 { l.insts[id].a = 99; return }
-            if fault == 10 { l.insts[id].c += 1; return }
-            if fault == 11 && l.insts[id].c > 0 {
-                let first = l.insts[id].b
-                let arg = l.operands[first]
+        when kind == LIR_PLATFORM {
+            when fault == 9 { l.insts[id].a = 99; give }
+            when fault == 10 { l.insts[id].c += 1; give }
+            when fault == 11 && l.insts[id].c > 0 {
+                hold first = l.insts[id].b
+                hold arg = l.operands[first]
                 l.args[arg].by_ref = false
-                return
+                give
             }
-            if fault == 12 {
+            when fault == 12 {
                 l.vars[l.insts[id].dst].ty = 4
-                return
+                give
             }
-            if fault == 13 && l.insts[id].c > 0 {
-                let first = l.insts[id].b
+            when fault == 13 && l.insts[id].c > 0 {
+                hold first = l.insts[id].b
                 l.operands[first] = l.args.length + 1
-                return
+                give
             }
         }
-        if fault == 8 && (kind == LIR_READ || kind == LIR_STORE) && l.places[l.insts[id].a].parent >= 0 {
+        when fault == 8 && (kind == LIR_READ || kind == LIR_STORE) && l.places[l.insts[id].a].parent >= 0 {
             l.places[l.insts[id].a].field = 99
-            return
+            give
         }
     }
-    if fault == 4 {
+    when fault == 4 {
         // Use a fresh, never assigned variable as the first operand read.
-        let fresh = lirVar(&mut l, 1, false)
-        for n in 0..body.order.length {
-            let id = body.order[n]
-            if l.insts[id].kind == LIR_BINARY {
+        hold fresh = lirVar(edit l, 1, false)
+        each n among 0..body.order.length {
+            hold id = body.order[n]
+            when l.insts[id].kind == LIR_BINARY {
                 l.insts[id].b = fresh
-                return
+                give
             }
         }
     }
-    for b in 0..body.term.length {
-        if fault == 2 && (body.term[b] == LIR_T_JUMP || body.term[b] == LIR_T_BRANCH) {
+    each b among 0..body.term.length {
+        when fault == 2 && (body.term[b] == LIR_T_JUMP || body.term[b] == LIR_T_BRANCH) {
             body.ta[b] = body.term.length + 5
-            return
+            give
         }
-        if fault == 7 && body.term[b] == LIR_T_RETURN {
-            body.top[b] = lirConst(&mut l, LIR_CONST_BOOL, 0, 0, 0)
-            return
+        when fault == 7 && body.term[b] == LIR_T_RETURN {
+            body.top[b] = lirConst(edit l, LIR_CONST_BOOL, 0, 0, 0)
+            give
         }
     }
 }

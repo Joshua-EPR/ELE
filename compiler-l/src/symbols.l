@@ -1,6 +1,6 @@
-import sema_types
+take sema_types
 
-pub enum SymbolKind {
+expose choice SymbolKind {
     Var
     Param
     Func
@@ -11,7 +11,7 @@ pub enum SymbolKind {
     Const
 }
 
-pub struct Symbol {
+expose shape Symbol {
     move_path: Int
     kind: SymbolKind
     name_start: Int
@@ -27,18 +27,18 @@ pub struct Symbol {
     module_id: Int
 }
 
-pub struct SymbolTable {
-    symbols: List<Symbol>
+expose shape SymbolTable {
+    symbols: List of[Symbol]
 }
 
-pub fn symbolTableNew() -> SymbolTable {
-    let list: List<Symbol> = List[]
-    return SymbolTable(symbols: list)
+expose flow symbolTableNew() => SymbolTable {
+    hold list: List of[Symbol] = List[]
+    give SymbolTable(symbols: list)
 }
 
-pub fn symbolAdd(table: &mut SymbolTable, kind: SymbolKind, name_start: Int, name_end: Int, type_id: Int, scope_id: Int, is_mut: Bool, is_pub: Bool, decl_id: Int, start: Int, end: Int) -> Int {
-    let id = table.symbols.length
-    table.symbols.push(Symbol(
+expose flow symbolAdd(table: edit SymbolTable, kind: SymbolKind, name_start: Int, name_end: Int, type_id: Int, scope_id: Int, is_mut: Bool, is_pub: Bool, decl_id: Int, start: Int, end: Int) => Int {
+    hold id = table.symbols.length
+    table.symbols@push(Symbol(
         move_path: -1,
         kind: kind,
         name_start: name_start,
@@ -52,38 +52,38 @@ pub fn symbolAdd(table: &mut SymbolTable, kind: SymbolKind, name_start: Int, nam
         decl_span_end: end,
         module_id: -1,
     ))
-    return id
+    give id
 }
 
-pub fn symbolSetModule(table: &mut SymbolTable, sym_id: Int, module_id: Int) {
-    if sym_id < 0 || sym_id >= table.symbols.length { return }
+expose flow symbolSetModule(table: edit SymbolTable, sym_id: Int, module_id: Int) {
+    when sym_id < 0 || sym_id >= table.symbols.length { give }
     table.symbols[sym_id].module_id = module_id
 }
 
 // A symbol is visible from `module_id` when it is a local (module -1), from
 // the same module, or public. Cross-module access only happens through public
 // symbols, which is the visibility rule enforced by the module system.
-pub fn symbolVisible(sym: &Symbol, module_id: Int, allowed: &List<Int>, module_count: Int) -> Bool {
-    if sym.module_id < 0 { return true }
-    if sym.module_id == module_id { return true }
-    if !sym.is_pub { return false }
+expose flow symbolVisible(sym: view Symbol, module_id: Int, allowed: view List of[Int], module_count: Int) => Bool {
+    when sym.module_id < 0 { give true }
+    when sym.module_id == module_id { give true }
+    when !sym.is_pub { give false }
     // Without a module loader, preserve existing isolated Stage 1 tests.
-    if module_count == 0 { return true }
-    if module_id < 0 || module_id >= module_count { return false }
-    if sym.module_id >= module_count { return false }
-    let pos = module_id * module_count + sym.module_id
-    if pos < 0 || pos >= allowed.length { return false }
-    return allowed[pos] == 1
+    when module_count == 0 { give true }
+    when module_id < 0 || module_id >= module_count { give false }
+    when sym.module_id >= module_count { give false }
+    hold pos = module_id * module_count + sym.module_id
+    when pos < 0 || pos >= allowed.length { give false }
+    give allowed[pos] == 1
 }
 
-pub fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b_end: Int) -> Bool {
-    let len_a = a_end - a_start
-    let len_b = b_end - b_start
-    if len_a != len_b { return false }
-    if len_a <= 0 { return true }
+expose flow symbolNamesEqual(source: view Text, a_start: Int, a_end: Int, b_start: Int, b_end: Int) => Bool {
+    hold len_a = a_end - a_start
+    hold len_b = b_end - b_start
+    when len_a != len_b { give false }
+    when len_a <= 0 { give true }
     when a_start == b_start { give true }
-    if a_start < 0 || a_end > source.byteLength { return false }
-    if b_start < 0 || b_end > source.byteLength { return false }
+    when a_start < 0 || a_end > source.byteLength { give false }
+    when b_start < 0 || b_end > source.byteLength { give false }
     when source@byteAt(a_start) != source@byteAt(b_start) { give false }
 
     each i among 1..len_a {
@@ -91,15 +91,15 @@ pub fn symbolNamesEqual(source: &Text, a_start: Int, a_end: Int, b_start: Int, b
             give false
         }
     }
-    return true
+    give true
 }
 
-pub fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, target: &Text) -> Bool {
-    let len_a = name_end - name_start
-    let len_t = target.byteLength
-    if len_a != len_t { return false }
-    if len_a <= 0 { return true }
-    if name_start < 0 || name_end > source.byteLength { return false }
+expose flow symbolNameEqualsText(source: view Text, name_start: Int, name_end: Int, target: view Text) => Bool {
+    hold len_a = name_end - name_start
+    hold len_t = target.byteLength
+    when len_a != len_t { give false }
+    when len_a <= 0 { give true }
+    when name_start < 0 || name_end > source.byteLength { give false }
     when source@byteAt(name_start) != target@byteAt(0) { give false }
 
     each i among 1..len_a {
@@ -107,22 +107,22 @@ pub fn symbolNameEqualsText(source: &Text, name_start: Int, name_end: Int, targe
             give false
         }
     }
-    return true
+    give true
 }
 
-pub fn symbolName(source: &Text, sym: &Symbol) -> Text {
-    return "<symbol>"
+expose flow symbolName(source: view Text, sym: view Symbol) => Text {
+    give "<symbol>"
 }
 
-pub fn symbolKindName(kind: SymbolKind) -> Text {
-    match kind {
-        SymbolKind.Var => { return "Var" }
-        SymbolKind.Param => { return "Param" }
-        SymbolKind.Func => { return "Func" }
-        SymbolKind.Struct => { return "Struct" }
-        SymbolKind.Enum => { return "Enum" }
-        SymbolKind.Variant => { return "Variant" }
-        SymbolKind.Field => { return "Field" }
-        SymbolKind.Const => { return "Const" }
+expose flow symbolKindName(kind: SymbolKind) => Text {
+    choose kind {
+        SymbolKind.Var : { give "Var" }
+        SymbolKind.Param : { give "Param" }
+        SymbolKind.Func : { give "Func" }
+        SymbolKind.Struct : { give "Struct" }
+        SymbolKind.Enum : { give "Enum" }
+        SymbolKind.Variant : { give "Variant" }
+        SymbolKind.Field : { give "Field" }
+        SymbolKind.Const : { give "Const" }
     }
 }

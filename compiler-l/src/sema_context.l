@@ -1,31 +1,31 @@
-import tokens
-import ast
-import sema_types
-import symbols
-import scopes
-import flow_cfg
-import loans_l
-import lir_build
+take tokens
+take ast
+take sema_types
+take symbols
+take scopes
+take flow_cfg
+take loans_l
+take lir_build
 
-pub const ACCESS_READ = 0
-pub const ACCESS_MOVE = 1
-pub const ACCESS_PLACE = 2
+expose fixed ACCESS_READ = 0
+expose fixed ACCESS_MOVE = 1
+expose fixed ACCESS_PLACE = 2
 
 // Syntactic positions where a borrow or a borrowed call result may appear.
-pub const SITE_NONE = 0
-pub const SITE_LET = 1
-pub const SITE_VAR = 2
-pub const SITE_ARG = 3
-pub const SITE_RETURN = 4
+expose fixed SITE_NONE = 0
+expose fixed SITE_LET = 1
+expose fixed SITE_VAR = 2
+expose fixed SITE_ARG = 3
+expose fixed SITE_RETURN = 4
 
-pub struct SemaError {
+expose shape SemaError {
     code: Text
     message: Text
     start: Int
     end: Int
 }
 
-pub struct SemaContext {
+expose shape SemaContext {
     types: TypeTable
     symbols: SymbolTable
     scopes: ScopeTree
@@ -37,7 +37,7 @@ pub struct SemaContext {
     flow_iterations: Int
     flow_loans: Int
     loan_iterations: Int
-    errors: List<SemaError>
+    errors: List of[SemaError]
     current_fn_ret_type: Int
     current_fn_is_async: Bool
     expected_list_type: Int
@@ -46,8 +46,8 @@ pub struct SemaContext {
     // Module identity: the module whose declarations are being analyzed,
     // and the owning module of each merged-tree declaration.
     current_module: Int
-    decl_module: List<Int>
-    module_access: List<Int>
+    decl_module: List of[Int]
+    module_access: List of[Int]
     module_count: Int
     // Position of the expression being inferred (SITE_*), consumed by it.
     borrow_site: Int
@@ -56,12 +56,12 @@ pub struct SemaContext {
     // Drop elaboration (sema_drop.l): memo per type and per AST field,
     // owned root paths in declaration order, scope marks into it, the
     // mark of the innermost loop and the temporaries of the statement.
-    drop_memo: List<Int>
-    field_types: List<Int>
-    owned_locals: List<Int>
-    scope_marks: List<Int>
+    drop_memo: List of[Int]
+    field_types: List of[Int]
+    owned_locals: List of[Int]
+    scope_marks: List of[Int]
     loop_mark: Int
-    pending_temps: List<Int>
+    pending_temps: List of[Int]
     // Symbols whose value a `choose` arm with a non-Copy binding examines:
     // assigning them inside that arm is L0005 (SEMANTICS.md, Stage 0).
     frozen_symbols: List of[Int]
@@ -80,27 +80,27 @@ pub struct SemaContext {
     lir_fault: Int
     // Test hook: forged-instruction patch applied before verification.
     lir_patch: Text
-    lir_lines: List<Text>
-    lir_functions: List<Text>
-    lir_line_starts: List<Int>
-    lir_field_local: List<Int>
-    lir_func_index: List<Int>
-    lir_struct_index: List<Int>
+    lir_lines: List of[Text]
+    lir_functions: List of[Text]
+    lir_line_starts: List of[Int]
+    lir_field_local: List of[Int]
+    lir_func_index: List of[Int]
+    lir_struct_index: List of[Int]
     lir_main: Int
     lir_insts: Int
     lir_blocks: Int
     lir_failed: Int
 }
 
-pub fn semaContextNew() -> SemaContext {
-    let errs: List<SemaError> = List[]
-    let drop_memo: List<Int> = List[]
-    let field_types: List<Int> = List[]
-    let owned_locals: List<Int> = List[]
-    let scope_marks: List<Int> = List[]
-    let pending_temps: List<Int> = List[]
+expose flow semaContextNew() => SemaContext {
+    hold errs: List of[SemaError] = List[]
+    hold drop_memo: List of[Int] = List[]
+    hold field_types: List of[Int] = List[]
+    hold owned_locals: List of[Int] = List[]
+    hold scope_marks: List of[Int] = List[]
+    hold pending_temps: List of[Int] = List[]
     hold frozen_symbols: List of[Int] = List[]
-    return SemaContext(
+    give SemaContext(
         types: typeTableNew(),
         symbols: symbolTableNew(),
         scopes: scopeTreeNew(),
@@ -154,137 +154,137 @@ pub fn semaContextNew() -> SemaContext {
     )
 }
 
-pub fn semaInitPath(ctx: &mut SemaContext, symbol: Int, start: Int, end: Int) {
-    let path = flowRoot(&mut ctx.flow, symbol)
+expose flow semaInitPath(ctx: edit SemaContext, symbol: Int, start: Int, end: Int) {
+    hold path = flowRoot(edit ctx.flow, symbol)
     ctx.symbols.symbols[symbol].move_path = path
-    flowEvent(&mut ctx.flow, FLOW_INIT, path, start, end)
+    flowEvent(edit ctx.flow, FLOW_INIT, path, start, end)
 }
 
-pub fn semaAccess(ctx: &mut SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
+expose flow semaAccess(ctx: edit SemaContext, path: Int, ty: Int, mode: Int, start: Int, end: Int) {
     ctx.expression_path = path
-    if path < 0 || mode == ACCESS_PLACE { return }
-    if ty < 0 || ty >= ctx.types.types.length { return }
-    var kind = FLOW_READ
-    let t = &ctx.types.types[ty]
-    if mode == ACCESS_MOVE && semTypeIsMove(t.kind) {
-        if loanOfPath(&ctx.flow, path) >= 0 {
-            semaAddError(&mut ctx, "L0005", "no se puede mover un valor recibido por referencia", start, end)
-        } else {
+    when path < 0 || mode == ACCESS_PLACE { give }
+    when ty < 0 || ty >= ctx.types.types.length { give }
+    change kind = FLOW_READ
+    hold t = view ctx.types.types[ty]
+    when mode == ACCESS_MOVE && semTypeIsMove(t.kind) {
+        when loanOfPath(view ctx.flow, path) >= 0 {
+            semaAddError(edit ctx, "L0005", "no se puede mover un valor recibido por referencia", start, end)
+        } otherwise {
             kind = FLOW_MOVE
         }
     }
-    flowEvent(&mut ctx.flow, kind, path, start, end)
+    flowEvent(edit ctx.flow, kind, path, start, end)
 }
 
 // Referent of a reference type, or -1 when `ty` is not a reference.
-pub fn semaRefElem(ctx: &SemaContext, ty: Int) -> Int {
-    if ty < 8 || ty >= ctx.types.types.length { return -1 }
-    let t = &ctx.types.types[ty]
-    match t.kind {
-        SemTypeKind.Ref => { return t.elem_type }
-        SemTypeKind.MutRef => { return t.elem_type }
-        _ => { return -1 }
+expose flow semaRefElem(ctx: view SemaContext, ty: Int) => Int {
+    when ty < 8 || ty >= ctx.types.types.length { give -1 }
+    hold t = view ctx.types.types[ty]
+    choose t.kind {
+        SemTypeKind.Ref : { give t.elem_type }
+        SemTypeKind.MutRef : { give t.elem_type }
+        _ : { give -1 }
     }
 }
 
-pub fn semaIsMutRef(ctx: &SemaContext, ty: Int) -> Bool {
-    if ty < 8 || ty >= ctx.types.types.length { return false }
-    match ctx.types.types[ty].kind {
-        SemTypeKind.MutRef => { return true }
-        _ => { return false }
+expose flow semaIsMutRef(ctx: view SemaContext, ty: Int) => Bool {
+    when ty < 8 || ty >= ctx.types.types.length { give false }
+    choose ctx.types.types[ty].kind {
+        SemTypeKind.MutRef : { give true }
+        _ : { give false }
     }
 }
 
-pub fn semaFindField(source: &Text, tree: &AstTree, declaration: Int, start: Int, end: Int) -> Int {
-    let decl = &tree.declarations[declaration]
-    for i in decl.c..(decl.c + decl.d) {
-        let field = &tree.fields[i]
-        if symbolNamesEqual(source, field.name_start, field.name_end, start, end) { return i }
+expose flow semaFindField(source: view Text, tree: view AstTree, declaration: Int, start: Int, end: Int) => Int {
+    hold decl = view tree.declarations[declaration]
+    each i among decl.c..(decl.c + decl.d) {
+        hold field = view tree.fields[i]
+        when symbolNamesEqual(source, field.name_start, field.name_end, start, end) { give i }
     }
-    return -1
+    give -1
 }
 
-pub fn semaNamedField(source: &Text, tree: &AstTree, declaration: Int, arg: &AstExpr) -> Int {
-    match arg.kind {
-        AstExprKind.Named => { return semaFindField(source, tree, declaration, arg.a, arg.b) }
-        _ => { return -1 }
-    }
-}
-
-pub fn semaAddError(ctx: &mut SemaContext, code: Text, message: Text, start: Int, end: Int) {
-    ctx.errors.push(SemaError(code: code, message: message, start: start, end: end))
-}
-
-pub fn semaDeclModule(ctx: &SemaContext, decl: Int) -> Int {
-    if decl < 0 || decl >= ctx.decl_module.length { return 0 }
-    return ctx.decl_module[decl]
-}
-
-pub fn semaSetDeclModules(ctx: &mut SemaContext, decl_module: &List<Int>) {
-    for i in 0..decl_module.length {
-        ctx.decl_module.push(decl_module[i])
+expose flow semaNamedField(source: view Text, tree: view AstTree, declaration: Int, arg: view AstExpr) => Int {
+    choose arg.kind {
+        AstExprKind.Named : { give semaFindField(source, tree, declaration, arg.a, arg.b) }
+        _ : { give -1 }
     }
 }
 
-pub fn semaSetModuleAccess(ctx: &mut SemaContext, access: &List<Int>, module_count: Int) {
+expose flow semaAddError(ctx: edit SemaContext, code: Text, message: Text, start: Int, end: Int) {
+    ctx.errors@push(SemaError(code: code, message: message, start: start, end: end))
+}
+
+expose flow semaDeclModule(ctx: view SemaContext, decl: Int) => Int {
+    when decl < 0 || decl >= ctx.decl_module.length { give 0 }
+    give ctx.decl_module[decl]
+}
+
+expose flow semaSetDeclModules(ctx: edit SemaContext, decl_module: view List of[Int]) {
+    each i among 0..decl_module.length {
+        ctx.decl_module@push(decl_module[i])
+    }
+}
+
+expose flow semaSetModuleAccess(ctx: edit SemaContext, access: view List of[Int], module_count: Int) {
     ctx.module_count = module_count
-    for i in 0..access.length { ctx.module_access.push(access[i]) }
+    each i among 0..access.length { ctx.module_access@push(access[i]) }
 }
 
-pub fn semaLookupVisible(ctx: &mut SemaContext, source: &Text, start: Int, end: Int) -> Int {
-    let found = scopeLookupAllVisible(&ctx.scopes, &ctx.symbols, source, start, end, ctx.current_module, &ctx.module_access, ctx.module_count)
-    if found == -2 {
-        semaAddError(&mut ctx, "L0014", "nombre ambiguo: varias declaraciones públicas importadas", start, end)
+expose flow semaLookupVisible(ctx: edit SemaContext, source: view Text, start: Int, end: Int) => Int {
+    hold found = scopeLookupAllVisible(view ctx.scopes, view ctx.symbols, source, start, end, ctx.current_module, view ctx.module_access, ctx.module_count)
+    when found == -2 {
+        semaAddError(edit ctx, "L0014", "nombre ambiguo: varias declaraciones públicas importadas", start, end)
     }
-    return found
+    give found
 }
 
-pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, type_id: Int) -> Int {
-    if type_id < 0 || type_id >= tree.types.length {
-        return 0
+expose flow semaResolveAstType(ctx: edit SemaContext, source: view Text, tree: view AstTree, type_id: Int) => Int {
+    when type_id < 0 || type_id >= tree.types.length {
+        give 0
     }
-    let at = &tree.types[type_id]
-    match at.kind {
-        AstTypeKind.Int => { return 1 }
-        AstTypeKind.Float => { return 2 }
-        AstTypeKind.F32 => { return 3 }
-        AstTypeKind.Bool => { return 4 }
-        AstTypeKind.Text => { return 5 }
-        AstTypeKind.Unit => { return 6 }
-        AstTypeKind.Named => {
+    hold at = view tree.types[type_id]
+    choose at.kind {
+        AstTypeKind.Int : { give 1 }
+        AstTypeKind.Float : { give 2 }
+        AstTypeKind.F32 : { give 3 }
+        AstTypeKind.Bool : { give 4 }
+        AstTypeKind.Text : { give 5 }
+        AstTypeKind.Unit : { give 6 }
+        AstTypeKind.Named : {
             // `List<T>` is the built-in growable list; any other generic
             // arguments are outside the Stage 1 subset.
-            if at.c >= 0 && at.c < tree.extra.length {
-                let list_name = "List"
-                let result_name = "Result"
-                let option_name = "Option"
-                if tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, list_name) {
-                    let elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
+            when at.c >= 0 && at.c < tree.extra.length {
+                hold list_name = "List"
+                hold result_name = "Result"
+                hold option_name = "Option"
+                when tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, list_name) {
+                    hold elem = semaResolveAstType(edit ctx, source, tree, tree.extra[at.c + 1])
                     when semaRejectLinearElem(edit ctx, elem, at.start, at.end) { give 7 }
-                    return semTypeMakeList(&mut ctx.types, elem)
+                    give semTypeMakeList(edit ctx.types, elem)
                 }
-                if tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, option_name) {
-                    let elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
+                when tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, option_name) {
+                    hold elem = semaResolveAstType(edit ctx, source, tree, tree.extra[at.c + 1])
                     when semaRejectLinearElem(edit ctx, elem, at.start, at.end) { give 7 }
-                    return semTypeMakeOption(&mut ctx.types, elem)
+                    give semTypeMakeOption(edit ctx.types, elem)
                 }
-                if tree.extra[at.c] == 2 && symbolNameEqualsText(source, at.a, at.b, result_name) {
-                    let ok_elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 1])
-                    let err_elem = semaResolveAstType(&mut ctx, source, tree, tree.extra[at.c + 2])
+                when tree.extra[at.c] == 2 && symbolNameEqualsText(source, at.a, at.b, result_name) {
+                    hold ok_elem = semaResolveAstType(edit ctx, source, tree, tree.extra[at.c + 1])
+                    hold err_elem = semaResolveAstType(edit ctx, source, tree, tree.extra[at.c + 2])
                     when semaRejectLinearElem(edit ctx, ok_elem, at.start, at.end) || semaRejectLinearElem(edit ctx, err_elem, at.start, at.end) { give 7 }
-                    return semTypeMakeResult(&mut ctx.types, ok_elem, err_elem)
+                    give semTypeMakeResult(edit ctx.types, ok_elem, err_elem)
                 }
-                semaAddError(&mut ctx, "L0016", "argumentos genéricos fuera del subconjunto de Stage 1", at.start, at.end)
-                return 7
+                semaAddError(edit ctx, "L0016", "argumentos genéricos fuera del subconjunto de Stage 1", at.start, at.end)
+                give 7
             }
-            let sym_id = semaLookupVisible(&mut ctx, source, at.a, at.b)
-            if sym_id == -2 { return 7 }
-            if sym_id >= 0 {
-                let sym = &ctx.symbols.symbols[sym_id]
-                match sym.kind {
-                    SymbolKind.Struct => { return sym.type_id }
-                    SymbolKind.Enum => { return sym.type_id }
-                    _ => {}
+            hold sym_id = semaLookupVisible(edit ctx, source, at.a, at.b)
+            when sym_id == -2 { give 7 }
+            when sym_id >= 0 {
+                hold sym = view ctx.symbols.symbols[sym_id]
+                choose sym.kind {
+                    SymbolKind.Struct : { give sym.type_id }
+                    SymbolKind.Enum : { give sym.type_id }
+                    _ : {}
                 }
             }
             // The built-in opaque File, unless a program shape shadows it.
@@ -292,22 +292,22 @@ pub fn semaResolveAstType(ctx: &mut SemaContext, source: &Text, tree: &AstTree, 
             when symbolNameEqualsText(source, at.a, at.b, file_name) { give semTypeMakeFile(edit ctx.types) }
             hold window_name = "Window"
             when symbolNameEqualsText(source, at.a, at.b, window_name) { give semTypeMakeWindow(edit ctx.types) }
-            semaAddError(&mut ctx, "L0001", "tipo desconocido", at.start, at.end)
-            return 7
+            semaAddError(edit ctx, "L0001", "tipo desconocido", at.start, at.end)
+            give 7
         }
-        AstTypeKind.Ref => {
-            let inner = semaResolveAstType(&mut ctx, source, tree, at.a)
-            return semTypeMakeRef(&mut ctx.types, inner, at.b == 1)
+        AstTypeKind.Ref : {
+            hold inner = semaResolveAstType(edit ctx, source, tree, at.a)
+            give semTypeMakeRef(edit ctx.types, inner, at.b == 1)
         }
-        AstTypeKind.Array => {
-            let inner = semaResolveAstType(&mut ctx, source, tree, at.a)
+        AstTypeKind.Array : {
+            hold inner = semaResolveAstType(edit ctx, source, tree, at.a)
             when semaRejectLinearElem(edit ctx, inner, at.start, at.end) { give 7 }
-            return semTypeMakeArray(&mut ctx.types, inner)
+            give semTypeMakeArray(edit ctx.types, inner)
         }
-        AstTypeKind.Slice => {
-            let inner = semaResolveAstType(&mut ctx, source, tree, at.a)
+        AstTypeKind.Slice : {
+            hold inner = semaResolveAstType(edit ctx, source, tree, at.a)
             when semaRejectLinearElem(edit ctx, inner, at.start, at.end) { give 7 }
-            return semTypeMakeSlice(&mut ctx.types, inner)
+            give semTypeMakeSlice(edit ctx.types, inner)
         }
     }
 }

@@ -1,8 +1,8 @@
-import sema_types
-import sema_context
-import sema_lower
-import lir_build
-import lir_builtin_union
+take sema_types
+take sema_context
+take sema_lower
+take lir_build
+take lir_builtin_union
 
 // Expected union type of a constructor's payload: the payload type of
 // `contextual` for this variant when it is itself an Option/Result, else -1.
@@ -32,46 +32,46 @@ expose flow semaBuiltinPayloadExpected(ctx: view SemaContext, contextual: Int, v
 // union and the source path becomes moved; the union value then carries
 // the drop obligation of its active payload. No unchecked read or fake
 // integer tag is emitted; unsupported payloads keep failing with L0016.
-pub fn semaBuiltinUnionValue(ctx: &mut SemaContext, arg_t: Int, payload: Int, variant: Int, start: Int, end: Int) -> Int {
+expose flow semaBuiltinUnionValue(ctx: edit SemaContext, arg_t: Int, payload: Int, variant: Int, start: Int, end: Int) => Int {
     when semaRejectLinearElem(edit ctx, arg_t, start, end) { give 7 }
-    if variant == 2 {
-        let ty = semTypeMakeOption(&mut ctx.types, arg_t)
-        let index = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, ty)
-        if index < 0 {
-            lirMarkUnsupported(&mut ctx.lir, start)
-        } else {
+    when variant == 2 {
+        hold ty = semTypeMakeOption(edit ctx.types, arg_t)
+        hold index = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, ty)
+        when index < 0 {
+            lirMarkUnsupported(edit ctx.lir, start)
+        } otherwise {
             // LIR allocation and result registration must not overlap mutable borrows.
-            let value = lirNew(&mut ctx, ty, false, LIR_VARIANT, index, 1, payload)
-            lirSetVal(&mut ctx, value)
+            hold value = lirNew(edit ctx, ty, false, LIR_VARIANT, index, 1, payload)
+            lirSetVal(edit ctx, value)
         }
-        return ty
+        give ty
     }
-    let contextual = ctx.expected_union_type
-    if contextual < 0 || contextual >= ctx.types.types.length {
-        lirMarkUnsupported(&mut ctx.lir, start)
-        if variant == 0 { return semTypeMakeResult(&mut ctx.types, arg_t, 0) }
-        return semTypeMakeResult(&mut ctx.types, 0, arg_t)
+    hold contextual = ctx.expected_union_type
+    when contextual < 0 || contextual >= ctx.types.types.length {
+        lirMarkUnsupported(edit ctx.lir, start)
+        when variant == 0 { give semTypeMakeResult(edit ctx.types, arg_t, 0) }
+        give semTypeMakeResult(edit ctx.types, 0, arg_t)
     }
-    match ctx.types.types[contextual].kind {
-        SemTypeKind.Result => {}
-        _ => {
-            lirMarkUnsupported(&mut ctx.lir, start)
-            if variant == 0 { return semTypeMakeResult(&mut ctx.types, arg_t, 0) }
-            return semTypeMakeResult(&mut ctx.types, 0, arg_t)
+    choose ctx.types.types[contextual].kind {
+        SemTypeKind.Result : {}
+        _ : {
+            lirMarkUnsupported(edit ctx.lir, start)
+            when variant == 0 { give semTypeMakeResult(edit ctx.types, arg_t, 0) }
+            give semTypeMakeResult(edit ctx.types, 0, arg_t)
         }
     }
-    var expected = ctx.types.types[contextual].elem_type
-    if variant == 1 { expected = ctx.types.types[contextual].nominal_id }
-    if !semTypeEquals(&ctx.types, arg_t, expected) {
-        semaAddError(&mut ctx, "L0004", "tipo de payload incompatible con Result", start, end)
-        return 7
+    change expected = ctx.types.types[contextual].elem_type
+    when variant == 1 { expected = ctx.types.types[contextual].nominal_id }
+    when !semTypeEquals(view ctx.types, arg_t, expected) {
+        semaAddError(edit ctx, "L0004", "tipo de payload incompatible con Result", start, end)
+        give 7
     }
-    let index = lirBuiltinRegister(&mut ctx.lir_module, &ctx.types, contextual)
-    if index < 0 {
-        lirMarkUnsupported(&mut ctx.lir, start)
-    } else {
-        let value = lirNew(&mut ctx, contextual, false, LIR_VARIANT, index, variant, payload)
-        lirSetVal(&mut ctx, value)
+    hold index = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, contextual)
+    when index < 0 {
+        lirMarkUnsupported(edit ctx.lir, start)
+    } otherwise {
+        hold value = lirNew(edit ctx, contextual, false, LIR_VARIANT, index, variant, payload)
+        lirSetVal(edit ctx, value)
     }
-    return contextual
+    give contextual
 }
