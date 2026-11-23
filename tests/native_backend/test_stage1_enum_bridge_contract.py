@@ -18,9 +18,9 @@ class Stage1EnumBridgeContract(unittest.TestCase):
     def test_decl_table_and_type_name_agree(self):
         module = src('compiler-l/src/lir_module.l')
         emitter = src('compiler-l/src/lir_emit.l')
-        self.assertIn('en_decl.push(d)', module)
+        self.assertIn('en_decl@push(d)', module)
         self.assertIn('enum e{k} {name} variants {count}', module)
-        self.assertIn('return "e{k}"', emitter)
+        self.assertIn('give "e{k}"', emitter)
         self.assertIn('"module structs {structs}"', module)
 
     def test_emitter_never_forges_enum_as_int(self):
@@ -65,8 +65,8 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('give lirPayloadValue(types, lm, ty, 0)', union)
         self.assertIn('give lirPayloadValue(types, lm, ty, 0) && !lirDropFreeValue(types, lm, ty, 0)', union)
         # Drop-free nominal choices still cannot hide arbitrary owned payloads.
-        self.assertIn('fn lirDropFreeValue(', union)
-        self.assertIn('if n == 1 && !lirBuiltinPrimitive(lm.variant_type[v]) { return false }', union)
+        self.assertIn('flow lirDropFreeValue(', union)
+        self.assertIn('when n == 1 && !lirBuiltinPrimitive(lm.variant_type[v]) { give false }', union)
         # Extracting an owned payload moves its scrutinee, not a borrowed alias.
         self.assertIn('semaAccess(&mut ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)', binding)
         self.assertIn('lirBuiltinEnumIndex(&ctx.lir_module, scrut_t)', binding)
