@@ -1,61 +1,61 @@
-import lexer
-import tokens
+take lexer
+take tokens
 
-pub struct TokenCursor {
+expose shape TokenCursor {
     pos: Int
     fileId: Int
 }
 
-pub fn cursorNew(fileId: Int) -> TokenCursor {
-    return TokenCursor(pos: 0, fileId: fileId)
+expose flow cursorNew(fileId: Int) => TokenCursor {
+    give TokenCursor(pos: 0, fileId: fileId)
 }
 
-pub fn cursorIsAtEnd(cursor: &TokenCursor, tokens: &List<LexToken>) -> Bool {
-    if cursor.pos >= tokens.length { return true }
-    let current_kind_token = &tokens[cursor.pos]
-    match tokenKindValue(&current_kind_token.kind) {
-        LexKind.Eof => { return true }
-        _ => { return false }
+expose flow cursorIsAtEnd(cursor: view TokenCursor, tokens: view List of[LexToken]) => Bool {
+    when cursor.pos >= tokens.length { give true }
+    hold current_kind_token = view tokens[cursor.pos]
+    choose tokenKindValue(view current_kind_token.kind) {
+        LexKind.Eof : { give true }
+        _ : { give false }
     }
 }
 
-pub fn cursorCurrent(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexToken {
-    return &tokens[cursor.pos]
+expose flow cursorCurrent(cursor: view TokenCursor, tokens: view List of[LexToken]) => view LexToken {
+    give view tokens[cursor.pos]
 }
 
-pub fn cursorCurrentKind(cursor: &TokenCursor, tokens: &List<LexToken>) -> &LexKind {
-    return &tokens[cursor.pos].kind
+expose flow cursorCurrentKind(cursor: view TokenCursor, tokens: view List of[LexToken]) => view LexKind {
+    give view tokens[cursor.pos].kind
 }
 
-pub fn cursorAdvance(cursor: &mut TokenCursor, tokens: &List<LexToken>) -> &LexToken {
-    let current = &tokens[cursor.pos]
-    if cursor.pos < tokens.length {
+expose flow cursorAdvance(cursor: edit TokenCursor, tokens: view List of[LexToken]) => view LexToken {
+    hold current = view tokens[cursor.pos]
+    when cursor.pos < tokens.length {
         cursor.pos += 1
     }
-    return current
+    give current
 }
 
-pub fn cursorExpectKind(kind: &LexKind, expected: &LexKind) -> Bool {
-    match kind {
-        LexKind.Word => { match expected { LexKind.Word => { return true }, _ => { return false } } }
-        LexKind.Integer => { match expected { LexKind.Integer => { return true }, _ => { return false } } }
-        LexKind.Symbol => { match expected { LexKind.Symbol => { return true }, _ => { return false } } }
-        LexKind.Newline => { match expected { LexKind.Newline => { return true }, _ => { return false } } }
-        LexKind.Eof => { match expected { LexKind.Eof => { return true }, _ => { return false } } }
-        LexKind.Text => { match expected { LexKind.Text => { return true }, _ => { return false } } }
-        LexKind.TextStart => { match expected { LexKind.TextStart => { return true }, _ => { return false } } }
-        LexKind.TextEnd => { match expected { LexKind.TextEnd => { return true }, _ => { return false } } }
-        LexKind.InterpolationStart => { match expected { LexKind.InterpolationStart => { return true }, _ => { return false } } }
-        LexKind.InterpolationEnd => { match expected { LexKind.InterpolationEnd => { return true }, _ => { return false } } }
+expose flow cursorExpectKind(kind: view LexKind, expected: view LexKind) => Bool {
+    choose kind {
+        LexKind.Word : { choose expected { LexKind.Word : { give true }, _ : { give false } } }
+        LexKind.Integer : { choose expected { LexKind.Integer : { give true }, _ : { give false } } }
+        LexKind.Symbol : { choose expected { LexKind.Symbol : { give true }, _ : { give false } } }
+        LexKind.Newline : { choose expected { LexKind.Newline : { give true }, _ : { give false } } }
+        LexKind.Eof : { choose expected { LexKind.Eof : { give true }, _ : { give false } } }
+        LexKind.Text : { choose expected { LexKind.Text : { give true }, _ : { give false } } }
+        LexKind.TextStart : { choose expected { LexKind.TextStart : { give true }, _ : { give false } } }
+        LexKind.TextEnd : { choose expected { LexKind.TextEnd : { give true }, _ : { give false } } }
+        LexKind.InterpolationStart : { choose expected { LexKind.InterpolationStart : { give true }, _ : { give false } } }
+        LexKind.InterpolationEnd : { choose expected { LexKind.InterpolationEnd : { give true }, _ : { give false } } }
     }
 }
 
-pub fn cursorExpect(cursor: &mut TokenCursor, tokens: &List<LexToken>, expected: &LexKind) -> Bool {
-    if cursor.pos >= tokens.length { return false }
-    let token = &tokens[cursor.pos]
-    if cursorExpectKind(&token.kind, expected) {
+expose flow cursorExpect(cursor: edit TokenCursor, tokens: view List of[LexToken], expected: view LexKind) => Bool {
+    when cursor.pos >= tokens.length { give false }
+    hold token = view tokens[cursor.pos]
+    when cursorExpectKind(view token.kind, expected) {
         cursor.pos += 1
-        return true
+        give true
     }
-    return false
+    give false
 }

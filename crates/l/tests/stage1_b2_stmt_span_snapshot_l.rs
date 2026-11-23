@@ -40,9 +40,9 @@ fn b2_stmt_parser_passes_stage1_ownership() {
     // Every span is snapshotted before the exclusive borrow of `tree`.
     assert!(!text.contains("(&mut tree, AstStmtKind.Assign, tree.expressions[e].start"));
     assert!(!text.contains("(&mut tree, AstStmtKind.Expr, tree.expressions[e].start"));
-    assert!(text.contains("let target_start = tree.expressions[e].start"));
-    assert!(text.contains("let expr_start = tree.expressions[e].start"));
-    assert!(text.contains("let expr_end = tree.expressions[e].end"));
+    assert!(text.contains("hold target_start = tree.expressions[e].start"));
+    assert!(text.contains("hold expr_start = tree.expressions[e].start"));
+    assert!(text.contains("hold expr_end = tree.expressions[e].end"));
     let (ok, stderr) = check_ownership(&source);
     assert!(ok, "{stderr}");
     assert!(!stderr.contains("L0012"), "{stderr}");

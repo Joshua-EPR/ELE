@@ -2,123 +2,123 @@
 // Keeps token spans in the original Text so it need not create substrings.
 // Errors are sticky; consumers must reject any nonzero error.
 
-pub struct NativeWord {
+expose shape NativeWord {
     start: Int
     end: Int
 }
 
-pub struct NativeReader {
+expose shape NativeReader {
     offset: Int
     error: Int
 }
 
-pub fn nativeReaderNew() -> NativeReader {
-    return NativeReader(offset: 0, error: 0)
+expose flow nativeReaderNew() => NativeReader {
+    give NativeReader(offset: 0, error: 0)
 }
 
-pub fn nativeWord(source: &Text, reader: &mut NativeReader) -> NativeWord {
-    var p = reader.offset
+expose flow nativeWord(source: view Text, reader: edit NativeReader) => NativeWord {
+    change p = reader.offset
     // Words may be separated by one ASCII space only. Never cross a line.
-    if p < source.byteLength && source.byteAt(p) == 32 { p += 1 }
-    let start = p
-    while p < source.byteLength {
-        let b = source.byteAt(p)
-        if b == 32 || b == 10 || b == 13 { break }
+    when p < source.byteLength && source@byteAt(p) == 32 { p += 1 }
+    hold start = p
+    during p < source.byteLength {
+        hold b = source@byteAt(p)
+        when b == 32 || b == 10 || b == 13 { leave }
         p += 1
     }
     reader.offset = p
-    if p == start { reader.error = 1 }
-    return NativeWord(start: start, end: p)
+    when p == start { reader.error = 1 }
+    give NativeWord(start: start, end: p)
 }
 
 // Literal tokens are passed by value: a string literal is not an addressable
 // place and cannot be implicitly borrowed as &Text in Stage 0.
-pub fn nativeEquals(source: &Text, word: &NativeWord, literal: Text) -> Bool {
-    if word.end - word.start != literal.byteLength { return false }
-    for i in 0..literal.byteLength {
-        if source.byteAt(word.start + i) != literal.byteAt(i) { return false }
+expose flow nativeEquals(source: view Text, word: view NativeWord, literal: Text) => Bool {
+    when word.end - word.start != literal.byteLength { give false }
+    each i among 0..literal.byteLength {
+        when source@byteAt(word.start + i) != literal@byteAt(i) { give false }
     }
-    return true
+    give true
 }
 
-pub fn nativeExpect(source: &Text, reader: &mut NativeReader, literal: Text) {
-    let w = nativeWord(source, &mut reader)
-    if !nativeEquals(source, &w, literal) { reader.error = 2 }
+expose flow nativeExpect(source: view Text, reader: edit NativeReader, literal: Text) {
+    hold w = nativeWord(source, edit reader)
+    when !nativeEquals(source, view w, literal) { reader.error = 2 }
 }
 
-pub fn nativeEndLine(source: &Text, reader: &mut NativeReader) {
-    var p = reader.offset
-    if p < source.byteLength && source.byteAt(p) == 13 { p += 1 }
-    if p < source.byteLength && source.byteAt(p) == 10 {
+expose flow nativeEndLine(source: view Text, reader: edit NativeReader) {
+    change p = reader.offset
+    when p < source.byteLength && source@byteAt(p) == 13 { p += 1 }
+    when p < source.byteLength && source@byteAt(p) == 10 {
         p += 1
-    } else if p != source.byteLength {
+    } otherwise when p != source.byteLength {
         reader.error = 3
     }
     reader.offset = p
 }
 
-pub fn nativeDecimal(source: &Text, reader: &mut NativeReader, word: &NativeWord, prefix: Int) -> Int {
-    var p = word.start + prefix
-    var negative = false
-    if p < word.end && source.byteAt(p) == 45 {
+expose flow nativeDecimal(source: view Text, reader: edit NativeReader, word: view NativeWord, prefix: Int) => Int {
+    change p = word.start + prefix
+    change negative = false
+    when p < word.end && source@byteAt(p) == 45 {
         negative = true
         p += 1
     }
-    if p == word.end { reader.error = 4; return 0 }
-    var n = 0
-    while p < word.end {
-        let b = source.byteAt(p)
-        if b < 48 || b > 57 { reader.error = 4; return 0 }
-        let digit = b - 48
+    when p == word.end { reader.error = 4; give 0 }
+    change n = 0
+    during p < word.end {
+        hold b = source@byteAt(p)
+        when b < 48 || b > 57 { reader.error = 4; give 0 }
+        hold digit = b - 48
         // Int32 range is intentional for this bootstrap subset.
-        if n > (2147483647 - digit) / 10 { reader.error = 5; return 0 }
+        when n > (2147483647 - digit) / 10 { reader.error = 5; give 0 }
         n = n * 10 + digit
         p += 1
     }
-    if negative { return -n }
-    return n
+    when negative { give -n }
+    give n
 }
 
 // Full Int (64-bit signed) range for `ci` constants. The magnitude is
 // accumulated as a negative number so the minimum Int needs no special case.
-pub fn nativeDecimal64(source: &Text, reader: &mut NativeReader, word: &NativeWord, prefix: Int) -> Int {
-    var p = word.start + prefix
-    var negative = false
-    if p < word.end && source.byteAt(p) == 45 {
+expose flow nativeDecimal64(source: view Text, reader: edit NativeReader, word: view NativeWord, prefix: Int) => Int {
+    change p = word.start + prefix
+    change negative = false
+    when p < word.end && source@byteAt(p) == 45 {
         negative = true
         p += 1
     }
-    if p == word.end { reader.error = 4; return 0 }
-    let minimum = -9223372036854775807 - 1
-    var n = 0
-    while p < word.end {
-        let b = source.byteAt(p)
-        if b < 48 || b > 57 { reader.error = 4; return 0 }
-        let digit = b - 48
-        if n < (minimum + digit) / 10 { reader.error = 5; return 0 }
+    when p == word.end { reader.error = 4; give 0 }
+    hold minimum = -9223372036854775807 - 1
+    change n = 0
+    during p < word.end {
+        hold b = source@byteAt(p)
+        when b < 48 || b > 57 { reader.error = 4; give 0 }
+        hold digit = b - 48
+        when n < (minimum + digit) / 10 { reader.error = 5; give 0 }
         n = n * 10 - digit
         p += 1
     }
-    if negative { return n }
-    if n == minimum { reader.error = 5; return 0 }
-    return -n
+    when negative { give n }
+    when n == minimum { reader.error = 5; give 0 }
+    give -n
 }
 
-pub fn nativeNumber(source: &Text, reader: &mut NativeReader) -> Int {
-    let w = nativeWord(source, &mut reader)
-    return nativeDecimal(source, &mut reader, &w, 0)
+expose flow nativeNumber(source: view Text, reader: edit NativeReader) => Int {
+    hold w = nativeWord(source, edit reader)
+    give nativeDecimal(source, edit reader, view w, 0)
 }
 
-pub fn nativeId(source: &Text, reader: &mut NativeReader, prefix: Int) -> Int {
-    let w = nativeWord(source, &mut reader)
-    if w.start >= w.end || source.byteAt(w.start) != prefix {
+expose flow nativeId(source: view Text, reader: edit NativeReader, prefix: Int) => Int {
+    hold w = nativeWord(source, edit reader)
+    when w.start >= w.end || source@byteAt(w.start) != prefix {
         reader.error = 6
-        return -1
+        give -1
     }
-    return nativeDecimal(source, &mut reader, &w, 1)
+    give nativeDecimal(source, edit reader, view w, 1)
 }
 
-pub struct NativeOperand {
+expose shape NativeOperand {
     is_var: Bool
     value: Int
     is_bool: Bool
@@ -127,70 +127,70 @@ pub struct NativeOperand {
     is_text: Bool
 }
 
-pub fn nativeOperand(source: &Text, reader: &mut NativeReader) -> NativeOperand {
-    let w = nativeWord(source, &mut reader)
-    if w.start >= w.end {
+expose flow nativeOperand(source: view Text, reader: edit NativeReader) => NativeOperand {
+    hold w = nativeWord(source, edit reader)
+    when w.start >= w.end {
         reader.error = 7
-        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
     }
-    if source.byteAt(w.start) == 118 {
-        let index = nativeDecimal(source, &mut reader, &w, 1)
-        return NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false)
+    when source@byteAt(w.start) == 118 {
+        hold index = nativeDecimal(source, edit reader, view w, 1)
+        give NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false)
     }
-    if w.end - w.start >= 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 105 {
-        let value = nativeDecimal64(source, &mut reader, &w, 2)
-        return NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false)
+    when w.end - w.start >= 3 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 105 {
+        hold value = nativeDecimal64(source, edit reader, view w, 2)
+        give NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false)
     }
-    if w.end - w.start == 3 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 98 {
-        let value = source.byteAt(w.start + 2)
-        if value == 48 { return NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false) }
-        if value == 49 { return NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false) }
+    when w.end - w.start == 3 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 98 {
+        hold value = source@byteAt(w.start + 2)
+        when value == 48 { give NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false) }
+        when value == 49 { give NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false) }
     }
     // `cu` is the only unit constant. It carries no runtime value.
-    if w.end - w.start == 2 && source.byteAt(w.start) == 99 && source.byteAt(w.start + 1) == 117 {
-        return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false)
+    when w.end - w.start == 2 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 117 {
+        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false)
     }
     reader.error = 7
-    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
 }
 
-pub fn nativeAtEnd(source: &Text, reader: &NativeReader) -> Bool {
-    return reader.offset == source.byteLength
+expose flow nativeAtEnd(source: view Text, reader: view NativeReader) => Bool {
+    give reader.offset == source.byteLength
 }
 
 // Stage 1 emits an optional source location on instruction records:
 // ` @<line>:<column>`. Parse it conservatively rather than dropping an
 // arbitrary trailing token. The record remains single-line and bounded.
-pub fn nativeEndLineSpan(source: &Text, reader: &mut NativeReader) {
-    var p = reader.offset
-    if p < source.byteLength && source.byteAt(p) == 32 {
+expose flow nativeEndLineSpan(source: view Text, reader: edit NativeReader) {
+    change p = reader.offset
+    when p < source.byteLength && source@byteAt(p) == 32 {
         p += 1
-        if p >= source.byteLength || source.byteAt(p) != 64 { reader.error = 10; return }
+        when p >= source.byteLength || source@byteAt(p) != 64 { reader.error = 10; give }
         p += 1
-        var line = 0
-        var digits = 0
-        while p < source.byteLength {
-            let b = source.byteAt(p)
-            if b < 48 || b > 57 { break }
-            if line > 1000000 { reader.error = 11; return }
+        change line = 0
+        change digits = 0
+        during p < source.byteLength {
+            hold b = source@byteAt(p)
+            when b < 48 || b > 57 { leave }
+            when line > 1000000 { reader.error = 11; give }
             line = line * 10 + b - 48
             digits += 1
             p += 1
         }
-        if digits == 0 || line == 0 || p >= source.byteLength || source.byteAt(p) != 58 { reader.error = 11; return }
+        when digits == 0 || line == 0 || p >= source.byteLength || source@byteAt(p) != 58 { reader.error = 11; give }
         p += 1
-        var col = 0
+        change col = 0
         digits = 0
-        while p < source.byteLength {
-            let b = source.byteAt(p)
-            if b < 48 || b > 57 { break }
-            if col > 1000000 { reader.error = 11; return }
+        during p < source.byteLength {
+            hold b = source@byteAt(p)
+            when b < 48 || b > 57 { leave }
+            when col > 1000000 { reader.error = 11; give }
             col = col * 10 + b - 48
             digits += 1
             p += 1
         }
-        if digits == 0 || col == 0 { reader.error = 11; return }
+        when digits == 0 || col == 0 { reader.error = 11; give }
         reader.offset = p
     }
-    nativeEndLine(source, &mut reader)
+    nativeEndLine(source, edit reader)
 }

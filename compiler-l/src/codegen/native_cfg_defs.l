@@ -1,4 +1,4 @@
-import lir_tokens
+take lir_tokens
 
 // Restricted, typed, flattened representation of ELE-LIR 1 for the
 // independent ELE-written x86-64 bootstrap backend. Supports move-only,
@@ -31,7 +31,7 @@ import lir_tokens
 // 7 le, 8 gt, 9 ge. Terminators: 1 return, 2 jump, 3 branch,
 // 4 unreachable, 5 returnref.
 
-pub struct CfgInst {
+expose shape CfgInst {
     kind: Int
     dst: Int
     op: Int
@@ -55,12 +55,12 @@ pub struct CfgInst {
     src_ext: Int
 }
 
-pub struct CfgField {
+expose shape CfgField {
     ty: Int
     offset: Int
 }
 
-pub struct CfgStruct {
+expose shape CfgStruct {
     first_field: Int
     fields: Int
     size: Int
@@ -72,25 +72,25 @@ pub struct CfgStruct {
 // sized by the largest payload (whole words). Each enum is move-only and
 // drop-free. The payload area is always fully initialized (zero-filled),
 // including for None/unit variants, so whole-value moves copy defined bytes.
-pub struct CfgEnum {
+expose shape CfgEnum {
     first_variant: Int
     variants: Int
     size: Int
     align: Int
 }
 
-pub struct CfgVariant {
+expose shape CfgVariant {
     payload_type: Int
 }
 
-pub struct CfgPlace {
+expose shape CfgPlace {
     variable: Int
     field: Int
     subfield: Int
     ext: Int
 }
 
-pub struct CfgBlock {
+expose shape CfgBlock {
     first: Int
     count: Int
     term: Int
@@ -99,7 +99,7 @@ pub struct CfgBlock {
     no: Int
 }
 
-pub struct CfgFunc {
+expose shape CfgFunc {
     first_var: Int
     vars: Int
     first_block: Int
@@ -118,34 +118,34 @@ pub struct CfgFunc {
     result_ref_type: Int
 }
 
-pub struct CfgProgram {
+expose shape CfgProgram {
     error: Int
     main: Int
-    functions: List<CfgFunc>
-    types_bool: List<Bool>
-    types_code: List<Int>
-    slot_start: List<Int>
-    slot_count: List<Int>
-    structs: List<CfgStruct>
-    fields: List<CfgField>
-    enums: List<CfgEnum>
-    variants: List<CfgVariant>
-    blocks: List<CfgBlock>
-    insts: List<CfgInst>
+    functions: List of[CfgFunc]
+    types_bool: List of[Bool]
+    types_code: List of[Int]
+    slot_start: List of[Int]
+    slot_count: List of[Int]
+    structs: List of[CfgStruct]
+    fields: List of[CfgField]
+    enums: List of[CfgEnum]
+    variants: List of[CfgVariant]
+    blocks: List of[CfgBlock]
+    insts: List of[CfgInst]
     // Constructor operands for kind 4. Call arguments remain separate.
-    struct_args: List<NativeOperand>
-    call_args: List<NativeOperand>
+    struct_args: List of[NativeOperand]
+    call_args: List of[NativeOperand]
     // Per call argument: -1 by value, 0 shared and 1 exclusive reference.
     // A reference argument keeps its root variable in `call_args[k].value`
     // and its projections in `call_field`/`call_sub` (-1 when absent).
-    call_ref: List<Int>
-    call_field: List<Int>
-    call_sub: List<Int>
-    call_ext: List<Int>
-    var_ref: List<Bool>
-    text_start: List<Int>
-    text_length: List<Int>
-    text_bytes: List<Int>
+    call_ref: List of[Int]
+    call_field: List of[Int]
+    call_sub: List of[Int]
+    call_ext: List of[Int]
+    var_ref: List of[Bool]
+    text_start: List of[Int]
+    text_length: List of[Int]
+    text_bytes: List of[Int]
     // Counts declared by the module header. Type codes are fixed by them:
     // list k is 2 + decl_structs + decl_enums + k, known before any
     // declaration is read, so a shape may hold a list of itself.
@@ -153,40 +153,40 @@ pub struct CfgProgram {
     decl_enums: Int
     decl_lists: Int
     // Element type of each `list lK <type>`.
-    list_elem: List<Int>
+    list_elem: List of[Int]
     // Place extensions: run `ext_first[e]..+ext_count[e]` of projections.
     // proj_kind 0 is a field (proj_value its index) and 1 an index
     // (proj_value the Int variable that holds it).
-    ext_first: List<Int>
-    ext_count: List<Int>
-    proj_kind: List<Int>
-    proj_value: List<Int>
+    ext_first: List of[Int]
+    ext_count: List of[Int]
+    proj_kind: List of[Int]
+    proj_value: List of[Int]
     // Local references, per variable slot (native_cfg_loan): the root
     // variable and static prefix of the place its loan took, and the mode
     // (-1 no loan yet, 0 shared, 1 exclusive).
-    ref_root: List<Int>
-    ref_field: List<Int>
-    ref_sub: List<Int>
-    ref_mut: List<Int>
+    ref_root: List of[Int]
+    ref_field: List of[Int]
+    ref_sub: List of[Int]
+    ref_mut: List of[Int]
 }
 
-pub fn cfgEmptyOperand() -> NativeOperand {
-    return NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+expose flow cfgEmptyOperand() => NativeOperand {
+    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
 }
 
-pub fn cfgEmpty() -> CfgProgram {
-    return CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], call_ext: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[], decl_structs: 0, decl_enums: 0, decl_lists: 0, list_elem: List[], ext_first: List[], ext_count: List[], proj_kind: List[], proj_value: List[], ref_root: List[], ref_field: List[], ref_sub: List[], ref_mut: List[])
+expose flow cfgEmpty() => CfgProgram {
+    give CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], call_ext: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[], decl_structs: 0, decl_enums: 0, decl_lists: 0, list_elem: List[], ext_first: List[], ext_count: List[], proj_kind: List[], proj_value: List[], ref_root: List[], ref_field: List[], ref_sub: List[], ref_mut: List[])
 }
 
 // Index of the list type `ty`, or -1 when it is not a list.
-pub fn cfgListIndex(p: &CfgProgram, ty: Int) -> Int {
-    let k = ty - 2 - p.decl_structs - p.decl_enums
-    if ty >= 2 && k >= 0 && k < p.decl_lists { return k }
-    return -1
+expose flow cfgListIndex(p: view CfgProgram, ty: Int) => Int {
+    hold k = ty - 2 - p.decl_structs - p.decl_enums
+    when ty >= 2 && k >= 0 && k < p.decl_lists { give k }
+    give -1
 }
 
 // A value that owns heap storage by itself: Text or a list. Shapes own
 // storage through their fields (see cfgOwnsHeap in native_cfg_fields).
-pub fn cfgHeapDirect(p: &CfgProgram, ty: Int) -> Bool {
-    return ty == -3 || cfgListIndex(p, ty) >= 0
+expose flow cfgHeapDirect(p: view CfgProgram, ty: Int) => Bool {
+    give ty == -3 || cfgListIndex(p, ty) >= 0
 }

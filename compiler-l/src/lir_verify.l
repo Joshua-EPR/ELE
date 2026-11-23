@@ -1,10 +1,10 @@
-import tokens
-import sema_types
-import lir_build
-import lir_finish
-import lir_verify_core
-import lir_verify_helpers
-import lir_builtin_union
+take tokens
+take sema_types
+take lir_build
+take lir_finish
+take lir_verify_core
+take lir_verify_helpers
+take lir_builtin_union
 take lir_verify_own
 
 // Verifier of one lowered function. It does not trust the lowering: every
@@ -89,74 +89,74 @@ flow lirVerifyInst(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm
 }
 
 // Check one instruction and apply its definition. Returns a status.
-fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, id: Int, block: Int, check: Bool) -> Int {
-    if id < 0 || id >= l.insts.length { return 1 }
-    let inst = &l.insts[id]
-    if inst.block != block { return 9 }
-    let kind = inst.kind
-    let dst = inst.dst
-    if kind == LIR_PRINT || kind == LIR_APPEND {
-        if inst.a < 0 || inst.a >= l.args.length { return 1 }
-        let ty = lirArgType(l, types, lm, inst.a)
-        if ty == LIR_TY_ERR { return 1 }
-        if !lirPrintable(ty) { return 3 }
-        if !lirArgDefined(&mut v, l, inst.a, check) { return 5 }
-        if kind == LIR_APPEND {
-            if !lirVarOk(l, dst) || l.vars[dst].ty != 5 || l.vars[dst].is_ref { return 3 }
-            if check && !v.defined[dst] { return 5 }
+flow lirVerifyInstCore(v: edit LirVerifier, l: view LirFn, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], id: Int, block: Int, check: Bool) => Int {
+    when id < 0 || id >= l.insts.length { give 1 }
+    hold inst = view l.insts[id]
+    when inst.block != block { give 9 }
+    hold kind = inst.kind
+    hold dst = inst.dst
+    when kind == LIR_PRINT || kind == LIR_APPEND {
+        when inst.a < 0 || inst.a >= l.args.length { give 1 }
+        hold ty = lirArgType(l, types, lm, inst.a)
+        when ty == LIR_TY_ERR { give 1 }
+        when !lirPrintable(ty) { give 3 }
+        when !lirArgDefined(edit v, l, inst.a, check) { give 5 }
+        when kind == LIR_APPEND {
+            when !lirVarOk(l, dst) || l.vars[dst].ty != 5 || l.vars[dst].is_ref { give 3 }
+            when check && !v.defined[dst] { give 5 }
         }
-        return 0
+        give 0
     }
-    if kind == LIR_STORE {
-        let ty = lirPlaceType(l, types, lm, inst.a)
-        if ty == LIR_TY_ERR { return 8 }
-        if !lirTypesCompat(types, lm, lirOperandType(l, inst.b), ty) { return 3 }
-        if !lirUse(&mut v, l, inst.b, check) { return 5 }
+    when kind == LIR_STORE {
+        hold ty = lirPlaceType(l, types, lm, inst.a)
+        when ty == LIR_TY_ERR { give 8 }
+        when !lirTypesCompat(types, lm, lirOperandType(l, inst.b), ty) { give 3 }
+        when !lirUse(edit v, l, inst.b, check) { give 5 }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
         // The stored place owns its new value (the drop plan released the
         // old one before the store).
         lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 1, false)
-        return 0
+        give 0
     }
-    if kind == LIR_LIST_PUSH || kind == LIR_LIST_RESERVE {
-        let ty = lirPlaceType(l, types, lm, inst.a)
-        if ty < 0 || ty >= types.types.length { return 8 }
-        match types.types[ty].kind {
-            SemTypeKind.List => {}
-            _ => { return 3 }
+    when kind == LIR_LIST_PUSH || kind == LIR_LIST_RESERVE {
+        hold ty = lirPlaceType(l, types, lm, inst.a)
+        when ty < 0 || ty >= types.types.length { give 8 }
+        choose types.types[ty].kind {
+            SemTypeKind.List : {}
+            _ : { give 3 }
         }
-        var expected = types.types[ty].elem_type
-        if kind == LIR_LIST_RESERVE { expected = 1 }
-        if lirOperandType(l, inst.b) != expected { return 3 }
+        change expected = types.types[ty].elem_type
+        when kind == LIR_LIST_RESERVE { expected = 1 }
+        when lirOperandType(l, inst.b) != expected { give 3 }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
-        if !lirUse(&mut v, l, inst.b, check) { return 5 }
+        when !lirUse(edit v, l, inst.b, check) { give 5 }
         lirMoveOut(edit v, l, types, drop_memo, inst.b, false)
-        return 0
+        give 0
     }
-    if kind == LIR_DROP || kind == LIR_DROPFIELD {
-        var ty = LIR_TY_ERR
-        if kind == LIR_DROP {
-            if !lirVarOk(l, dst) || l.vars[dst].is_ref { return 6 }
+    when kind == LIR_DROP || kind == LIR_DROPFIELD {
+        change ty = LIR_TY_ERR
+        when kind == LIR_DROP {
+            when !lirVarOk(l, dst) || l.vars[dst].is_ref { give 6 }
             ty = l.vars[dst].ty
-            if check && !v.defined[dst] { return 5 }
+            when check && !v.defined[dst] { give 5 }
             // An unflagged drop of a (maybe) moved owned union is a double
             // drop; afterwards the union owns nothing.
             when check && inst.a < 0 && dst < v.moved.length && v.moved[dst] { give 6 }
-        } else {
+        } otherwise {
             ty = lirPlaceType(l, types, lm, inst.a)
-            if ty == LIR_TY_ERR { return 8 }
+            when ty == LIR_TY_ERR { give 8 }
         }
-        if ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { return 6 }
-        var flag = inst.a
+        when ty < 0 || ty >= drop_memo.length || drop_memo[ty] != 2 { give 6 }
+        change flag = inst.a
         change root = dst
         when kind == LIR_DROPFIELD {
             flag = inst.b
             root = l.places[inst.a].root
         }
-        if flag >= 0 {
-            if !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { return 6 }
-            if check && !v.defined[flag] { return 5 }
+        when flag >= 0 {
+            when !lirVarOk(l, flag) || l.vars[flag].ty != 4 || l.vars[flag].is_ref { give 6 }
+            when check && !v.defined[flag] { give 5 }
             when check && v.has_flags {
                 when root < 0 || flag >= v.flag_root.length || v.flag_root[flag] != root { give 6 }
                 when flag >= v.owned.length || flag >= v.flags.length { give 6 }
@@ -171,104 +171,104 @@ fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
                 lirGuardSet(edit v, l, root, inst.a, 0, true)
             }
         }
-        return 0
+        give 0
     }
-    if !lirVarOk(l, dst) { return 1 }
-    let dst_t = l.vars[dst].ty
-    let dst_ref = l.vars[dst].is_ref
-    var result = LIR_TY_ERR
-    var result_ref = false
-    if kind == LIR_USE {
-        if lirIsVar(inst.a) && lirVarOk(l, inst.a) && l.vars[inst.a].is_ref {
+    when !lirVarOk(l, dst) { give 1 }
+    hold dst_t = l.vars[dst].ty
+    hold dst_ref = l.vars[dst].is_ref
+    change result = LIR_TY_ERR
+    change result_ref = false
+    when kind == LIR_USE {
+        when lirIsVar(inst.a) && lirVarOk(l, inst.a) && l.vars[inst.a].is_ref {
             result = l.vars[inst.a].ty
             result_ref = true
-        } else {
+        } otherwise {
             result = lirOperandType(l, inst.a)
         }
-        if !lirUse(&mut v, l, inst.a, check) { return 5 }
+        when !lirUse(edit v, l, inst.a, check) { give 5 }
         lirMoveOut(edit v, l, types, drop_memo, inst.a, false)
-    } else if kind == LIR_UNARY {
-        let ty = lirOperandType(l, inst.b)
-        if (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
-        if !lirUse(&mut v, l, inst.b, check) { return 5 }
-    } else if kind == LIR_BINARY {
-        let lt = lirOperandType(l, inst.b)
-        let rt = lirOperandType(l, inst.c)
-        if lirTypesCompat(types, lm, lt, rt) && lt != LIR_TY_ERR {
-            if inst.a <= LIR_REM && (lt == 1 || lt == 2) { result = lt }
-            if inst.a >= LIR_EQ && inst.a <= LIR_GE && (lt == 1 || rt == 1 || lt == 2 || ((lt == 4 || lirIsUnitEnum(types, lm, lt)) && inst.a <= LIR_NE)) { result = 4 }
+    } otherwise when kind == LIR_UNARY {
+        hold ty = lirOperandType(l, inst.b)
+        when (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
+        when !lirUse(edit v, l, inst.b, check) { give 5 }
+    } otherwise when kind == LIR_BINARY {
+        hold lt = lirOperandType(l, inst.b)
+        hold rt = lirOperandType(l, inst.c)
+        when lirTypesCompat(types, lm, lt, rt) && lt != LIR_TY_ERR {
+            when inst.a <= LIR_REM && (lt == 1 || lt == 2) { result = lt }
+            when inst.a >= LIR_EQ && inst.a <= LIR_GE && (lt == 1 || rt == 1 || lt == 2 || ((lt == 4 || lirIsUnitEnum(types, lm, lt)) && inst.a <= LIR_NE)) { result = 4 }
         }
-        if !lirUse(&mut v, l, inst.b, check) || !lirUse(&mut v, l, inst.c, check) { return 5 }
-    } else if kind == LIR_CALL {
-        let status = lirVerifyCall(&mut v, l, types, lm, inst.a, inst.b, inst.c, check)
-        if status != 0 { return status }
+        when !lirUse(edit v, l, inst.b, check) || !lirUse(edit v, l, inst.c, check) { give 5 }
+    } otherwise when kind == LIR_CALL {
+        hold status = lirVerifyCall(edit v, l, types, lm, inst.a, inst.b, inst.c, check)
+        when status != 0 { give status }
         each i among 0..inst.c {
             hold arg = l.operands[inst.b + i]
             when !l.args[arg].by_ref { lirMoveOut(edit v, l, types, drop_memo, l.args[arg].value, false) }
         }
         result = lm.fn_ret[inst.a]
         result_ref = lm.fn_ret_ref[inst.a]
-    } else if kind == LIR_STRUCT {
-        if inst.a < 0 || inst.a >= lm.st_count.length { return 1 }
-        if inst.c != lm.st_count[inst.a] || inst.b < 0 || inst.b + inst.c > l.operands.length { return 3 }
-        for i in 0..inst.c {
-            let operand = l.operands[inst.b + i]
-            if lirOperandType(l, operand) != lm.field_ty[lm.st_first[inst.a] + i] { return 3 }
-            if !lirUse(&mut v, l, operand, check) { return 5 }
+    } otherwise when kind == LIR_STRUCT {
+        when inst.a < 0 || inst.a >= lm.st_count.length { give 1 }
+        when inst.c != lm.st_count[inst.a] || inst.b < 0 || inst.b + inst.c > l.operands.length { give 3 }
+        each i among 0..inst.c {
+            hold operand = l.operands[inst.b + i]
+            when lirOperandType(l, operand) != lm.field_ty[lm.st_first[inst.a] + i] { give 3 }
+            when !lirUse(edit v, l, operand, check) { give 5 }
             lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
-        if lirStructOf(types, lm, dst_t) == inst.a { result = dst_t }
-    } else if kind == LIR_VARIANT {
-        if inst.a < 0 || inst.a >= lm.en_decl.length || inst.b < 0 || inst.b >= lm.en_count[inst.a] { return 1 }
-        let which = lm.en_first[inst.a] + inst.b
-        if which < 0 || which >= lm.variant_payload.length { return 3 }
-        let count = lm.variant_payload[which]
-        if count == 1 {
-            let payload_ty = lm.variant_type[which]
-            if !lirBuiltinPayloadOk(types, lm, payload_ty) || lirOperandType(l, inst.c) != payload_ty { return 3 }
-            if !lirUse(&mut v, l, inst.c, check) { return 5 }
+        when lirStructOf(types, lm, dst_t) == inst.a { result = dst_t }
+    } otherwise when kind == LIR_VARIANT {
+        when inst.a < 0 || inst.a >= lm.en_decl.length || inst.b < 0 || inst.b >= lm.en_count[inst.a] { give 1 }
+        hold which = lm.en_first[inst.a] + inst.b
+        when which < 0 || which >= lm.variant_payload.length { give 3 }
+        hold count = lm.variant_payload[which]
+        when count == 1 {
+            hold payload_ty = lm.variant_type[which]
+            when !lirBuiltinPayloadOk(types, lm, payload_ty) || lirOperandType(l, inst.c) != payload_ty { give 3 }
+            when !lirUse(edit v, l, inst.c, check) { give 5 }
             lirMoveOut(edit v, l, types, drop_memo, inst.c, true)
-        } else if count != 0 { return 3 }
-        else if inst.c != LIR_NONE { return 3 }
-        if dst_t < 0 || dst_t >= types.types.length { return 3 }
-        match types.types[dst_t].kind {
-            SemTypeKind.Enum => {
-                if types.types[dst_t].nominal_id != lm.en_decl[inst.a] { return 3 }
+        } otherwise when count != 0 { give 3 }
+        otherwise when inst.c != LIR_NONE { give 3 }
+        when dst_t < 0 || dst_t >= types.types.length { give 3 }
+        choose types.types[dst_t].kind {
+            SemTypeKind.Enum : {
+                when types.types[dst_t].nominal_id != lm.en_decl[inst.a] { give 3 }
                 result = dst_t
             }
-            SemTypeKind.Option => {
-                if lm.en_builtin[inst.a] != dst_t { return 3 }
+            SemTypeKind.Option : {
+                when lm.en_builtin[inst.a] != dst_t { give 3 }
                 result = dst_t
             }
-            SemTypeKind.Result => {
-                if lm.en_builtin[inst.a] != dst_t { return 3 }
+            SemTypeKind.Result : {
+                when lm.en_builtin[inst.a] != dst_t { give 3 }
                 result = dst_t
             }
-            _ => { return 3 }
+            _ : { give 3 }
         }
-    } else if kind == LIR_PAYLOAD {
-        let enum_t = lirPlaceType(l, types, lm, inst.a)
-        if enum_t < 0 || enum_t >= types.types.length { return 8 }
-        if inst.b < 0 || inst.b >= lm.en_decl.length { return 1 }
-        if inst.c < 0 || inst.c >= lm.en_count[inst.b] { return 1 }
-        let variant = lm.en_first[inst.b] + inst.c
-        if variant < 0 || variant >= lm.variant_payload.length || lm.variant_payload[variant] != 1 { return 3 }
-        let payload_ty = lm.variant_type[variant]
-        if !lirBuiltinPayloadOk(types, lm, payload_ty) { return 3 }
-        if inst.a < 0 || inst.a >= l.places.length || l.places[inst.a].parent >= 0 { return 8 }
-        let root = l.places[inst.a].root
-        if !lirVarOk(l, root) || l.vars[root].is_ref { return 8 }
-        match types.types[enum_t].kind {
-            SemTypeKind.Enum => {
-                if types.types[enum_t].nominal_id != lm.en_decl[inst.b] { return 3 }
+    } otherwise when kind == LIR_PAYLOAD {
+        hold enum_t = lirPlaceType(l, types, lm, inst.a)
+        when enum_t < 0 || enum_t >= types.types.length { give 8 }
+        when inst.b < 0 || inst.b >= lm.en_decl.length { give 1 }
+        when inst.c < 0 || inst.c >= lm.en_count[inst.b] { give 1 }
+        hold variant = lm.en_first[inst.b] + inst.c
+        when variant < 0 || variant >= lm.variant_payload.length || lm.variant_payload[variant] != 1 { give 3 }
+        hold payload_ty = lm.variant_type[variant]
+        when !lirBuiltinPayloadOk(types, lm, payload_ty) { give 3 }
+        when inst.a < 0 || inst.a >= l.places.length || l.places[inst.a].parent >= 0 { give 8 }
+        hold root = l.places[inst.a].root
+        when !lirVarOk(l, root) || l.vars[root].is_ref { give 8 }
+        choose types.types[enum_t].kind {
+            SemTypeKind.Enum : {
+                when types.types[enum_t].nominal_id != lm.en_decl[inst.b] { give 3 }
             }
-            SemTypeKind.Option => {
-                if lm.en_builtin[inst.b] != enum_t { return 3 }
+            SemTypeKind.Option : {
+                when lm.en_builtin[inst.b] != enum_t { give 3 }
             }
-            SemTypeKind.Result => {
-                if lm.en_builtin[inst.b] != enum_t { return 3 }
+            SemTypeKind.Result : {
+                when lm.en_builtin[inst.b] != enum_t { give 3 }
             }
-            _ => { return 3 }
+            _ : { give 3 }
         }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         // An owned payload is moved out: the whole union is consumed.
@@ -277,41 +277,41 @@ fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
             lirGuardSet(edit v, l, root, -1, 0, true)
         }
         result = payload_ty
-    } else if kind == LIR_DISC {
-        let enum_t = lirPlaceType(l, types, lm, inst.a)
-        if enum_t < 0 || enum_t >= types.types.length { return 8 }
-        match types.types[enum_t].kind {
-            SemTypeKind.Enum => { result = 1 }
-            SemTypeKind.Option => {
-                if lirBuiltinEnumIndex(lm, enum_t) < 0 { return 3 }
+    } otherwise when kind == LIR_DISC {
+        hold enum_t = lirPlaceType(l, types, lm, inst.a)
+        when enum_t < 0 || enum_t >= types.types.length { give 8 }
+        choose types.types[enum_t].kind {
+            SemTypeKind.Enum : { result = 1 }
+            SemTypeKind.Option : {
+                when lirBuiltinEnumIndex(lm, enum_t) < 0 { give 3 }
                 result = 1
             }
-            SemTypeKind.Result => {
-                if lirBuiltinEnumIndex(lm, enum_t) < 0 { return 3 }
+            SemTypeKind.Result : {
+                when lirBuiltinEnumIndex(lm, enum_t) < 0 { give 3 }
                 result = 1
             }
-            _ => { return 3 }
+            _ : { give 3 }
         }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
-    } else if kind == LIR_LIST_LIT {
-        if inst.a < 0 || inst.a >= lm.list_elem.length || inst.c < 0 || inst.b < 0 || inst.c > l.operands.length || inst.b > l.operands.length - inst.c { return 1 }
-        if dst_t < 0 || dst_t >= types.types.length { return 3 }
-        match types.types[dst_t].kind {
-            SemTypeKind.List => {
-                if types.types[dst_t].elem_type != lm.list_elem[inst.a] { return 3 }
+    } otherwise when kind == LIR_LIST_LIT {
+        when inst.a < 0 || inst.a >= lm.list_elem.length || inst.c < 0 || inst.b < 0 || inst.c > l.operands.length || inst.b > l.operands.length - inst.c { give 1 }
+        when dst_t < 0 || dst_t >= types.types.length { give 3 }
+        choose types.types[dst_t].kind {
+            SemTypeKind.List : {
+                when types.types[dst_t].elem_type != lm.list_elem[inst.a] { give 3 }
             }
-            _ => { return 3 }
+            _ : { give 3 }
         }
-        for i in 0..inst.c {
-            let operand = l.operands[inst.b + i]
-            if lirOperandType(l, operand) != lm.list_elem[inst.a] { return 3 }
-            if !lirUse(&mut v, l, operand, check) { return 5 }
+        each i among 0..inst.c {
+            hold operand = l.operands[inst.b + i]
+            when lirOperandType(l, operand) != lm.list_elem[inst.a] { give 3 }
+            when !lirUse(edit v, l, operand, check) { give 5 }
             lirMoveOut(edit v, l, types, drop_memo, operand, false)
         }
         result = dst_t
-    } else if kind == LIR_READ || kind == LIR_LOAN {
+    } otherwise when kind == LIR_READ || kind == LIR_LOAN {
         result = lirPlaceType(l, types, lm, inst.a)
-        if result == LIR_TY_ERR { return 8 }
+        when result == LIR_TY_ERR { give 8 }
         when check && !lirRootLive(edit v, l, inst.a) { give 5 }
         result_ref = kind == LIR_LOAN
         when kind == LIR_READ && result >= 0 && result < drop_memo.length && drop_memo[result] == 2 {
@@ -319,24 +319,24 @@ fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
             // guards inside (or containing) that place.
             lirGuardSet(edit v, l, l.places[inst.a].root, inst.a, 0, true)
         }
-    } else if kind == LIR_TEXTBUF {
+    } otherwise when kind == LIR_TEXTBUF {
         result = 5
-    } else if kind == LIR_LEN || kind == LIR_CAP {
-        let ty = lirPlaceType(l, types, lm, inst.a)
-        if ty < 0 || ty >= types.types.length { return 8 }
-        match types.types[ty].kind {
-            SemTypeKind.List => {}
-            SemTypeKind.Text => { if kind == LIR_CAP { return 3 } }
-            _ => { return 3 }
+    } otherwise when kind == LIR_LEN || kind == LIR_CAP {
+        hold ty = lirPlaceType(l, types, lm, inst.a)
+        when ty < 0 || ty >= types.types.length { give 8 }
+        choose types.types[ty].kind {
+            SemTypeKind.List : {}
+            SemTypeKind.Text : { when kind == LIR_CAP { give 3 } }
+            _ : { give 3 }
         }
         result = 1
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
-    } else if kind == LIR_BYTE_AT {
-        if lirPlaceType(l, types, lm, inst.a) != 5 || lirOperandType(l, inst.b) != 1 { return 3 }
+        when check && !v.defined[l.places[inst.a].root] { give 5 }
+    } otherwise when kind == LIR_BYTE_AT {
+        when lirPlaceType(l, types, lm, inst.a) != 5 || lirOperandType(l, inst.b) != 1 { give 3 }
         result = 1
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
-        if !lirUse(&mut v, l, inst.b, check) { return 5 }
-    } else if kind == LIR_LIST_POP {
+        when check && !v.defined[l.places[inst.a].root] { give 5 }
+        when !lirUse(edit v, l, inst.b, check) { give 5 }
+    } otherwise when kind == LIR_LIST_POP {
         hold list_t = lirPlaceType(l, types, lm, inst.a)
         when list_t < 0 || list_t >= types.types.length { give 8 }
         choose types.types[list_t].kind {
@@ -351,15 +351,15 @@ fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
             _ : { give 3 }
         }
         result = dst_t
-        if check && !v.defined[l.places[inst.a].root] { return 5 }
-    } else if kind == LIR_PLATFORM {
-        let status = lirVerifyPlatform(&mut v, l, types, lm, inst.a, inst.b, inst.c, dst, check)
-        if status != 0 { return status }
+        when check && !v.defined[l.places[inst.a].root] { give 5 }
+    } otherwise when kind == LIR_PLATFORM {
+        hold status = lirVerifyPlatform(edit v, l, types, lm, inst.a, inst.b, inst.c, dst, check)
+        when status != 0 { give status }
         result = dst_t
-    } else {
-        return 1
+    } otherwise {
+        give 1
     }
-    if result == LIR_TY_ERR || !lirTypesCompat(types, lm, result, dst_t) || result_ref != dst_ref { return 3 }
+    when result == LIR_TY_ERR || !lirTypesCompat(types, lm, result, dst_t) || result_ref != dst_ref { give 3 }
     v.defined[dst] = true
     when dst < v.moved.length { v.moved[dst] = false }
     when v.has_flags {
@@ -385,16 +385,16 @@ fn lirVerifyInstCore(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: &Lir
             lirGuardSet(edit v, l, dst, -1, 1, false)
         }
     }
-    return 0
+    give 0
 }
 
-fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int, b: Int, check: Bool) -> Int {
-    let blocks = body.term.length
-    let first = body.first[b]
-    if first < 0 || body.count[b] < 0 || first + body.count[b] > body.order.length { return 1 }
-    for i in first..(first + body.count[b]) {
-        let status = lirVerifyInst(&mut v, l, types, lm, drop_memo, body.order[i], b, check)
-        if status != 0 { return status }
+flow lirVerifyBlock(v: edit LirVerifier, l: view LirFn, body: view LirBody, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], fn_index: Int, b: Int, check: Bool) => Int {
+    hold blocks = body.term.length
+    hold first = body.first[b]
+    when first < 0 || body.count[b] < 0 || first + body.count[b] > body.order.length { give 1 }
+    each i among first..(first + body.count[b]) {
+        hold status = lirVerifyInst(edit v, l, types, lm, drop_memo, body.order[i], b, check)
+        when status != 0 { give status }
     }
     when check && v.has_flags {
         hold term = body.term[b]
@@ -411,17 +411,17 @@ fn lirVerifyBlock(v: &mut LirVerifier, l: &LirFn, body: &LirBody, types: &TypeTa
             }
         }
     }
-    hold term = lirVerifyTerm(&mut v, l, body, types, lm, fn_index, b, blocks, check)
+    hold term = lirVerifyTerm(edit v, l, body, types, lm, fn_index, b, blocks, check)
     when term != 0 { give term }
     give lirOwnTerm(edit v, l, body, b, check)
 }
 
-pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, drop_memo: &List<Int>, fn_index: Int) -> LirCheck {
-    let blocks = body.term.length
-    let vars = l.vars.length
-    if fn_index < 0 || fn_index >= lm.fn_first.length || blocks == 0 { return LirCheck(status: 1, block: -1, inst: -1) }
-    if body.first.length != blocks || body.count.length != blocks || body.ta.length != blocks || body.tb.length != blocks || body.top.length != blocks {
-        return LirCheck(status: 2, block: -1, inst: -1)
+expose flow lirVerify(l: view LirFn, body: view LirBody, types: view TypeTable, lm: view LirModule, drop_memo: view List of[Int], fn_index: Int) => LirCheck {
+    hold blocks = body.term.length
+    hold vars = l.vars.length
+    when fn_index < 0 || fn_index >= lm.fn_first.length || blocks == 0 { give LirCheck(status: 1, block: -1, inst: -1) }
+    when body.first.length != blocks || body.count.length != blocks || body.ta.length != blocks || body.tb.length != blocks || body.top.length != blocks {
+        give LirCheck(status: 2, block: -1, inst: -1)
     }
     change v = LirVerifier(
         defined: List[],
@@ -516,9 +516,9 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         v.ftable@push(0)
         v.otable@push(0)
     }
-    for b in 0..blocks {
-        v.seen.push(b == 0)
-        v.pending.push(b == 0)
+    each b among 0..blocks {
+        v.seen@push(b == 0)
+        v.pending@push(b == 0)
     }
     // Parameters are assigned on entry.
     each i among 0..vars {
@@ -526,17 +526,17 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
         // A guard of a parameter starts owning its place.
         when v.flag_root[i] >= 0 && v.flag_root[i] < l.params { v.otable[i] = 1 }
     }
-    v.queue.push(0)
-    var steps = 0
-    while v.queue.length > 0 {
-        var b = 0
-        match v.queue.pop() {
-            Some(x) => { b = x }
-            None => { break }
+    v.queue@push(0)
+    change steps = 0
+    during v.queue.length > 0 {
+        change b = 0
+        choose v.queue@pop() {
+            Some(x) : { b = x }
+            None : { leave }
         }
         v.pending[b] = false
         steps += 1
-        if steps > 100000 { return LirCheck(status: 2, block: b, inst: -1) }
+        when steps > 100000 { give LirCheck(status: 2, block: b, inst: -1) }
         each i among 0..vars {
             v.defined[i] = v.table[b * vars + i]
             v.moved[i] = v.mtable[b * vars + i]
@@ -546,17 +546,17 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
             }
         }
         lirLeafLoad(edit v, b)
-        let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, false)
-        if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
-        let kind = body.term[b]
-        if kind == LIR_T_JUMP || kind == LIR_T_BRANCH {
-            lirVerifyFlow(&mut v, body.ta[b], vars)
+        hold status = lirVerifyBlock(edit v, l, body, types, lm, drop_memo, fn_index, b, false)
+        when status != 0 { give LirCheck(status: status, block: b, inst: -1) }
+        hold kind = body.term[b]
+        when kind == LIR_T_JUMP || kind == LIR_T_BRANCH {
+            lirVerifyFlow(edit v, body.ta[b], vars)
         }
-        if kind == LIR_T_BRANCH { lirVerifyFlow(&mut v, body.tb[b], vars) }
+        when kind == LIR_T_BRANCH { lirVerifyFlow(edit v, body.tb[b], vars) }
     }
     change leak_block = -1
-    for b in 0..blocks {
-        if v.seen[b] {
+    each b among 0..blocks {
+        when v.seen[b] {
             each i among 0..vars {
                 v.defined[i] = v.table[b * vars + i]
                 v.moved[i] = v.mtable[b * vars + i]
@@ -566,13 +566,13 @@ pub fn lirVerify(l: &LirFn, body: &LirBody, types: &TypeTable, lm: &LirModule, d
                 }
             }
             lirLeafLoad(edit v, b)
-            let status = lirVerifyBlock(&mut v, l, body, types, lm, drop_memo, fn_index, b, true)
-            if status != 0 { return LirCheck(status: status, block: b, inst: -1) }
+            hold status = lirVerifyBlock(edit v, l, body, types, lm, drop_memo, fn_index, b, true)
+            when status != 0 { give LirCheck(status: status, block: b, inst: -1) }
             when v.leaked && leak_block < 0 { leak_block = b }
         }
     }
     // A leak only once no memory-safety rule is violated anywhere.
     when leak_block >= 0 { give LirCheck(status: 10, block: leak_block, inst: -1) }
-    return LirCheck(status: 0, block: -1, inst: steps)
+    give LirCheck(status: 0, block: -1, inst: steps)
 }
 

@@ -1,11 +1,11 @@
-import flow_cfg
+take flow_cfg
 
-pub const FLOW_UNINIT = 0
-pub const FLOW_LIVE = 1
-const FLOW_MOVED = 2
-pub const FLOW_MAYBE = 3
+expose fixed FLOW_UNINIT = 0
+expose fixed FLOW_LIVE = 1
+fixed FLOW_MOVED = 2
+expose fixed FLOW_MAYBE = 3
 
-struct FlowCheck {
+shape FlowCheck {
     status: Int
     start: Int
     end: Int
@@ -14,102 +14,102 @@ struct FlowCheck {
     linear: Int
 }
 
-struct FlowWork {
-    incoming: List<Int>
-    reached: List<Bool>
-    pending: List<Bool>
-    queue: List<Int>
-    scratch: List<Int>
+shape FlowWork {
+    incoming: List of[Int]
+    reached: List of[Bool]
+    pending: List of[Bool]
+    queue: List of[Int]
+    scratch: List of[Int]
 }
 
-fn flowWorkNew(blocks: Int, paths: Int) -> FlowWork {
-    var incoming: List<Int> = List[]
-    var reached: List<Bool> = List[]
-    var pending: List<Bool> = List[]
-    var queue: List<Int> = List[]
-    var scratch: List<Int> = List[]
-    incoming.reserve(blocks * paths)
-    for i in 0..(blocks * paths) { incoming.push(FLOW_UNINIT) }
-    for i in 0..blocks {
-        reached.push(i == 0)
-        pending.push(i == 0)
+flow flowWorkNew(blocks: Int, paths: Int) => FlowWork {
+    change incoming: List of[Int] = List[]
+    change reached: List of[Bool] = List[]
+    change pending: List of[Bool] = List[]
+    change queue: List of[Int] = List[]
+    change scratch: List of[Int] = List[]
+    incoming@reserve(blocks * paths)
+    each i among 0..(blocks * paths) { incoming@push(FLOW_UNINIT) }
+    each i among 0..blocks {
+        reached@push(i == 0)
+        pending@push(i == 0)
     }
-    for i in 0..paths { scratch.push(FLOW_UNINIT) }
-    queue.push(0)
-    return FlowWork(incoming: incoming, reached: reached, pending: pending, queue: queue, scratch: scratch)
+    each i among 0..paths { scratch@push(FLOW_UNINIT) }
+    queue@push(0)
+    give FlowWork(incoming: incoming, reached: reached, pending: pending, queue: queue, scratch: scratch)
 }
 
-fn flowJoin(work: &mut FlowWork, target: Int, paths: Int) {
-    if target < 0 { return }
-    let first = !work.reached[target]
-    var changed = first
-    let offset = target * paths
-    for i in 0..paths {
-        let current = work.incoming[offset + i]
-        let arriving = work.scratch[i]
-        if first {
+flow flowJoin(work: edit FlowWork, target: Int, paths: Int) {
+    when target < 0 { give }
+    hold first = !work.reached[target]
+    change changed = first
+    hold offset = target * paths
+    each i among 0..paths {
+        hold current = work.incoming[offset + i]
+        hold arriving = work.scratch[i]
+        when first {
             work.incoming[offset + i] = arriving
-        } else if current != arriving && current != FLOW_MAYBE {
+        } otherwise when current != arriving && current != FLOW_MAYBE {
             work.incoming[offset + i] = FLOW_MAYBE
             changed = true
         }
     }
     work.reached[target] = true
-    if changed && !work.pending[target] {
+    when changed && !work.pending[target] {
         work.pending[target] = true
-        work.queue.push(target)
+        work.queue@push(target)
     }
 }
 
-fn flowLoad(work: &mut FlowWork, block: Int, paths: Int) {
-    let offset = block * paths
-    for i in 0..paths { work.scratch[i] = work.incoming[offset + i] }
+flow flowLoad(work: edit FlowWork, block: Int, paths: Int) {
+    hold offset = block * paths
+    each i among 0..paths { work.scratch[i] = work.incoming[offset + i] }
 }
 
 // A path's own cell represents its residual storage. Descendants have
 // separate cells so a moved field does not invalidate a sibling.
-pub fn flowApply(graph: &FlowGraph, state: &mut List<Int>, event: &FlowEvent, verify: Bool) -> Bool {
-    let kind = event.kind
-    let root = event.path
+expose flow flowApply(graph: view FlowGraph, state: edit List of[Int], event: view FlowEvent, verify: Bool) => Bool {
+    hold kind = event.kind
+    hold root = event.path
     // Loan events belong to the borrow checker in loans_check.l. A drop
     // ends the lifetime of whatever the path still owns.
-    if kind == FLOW_DROP {
-        var dropped = root
-        while dropped >= 0 {
+    when kind == FLOW_DROP {
+        change dropped = root
+        during dropped >= 0 {
             state[dropped] = FLOW_UNINIT
             dropped = flowNextPath(graph, root, dropped)
         }
-        return true
+        give true
     }
-    if kind == FLOW_MUTATE {
-        var current = root
-        while current >= 0 {
-            if verify && state[current] != FLOW_LIVE { return false }
+    when kind == FLOW_MUTATE {
+        change current = root
+        during current >= 0 {
+            when verify && state[current] != FLOW_LIVE { give false }
             current = flowNextPath(graph, root, current)
         }
-        return true
+        give true
     }
-    if kind > FLOW_WRITE { return true }
-    if verify && kind == FLOW_WRITE {
-        var ancestor = graph.paths[root].parent
-        while ancestor >= 0 {
-            if state[ancestor] != FLOW_LIVE { return false }
+    when kind > FLOW_WRITE { give true }
+    when verify && kind == FLOW_WRITE {
+        change ancestor = graph.paths[root].parent
+        during ancestor >= 0 {
+            when state[ancestor] != FLOW_LIVE { give false }
             ancestor = graph.paths[ancestor].parent
         }
     }
-    var path = root
-    while path >= 0 {
-        if verify && (kind == FLOW_READ || kind == FLOW_MOVE) && state[path] != FLOW_LIVE {
-            return false
+    change path = root
+    during path >= 0 {
+        when verify && (kind == FLOW_READ || kind == FLOW_MOVE) && state[path] != FLOW_LIVE {
+            give false
         }
-        if kind == FLOW_MOVE {
+        when kind == FLOW_MOVE {
             state[path] = FLOW_MOVED
-        } else if kind == FLOW_INIT || kind == FLOW_WRITE {
+        } otherwise when kind == FLOW_INIT || kind == FLOW_WRITE {
             state[path] = FLOW_LIVE
         }
         path = flowNextPath(graph, root, path)
     }
-    return true
+    give true
 }
 
 flow flowIsLinear(graph: view FlowGraph, ty: Int) => Bool {
@@ -151,59 +151,59 @@ flow flowReleasesLinear(graph: view FlowGraph, state: view List of[Int], event: 
     give -1
 }
 
-pub fn flowVerify(graph: &mut FlowGraph, requires_return: Bool) -> FlowCheck {
-    let paths = graph.paths.length
-    let blocks = graph.blocks.length
-    if paths > 2000000 / blocks {
-        return FlowCheck(status: 2, start: 0, end: 0, iterations: 0, linear: -1)
+expose flow flowVerify(graph: edit FlowGraph, requires_return: Bool) => FlowCheck {
+    hold paths = graph.paths.length
+    hold blocks = graph.blocks.length
+    when paths > 2000000 / blocks {
+        give FlowCheck(status: 2, start: 0, end: 0, iterations: 0, linear: -1)
     }
-    var work = flowWorkNew(blocks, paths)
-    var steps = 0
-    while work.queue.length > 0 {
-        var id = 0
-        match work.queue.pop() {
-            Some(next_block) => { id = next_block }
-            None => { break }
+    change work = flowWorkNew(blocks, paths)
+    change steps = 0
+    during work.queue.length > 0 {
+        change id = 0
+        choose work.queue@pop() {
+            Some(next_block) : { id = next_block }
+            None : { leave }
         }
         steps += 1
-        if steps > 100000 {
-            return FlowCheck(status: 2, start: 0, end: 0, iterations: steps, linear: -1)
+        when steps > 100000 {
+            give FlowCheck(status: 2, start: 0, end: 0, iterations: steps, linear: -1)
         }
         work.pending[id] = false
-        flowLoad(&mut work, id, paths)
-        let block = &graph.blocks[id]
-        var event = block.first
-        while event >= 0 {
-            let instruction = &graph.events[event]
-            flowApply(graph, &mut work.scratch, instruction, false)
+        flowLoad(edit work, id, paths)
+        hold block = view graph.blocks[id]
+        change event = block.first
+        during event >= 0 {
+            hold instruction = view graph.events[event]
+            flowApply(graph, edit work.scratch, instruction, false)
             event = instruction.next
         }
-        flowJoin(&mut work, block.next_a, paths)
-        flowJoin(&mut work, block.next_b, paths)
+        flowJoin(edit work, block.next_a, paths)
+        flowJoin(edit work, block.next_b, paths)
     }
-    for id in 0..blocks {
-        if work.reached[id] {
-            flowLoad(&mut work, id, paths)
-            let block = &graph.blocks[id]
-            var event = block.first
-            while event >= 0 {
-                let instruction = &graph.events[event]
+    each id among 0..blocks {
+        when work.reached[id] {
+            flowLoad(edit work, id, paths)
+            hold block = view graph.blocks[id]
+            change event = block.first
+            during event >= 0 {
+                hold instruction = view graph.events[event]
                 hold leaked = flowReleasesLinear(graph, view work.scratch, instruction)
                 when leaked >= 0 {
                     give FlowCheck(status: 4, start: instruction.start, end: instruction.end, iterations: steps, linear: leaked)
                 }
-                if !flowApply(graph, &mut work.scratch, instruction, true) {
-                    return FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps, linear: -1)
+                when !flowApply(graph, edit work.scratch, instruction, true) {
+                    give FlowCheck(status: 1, start: instruction.start, end: instruction.end, iterations: steps, linear: -1)
                 }
                 event = instruction.next
             }
-            if requires_return && block.next_a < 0 && !block.returned {
-                return FlowCheck(status: 3, start: 0, end: 0, iterations: steps, linear: -1)
+            when requires_return && block.next_a < 0 && !block.returned {
+                give FlowCheck(status: 3, start: 0, end: 0, iterations: steps, linear: -1)
             }
         }
     }
     // Keep the converged entry states for drop elaboration.
     graph.entry = work.incoming
     graph.reached = work.reached
-    return FlowCheck(status: 0, start: 0, end: 0, iterations: steps, linear: -1)
+    give FlowCheck(status: 0, start: 0, end: 0, iterations: steps, linear: -1)
 }

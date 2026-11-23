@@ -48,7 +48,7 @@ fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
 fn b1_public_parse_type_does_not_expose_parse_type_atom() {
     let dir = prepare_modules();
     let actual_stmt = fs::read_to_string(dir.join("stmt.l")).unwrap();
-    assert!(actual_stmt.contains("import types"));
+    assert!(actual_stmt.contains("take types"));
     assert!(actual_stmt.contains("parseType("));
 
     let public = check(

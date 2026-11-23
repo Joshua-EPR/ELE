@@ -237,6 +237,8 @@ See [Known Limitations](docs/limitations.md) and [Development Roadmap](docs/road
 
 - [Getting Started Guide](docs/getting-started.md)
 - [Language Reference Specification](docs/language-reference.md)
+- [Migrating legacy ELE v1 code to ELE v2](docs/MIGRATING_ELE_V1_TO_V2.md)
+- [ELE v2 syntax status](docs/ELE_SYNTAX_V2.md)
 - [Compiler Architecture](docs/architecture.md)
 - [Self-Hosting & Generational Fixpoint](docs/self-hosting.md)
 - [Performance & Benchmark Report](docs/performance.md)

@@ -1,85 +1,85 @@
-import lexer
-import tokens
-import cursor
-import ast
-import parser
-import sema_types
-import symbols
-import scopes
-import ownership_l
-import sema_context
-import sema_expr
-import sema_stmt
-import sema
-import modules_l
+take lexer
+take tokens
+take cursor
+take ast
+take parser
+take sema_types
+take symbols
+take scopes
+take ownership_l
+take sema_context
+take sema_expr
+take sema_stmt
+take sema
+take modules_l
 
-fn reportFileError(path: &Text, code: Int) -> Int {
+flow reportFileError(path: view Text, code: Int) => Int {
     // loadModuleRecursive has already reported the import path/cycle.
-    if code == -14 { return 1 }
-    if code == 1 {
+    when code == -14 { give 1 }
+    when code == 1 {
         printError("{path}: ruta o límite inválido")
-        return 2
+        give 2
     }
-    if code == 2 {
+    when code == 2 {
         printError("{path}: archivo inexistente")
-        return 3
+        give 3
     }
-    if code == 4 {
+    when code == 4 {
         printError("{path}: UTF-8 inválido")
-        return 5
+        give 5
     }
-    if code == 5 {
+    when code == 5 {
         printError("{path}: archivo excede el límite de 16 MiB")
-        return 7
+        give 7
     }
     printError("{path}: no se pudo abrir o leer el archivo")
-    return 4
+    give 4
 }
 
 // Line:column of `offset` counted from `start` (a module boundary in the
 // combined source), so each file reports its own coordinates.
-struct LineCol {
+shape LineCol {
     line: Int
     column: Int
 }
 
-fn computeLineCol(source: &Text, start: Int, offset: Int) -> LineCol {
-    var line = 1
-    var column = 1
-    for i in start..offset {
-        if i < source.byteLength {
-            let b = source.byteAt(i)
-            if b == 10 {
+flow computeLineCol(source: view Text, start: Int, offset: Int) => LineCol {
+    change line = 1
+    change column = 1
+    each i among start..offset {
+        when i < source.byteLength {
+            hold b = source@byteAt(i)
+            when b == 10 {
                 line += 1
                 column = 1
-            } else if b < 128 || b >= 192 {
+            } otherwise when b < 128 || b >= 192 {
                 column += 1
             }
         }
     }
-    return LineCol(line: line, column: column)
+    give LineCol(line: line, column: column)
 }
 
 // The module that owns a byte offset of the combined source.
-fn moduleIndexFor(starts: &List<Int>, offset: Int) -> Int {
-    var m = 0
-    for i in 0..starts.length {
-        if starts[i] <= offset { m = i }
+flow moduleIndexFor(starts: view List of[Int], offset: Int) => Int {
+    change m = 0
+    each i among 0..starts.length {
+        when starts[i] <= offset { m = i }
     }
-    return m
+    give m
 }
 
-fn reportLexError(path: &Text, source: &Text, error: &LexError) {
-    let offset = error.offset
-    var line = 1
-    var column = 1
-    for i in 0..offset {
-        if i < source.byteLength {
-            let b = source.byteAt(i)
-            if b == 10 {
+flow reportLexError(path: view Text, source: view Text, error: view LexError) {
+    hold offset = error.offset
+    change line = 1
+    change column = 1
+    each i among 0..offset {
+        when i < source.byteLength {
+            hold b = source@byteAt(i)
+            when b == 10 {
                 line += 1
                 column = 1
-            } else if b < 128 || b >= 192 {
+            } otherwise when b < 128 || b >= 192 {
                 column += 1
             }
         }
@@ -87,91 +87,91 @@ fn reportLexError(path: &Text, source: &Text, error: &LexError) {
     printError("{path}:{line}:{column}: error[LEXER]: error léxico (byte {offset})")
 }
 
-fn reportParseError(paths: &List<Text>, starts: &List<Int>, source: &Text, error: &ParseError) {
-    let offset = error.token_start
-    var message = "error sintáctico"
-    match error.problem {
-        ParseProblem.ExpectedExpression => { message = "se esperaba expresión" }
-        ParseProblem.ExpectedIdentifier => { message = "se esperaba identificador" }
-        ParseProblem.ExpectedType => { message = "se esperaba tipo" }
-        ParseProblem.ExpectedStatement => { message = "se esperaba sentencia" }
-        ParseProblem.ExpectedDeclaration => { message = "se esperaba declaración" }
-        ParseProblem.ExpectedToken => { message = "se esperaba token" }
-        ParseProblem.UnclosedBlock => { message = "bloque sin cerrar" }
-        ParseProblem.UnclosedParenthesis => { message = "paréntesis sin cerrar" }
-        ParseProblem.UnclosedBracket => { message = "corchete sin cerrar" }
-        ParseProblem.UnclosedInterpolation => { message = "expresión interpolada sin cerrar" }
-        ParseProblem.ChainedComparisonsProhibited => { message = "comparaciones encadenadas prohibidas" }
-        ParseProblem.NestingLimitExceeded => { message = "límite de anidamiento (128) excedido" }
-        ParseProblem.UnexpectedToken => { message = "token inesperado" }
+flow reportParseError(paths: view List of[Text], starts: view List of[Int], source: view Text, error: view ParseError) {
+    hold offset = error.token_start
+    change message = "error sintáctico"
+    choose error.problem {
+        ParseProblem.ExpectedExpression : { message = "se esperaba expresión" }
+        ParseProblem.ExpectedIdentifier : { message = "se esperaba identificador" }
+        ParseProblem.ExpectedType : { message = "se esperaba tipo" }
+        ParseProblem.ExpectedStatement : { message = "se esperaba sentencia" }
+        ParseProblem.ExpectedDeclaration : { message = "se esperaba declaración" }
+        ParseProblem.ExpectedToken : { message = "se esperaba token" }
+        ParseProblem.UnclosedBlock : { message = "bloque sin cerrar" }
+        ParseProblem.UnclosedParenthesis : { message = "paréntesis sin cerrar" }
+        ParseProblem.UnclosedBracket : { message = "corchete sin cerrar" }
+        ParseProblem.UnclosedInterpolation : { message = "expresión interpolada sin cerrar" }
+        ParseProblem.ChainedComparisonsProhibited : { message = "comparaciones encadenadas prohibidas" }
+        ParseProblem.NestingLimitExceeded : { message = "límite de anidamiento (128) excedido" }
+        ParseProblem.UnexpectedToken : { message = "token inesperado" }
     }
-    let m = moduleIndexFor(starts, offset)
-    let lc = computeLineCol(source, starts[m], offset)
-    let path = &paths[m]
-    let exp = &error.expected_token
-    if exp.byteLength > 0 {
+    hold m = moduleIndexFor(starts, offset)
+    hold lc = computeLineCol(source, starts[m], offset)
+    hold path = view paths[m]
+    hold exp = view error.expected_token
+    when exp.byteLength > 0 {
         printError("{path}:{lc.line}:{lc.column}: error[PARSER]: {message}: '{exp}' (byte {offset})")
-    } else {
+    } otherwise {
         printError("{path}:{lc.line}:{lc.column}: error[PARSER]: {message} (byte {offset})")
     }
 }
 
-fn reportSemaError(paths: &List<Text>, starts: &List<Int>, source: &Text, error: &SemaError) {
-    let offset = error.start
-    let m = moduleIndexFor(starts, offset)
-    let lc = computeLineCol(source, starts[m], offset)
-    let path = &paths[m]
-    let code = &error.code
-    let msg = &error.message
+flow reportSemaError(paths: view List of[Text], starts: view List of[Int], source: view Text, error: view SemaError) {
+    hold offset = error.start
+    hold m = moduleIndexFor(starts, offset)
+    hold lc = computeLineCol(source, starts[m], offset)
+    hold path = view paths[m]
+    hold code = view error.code
+    hold msg = view error.message
     printError("{path}:{lc.line}:{lc.column}: error[{code}]: {msg}")
 }
 
-fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int, patch: Text) -> Int {
-    match loadProgram(path) {
-        Ok(prog) => {
-            let source = &prog.source
-            if prog.tree.errors.length > 0 {
-                for i in 0..prog.tree.errors.length {
-                    let err = &prog.tree.errors[i]
-                    reportParseError(&prog.module_paths, &prog.module_starts, source, err)
+flow analyzeFile(path: view Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int, patch: Text) => Int {
+    choose loadProgram(path) {
+        Ok(prog) : {
+            hold source = view prog.source
+            when prog.tree.errors.length > 0 {
+                each i among 0..prog.tree.errors.length {
+                    hold err = view prog.tree.errors[i]
+                    reportParseError(view prog.module_paths, view prog.module_starts, source, err)
                 }
-                return 1
+                give 1
             }
-            var semaCtx = semaContextNew()
+            change semaCtx = semaContextNew()
             semaCtx.dump_drops = dump
             semaCtx.drop_fault = fault
             semaCtx.emit_lir = lir
             semaCtx.lir_fault = lir_fault
             semaCtx.lir_patch = patch
-            semaSetDeclModules(&mut semaCtx, &prog.decl_module)
-            semaSetModuleAccess(&mut semaCtx, &prog.module_access, prog.module_count)
-            semaAnalyze(&mut semaCtx, source, &prog.tree)
-            if semaCtx.errors.length > 0 {
-                for i in 0..semaCtx.errors.length {
-                    let err = &semaCtx.errors[i]
-                    reportSemaError(&prog.module_paths, &prog.module_starts, source, err)
+            semaSetDeclModules(edit semaCtx, view prog.decl_module)
+            semaSetModuleAccess(edit semaCtx, view prog.module_access, prog.module_count)
+            semaAnalyze(edit semaCtx, source, view prog.tree)
+            when semaCtx.errors.length > 0 {
+                each i among 0..semaCtx.errors.length {
+                    hold err = view semaCtx.errors[i]
+                    reportSemaError(view prog.module_paths, view prog.module_starts, source, err)
                 }
-                return 1
+                give 1
             }
-            let sym_count = semaCtx.symbols.symbols.length
-            let scope_count = semaCtx.scopes.scopes.length
-            let type_count = semaCtx.types.types.length
-            let blocks = semaCtx.flow_blocks
-            let edges = semaCtx.flow_edges
-            let paths = semaCtx.flow_paths
-            let iterations = semaCtx.flow_iterations
-            let loans = semaCtx.flow_loans
-            let loan_iterations = semaCtx.loan_iterations
-            let drops = semaCtx.drop_count
-            let flags = semaCtx.drop_flags
-            let drop_ops = semaCtx.drop_ops
-            let drop_iterations = semaCtx.drop_iterations
-            let lir_insts = semaCtx.lir_insts
-            let lir_blocks = semaCtx.lir_blocks
-            if lir {
+            hold sym_count = semaCtx.symbols.symbols.length
+            hold scope_count = semaCtx.scopes.scopes.length
+            hold type_count = semaCtx.types.types.length
+            hold blocks = semaCtx.flow_blocks
+            hold edges = semaCtx.flow_edges
+            hold paths = semaCtx.flow_paths
+            hold iterations = semaCtx.flow_iterations
+            hold loans = semaCtx.flow_loans
+            hold loan_iterations = semaCtx.loan_iterations
+            hold drops = semaCtx.drop_count
+            hold flags = semaCtx.drop_flags
+            hold drop_ops = semaCtx.drop_ops
+            hold drop_iterations = semaCtx.drop_iterations
+            hold lir_insts = semaCtx.lir_insts
+            hold lir_blocks = semaCtx.lir_blocks
+            when lir {
                 // The LIR goes to stdout; statistics go to stderr.
-                for i in 0..semaCtx.lir_lines.length {
-                    let line = &semaCtx.lir_lines[i]
+                each i among 0..semaCtx.lir_lines.length {
+                    hold line = view semaCtx.lir_lines[i]
                     print(line)
                 }
                 each i among 0..semaCtx.lir_functions.length {
@@ -180,27 +180,27 @@ fn analyzeFile(path: &Text, dump: Bool, fault: Int, lir: Bool, lir_fault: Int, p
                 }
                 print("end")
                 printError("LirSummary blocks={lir_blocks} insts={lir_insts} drops={drops} flags={flags}")
-                return 0
+                give 0
             }
-            let mod_count = prog.module_count
+            hold mod_count = prog.module_count
             print("SemaSummary modules={mod_count} symbols={sym_count} scopes={scope_count} types={type_count} blocks={blocks} edges={edges} paths={paths} iterations={iterations} loans={loans} loan_iterations={loan_iterations} drops={drops} flags={flags} drop_ops={drop_ops} drop_iterations={drop_iterations} errors=0")
-            return 0
+            give 0
         }
-        Err(code) => { return reportFileError(path, code) }
+        Err(code) : { give reportFileError(path, code) }
     }
 }
 
-fn main() -> Int {
-    let count = processArgCount()
-    let usage = "Uso: sema-l <archivo.l> [--check-ownership | --drop-plan | --emit-lir] | sema-l <archivo.l> --lir-patch <parche>"
-    if count < 1 || count > 3 {
+flow main() => Int {
+    hold count = processArgCount()
+    hold usage = "Uso: sema-l <archivo.l> [--check-ownership | --drop-plan | --emit-lir] | sema-l <archivo.l> --lir-patch <parche>"
+    when count < 1 || count > 3 {
         printError(usage)
-        return 2
+        give 2
     }
-    var dump = false
-    var fault = 0
-    var lir = false
-    var lir_fault = 0
+    change dump = false
+    change fault = 0
+    change lir = false
+    change lir_fault = 0
     change patch = ""
     when count == 3 {
         // Test hook: verify a lowered function rewritten by a patch file.
@@ -228,51 +228,51 @@ fn main() -> Int {
         }
         lir = true
     }
-    if count == 2 {
-        match processArg(1) {
-            Ok(flag) => {
-                let check = "--check-ownership"
-                let plan = "--drop-plan"
-                let fault_flag = "--drop-fault="
-                let lir_flag = "--emit-lir"
-                let lir_fault_flag = "--lir-fault="
-                if symbolNameEqualsText(flag, 0, flag.byteLength, lir_flag) {
+    when count == 2 {
+        choose processArg(1) {
+            Ok(flag) : {
+                hold check = "--check-ownership"
+                hold plan = "--drop-plan"
+                hold fault_flag = "--drop-fault="
+                hold lir_flag = "--emit-lir"
+                hold lir_fault_flag = "--lir-fault="
+                when symbolNameEqualsText(flag, 0, flag.byteLength, lir_flag) {
                     lir = true
-                } else if (flag.byteLength == 13 || flag.byteLength == 14) && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
+                } otherwise when (flag.byteLength == 13 || flag.byteLength == 14) && symbolNameEqualsText(flag, 0, 12, lir_fault_flag) {
                     // Two-digit injection ids cover platform contract faults.
-                    let digit = flag.byteAt(12)
-                    if digit < 48 || digit > 57 { printError(usage); return 2 }
+                    hold digit = flag@byteAt(12)
+                    when digit < 48 || digit > 57 { printError(usage); give 2 }
                     lir_fault = digit - 48
-                    if flag.byteLength == 14 {
-                        let second = flag.byteAt(13)
-                        if second < 48 || second > 57 { printError(usage); return 2 }
+                    when flag.byteLength == 14 {
+                        hold second = flag@byteAt(13)
+                        when second < 48 || second > 57 { printError(usage); give 2 }
                         lir_fault = lir_fault * 10 + second - 48
                     }
                     lir = true
-                } else if symbolNameEqualsText(flag, 0, flag.byteLength, plan) {
+                } otherwise when symbolNameEqualsText(flag, 0, flag.byteLength, plan) {
                     dump = true
-                } else if flag.byteLength == 14 && symbolNameEqualsText(flag, 0, 13, fault_flag) {
+                } otherwise when flag.byteLength == 14 && symbolNameEqualsText(flag, 0, 13, fault_flag) {
                     // Test hook: corrupt the plan to exercise the verifier.
-                    fault = flag.byteAt(13) - 48
-                } else if !symbolNameEqualsText(flag, 0, flag.byteLength, check) {
+                    fault = flag@byteAt(13) - 48
+                } otherwise when !symbolNameEqualsText(flag, 0, flag.byteLength, check) {
                     printError(usage)
-                    return 2
+                    give 2
                 }
             }
-            Err(code) => { return 2 }
+            Err(code) : { give 2 }
         }
     }
-    match processArg(0) {
-        Ok(path) => {
-            if path.byteLength == 0 {
+    choose processArg(0) {
+        Ok(path) : {
+            when path.byteLength == 0 {
                 printError(usage)
-                return 2
+                give 2
             }
-            return analyzeFile(path, dump, fault, lir, lir_fault, patch)
+            give analyzeFile(path, dump, fault, lir, lir_fault, patch)
         }
-        Err(code) => {
+        Err(code) : {
             printError("sema-l: argumento inválido")
-            return 2
+            give 2
         }
     }
 }

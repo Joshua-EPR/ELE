@@ -1,212 +1,212 @@
-import tokens
-import sema_types
-import lir_build
-import lir_finish
-import lir_builtin_union
+take tokens
+take sema_types
+take lir_build
+take lir_finish
+take lir_builtin_union
 
 // Text serialization of ELE LIR, protocol version 1 (docs/LIR_PROTOCOL.md).
 // One record per line, fields separated by single spaces. Names and text
 // constants are written as `<length>:<byte>,<byte>,...` (decimal UTF-8
 // bytes), so no escaping is needed and lengths can be validated.
 
-fn lirHexValue(b: Int) -> Int {
-    if b >= 48 && b <= 57 { return b - 48 }
-    if b >= 97 && b <= 102 { return b - 87 }
-    return b - 55
+flow lirHexValue(b: Int) => Int {
+    when b >= 48 && b <= 57 { give b - 48 }
+    when b >= 97 && b <= 102 { give b - 87 }
+    give b - 55
 }
 
 // Append the UTF-8 encoding of a Unicode scalar.
-fn lirUtf8(bytes: &mut List<Int>, scalar: Int) {
-    if scalar < 128 {
-        bytes.push(scalar)
-    } else if scalar < 2048 {
-        bytes.push(192 + scalar / 64)
-        bytes.push(128 + scalar % 64)
-    } else if scalar < 65536 {
-        bytes.push(224 + scalar / 4096)
-        bytes.push(128 + (scalar / 64) % 64)
-        bytes.push(128 + scalar % 64)
-    } else {
-        bytes.push(240 + scalar / 262144)
-        bytes.push(128 + (scalar / 4096) % 64)
-        bytes.push(128 + (scalar / 64) % 64)
-        bytes.push(128 + scalar % 64)
+flow lirUtf8(bytes: edit List of[Int], scalar: Int) {
+    when scalar < 128 {
+        bytes@push(scalar)
+    } otherwise when scalar < 2048 {
+        bytes@push(192 + scalar / 64)
+        bytes@push(128 + scalar % 64)
+    } otherwise when scalar < 65536 {
+        bytes@push(224 + scalar / 4096)
+        bytes@push(128 + (scalar / 64) % 64)
+        bytes@push(128 + scalar % 64)
+    } otherwise {
+        bytes@push(240 + scalar / 262144)
+        bytes@push(128 + (scalar / 4096) % 64)
+        bytes@push(128 + (scalar / 64) % 64)
+        bytes@push(128 + scalar % 64)
     }
 }
 
 // Decode the escapes of a literal span already validated by the lexer.
-fn lirDecode(source: &Text, start: Int, end: Int) -> List<Int> {
-    var bytes: List<Int> = List[]
-    var i = start
-    while i < end {
-        let b = source.byteAt(i)
-        if b == 92 && i + 1 < end {
-            let e = source.byteAt(i + 1)
-            if e == 117 {
-                var scalar = 0
-                var j = i + 3
-                while j < end && source.byteAt(j) != 125 {
-                    scalar = scalar * 16 + lirHexValue(source.byteAt(j))
+flow lirDecode(source: view Text, start: Int, end: Int) => List of[Int] {
+    change bytes: List of[Int] = List[]
+    change i = start
+    during i < end {
+        hold b = source@byteAt(i)
+        when b == 92 && i + 1 < end {
+            hold e = source@byteAt(i + 1)
+            when e == 117 {
+                change scalar = 0
+                change j = i + 3
+                during j < end && source@byteAt(j) != 125 {
+                    scalar = scalar * 16 + lirHexValue(source@byteAt(j))
                     j += 1
                 }
-                lirUtf8(&mut bytes, scalar)
+                lirUtf8(edit bytes, scalar)
                 i = j + 1
-            } else {
-                var c = e
-                if e == 110 { c = 10 }
-                if e == 116 { c = 9 }
-                if e == 114 { c = 13 }
-                bytes.push(c)
+            } otherwise {
+                change c = e
+                when e == 110 { c = 10 }
+                when e == 116 { c = 9 }
+                when e == 114 { c = 13 }
+                bytes@push(c)
                 i += 2
             }
-        } else if (b == 123 || b == 125) && i + 1 < end && source.byteAt(i + 1) == b {
+        } otherwise when (b == 123 || b == 125) && i + 1 < end && source@byteAt(i + 1) == b {
             // `{{` and `}}` stand for one brace.
-            bytes.push(b)
+            bytes@push(b)
             i += 2
-        } else {
-            bytes.push(b)
+        } otherwise {
+            bytes@push(b)
             i += 1
         }
     }
-    return bytes
+    give bytes
 }
 
 // Line start offsets of a source, for offset -> line:column.
-pub fn lirLineStarts(source: &Text) -> List<Int> {
-    var starts: List<Int> = List[]
-    starts.push(0)
-    for i in 0..source.byteLength {
-        if source.byteAt(i) == 10 { starts.push(i + 1) }
+expose flow lirLineStarts(source: view Text) => List of[Int] {
+    change starts: List of[Int] = List[]
+    starts@push(0)
+    each i among 0..source.byteLength {
+        when source@byteAt(i) == 10 { starts@push(i + 1) }
     }
-    return starts
+    give starts
 }
 
 // ` @line:col` of a byte offset (columns count code points, as the CLI).
-pub fn lirAtText(source: &Text, starts: &List<Int>, offset: Int) -> Text {
-    if offset < 0 || offset > source.byteLength { return "" }
-    var low = 0
-    var high = starts.length - 1
-    while low < high {
-        let mid = (low + high + 1) / 2
-        if starts[mid] <= offset { low = mid } else { high = mid - 1 }
+expose flow lirAtText(source: view Text, starts: view List of[Int], offset: Int) => Text {
+    when offset < 0 || offset > source.byteLength { give "" }
+    change low = 0
+    change high = starts.length - 1
+    during low < high {
+        hold mid = (low + high + 1) / 2
+        when starts[mid] <= offset { low = mid } otherwise { high = mid - 1 }
     }
-    var col = 1
-    for i in starts[low]..offset {
-        let b = source.byteAt(i)
-        if b < 128 || b >= 192 { col += 1 }
+    change col = 1
+    each i among starts[low]..offset {
+        hold b = source@byteAt(i)
+        when b < 128 || b >= 192 { col += 1 }
     }
-    let line = low + 1
-    return " @{line}:{col}"
+    hold line = low + 1
+    give " @{line}:{col}"
 }
 
-fn lirBytesText(bytes: &List<Int>) -> Text {
-    let n = bytes.length
-    var out = "{n}:"
-    for i in 0..n {
-        let b = bytes[i]
-        if i == 0 { out = "{out}{b}" } else { out = "{out},{b}" }
+flow lirBytesText(bytes: view List of[Int]) => Text {
+    hold n = bytes.length
+    change out = "{n}:"
+    each i among 0..n {
+        hold b = bytes[i]
+        when i == 0 { out = "{out}{b}" } otherwise { out = "{out},{b}" }
     }
-    return out
+    give out
 }
 
-pub fn lirSpanText(source: &Text, start: Int, end: Int) -> Text {
-    var bytes: List<Int> = List[]
-    for i in start..end { bytes.push(source.byteAt(i)) }
-    return lirBytesText(&bytes)
+expose flow lirSpanText(source: view Text, start: Int, end: Int) => Text {
+    change bytes: List of[Int] = List[]
+    each i among start..end { bytes@push(source@byteAt(i)) }
+    give lirBytesText(view bytes)
 }
 
 // Type code: i Int, f Float, b Bool, t Text, u Unit, s<k> struct k.
-pub fn lirTypeCode(types: &TypeTable, lm: &LirModule, ty: Int) -> Text {
-    if ty == 1 { return "i" }
-    if ty == 2 { return "f" }
-    if ty == 4 { return "b" }
-    if ty == 5 { return "t" }
-    if ty == 6 { return "u" }
+expose flow lirTypeCode(types: view TypeTable, lm: view LirModule, ty: Int) => Text {
+    when ty == 1 { give "i" }
+    when ty == 2 { give "f" }
+    when ty == 4 { give "b" }
+    when ty == 5 { give "t" }
+    when ty == 6 { give "u" }
     // The runtime stores one word, but the LIR must retain linear identity.
     when semTypeIsFile(types, ty) { give "h" }
     when semTypeIsWindow(types, ty) { give "w" }
-    if ty >= 0 && ty < types.types.length {
-        match types.types[ty].kind {
-            SemTypeKind.Struct => {
-                let decl = types.types[ty].nominal_id
-                for k in 0..lm.st_decl.length {
-                    if lm.st_decl[k] == decl { return "s{k}" }
+    when ty >= 0 && ty < types.types.length {
+        choose types.types[ty].kind {
+            SemTypeKind.Struct : {
+                hold decl = types.types[ty].nominal_id
+                each k among 0..lm.st_decl.length {
+                    when lm.st_decl[k] == decl { give "s{k}" }
                 }
             }
-            SemTypeKind.Enum => {
-                let decl = types.types[ty].nominal_id
-                for k in 0..lm.en_decl.length {
-                    if lm.en_decl[k] == decl { return "e{k}" }
+            SemTypeKind.Enum : {
+                hold decl = types.types[ty].nominal_id
+                each k among 0..lm.en_decl.length {
+                    when lm.en_decl[k] == decl { give "e{k}" }
                 }
             }
-            SemTypeKind.Option => {
-                let k = lirBuiltinEnumIndex(lm, ty)
-                if k >= 0 { return "e{k}" }
+            SemTypeKind.Option : {
+                hold k = lirBuiltinEnumIndex(lm, ty)
+                when k >= 0 { give "e{k}" }
             }
-            SemTypeKind.Result => {
-                let k = lirBuiltinEnumIndex(lm, ty)
-                if k >= 0 { return "e{k}" }
+            SemTypeKind.Result : {
+                hold k = lirBuiltinEnumIndex(lm, ty)
+                when k >= 0 { give "e{k}" }
             }
-            SemTypeKind.List => {
-                let elem = types.types[ty].elem_type
-                for k in 0..lm.list_elem.length {
-                    if lm.list_elem[k] == elem { return "l{k}" }
+            SemTypeKind.List : {
+                hold elem = types.types[ty].elem_type
+                each k among 0..lm.list_elem.length {
+                    when lm.list_elem[k] == elem { give "l{k}" }
                 }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return "?"
+    give "?"
 }
 
-pub fn lirOperandText(l: &LirFn, source: &Text, operand: Int) -> Text {
-    if lirIsVar(operand) { return "v{operand}" }
-    let id = lirConstId(operand)
-    if id < 0 || id >= l.consts.length { return "?" }
-    let c = &l.consts[id]
-    if c.kind == LIR_CONST_INT {
-        let value = c.value
-        return "ci{value}"
+expose flow lirOperandText(l: view LirFn, source: view Text, operand: Int) => Text {
+    when lirIsVar(operand) { give "v{operand}" }
+    hold id = lirConstId(operand)
+    when id < 0 || id >= l.consts.length { give "?" }
+    hold c = view l.consts[id]
+    when c.kind == LIR_CONST_INT {
+        hold value = c.value
+        give "ci{value}"
     }
-    if c.kind == LIR_CONST_BOOL {
-        let value = c.value
-        return "cb{value}"
+    when c.kind == LIR_CONST_BOOL {
+        hold value = c.value
+        give "cb{value}"
     }
-    if c.kind == LIR_CONST_UNIT { return "cu" }
-    let bytes = lirDecode(source, c.start, c.end)
-    let text = lirBytesText(&bytes)
-    return "ct{text}"
+    when c.kind == LIR_CONST_UNIT { give "cu" }
+    hold bytes = lirDecode(source, c.start, c.end)
+    hold text = lirBytesText(view bytes)
+    give "ct{text}"
 }
 
 // Place: p<var> followed by .<field> per projection, outermost last.
-pub fn lirPlaceText(l: &LirFn, place: Int) -> Text {
-    if place < 0 || place >= l.places.length { return "?" }
-    var suffix = ""
-    var cursor = place
-    var steps = 0
-    while l.places[cursor].parent >= 0 && steps <= l.places.length {
-        let f = l.places[cursor].field
-        if f >= 0 {
+expose flow lirPlaceText(l: view LirFn, place: Int) => Text {
+    when place < 0 || place >= l.places.length { give "?" }
+    change suffix = ""
+    change cursor = place
+    change steps = 0
+    during l.places[cursor].parent >= 0 && steps <= l.places.length {
+        hold f = l.places[cursor].field
+        when f >= 0 {
             suffix = ".{f}{suffix}"
-        } else if f <= -2 {
-            let iv = 0 - 2 - f
+        } otherwise when f <= -2 {
+            hold iv = 0 - 2 - f
             suffix = "[v{iv}]{suffix}"
         }
         cursor = l.places[cursor].parent
         steps += 1
     }
-    let root = l.places[cursor].root
-    return "p{root}{suffix}"
+    hold root = l.places[cursor].root
+    give "p{root}{suffix}"
 }
 
-pub fn lirArgText(l: &LirFn, source: &Text, arg: Int) -> Text {
-    if arg < 0 || arg >= l.args.length { return "?" }
-    if l.args[arg].by_ref {
-        let place = lirPlaceText(l, l.args[arg].value)
-        var m = 0
-        if l.args[arg].mutable { m = 1 }
-        return "ref {place} {m}"
+expose flow lirArgText(l: view LirFn, source: view Text, arg: Int) => Text {
+    when arg < 0 || arg >= l.args.length { give "?" }
+    when l.args[arg].by_ref {
+        hold place = lirPlaceText(l, l.args[arg].value)
+        change m = 0
+        when l.args[arg].mutable { m = 1 }
+        give "ref {place} {m}"
     }
-    let operand = lirOperandText(l, source, l.args[arg].value)
-    return "val {operand}"
+    hold operand = lirOperandText(l, source, l.args[arg].value)
+    give "val {operand}"
 }

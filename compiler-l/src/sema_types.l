@@ -1,4 +1,4 @@
-pub enum SemTypeKind {
+expose choice SemTypeKind {
     Unknown
     Int
     Float
@@ -22,7 +22,7 @@ pub enum SemTypeKind {
     Window
 }
 
-pub struct SemType {
+expose shape SemType {
     kind: SemTypeKind
     name_start: Int
     name_end: Int
@@ -30,54 +30,54 @@ pub struct SemType {
     nominal_id: Int
 }
 
-pub struct TypeTable {
-    types: List<SemType>
+expose shape TypeTable {
+    types: List of[SemType]
 }
 
-pub fn typeTableNew() -> TypeTable {
-    let list: List<SemType> = List[]
-    var table = TypeTable(types: list)
-    table.types.push(SemType(kind: SemTypeKind.Unknown, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Int, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Float, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.F32, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Bool, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Text, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Unit, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    table.types.push(SemType(kind: SemTypeKind.Error, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
-    return table
+expose flow typeTableNew() => TypeTable {
+    hold list: List of[SemType] = List[]
+    change table = TypeTable(types: list)
+    table.types@push(SemType(kind: SemTypeKind.Unknown, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Int, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Float, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.F32, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Bool, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Text, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Unit, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    table.types@push(SemType(kind: SemTypeKind.Error, name_start: -1, name_end: -1, elem_type: -1, nominal_id: -1))
+    give table
 }
 
-pub fn semTypeAdd(table: &mut TypeTable, kind: SemTypeKind, name_start: Int, name_end: Int, elem_type: Int, nominal_id: Int) -> Int {
-    let id = table.types.length
-    table.types.push(SemType(kind: kind, name_start: name_start, name_end: name_end, elem_type: elem_type, nominal_id: nominal_id))
-    return id
+expose flow semTypeAdd(table: edit TypeTable, kind: SemTypeKind, name_start: Int, name_end: Int, elem_type: Int, nominal_id: Int) => Int {
+    hold id = table.types.length
+    table.types@push(SemType(kind: kind, name_start: name_start, name_end: name_end, elem_type: elem_type, nominal_id: nominal_id))
+    give id
 }
 
-pub fn semTypeMakeRef(table: &mut TypeTable, inner_id: Int, is_mut: Bool) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        if is_mut {
-            match t.kind {
-                SemTypeKind.MutRef => {
-                    if t.elem_type == inner_id { return i }
+expose flow semTypeMakeRef(table: edit TypeTable, inner_id: Int, is_mut: Bool) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        when is_mut {
+            choose t.kind {
+                SemTypeKind.MutRef : {
+                    when t.elem_type == inner_id { give i }
                 }
-                _ => {}
+                _ : {}
             }
-        } else {
-            match t.kind {
-                SemTypeKind.Ref => {
-                    if t.elem_type == inner_id { return i }
+        } otherwise {
+            choose t.kind {
+                SemTypeKind.Ref : {
+                    when t.elem_type == inner_id { give i }
                 }
-                _ => {}
+                _ : {}
             }
         }
     }
-    var kind = SemTypeKind.Ref
-    if is_mut {
+    change kind = SemTypeKind.Ref
+    when is_mut {
         kind = SemTypeKind.MutRef
     }
-    return semTypeAdd(&mut table, kind, -1, -1, inner_id, -1)
+    give semTypeAdd(edit table, kind, -1, -1, inner_id, -1)
 }
 
 // The single File type: created on first use, so programs without files
@@ -160,251 +160,251 @@ expose flow semTypeLinearIds(table: view TypeTable) => List of[Int] {
     give ids
 }
 
-pub fn semTypeMakeList(table: &mut TypeTable, elem_id: Int) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        match t.kind {
-            SemTypeKind.List => {
-                if t.elem_type == elem_id { return i }
+expose flow semTypeMakeList(table: edit TypeTable, elem_id: Int) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        choose t.kind {
+            SemTypeKind.List : {
+                when t.elem_type == elem_id { give i }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return semTypeAdd(&mut table, SemTypeKind.List, -1, -1, elem_id, -1)
+    give semTypeAdd(edit table, SemTypeKind.List, -1, -1, elem_id, -1)
 }
 
-pub fn semTypeMakeOption(table: &mut TypeTable, elem_id: Int) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        match t.kind {
-            SemTypeKind.Option => {
-                if t.elem_type == elem_id { return i }
+expose flow semTypeMakeOption(table: edit TypeTable, elem_id: Int) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        choose t.kind {
+            SemTypeKind.Option : {
+                when t.elem_type == elem_id { give i }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return semTypeAdd(&mut table, SemTypeKind.Option, -1, -1, elem_id, -1)
+    give semTypeAdd(edit table, SemTypeKind.Option, -1, -1, elem_id, -1)
 }
 
-pub fn semTypeMakeResult(table: &mut TypeTable, ok_id: Int, err_id: Int) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        match t.kind {
-            SemTypeKind.Result => {
-                if t.elem_type == ok_id && t.nominal_id == err_id { return i }
+expose flow semTypeMakeResult(table: edit TypeTable, ok_id: Int, err_id: Int) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        choose t.kind {
+            SemTypeKind.Result : {
+                when t.elem_type == ok_id && t.nominal_id == err_id { give i }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return semTypeAdd(&mut table, SemTypeKind.Result, -1, -1, ok_id, err_id)
+    give semTypeAdd(edit table, SemTypeKind.Result, -1, -1, ok_id, err_id)
 }
 
-pub fn semTypeMakeArray(table: &mut TypeTable, elem_id: Int) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        match t.kind {
-            SemTypeKind.Array => {
-                if t.elem_type == elem_id { return i }
+expose flow semTypeMakeArray(table: edit TypeTable, elem_id: Int) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        choose t.kind {
+            SemTypeKind.Array : {
+                when t.elem_type == elem_id { give i }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return semTypeAdd(&mut table, SemTypeKind.Array, -1, -1, elem_id, -1)
+    give semTypeAdd(edit table, SemTypeKind.Array, -1, -1, elem_id, -1)
 }
 
-pub fn semTypeMakeSlice(table: &mut TypeTable, elem_id: Int) -> Int {
-    for i in 8..table.types.length {
-        let t = &table.types[i]
-        match t.kind {
-            SemTypeKind.Slice => {
-                if t.elem_type == elem_id { return i }
+expose flow semTypeMakeSlice(table: edit TypeTable, elem_id: Int) => Int {
+    each i among 8..table.types.length {
+        hold t = view table.types[i]
+        choose t.kind {
+            SemTypeKind.Slice : {
+                when t.elem_type == elem_id { give i }
             }
-            _ => {}
+            _ : {}
         }
     }
-    return semTypeAdd(&mut table, SemTypeKind.Slice, -1, -1, elem_id, -1)
+    give semTypeAdd(edit table, SemTypeKind.Slice, -1, -1, elem_id, -1)
 }
 
-pub fn semTypeIsNumeric(kind: &SemTypeKind) -> Bool {
-    match kind {
-        SemTypeKind.Int => { return true }
-        SemTypeKind.Float => { return true }
-        SemTypeKind.F32 => { return true }
-        _ => { return false }
-    }
-}
-
-pub fn semTypeIsCopy(kind: &SemTypeKind) -> Bool {
-    match kind {
-        SemTypeKind.Int => { return true }
-        SemTypeKind.Float => { return true }
-        SemTypeKind.F32 => { return true }
-        SemTypeKind.Bool => { return true }
-        SemTypeKind.Unit => { return true }
-        _ => { return false }
+expose flow semTypeIsNumeric(kind: view SemTypeKind) => Bool {
+    choose kind {
+        SemTypeKind.Int : { give true }
+        SemTypeKind.Float : { give true }
+        SemTypeKind.F32 : { give true }
+        _ : { give false }
     }
 }
 
-pub fn semTypeIsMove(kind: &SemTypeKind) -> Bool {
-    return !semTypeIsCopy(kind)
+expose flow semTypeIsCopy(kind: view SemTypeKind) => Bool {
+    choose kind {
+        SemTypeKind.Int : { give true }
+        SemTypeKind.Float : { give true }
+        SemTypeKind.F32 : { give true }
+        SemTypeKind.Bool : { give true }
+        SemTypeKind.Unit : { give true }
+        _ : { give false }
+    }
 }
 
-pub fn semTypeEquals(table: &TypeTable, a: Int, b: Int) -> Bool {
-    if a == b { return true }
-    if a == 0 || b == 0 { return true }
-    if a == 7 || b == 7 { return true }
-    if a < 0 || a >= table.types.length { return false }
-    if b < 0 || b >= table.types.length { return false }
+expose flow semTypeIsMove(kind: view SemTypeKind) => Bool {
+    give !semTypeIsCopy(kind)
+}
 
-    let ta = &table.types[a]
-    let tb = &table.types[b]
+expose flow semTypeEquals(table: view TypeTable, a: Int, b: Int) => Bool {
+    when a == b { give true }
+    when a == 0 || b == 0 { give true }
+    when a == 7 || b == 7 { give true }
+    when a < 0 || a >= table.types.length { give false }
+    when b < 0 || b >= table.types.length { give false }
 
-    match ta.kind {
-        SemTypeKind.Int => {
-            match tb.kind {
-                SemTypeKind.Int => { return true }
-                _ => { return false }
+    hold ta = view table.types[a]
+    hold tb = view table.types[b]
+
+    choose ta.kind {
+        SemTypeKind.Int : {
+            choose tb.kind {
+                SemTypeKind.Int : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.Float => {
-            match tb.kind {
-                SemTypeKind.Float => { return true }
-                _ => { return false }
+        SemTypeKind.Float : {
+            choose tb.kind {
+                SemTypeKind.Float : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.F32 => {
-            match tb.kind {
-                SemTypeKind.F32 => { return true }
-                _ => { return false }
+        SemTypeKind.F32 : {
+            choose tb.kind {
+                SemTypeKind.F32 : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.Bool => {
-            match tb.kind {
-                SemTypeKind.Bool => { return true }
-                _ => { return false }
+        SemTypeKind.Bool : {
+            choose tb.kind {
+                SemTypeKind.Bool : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.Text => {
-            match tb.kind {
-                SemTypeKind.Text => { return true }
-                _ => { return false }
+        SemTypeKind.Text : {
+            choose tb.kind {
+                SemTypeKind.Text : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.Unit => {
-            match tb.kind {
-                SemTypeKind.Unit => { return true }
-                _ => { return false }
+        SemTypeKind.Unit : {
+            choose tb.kind {
+                SemTypeKind.Unit : { give true }
+                _ : { give false }
             }
         }
-        SemTypeKind.Struct => {
-            match tb.kind {
-                SemTypeKind.Struct => { return ta.nominal_id == tb.nominal_id }
-                _ => { return false }
+        SemTypeKind.Struct : {
+            choose tb.kind {
+                SemTypeKind.Struct : { give ta.nominal_id == tb.nominal_id }
+                _ : { give false }
             }
         }
-        SemTypeKind.Enum => {
-            match tb.kind {
-                SemTypeKind.Enum => { return ta.nominal_id == tb.nominal_id }
-                _ => { return false }
+        SemTypeKind.Enum : {
+            choose tb.kind {
+                SemTypeKind.Enum : { give ta.nominal_id == tb.nominal_id }
+                _ : { give false }
             }
         }
-        SemTypeKind.Ref => {
-            match tb.kind {
-                SemTypeKind.Ref => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.Ref : {
+            choose tb.kind {
+                SemTypeKind.Ref : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.MutRef => {
-            match tb.kind {
-                SemTypeKind.MutRef => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.MutRef : {
+            choose tb.kind {
+                SemTypeKind.MutRef : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.Array => {
-            match tb.kind {
-                SemTypeKind.Array => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.Array : {
+            choose tb.kind {
+                SemTypeKind.Array : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.Slice => {
-            match tb.kind {
-                SemTypeKind.Slice => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.Slice : {
+            choose tb.kind {
+                SemTypeKind.Slice : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.List => {
-            match tb.kind {
-                SemTypeKind.List => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.List : {
+            choose tb.kind {
+                SemTypeKind.List : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.Option => {
-            match tb.kind {
-                SemTypeKind.Option => { return semTypeEquals(table, ta.elem_type, tb.elem_type) }
-                _ => { return false }
+        SemTypeKind.Option : {
+            choose tb.kind {
+                SemTypeKind.Option : { give semTypeEquals(table, ta.elem_type, tb.elem_type) }
+                _ : { give false }
             }
         }
-        SemTypeKind.Result => {
-            match tb.kind {
-                SemTypeKind.Result => {
-                    return semTypeEquals(table, ta.elem_type, tb.elem_type) && semTypeEquals(table, ta.nominal_id, tb.nominal_id)
+        SemTypeKind.Result : {
+            choose tb.kind {
+                SemTypeKind.Result : {
+                    give semTypeEquals(table, ta.elem_type, tb.elem_type) && semTypeEquals(table, ta.nominal_id, tb.nominal_id)
                 }
-                _ => { return false }
+                _ : { give false }
             }
         }
-        _ => { return false }
+        _ : { give false }
     }
 }
 
-pub fn semTypeName(table: &TypeTable, source: &Text, type_id: Int) -> Text {
-    if type_id < 0 || type_id >= table.types.length {
-        return "<invalid>"
+expose flow semTypeName(table: view TypeTable, source: view Text, type_id: Int) => Text {
+    when type_id < 0 || type_id >= table.types.length {
+        give "<invalid>"
     }
     when semTypeIsFile(table, type_id) { give "File" }
     when semTypeIsWindow(table, type_id) { give "Window" }
-    let t = &table.types[type_id]
-    match t.kind {
-        SemTypeKind.Unknown => { return "Unknown" }
-        SemTypeKind.Int => { return "Int" }
-        SemTypeKind.Float => { return "Float" }
-        SemTypeKind.F32 => { return "F32" }
-        SemTypeKind.Bool => { return "Bool" }
-        SemTypeKind.Text => { return "Text" }
-        SemTypeKind.Unit => { return "()" }
-        SemTypeKind.Error => { return "<error>" }
-        SemTypeKind.Struct => {
-            return "Struct"
+    hold t = view table.types[type_id]
+    choose t.kind {
+        SemTypeKind.Unknown : { give "Unknown" }
+        SemTypeKind.Int : { give "Int" }
+        SemTypeKind.Float : { give "Float" }
+        SemTypeKind.F32 : { give "F32" }
+        SemTypeKind.Bool : { give "Bool" }
+        SemTypeKind.Text : { give "Text" }
+        SemTypeKind.Unit : { give "()" }
+        SemTypeKind.Error : { give "<error>" }
+        SemTypeKind.Struct : {
+            give "Struct"
         }
-        SemTypeKind.Enum => {
-            return "Enum"
+        SemTypeKind.Enum : {
+            give "Enum"
         }
-        SemTypeKind.Ref => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "&{inner}"
+        SemTypeKind.Ref : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "&{inner}"
         }
-        SemTypeKind.MutRef => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "&mut {inner}"
+        SemTypeKind.MutRef : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "&mut {inner}"
         }
-        SemTypeKind.Array => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "[{inner}]"
+        SemTypeKind.Array : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "[{inner}]"
         }
-        SemTypeKind.Slice => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "&[{inner}]"
+        SemTypeKind.Slice : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "&[{inner}]"
         }
-        SemTypeKind.List => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "List<{inner}>"
+        SemTypeKind.List : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "List<{inner}>"
         }
-        SemTypeKind.Option => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "Option<{inner}>"
+        SemTypeKind.Option : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "Option<{inner}>"
         }
-        SemTypeKind.Result => {
-            let inner = semTypeName(table, source, t.elem_type)
-            return "Result<{inner}>"
+        SemTypeKind.Result : {
+            hold inner = semTypeName(table, source, t.elem_type)
+            give "Result<{inner}>"
         }
         SemTypeKind.File : { give "File" }
         SemTypeKind.Window : { give "Window" }

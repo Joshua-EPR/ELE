@@ -1,15 +1,15 @@
-import sema_types
-import lir_build
+take sema_types
+take lir_build
 
-pub const LIR_TY_ERR = -1
+expose fixed LIR_TY_ERR = -1
 
-pub struct LirCheck {
+expose shape LirCheck {
     status: Int
     block: Int
     inst: Int
 }
 
-pub struct LirVerifier {
+expose shape LirVerifier {
     defined: List of[Bool]
     table: List of[Bool]
     seen: List of[Bool]
@@ -158,7 +158,7 @@ expose flow lirPlaceType(l: view LirFn, types: view TypeTable, lm: view LirModul
             hold elem = types.types[ty].elem_type
             when elem < 0 || elem >= types.types.length { give LIR_TY_ERR }
             ty = elem
-        } else {
+        } otherwise {
             hold k = lirStructOf(types, lm, ty)
             // A malformed LIR module must not access missing or truncated
             // struct tables. Compare using subtraction before adding indexes.

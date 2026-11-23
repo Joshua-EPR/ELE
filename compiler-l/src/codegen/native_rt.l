@@ -1,4 +1,4 @@
-import x86_64
+take x86_64
 
 // Runtime of the ELE-written Linux x86-64 backend: output and owned Text.
 // Every routine is machine code produced through the ELE x86-64 encoder;
@@ -331,27 +331,27 @@ flow rtEmitTextDrop(code: edit X64Code) {
 
 // Emits the whole runtime and returns the address of each routine, indexed
 // by the rt* functions above.
-expose flow rtEmitAll(code: edit X64Code) => List<Int> {
-    change at: List<Int> = List[]
+expose flow rtEmitAll(code: edit X64Code) => List of[Int] {
+    change at: List of[Int] = List[]
     hold write_all = code.bytes.length
-    at.push(write_all)
+    at@push(write_all)
     rtEmitWriteAll(edit code)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitPrintInt(edit code, write_all)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitPrintBool(edit code, write_all)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitPrintText(edit code, write_all)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitTextNew(edit code)
     hold append = code.bytes.length
-    at.push(append)
+    at@push(append)
     rtEmitTextAppend(edit code)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitAppendInt(edit code, append)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitAppendBool(edit code, append)
-    at.push(code.bytes.length)
+    at@push(code.bytes.length)
     rtEmitTextDrop(edit code)
     give at
 }

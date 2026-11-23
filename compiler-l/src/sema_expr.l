@@ -1,278 +1,278 @@
-import tokens
-import sema_borrow_syntax
-import sema_expr_temp
-import ast
-import sema_types
-import symbols
-import scopes
-import flow_cfg
-import loans_l
-import sema_context
-import sema_borrow
-import sema_drop
-import lir_build
-import sema_lower
-import sema_ops
-import sema_collection_ops
-import stmt_lower
-import sema_builtin_union
+take tokens
+take sema_borrow_syntax
+take sema_expr_temp
+take ast
+take sema_types
+take symbols
+take scopes
+take flow_cfg
+take loans_l
+take sema_context
+take sema_borrow
+take sema_drop
+take lir_build
+take sema_lower
+take sema_ops
+take sema_collection_ops
+take stmt_lower
+take sema_builtin_union
 take lir_builtin_union
 
-fn semaCheckConstructor(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, decl_id: Int, struct_t: Int) {
-    let decl = &tree.declarations[decl_id]
-    var seen: List<Bool> = List[]
-    var slots: List<Int> = List[]
-    for i in 0..decl.d {
-        seen.push(false)
-        slots.push(LIR_NONE)
+flow semaCheckConstructor(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, decl_id: Int, struct_t: Int) {
+    hold decl = view tree.declarations[decl_id]
+    change seen: List of[Bool] = List[]
+    change slots: List of[Int] = List[]
+    each i among 0..decl.d {
+        seen@push(false)
+        slots@push(LIR_NONE)
     }
-    for i in 0..expr.d {
-        let arg = &tree.expressions[tree.extra[expr.c + i]]
+    each i among 0..expr.d {
+        hold arg = view tree.expressions[tree.extra[expr.c + i]]
         // The declared field type is the context of an empty `List[]`.
-        let field = semaNamedField(source, tree, decl_id, arg)
-        if field >= 0 { ctx.expected_list_type = semaFieldType(&mut ctx, source, tree, field) }
-        let ty = semaExprMode(&mut ctx, source, tree, arg.c, ACCESS_MOVE)
-        semaConstructorField(&mut ctx, source, tree, decl_id, arg, ty, &mut seen, &mut slots)
+        hold field = semaNamedField(source, tree, decl_id, arg)
+        when field >= 0 { ctx.expected_list_type = semaFieldType(edit ctx, source, tree, field) }
+        hold ty = semaExprMode(edit ctx, source, tree, arg.c, ACCESS_MOVE)
+        semaConstructorField(edit ctx, source, tree, decl_id, arg, ty, edit seen, edit slots)
     }
-    semaConstructorFinish(&mut ctx, tree, expr, decl_id, struct_t, &seen, &slots)
+    semaConstructorFinish(edit ctx, tree, expr, decl_id, struct_t, view seen, view slots)
 }
 
-pub fn semaCheckExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int) -> Int {
-    return semaExprMode(&mut ctx, source, tree, expr_id, ACCESS_READ)
+expose flow semaCheckExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int) => Int {
+    give semaExprMode(edit ctx, source, tree, expr_id, ACCESS_READ)
 }
 
 // `&place` / `&mut place`: only a let initializer, a reference argument
 // or a borrowed return may hold a borrow (Stage 0 rules).
-fn semaBorrowExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, site: Int) -> Int {
-    let expr = &tree.expressions[expr_id]
-    let is_mut = semaBorrowSyntaxKind(source, expr.b, expr.c) == 2
-    if site == SITE_VAR || semaPlaceRoot(tree, expr.a) < 0 {
-        semaAddError(&mut ctx, "L0012", "use let para prestar una variable, campo o elemento con un origen fijo", expr.start, expr.end)
-        return 7
+flow semaBorrowExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, site: Int) => Int {
+    hold expr = view tree.expressions[expr_id]
+    hold is_mut = semaBorrowSyntaxKind(source, expr.b, expr.c) == 2
+    when site == SITE_VAR || semaPlaceRoot(tree, expr.a) < 0 {
+        semaAddError(edit ctx, "L0012", "use let para prestar una variable, campo o elemento con un origen fijo", expr.start, expr.end)
+        give 7
     }
-    if site == SITE_NONE {
-        semaAddError(&mut ctx, "L0001", "un préstamo (&, &mut) solo puede pasarse directamente como argumento a un parámetro de referencia; guardarlo o devolverlo requiere anotaciones de vida aún no implementadas", expr.start, expr.end)
-        return 7
+    when site == SITE_NONE {
+        semaAddError(edit ctx, "L0001", "un préstamo (&, &mut) solo puede pasarse directamente como argumento a un parámetro de referencia; guardarlo o devolverlo requiere anotaciones de vida aún no implementadas", expr.start, expr.end)
+        give 7
     }
-    let operand_t = semaExprMode(&mut ctx, source, tree, expr.a, ACCESS_PLACE)
-    let path = ctx.expression_path
+    hold operand_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_PLACE)
+    hold path = ctx.expression_path
     ctx.expression_path = -1
-    let operand_place = ctx.lir.place
+    hold operand_place = ctx.lir.place
     // The loan starts at the borrowed place, as Stage 0 reports it.
-    let place = &tree.expressions[expr.a]
-    let ty = semaBorrowPlace(&mut ctx, path, operand_t, is_mut, site, place.start, place.end)
+    hold place = view tree.expressions[expr.a]
+    hold ty = semaBorrowPlace(edit ctx, path, operand_t, is_mut, site, place.start, place.end)
     // The flow path of an indexed operand is its collection, but the
     // reference must point at the element: keep the place of the operand.
-    if operand_place >= 0 && ctx.lir.borrowed >= 0 { ctx.lir.borrowed = operand_place }
-    if site != SITE_ARG && ctx.lir.borrowed >= 0 {
-        var mutable = 0
-        if is_mut { mutable = 1 }
-        let referent = semaRefElem(ctx, ty)
-        let borrowed_place = ctx.lir.borrowed
-        let value = lirNew(&mut ctx, referent, true, LIR_LOAN, borrowed_place, mutable, 0)
-        lirSetVal(&mut ctx, value)
+    when operand_place >= 0 && ctx.lir.borrowed >= 0 { ctx.lir.borrowed = operand_place }
+    when site != SITE_ARG && ctx.lir.borrowed >= 0 {
+        change mutable = 0
+        when is_mut { mutable = 1 }
+        hold referent = semaRefElem(ctx, ty)
+        hold borrowed_place = ctx.lir.borrowed
+        hold value = lirNew(edit ctx, referent, true, LIR_LOAN, borrowed_place, mutable, 0)
+        lirSetVal(edit ctx, value)
     }
-    return ty
+    give ty
 }
 
 // Argument for a reference parameter: an explicit borrow of the same mode
 // or, for `&T`, a place that is borrowed implicitly. Returns the loan.
-fn semaRefArg(ctx: &mut SemaContext, source: &Text, tree: &AstTree, arg_id: Int, param_t: Int, index: Int) -> Int {
-    let arg = &tree.expressions[arg_id]
-    let param_mut = semaIsMutRef(ctx, param_t)
-    let n = index + 1
-    var explicit = false
-    var arg_mut = false
-    match arg.kind {
-        AstExprKind.Unary => {
-            let kind = semaBorrowSyntaxKind(source, arg.b, arg.c)
-            if kind > 0 {
+flow semaRefArg(ctx: edit SemaContext, source: view Text, tree: view AstTree, arg_id: Int, param_t: Int, index: Int) => Int {
+    hold arg = view tree.expressions[arg_id]
+    hold param_mut = semaIsMutRef(ctx, param_t)
+    hold n = index + 1
+    change explicit = false
+    change arg_mut = false
+    choose arg.kind {
+        AstExprKind.Unary : {
+            hold kind = semaBorrowSyntaxKind(source, arg.b, arg.c)
+            when kind > 0 {
                 explicit = true
                 arg_mut = kind == 2
             }
         }
-        _ => {}
+        _ : {}
     }
-    if param_mut && !arg_mut {
-        semaAddError(&mut ctx, "L0001", "se esperaba un préstamo mutable (&mut) para el parámetro {n}", arg.start, arg.end)
-        return -1
+    when param_mut && !arg_mut {
+        semaAddError(edit ctx, "L0001", "se esperaba un préstamo mutable (&mut) para el parámetro {n}", arg.start, arg.end)
+        give -1
     }
-    if !param_mut && arg_mut {
-        semaAddError(&mut ctx, "L0001", "el parámetro {n} es &T: pase '&' en lugar de '&mut'", arg.start, arg.end)
-        return -1
+    when !param_mut && arg_mut {
+        semaAddError(edit ctx, "L0001", "el parámetro {n} es &T: pase '&' en lugar de '&mut'", arg.start, arg.end)
+        give -1
     }
-    var ty = 7
-    if explicit {
+    change ty = 7
+    when explicit {
         ctx.borrow_site = SITE_ARG
-        ty = semaExprMode(&mut ctx, source, tree, arg_id, ACCESS_MOVE)
-    } else {
-        if semaPlaceRoot(tree, arg_id) < 0 {
-            semaAddError(&mut ctx, "L0001", "el parámetro {n} es una referencia (&T): pase una variable o un campo, que se presta automáticamente", arg.start, arg.end)
-            return -1
+        ty = semaExprMode(edit ctx, source, tree, arg_id, ACCESS_MOVE)
+    } otherwise {
+        when semaPlaceRoot(tree, arg_id) < 0 {
+            semaAddError(edit ctx, "L0001", "el parámetro {n} es una referencia (&T): pase una variable o un campo, que se presta automáticamente", arg.start, arg.end)
+            give -1
         }
-        let operand_t = semaExprMode(&mut ctx, source, tree, arg_id, ACCESS_PLACE)
-        let path = ctx.expression_path
+        hold operand_t = semaExprMode(edit ctx, source, tree, arg_id, ACCESS_PLACE)
+        hold path = ctx.expression_path
         ctx.expression_path = -1
-        ty = semaBorrowPlace(&mut ctx, path, operand_t, false, SITE_ARG, arg.start, arg.end)
+        ty = semaBorrowPlace(edit ctx, path, operand_t, false, SITE_ARG, arg.start, arg.end)
     }
-    let loan = ctx.pending_loan
+    hold loan = ctx.pending_loan
     ctx.pending_loan = -1
-    if !semTypeEquals(&ctx.types, semaRefElem(ctx, ty), semaRefElem(ctx, param_t)) {
-        semaAddError(&mut ctx, "L0004", "tipo incompatible en argumento", arg.start, arg.end)
+    when !semTypeEquals(view ctx.types, semaRefElem(ctx, ty), semaRefElem(ctx, param_t)) {
+        semaAddError(edit ctx, "L0004", "tipo incompatible en argumento", arg.start, arg.end)
     }
-    return loan
+    give loan
 }
 
 // A value read by print or an interpolation that is not a place and not a
 // literal is an owned temporary of the enclosing statement.
-pub fn semaExprMode(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
+expose flow semaExprMode(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, mode: Int) => Int {
     ctx.expression_path = -1
-    if expr_id < 0 || expr_id >= tree.expressions.length {
-        return 7
+    when expr_id < 0 || expr_id >= tree.expressions.length {
+        give 7
     }
     // Instructions of this expression carry its start (runtime messages).
-    let outer_at = ctx.lir.at
+    hold outer_at = ctx.lir.at
     ctx.lir.at = tree.expressions[expr_id].start
     // A list context set by the caller belongs to this expression only when
     // it is the list literal itself (or a named argument wrapping it); it
     // never reaches unrelated subexpressions.
-    let expected_list = ctx.expected_list_type
+    hold expected_list = ctx.expected_list_type
     ctx.expected_list_type = -1
-    match tree.expressions[expr_id].kind {
-        AstExprKind.ListLit => { ctx.expected_list_type = expected_list }
-        AstExprKind.Named => { ctx.expected_list_type = expected_list }
-        _ => {}
+    choose tree.expressions[expr_id].kind {
+        AstExprKind.ListLit : { ctx.expected_list_type = expected_list }
+        AstExprKind.Named : { ctx.expected_list_type = expected_list }
+        _ : {}
     }
-    let ty = semaInferExpr(&mut ctx, source, tree, expr_id, mode)
+    hold ty = semaInferExpr(edit ctx, source, tree, expr_id, mode)
     ctx.expected_list_type = -1
     ctx.lir.at = outer_at
-    match tree.expressions[expr_id].kind {
-        AstExprKind.Name => {}
-        AstExprKind.Field => {}
-        AstExprKind.Index => {}
-        _ => { ctx.expression_path = -1 }
+    choose tree.expressions[expr_id].kind {
+        AstExprKind.Name : {}
+        AstExprKind.Field : {}
+        AstExprKind.Index : {}
+        _ : { ctx.expression_path = -1 }
     }
-    return ty
+    give ty
 }
 
-fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, mode: Int) -> Int {
-    let expr = &tree.expressions[expr_id]
-    let site = ctx.borrow_site
+flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, mode: Int) => Int {
+    hold expr = view tree.expressions[expr_id]
+    hold site = ctx.borrow_site
     ctx.borrow_site = SITE_NONE
-    match expr.kind {
-        AstExprKind.IntLit => { return semaLiteral(&mut ctx, source, tree, expr_id, 1) }
-        AstExprKind.BoolLit => { return semaLiteral(&mut ctx, source, tree, expr_id, 4) }
-        AstExprKind.TextLit => { return semaLiteral(&mut ctx, source, tree, expr_id, 5) }
-        AstExprKind.UnitLit => { return semaLiteral(&mut ctx, source, tree, expr_id, 6) }
-        AstExprKind.Interpolate => {
-            let buffer = lirNew(&mut ctx, 5, false, LIR_TEXTBUF, semaInterpCapacity(tree, expr_id), 0, 0)
-            for i in 0..expr.b {
-                let part = tree.extra[expr.a + i]
-                let mark = ctx.pending_temps.length
-                let ty = semaCheckExpr(&mut ctx, source, tree, part)
-                semaReadTemp(&mut ctx, source, tree, part, ty, mark)
-                if ty < 1 || ty > 5 {
-                    semaAddError(&mut ctx, "L0003", "tipo no imprimible en interpolación", expr.start, expr.end)
+    choose expr.kind {
+        AstExprKind.IntLit : { give semaLiteral(edit ctx, source, tree, expr_id, 1) }
+        AstExprKind.BoolLit : { give semaLiteral(edit ctx, source, tree, expr_id, 4) }
+        AstExprKind.TextLit : { give semaLiteral(edit ctx, source, tree, expr_id, 5) }
+        AstExprKind.UnitLit : { give semaLiteral(edit ctx, source, tree, expr_id, 6) }
+        AstExprKind.Interpolate : {
+            hold buffer = lirNew(edit ctx, 5, false, LIR_TEXTBUF, semaInterpCapacity(tree, expr_id), 0, 0)
+            each i among 0..expr.b {
+                hold part = tree.extra[expr.a + i]
+                hold mark = ctx.pending_temps.length
+                hold ty = semaCheckExpr(edit ctx, source, tree, part)
+                semaReadTemp(edit ctx, source, tree, part, ty, mark)
+                when ty < 1 || ty > 5 {
+                    semaAddError(edit ctx, "L0003", "tipo no imprimible en interpolación", expr.start, expr.end)
                 }
-                semaAppendPart(&mut ctx, tree, buffer, part, ty)
+                semaAppendPart(edit ctx, tree, buffer, part, ty)
             }
-            lirSetVal(&mut ctx, buffer)
-            return 5
+            lirSetVal(edit ctx, buffer)
+            give 5
         }
-        AstExprKind.Name => {
-            return semaNameExpr(&mut ctx, source, tree, expr_id, mode, site)
+        AstExprKind.Name : {
+            give semaNameExpr(edit ctx, source, tree, expr_id, mode, site)
         }
-        AstExprKind.Binary => {
-            let lhs_t = semaCheckExpr(&mut ctx, source, tree, expr.a)
-            var rhs_t = 7
-            let op = source.byteAt(expr.c)
-            if op == 63 {
-                semaAddError(&mut ctx, "L0016", "operación de Option fuera del subconjunto verificado", expr.start, expr.end)
-                return 7
+        AstExprKind.Binary : {
+            hold lhs_t = semaCheckExpr(edit ctx, source, tree, expr.a)
+            change rhs_t = 7
+            hold op = source@byteAt(expr.c)
+            when op == 63 {
+                semaAddError(edit ctx, "L0016", "operación de Option fuera del subconjunto verificado", expr.start, expr.end)
+                give 7
             }
-            let lhs = lirTakeOperand(&mut ctx, lhs_t)
-            var rhs = LIR_NONE
-            if op == 38 || op == 124 {
-                let rhs_block = flowBlock(&mut ctx.flow)
-                let join = flowBlock(&mut ctx.flow)
-                let result = semaShortVar(&mut ctx, lhs, op == 124)
-                flowLink(&mut ctx.flow, rhs_block, join)
+            hold lhs = lirTakeOperand(edit ctx, lhs_t)
+            change rhs = LIR_NONE
+            when op == 38 || op == 124 {
+                hold rhs_block = flowBlock(edit ctx.flow)
+                hold join = flowBlock(edit ctx.flow)
+                hold result = semaShortVar(edit ctx, lhs, op == 124)
+                flowLink(edit ctx.flow, rhs_block, join)
                 ctx.flow.current = rhs_block
-                rhs_t = semaCheckExpr(&mut ctx, source, tree, expr.b)
-                let rhs_value = lirTakeOperand(&mut ctx, rhs_t)
-                lirAt(&mut ctx, LIR_USE, result, rhs_value, 0, 0)
-                flowLink(&mut ctx.flow, join, -1)
+                rhs_t = semaCheckExpr(edit ctx, source, tree, expr.b)
+                hold rhs_value = lirTakeOperand(edit ctx, rhs_t)
+                lirAt(edit ctx, LIR_USE, result, rhs_value, 0, 0)
+                flowLink(edit ctx.flow, join, -1)
                 ctx.flow.current = join
                 rhs = result
-            } else {
-                rhs_t = semaCheckExpr(&mut ctx, source, tree, expr.b)
-                rhs = lirTakeOperand(&mut ctx, rhs_t)
+            } otherwise {
+                rhs_t = semaCheckExpr(edit ctx, source, tree, expr.b)
+                rhs = lirTakeOperand(edit ctx, rhs_t)
             }
-            return semaBinaryFinish(&mut ctx, source, tree, expr_id, lhs_t, rhs_t, lhs, rhs)
+            give semaBinaryFinish(edit ctx, source, tree, expr_id, lhs_t, rhs_t, lhs, rhs)
         }
-        AstExprKind.Unary => {
-            if expr.b >= 0 && expr.b < source.byteLength {
-                let op = source.byteAt(expr.b)
-                if semaBorrowSyntaxKind(source, expr.b, expr.c) > 0 {
-                    return semaBorrowExpr(&mut ctx, source, tree, expr_id, site)
+        AstExprKind.Unary : {
+            when expr.b >= 0 && expr.b < source.byteLength {
+                hold op = source@byteAt(expr.b)
+                when semaBorrowSyntaxKind(source, expr.b, expr.c) > 0 {
+                    give semaBorrowExpr(edit ctx, source, tree, expr_id, site)
                 }
-                if op == 42 {
-                    semaAddError(&mut ctx, "L0012", "la desreferencia explícita está fuera del subconjunto verificado de Stage 1", expr.start, expr.end)
-                    return 7
+                when op == 42 {
+                    semaAddError(edit ctx, "L0012", "la desreferencia explícita está fuera del subconjunto verificado de Stage 1", expr.start, expr.end)
+                    give 7
                 }
             }
-            let sub_t = semaCheckExpr(&mut ctx, source, tree, expr.a)
-            let operand = lirTakeOperand(&mut ctx, sub_t)
-            return semaUnaryFinish(&mut ctx, source, tree, expr_id, sub_t, operand)
+            hold sub_t = semaCheckExpr(edit ctx, source, tree, expr.a)
+            hold operand = lirTakeOperand(edit ctx, sub_t)
+            give semaUnaryFinish(edit ctx, source, tree, expr_id, sub_t, operand)
         }
-        AstExprKind.Call => {
-            let name_start = expr.a
-            let name_end = expr.b
-            let first_arg = expr.c
-            let arg_count = expr.d
-            let print_name = "print"
-            let name_ok = "Ok"
-            let name_err = "Err"
-            let name_some = "Some"
-            if symbolNameEqualsText(source, name_start, name_end, print_name) {
-                if arg_count == 1 {
-                    let arg = tree.extra[first_arg]
-                    let mark = ctx.pending_temps.length
-                    let ty = semaCheckExpr(&mut ctx, source, tree, arg)
-                    semaReadTemp(&mut ctx, source, tree, arg, ty, mark)
-                    if ty >= 1 && ty <= 5 {
-                        let printed = lirTakeArg(&mut ctx, ty)
-                        lirAt(&mut ctx, LIR_PRINT, -1, printed, 0, 0)
-                        let unit = lirConst(&mut ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
-                        lirSetVal(&mut ctx, unit)
-                        return 6
+        AstExprKind.Call : {
+            hold name_start = expr.a
+            hold name_end = expr.b
+            hold first_arg = expr.c
+            hold arg_count = expr.d
+            hold print_name = "print"
+            hold name_ok = "Ok"
+            hold name_err = "Err"
+            hold name_some = "Some"
+            when symbolNameEqualsText(source, name_start, name_end, print_name) {
+                when arg_count == 1 {
+                    hold arg = tree.extra[first_arg]
+                    hold mark = ctx.pending_temps.length
+                    hold ty = semaCheckExpr(edit ctx, source, tree, arg)
+                    semaReadTemp(edit ctx, source, tree, arg, ty, mark)
+                    when ty >= 1 && ty <= 5 {
+                        hold printed = lirTakeArg(edit ctx, ty)
+                        lirAt(edit ctx, LIR_PRINT, -1, printed, 0, 0)
+                        hold unit = lirConst(edit ctx.lir, LIR_CONST_UNIT, 0, 0, 0)
+                        lirSetVal(edit ctx, unit)
+                        give 6
                     }
                 }
-                semaAddError(&mut ctx, "L0004", "print requiere un argumento imprimible", expr.start, expr.end)
-                return 7
+                semaAddError(edit ctx, "L0004", "print requiere un argumento imprimible", expr.start, expr.end)
+                give 7
             }
-            var builtin_variant = -1
-            if symbolNameEqualsText(source, name_start, name_end, name_ok) { builtin_variant = 0 }
-            if symbolNameEqualsText(source, name_start, name_end, name_err) { builtin_variant = 1 }
-            if symbolNameEqualsText(source, name_start, name_end, name_some) { builtin_variant = 2 }
-            if builtin_variant >= 0 && arg_count == 1 {
+            change builtin_variant = -1
+            when symbolNameEqualsText(source, name_start, name_end, name_ok) { builtin_variant = 0 }
+            when symbolNameEqualsText(source, name_start, name_end, name_err) { builtin_variant = 1 }
+            when symbolNameEqualsText(source, name_start, name_end, name_some) { builtin_variant = 2 }
+            when builtin_variant >= 0 && arg_count == 1 {
                 // A nested expression must not inherit the result union type
                 // of its constructor's own expected destination.
                 // Only a nested Option/Result payload type is propagated
                 // (e.g. `Some(Ok(x))` against Option<Result<T, E>>).
-                let contextual = ctx.expected_union_type
+                hold contextual = ctx.expected_union_type
                 ctx.expected_union_type = semaBuiltinPayloadExpected(ctx, contextual, builtin_variant)
-                let arg_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
-                let payload = lirTakeOperand(&mut ctx, arg_t)
+                hold arg_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+                hold payload = lirTakeOperand(edit ctx, arg_t)
                 ctx.expected_union_type = contextual
-                return semaBuiltinUnionValue(&mut ctx, arg_t, payload, builtin_variant, expr.start, expr.end)
+                give semaBuiltinUnionValue(edit ctx, arg_t, payload, builtin_variant, expr.start, expr.end)
             }
-            let name_print_err = "printError"
-            if symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
+            hold name_print_err = "printError"
+            when symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
                 hold mark = ctx.pending_temps.length
-                let ty = semaCheckExpr(&mut ctx, source, tree, tree.extra[first_arg])
+                hold ty = semaCheckExpr(edit ctx, source, tree, tree.extra[first_arg])
                 semaReadTemp(edit ctx, source, tree, tree.extra[first_arg], ty, mark)
-                if ty == 5 || semaRefElem(ctx, ty) == 5 {
+                when ty == 5 || semaRefElem(ctx, ty) == 5 {
                     when ctx.lir.place < 0 {
                         when ctx.pending_temps.length == mark {
                             semaTemp(edit ctx, source, tree, 5, expr.start, expr.end)
@@ -280,78 +280,78 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                         hold temp_var = ctx.lir.val
                         when temp_var >= 0 { ctx.lir.place = lirPlaceVar(edit ctx.lir, temp_var) }
                     }
-                    if ctx.lir.place < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start) }
-                    var args: List<Int> = List[]
-                    args.push(lirTakeArg(&mut ctx, ty))
-                    semaPlatformEmit(&mut ctx, LIR_PLATFORM_PRINT_ERROR, &args, 6, false)
-                    return 6
+                    when ctx.lir.place < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                    change args: List of[Int] = List[]
+                    args@push(lirTakeArg(edit ctx, ty))
+                    semaPlatformEmit(edit ctx, LIR_PLATFORM_PRINT_ERROR, view args, 6, false)
+                    give 6
                 }
-                semaAddError(&mut ctx, "L0004", "printError requiere un argumento Text o &Text", expr.start, expr.end)
-                return 7
+                semaAddError(edit ctx, "L0004", "printError requiere un argumento Text o &Text", expr.start, expr.end)
+                give 7
             }
-            let name_arg_count = "processArgCount"
-            if symbolNameEqualsText(source, name_start, name_end, name_arg_count) && arg_count == 0 {
-                var args: List<Int> = List[]
-                semaPlatformEmit(&mut ctx, 0, &args, 1, true)
-                return 1
+            hold name_arg_count = "processArgCount"
+            when symbolNameEqualsText(source, name_start, name_end, name_arg_count) && arg_count == 0 {
+                change args: List of[Int] = List[]
+                semaPlatformEmit(edit ctx, 0, view args, 1, true)
+                give 1
             }
-            let name_arg = "processArg"
-            if symbolNameEqualsText(source, name_start, name_end, name_arg) && arg_count == 1 {
-                let ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
-                if ty == 1 {
-                    var args: List<Int> = List[]
-                    let operand = lirTakeOperand(&mut ctx, 1)
-                    let argument = lirArg(&mut ctx.lir, false, operand, false)
-                    args.push(argument)
-                    let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
+            hold name_arg = "processArg"
+            when symbolNameEqualsText(source, name_start, name_end, name_arg) && arg_count == 1 {
+                hold ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_MOVE)
+                when ty == 1 {
+                    change args: List of[Int] = List[]
+                    hold operand = lirTakeOperand(edit ctx, 1)
+                    hold argument = lirArg(edit ctx.lir, false, operand, false)
+                    args@push(argument)
+                    hold res_t = semTypeMakeResult(edit ctx.types, 5, 1)
                     when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
-                    semaPlatformEmit(&mut ctx, 1, &args, res_t, true)
-                    return res_t
+                    semaPlatformEmit(edit ctx, 1, view args, res_t, true)
+                    give res_t
                 }
-                semaAddError(&mut ctx, "L0004", "processArg requiere un argumento Int", expr.start, expr.end)
-                return 7
+                semaAddError(edit ctx, "L0004", "processArg requiere un argumento Int", expr.start, expr.end)
+                give 7
             }
-            let name_read_text = "readText"
-            if symbolNameEqualsText(source, name_start, name_end, name_read_text) {
-                if arg_count != 2 {
-                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
-                    return 7
+            hold name_read_text = "readText"
+            when symbolNameEqualsText(source, name_start, name_end, name_read_text) {
+                when arg_count != 2 {
+                    semaAddError(edit ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    give 7
                 }
                 // Do not consume ctx.lir after visiting the second argument:
                 // it replaces the expression channel used by the first.
-                let path_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
-                if path_t != 5 {
-                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
-                    return 7
+                hold path_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                when path_t != 5 {
+                    semaAddError(edit ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    give 7
                 }
-                let path_loan = semaPlatformArgLoan(&mut ctx, path_t, expr.start, expr.end)
-                let path = ctx.lir.borrowed
-                let len_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
-                let len = lirTakeOperand(&mut ctx, len_t)
-                if len_t != 1 {
-                    semaAddError(&mut ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
-                    return 7
+                hold path_loan = semaPlatformArgLoan(edit ctx, path_t, expr.start, expr.end)
+                hold path = ctx.lir.borrowed
+                hold len_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+                hold len = lirTakeOperand(edit ctx, len_t)
+                when len_t != 1 {
+                    semaAddError(edit ctx, "L0004", "readText requiere (path: &Text, max_len: Int)", expr.start, expr.end)
+                    give 7
                 }
-                if path < 0 || path_loan < 0 {
-                    semaAddError(&mut ctx, "L0016", "readText requiere un lugar Text prestable; los temporales propietarios no están soportados", expr.start, expr.end)
-                    return 7
+                when path < 0 || path_loan < 0 {
+                    semaAddError(edit ctx, "L0016", "readText requiere un lugar Text prestable; los temporales propietarios no están soportados", expr.start, expr.end)
+                    give 7
                 }
                 // The loan covers the full Result<Text, Int>, not only the
                 // primitive success path: preserve the source through max_len.
-                let res_t = semTypeMakeResult(&mut ctx.types, 5, 1)
-                var loans: List<Int> = List[]
-                loans.push(path_loan)
-                semaCallLoans(&mut ctx, &loans, res_t, SITE_NONE, expr.start, expr.end)
-                var args: List<Int> = List[]
-                let path_arg = lirArg(&mut ctx.lir, true, path, false)
-                args.push(path_arg)
-                let len_arg = lirArg(&mut ctx.lir, false, len, false)
-                args.push(len_arg)
+                hold res_t = semTypeMakeResult(edit ctx.types, 5, 1)
+                change loans: List of[Int] = List[]
+                loans@push(path_loan)
+                semaCallLoans(edit ctx, view loans, res_t, SITE_NONE, expr.start, expr.end)
+                change args: List of[Int] = List[]
+                hold path_arg = lirArg(edit ctx.lir, true, path, false)
+                args@push(path_arg)
+                hold len_arg = lirArg(edit ctx.lir, false, len, false)
+                args@push(len_arg)
                 // Result<Text, Int> owns its active Text (#5): a registered
                 // builtin union with an atomic drop obligation.
                 when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
-                semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
-                return res_t
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_READ_TEXT, view args, res_t, true)
+                give res_t
             }
             // textFromBytes(bytes: List<Int>, count: Int) => Result<Text, Int>:
             // the first `count` bytes as an owned Text (Err 1 bad count or
@@ -386,25 +386,25 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaPlatformEmit(edit ctx, LIR_PLATFORM_TEXT_FROM_BYTES, view text_args, text_res_t, true)
                 give text_res_t
             }
-            let name_write_bytes = "writeBytes"
-            if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
-                if arg_count != 2 {
-                    semaAddError(&mut ctx, "L0004", "writeBytes requiere (Text, List<Int>)", expr.start, expr.end)
-                    return 7
+            hold name_write_bytes = "writeBytes"
+            when symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
+                when arg_count != 2 {
+                    semaAddError(edit ctx, "L0004", "writeBytes requiere (Text, List<Int>)", expr.start, expr.end)
+                    give 7
                 }
                 // Materialize each shared loan before evaluating the next argument:
                 // a plain FLOW_READ does not protect a previous argument.
-                let path_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
-                let path_loan = semaPlatformArgLoan(&mut ctx, path_ty, expr.start, expr.end)
-                let path = ctx.lir.borrowed
-                let bytes_ty = semaExprMode(&mut ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
-                let bytes_loan = semaPlatformArgLoan(&mut ctx, bytes_ty, expr.start, expr.end)
-                let bytes = ctx.lir.borrowed
-                var loans: List<Int> = List[]
-                loans.push(path_loan)
-                loans.push(bytes_loan)
-                semaCallLoans(&mut ctx, &loans, 1, SITE_NONE, expr.start, expr.end)
-                return semaWriteBytes(&mut ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
+                hold path_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold path_loan = semaPlatformArgLoan(edit ctx, path_ty, expr.start, expr.end)
+                hold path = ctx.lir.borrowed
+                hold bytes_ty = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_READ)
+                hold bytes_loan = semaPlatformArgLoan(edit ctx, bytes_ty, expr.start, expr.end)
+                hold bytes = ctx.lir.borrowed
+                change loans: List of[Int] = List[]
+                loans@push(path_loan)
+                loans@push(bytes_loan)
+                semaCallLoans(edit ctx, view loans, 1, SITE_NONE, expr.start, expr.end)
+                give semaWriteBytes(edit ctx, expr.start, expr.end, path_ty, path, bytes_ty, bytes)
             }
             hold name_same_file = "sameFile"
             when symbolNameEqualsText(source, name_start, name_end, name_same_file) {
@@ -473,198 +473,198 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
             when window_result != -1 { give window_result }
             hold clipboard_result = semaClipboardBuiltin(edit ctx, source, tree, expr.start, expr.end, name_start, name_end, first_arg, arg_count)
             when clipboard_result != -1 { give clipboard_result }
-            let sym_id = semaLookupVisible(&mut ctx, source, name_start, name_end)
-            if sym_id == -2 { return 7 }
-            if sym_id < 0 {
-                semaAddError(&mut ctx, "L0001", "función no encontrada", name_start, name_end)
-                return 7
+            hold sym_id = semaLookupVisible(edit ctx, source, name_start, name_end)
+            when sym_id == -2 { give 7 }
+            when sym_id < 0 {
+                semaAddError(edit ctx, "L0001", "función no encontrada", name_start, name_end)
+                give 7
             }
-            let sym = &ctx.symbols.symbols[sym_id]
-            let sym_type_id = sym.type_id
-            let decl_id = sym.decl_id
-            match sym.kind {
-                SymbolKind.Struct => {
-                    semaCheckConstructor(&mut ctx, source, tree, expr, decl_id, sym_type_id)
-                    return sym_type_id
+            hold sym = view ctx.symbols.symbols[sym_id]
+            hold sym_type_id = sym.type_id
+            hold decl_id = sym.decl_id
+            choose sym.kind {
+                SymbolKind.Struct : {
+                    semaCheckConstructor(edit ctx, source, tree, expr, decl_id, sym_type_id)
+                    give sym_type_id
                 }
-                SymbolKind.Func => {
-                    if decl_id >= 0 && decl_id < tree.declarations.length {
-                        let decl = &tree.declarations[decl_id]
-                        let expected_params = decl.e
-                        let first_p = decl.d
-                        if arg_count != expected_params {
-                            semaAddError(&mut ctx, "L0004", "número incorrecto de argumentos en llamada", expr.start, expr.end)
-                            return 7
+                SymbolKind.Func : {
+                    when decl_id >= 0 && decl_id < tree.declarations.length {
+                        hold decl = view tree.declarations[decl_id]
+                        hold expected_params = decl.e
+                        hold first_p = decl.d
+                        when arg_count != expected_params {
+                            semaAddError(edit ctx, "L0004", "número incorrecto de argumentos en llamada", expr.start, expr.end)
+                            give 7
                         }
-                        var loans: List<Int> = List[]
-                        var args: List<Int> = List[]
-                        for a in 0..arg_count {
-                            let arg_eid = tree.extra[first_arg + a]
-                            let param = &tree.params[first_p + a]
-                            let param_t = semaResolveAstType(&mut ctx, source, tree, param.type_id)
-                            if semaRefElem(ctx, param_t) >= 0 {
-                                loans.push(semaRefArg(&mut ctx, source, tree, arg_eid, param_t, a))
-                                let place = ctx.lir.borrowed
-                                let is_mut = semaIsMutRef(ctx, param_t)
-                                let argument = lirArg(&mut ctx.lir, true, place, is_mut)
-                                args.push(argument)
-                            } else {
-                                loans.push(-1)
+                        change loans: List of[Int] = List[]
+                        change args: List of[Int] = List[]
+                        each a among 0..arg_count {
+                            hold arg_eid = tree.extra[first_arg + a]
+                            hold param = view tree.params[first_p + a]
+                            hold param_t = semaResolveAstType(edit ctx, source, tree, param.type_id)
+                            when semaRefElem(ctx, param_t) >= 0 {
+                                loans@push(semaRefArg(edit ctx, source, tree, arg_eid, param_t, a))
+                                hold place = ctx.lir.borrowed
+                                hold is_mut = semaIsMutRef(ctx, param_t)
+                                hold argument = lirArg(edit ctx.lir, true, place, is_mut)
+                                args@push(argument)
+                            } otherwise {
+                                loans@push(-1)
                                 ctx.expected_list_type = param_t
-                                let arg_t = semaExprMode(&mut ctx, source, tree, arg_eid, ACCESS_MOVE)
-                                let operand = lirTakeOperand(&mut ctx, arg_t)
-                                let argument = lirArg(&mut ctx.lir, false, operand, false)
-                                args.push(argument)
-                                if !semTypeEquals(&ctx.types, arg_t, param_t) {
-                                    semaAddError(&mut ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
+                                hold arg_t = semaExprMode(edit ctx, source, tree, arg_eid, ACCESS_MOVE)
+                                hold operand = lirTakeOperand(edit ctx, arg_t)
+                                hold argument = lirArg(edit ctx.lir, false, operand, false)
+                                args@push(argument)
+                                when !semTypeEquals(view ctx.types, arg_t, param_t) {
+                                    semaAddError(edit ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
                                 }
                             }
                         }
-                        let result = semaCallLoans(&mut ctx, &loans, sym_type_id, site, expr.start, expr.end)
-                        semaCallLower(&mut ctx, decl_id, &args, sym_type_id)
-                        return result
+                        hold result = semaCallLoans(edit ctx, view loans, sym_type_id, site, expr.start, expr.end)
+                        semaCallLower(edit ctx, decl_id, view args, sym_type_id)
+                        give result
                     }
-                    return sym_type_id
+                    give sym_type_id
                 }
-                _ => {
-                    semaAddError(&mut ctx, "L0001", "el símbolo no es invocable", name_start, name_end)
-                    return 7
+                _ : {
+                    semaAddError(edit ctx, "L0001", "el símbolo no es invocable", name_start, name_end)
+                    give 7
                 }
             }
         }
-        AstExprKind.ListLit => {
-            return semaCollectionLit(&mut ctx, source, tree, expr, false)
+        AstExprKind.ListLit : {
+            give semaCollectionLit(edit ctx, source, tree, expr, false)
         }
-        AstExprKind.ArrayLit => {
-            return semaCollectionLit(&mut ctx, source, tree, expr, true)
+        AstExprKind.ArrayLit : {
+            give semaCollectionLit(edit ctx, source, tree, expr, true)
         }
-        AstExprKind.Field => {
-            let enum_t = semaEnumField(&mut ctx, source, tree, expr)
-            if enum_t >= 0 { return enum_t }
-            let base_t = semaExprMode(&mut ctx, source, tree, expr.a, ACCESS_PLACE)
-            let parent = ctx.expression_path
+        AstExprKind.Field : {
+            hold enum_t = semaEnumField(edit ctx, source, tree, expr)
+            when enum_t >= 0 { give enum_t }
+            hold base_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_PLACE)
+            hold parent = ctx.expression_path
             ctx.expression_path = -1
-            return semaFieldFinish(&mut ctx, source, tree, expr_id, mode, base_t, parent)
+            give semaFieldFinish(edit ctx, source, tree, expr_id, mode, base_t, parent)
         }
-        AstExprKind.Named => {
+        AstExprKind.Named : {
             ctx.borrow_site = site
-            return semaExprMode(&mut ctx, source, tree, expr.c, mode)
+            give semaExprMode(edit ctx, source, tree, expr.c, mode)
         }
-        AstExprKind.MethodCall => {
-            let enum_call = semaEnumVariantCall(&mut ctx, source, tree, expr)
-            if enum_call >= 0 { return enum_call }
-            let base_t = semaExprMode(&mut ctx, source, tree, expr.a, ACCESS_PLACE)
-            let base_place = ctx.lir.place
-            let base_path = ctx.expression_path
+        AstExprKind.MethodCall : {
+            hold enum_call = semaEnumVariantCall(edit ctx, source, tree, expr)
+            when enum_call >= 0 { give enum_call }
+            hold base_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_PLACE)
+            hold base_place = ctx.lir.place
+            hold base_path = ctx.expression_path
             ctx.expression_path = -1
-            let first_call = expr.d
-            let count = tree.extra[first_call]
-            var arg_op = LIR_NONE
-            var arg_t = 0
-            if count == 1 {
-                arg_t = semaExprMode(&mut ctx, source, tree, tree.extra[first_call + 1], ACCESS_MOVE)
-                arg_op = lirTakeOperand(&mut ctx, arg_t)
+            hold first_call = expr.d
+            hold count = tree.extra[first_call]
+            change arg_op = LIR_NONE
+            change arg_t = 0
+            when count == 1 {
+                arg_t = semaExprMode(edit ctx, source, tree, tree.extra[first_call + 1], ACCESS_MOVE)
+                arg_op = lirTakeOperand(edit ctx, arg_t)
             }
-            return semaMethodFinish(&mut ctx, source, tree, expr_id, base_t, base_place, base_path, count, arg_t, arg_op)
+            give semaMethodFinish(edit ctx, source, tree, expr_id, base_t, base_place, base_path, count, arg_t, arg_op)
         }
-        AstExprKind.Index => {
-            let base_t = semaExprMode(&mut ctx, source, tree, expr.a, ACCESS_PLACE)
-            let base_place = ctx.lir.place
-            let base_path = ctx.expression_path
+        AstExprKind.Index : {
+            hold base_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_PLACE)
+            hold base_place = ctx.lir.place
+            hold base_path = ctx.expression_path
             ctx.expression_path = -1
-            let idx_t = semaExprMode(&mut ctx, source, tree, expr.b, ACCESS_READ)
-            let idx_op = lirTakeOperand(&mut ctx, idx_t)
-            return semaIndexFinish(&mut ctx, source, tree, expr_id, mode, base_t, base_place, base_path, idx_t, idx_op)
+            hold idx_t = semaExprMode(edit ctx, source, tree, expr.b, ACCESS_READ)
+            hold idx_op = lirTakeOperand(edit ctx, idx_t)
+            give semaIndexFinish(edit ctx, source, tree, expr_id, mode, base_t, base_place, base_path, idx_t, idx_op)
         }
-        AstExprKind.Match => {
-            return 6
+        AstExprKind.Match : {
+            give 6
         }
-        _ => {
-            semaAddError(&mut ctx, "L0016", "expresión fuera del subconjunto verificado de Stage 1", expr.start, expr.end)
-            return 7
+        _ : {
+            semaAddError(edit ctx, "L0016", "expresión fuera del subconjunto verificado de Stage 1", expr.start, expr.end)
+            give 7
         }
     }
 }
 
-fn semaCollectionLit(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr, is_array: Bool) -> Int {
-    let first = expr.a
-    let count = expr.b
-    var elem_t = 0
-    if !is_array { elem_t = semaExpectedListElem(ctx) }
+flow semaCollectionLit(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, is_array: Bool) => Int {
+    hold first = expr.a
+    hold count = expr.b
+    change elem_t = 0
+    when !is_array { elem_t = semaExpectedListElem(ctx) }
     ctx.expected_list_type = -1
-    let elem_context = elem_t
-    var elements: List<Int> = List[]
-    for i in 0..count {
+    hold elem_context = elem_t
+    change elements: List of[Int] = List[]
+    each i among 0..count {
         // Each element gets the element type as its own (nested) context.
         ctx.expected_list_type = elem_context
-        let ti = semaExprMode(&mut ctx, source, tree, tree.extra[first + i], ACCESS_MOVE)
-        if elem_t == 0 { elem_t = ti }
-        if !semTypeEquals(&ctx.types, elem_t, ti) {
-            semaAddError(&mut ctx, "L0003", "elementos heterogéneos en colección", expr.start, expr.end)
+        hold ti = semaExprMode(edit ctx, source, tree, tree.extra[first + i], ACCESS_MOVE)
+        when elem_t == 0 { elem_t = ti }
+        when !semTypeEquals(view ctx.types, elem_t, ti) {
+            semaAddError(edit ctx, "L0003", "elementos heterogéneos en colección", expr.start, expr.end)
         }
-        elements.push(lirTakeOperand(&mut ctx, ti))
+        elements@push(lirTakeOperand(edit ctx, ti))
     }
-    return semaFinishCollectionLit(&mut ctx, expr, is_array, elem_t, &elements)
+    give semaFinishCollectionLit(edit ctx, expr, is_array, elem_t, view elements)
 }
 
 // A qualified enum variant constructor is parsed as a MethodCall on an
 // enum name. Never type-check the enum name as a runtime object.
 // Return -1 when this is an ordinary method call.
-fn semaEnumVariantCall(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr: &AstExpr) -> Int {
-    if expr.a < 0 || expr.a >= tree.expressions.length { return -1 }
-    let base = &tree.expressions[expr.a]
-    match base.kind {
-        AstExprKind.Name => {}
-        _ => { return -1 }
+flow semaEnumVariantCall(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr) => Int {
+    when expr.a < 0 || expr.a >= tree.expressions.length { give -1 }
+    hold base = view tree.expressions[expr.a]
+    choose base.kind {
+        AstExprKind.Name : {}
+        _ : { give -1 }
     }
-    let sym_id = semaLookupVisible(&mut ctx, source, base.start, base.end)
-    if sym_id < 0 { return -1 }
-    match ctx.symbols.symbols[sym_id].kind {
-        SymbolKind.Enum => {}
-        _ => { return -1 }
+    hold sym_id = semaLookupVisible(edit ctx, source, base.start, base.end)
+    when sym_id < 0 { give -1 }
+    choose ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Enum : {}
+        _ : { give -1 }
     }
-    let decl_id = ctx.symbols.symbols[sym_id].decl_id
-    let enum_ty = ctx.symbols.symbols[sym_id].type_id
-    if decl_id < 0 || decl_id >= tree.declarations.length { return 7 }
-    let decl = &tree.declarations[decl_id]
-    let first = expr.d
-    let argc = tree.extra[first]
-    for v in 0..decl.d {
-        let variant = &tree.variants[decl.c + v]
-        if !symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) { continue }
-        if argc != variant.payload_count {
-            semaAddError(&mut ctx, "L0004", "cantidad de argumentos incorrecta para la variante", expr.start, expr.end)
-            return 7
+    hold decl_id = ctx.symbols.symbols[sym_id].decl_id
+    hold enum_ty = ctx.symbols.symbols[sym_id].type_id
+    when decl_id < 0 || decl_id >= tree.declarations.length { give 7 }
+    hold decl = view tree.declarations[decl_id]
+    hold first = expr.d
+    hold argc = tree.extra[first]
+    each v among 0..decl.d {
+        hold variant = view tree.variants[decl.c + v]
+        when !symbolNamesEqual(source, variant.name_start, variant.name_end, expr.b, expr.c) { proceed }
+        when argc != variant.payload_count {
+            semaAddError(edit ctx, "L0004", "cantidad de argumentos incorrecta para la variante", expr.start, expr.end)
+            give 7
         }
-        if argc > 1 {
-            semaAddError(&mut ctx, "L0016", "Stage 1 solo admite un payload primitivo por variante", expr.start, expr.end)
-            return 7
+        when argc > 1 {
+            semaAddError(edit ctx, "L0016", "Stage 1 solo admite un payload primitivo por variante", expr.start, expr.end)
+            give 7
         }
-        var payload = LIR_NONE
-        if argc == 1 {
-            let expected = semaResolveAstType(&mut ctx, source, tree, tree.extra[variant.first_payload_index])
-            let actual = semaExprMode(&mut ctx, source, tree, tree.extra[first + 1], ACCESS_MOVE)
-            if expected != actual {
-                semaAddError(&mut ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
-                return 7
+        change payload = LIR_NONE
+        when argc == 1 {
+            hold expected = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
+            hold actual = semaExprMode(edit ctx, source, tree, tree.extra[first + 1], ACCESS_MOVE)
+            when expected != actual {
+                semaAddError(edit ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
+                give 7
             }
-            if expected != 1 && expected != 4 {
-                semaAddError(&mut ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
-                return 7
+            when expected != 1 && expected != 4 {
+                semaAddError(edit ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
+                give 7
             }
-            payload = lirTakeOperand(&mut ctx, actual)
+            payload = lirTakeOperand(edit ctx, actual)
         }
-        var enum_id = -1
-        for k in 0..ctx.lir_module.en_decl.length {
-            if ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
+        change enum_id = -1
+        each k among 0..ctx.lir_module.en_decl.length {
+            when ctx.lir_module.en_decl[k] == decl_id { enum_id = k }
         }
-        if enum_id < 0 { lirMarkUnsupported(&mut ctx.lir, expr.start); return 7 }
-        let value = lirNew(&mut ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload)
-        lirSetVal(&mut ctx, value)
-        return enum_ty
+        when enum_id < 0 { lirMarkUnsupported(edit ctx.lir, expr.start); give 7 }
+        hold value = lirNew(edit ctx, enum_ty, false, LIR_VARIANT, enum_id, v, payload)
+        lirSetVal(edit ctx, value)
+        give enum_ty
     }
-    semaAddError(&mut ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
-    return 7
+    semaAddError(edit ctx, "L0001", "variante de enum no encontrada", expr.start, expr.end)
+    give 7
 }
 
 // ---- File streams (P0-B) ---------------------------------------------------

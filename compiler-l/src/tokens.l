@@ -1,43 +1,43 @@
-import lexer
+take lexer
 
-pub fn tokenName(kind: &LexKind) -> Text {
-    match kind {
-        LexKind.Word => { return "word" }
-        LexKind.Integer => { return "int" }
-        LexKind.Symbol => { return "symbol" }
-        LexKind.Newline => { return "newline" }
-        LexKind.Eof => { return "eof" }
-        LexKind.Text => { return "text" }
-        LexKind.TextStart => { return "text_start" }
-        LexKind.TextEnd => { return "text_end" }
-        LexKind.InterpolationStart => { return "interp_start" }
-        LexKind.InterpolationEnd => { return "interp_end" }
+expose flow tokenName(kind: view LexKind) => Text {
+    choose kind {
+        LexKind.Word : { give "word" }
+        LexKind.Integer : { give "int" }
+        LexKind.Symbol : { give "symbol" }
+        LexKind.Newline : { give "newline" }
+        LexKind.Eof : { give "eof" }
+        LexKind.Text : { give "text" }
+        LexKind.TextStart : { give "text_start" }
+        LexKind.TextEnd : { give "text_end" }
+        LexKind.InterpolationStart : { give "interp_start" }
+        LexKind.InterpolationEnd : { give "interp_end" }
     }
 }
 
-pub fn emitTokens(tokens: &List<LexToken>) {
-    for i in 0..tokens.length {
-        let token = &tokens[i]
-        let name = tokenName(&token.kind)
-        let start = token.start
-        let end = token.end
+expose flow emitTokens(tokens: view List of[LexToken]) {
+    each i among 0..tokens.length {
+        hold token = view tokens[i]
+        hold name = tokenName(view token.kind)
+        hold start = token.start
+        hold end = token.end
         print("{name}:{start}:{end}")
     }
 }
 
 // Unit-only LexKind can be reconstructed from a shared borrow without
 // moving the field of a borrowed LexToken (ELE structs remain move-only).
-pub fn tokenKindValue(kind: &LexKind) -> LexKind {
-    match kind {
-        LexKind.Word => { return LexKind.Word }
-        LexKind.Integer => { return LexKind.Integer }
-        LexKind.Symbol => { return LexKind.Symbol }
-        LexKind.Newline => { return LexKind.Newline }
-        LexKind.Eof => { return LexKind.Eof }
-        LexKind.Text => { return LexKind.Text }
-        LexKind.TextStart => { return LexKind.TextStart }
-        LexKind.TextEnd => { return LexKind.TextEnd }
-        LexKind.InterpolationStart => { return LexKind.InterpolationStart }
-        LexKind.InterpolationEnd => { return LexKind.InterpolationEnd }
+expose flow tokenKindValue(kind: view LexKind) => LexKind {
+    choose kind {
+        LexKind.Word : { give LexKind.Word }
+        LexKind.Integer : { give LexKind.Integer }
+        LexKind.Symbol : { give LexKind.Symbol }
+        LexKind.Newline : { give LexKind.Newline }
+        LexKind.Eof : { give LexKind.Eof }
+        LexKind.Text : { give LexKind.Text }
+        LexKind.TextStart : { give LexKind.TextStart }
+        LexKind.TextEnd : { give LexKind.TextEnd }
+        LexKind.InterpolationStart : { give LexKind.InterpolationStart }
+        LexKind.InterpolationEnd : { give LexKind.InterpolationEnd }
     }
 }

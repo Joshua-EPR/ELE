@@ -237,6 +237,8 @@ Consulta las [Limitaciones Conocidas](docs/limitations.md) y la [Hoja de Ruta de
 
 - [Guía de Inicio Rápido](docs/getting-started.md)
 - [Especificación de Referencia del Lenguaje](docs/language-reference.md)
+- [Migrar código ELE v1 a ELE v2](docs/MIGRATING_ELE_V1_TO_V2.md)
+- [Estado de la sintaxis ELE v2](docs/ELE_SYNTAX_V2.md)
 - [Arquitectura del Compilador](docs/architecture.md)
 - [Autorreconstrucción y Punto Fijo Generacional](docs/self-hosting.md)
 - [Informe de Rendimiento y Benchmarks](docs/performance.md)

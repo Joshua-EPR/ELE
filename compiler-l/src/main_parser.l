@@ -1,126 +1,126 @@
-import lexer
-import tokens
-import cursor
-import ast
-import parser
+take lexer
+take tokens
+take cursor
+take ast
+take parser
 
-fn reportFileError(path: &Text, code: Int) -> Int {
-    if code == 1 {
+flow reportFileError(path: view Text, code: Int) => Int {
+    when code == 1 {
         printError("{path}: ruta o límite inválido")
-        return 2
+        give 2
     }
-    if code == 2 {
+    when code == 2 {
         printError("{path}: archivo inexistente")
-        return 3
+        give 3
     }
-    if code == 4 {
+    when code == 4 {
         printError("{path}: UTF-8 inválido")
-        return 5
+        give 5
     }
-    if code == 5 {
+    when code == 5 {
         printError("{path}: archivo excede el límite de 16 MiB")
-        return 7
+        give 7
     }
     printError("{path}: no se pudo abrir o leer el archivo")
-    return 4
+    give 4
 }
 
-fn reportLexError(path: &Text, source: &Text, error: &LexError) {
-    let offset = error.offset
-    var line = 1
-    var column = 1
-    for i in lexStart(source)..offset {
-        let b = source.byteAt(i)
-        if b == 10 {
+flow reportLexError(path: view Text, source: view Text, error: view LexError) {
+    hold offset = error.offset
+    change line = 1
+    change column = 1
+    each i among lexStart(source)..offset {
+        hold b = source@byteAt(i)
+        when b == 10 {
             line += 1
             column = 1
-        } else if b < 128 || b >= 192 {
+        } otherwise when b < 128 || b >= 192 {
             column += 1
         }
     }
     printError("{path}:{line}:{column}: error[LEXER]: error léxico (byte {offset})")
 }
 
-fn reportParseError(path: &Text, source: &Text, error: &ParseError) {
-    let offset = error.token_start
-    var message = "error sintáctico"
-    match error.problem {
-        ParseProblem.ExpectedExpression => { message = "se esperaba expresión" }
-        ParseProblem.ExpectedIdentifier => { message = "se esperaba identificador" }
-        ParseProblem.ExpectedType => { message = "se esperaba tipo" }
-        ParseProblem.ExpectedStatement => { message = "se esperaba sentencia" }
-        ParseProblem.ExpectedDeclaration => { message = "se esperaba declaración" }
-        ParseProblem.ExpectedToken => { message = "se esperaba token" }
-        ParseProblem.UnclosedBlock => { message = "bloque sin cerrar" }
-        ParseProblem.UnclosedParenthesis => { message = "paréntesis sin cerrar" }
-        ParseProblem.UnclosedBracket => { message = "corchete sin cerrar" }
-        ParseProblem.UnclosedInterpolation => { message = "expresión interpolada sin cerrar" }
-        ParseProblem.ChainedComparisonsProhibited => { message = "comparaciones encadenadas prohibidas" }
-        ParseProblem.NestingLimitExceeded => { message = "límite de anidamiento (128) excedido" }
-        ParseProblem.UnexpectedToken => { message = "token inesperado" }
+flow reportParseError(path: view Text, source: view Text, error: view ParseError) {
+    hold offset = error.token_start
+    change message = "error sintáctico"
+    choose error.problem {
+        ParseProblem.ExpectedExpression: { message = "se esperaba expresión" }
+        ParseProblem.ExpectedIdentifier: { message = "se esperaba identificador" }
+        ParseProblem.ExpectedType: { message = "se esperaba tipo" }
+        ParseProblem.ExpectedStatement: { message = "se esperaba sentencia" }
+        ParseProblem.ExpectedDeclaration: { message = "se esperaba declaración" }
+        ParseProblem.ExpectedToken: { message = "se esperaba token" }
+        ParseProblem.UnclosedBlock: { message = "bloque sin cerrar" }
+        ParseProblem.UnclosedParenthesis: { message = "paréntesis sin cerrar" }
+        ParseProblem.UnclosedBracket: { message = "corchete sin cerrar" }
+        ParseProblem.UnclosedInterpolation: { message = "expresión interpolada sin cerrar" }
+        ParseProblem.ChainedComparisonsProhibited: { message = "comparaciones encadenadas prohibidas" }
+        ParseProblem.NestingLimitExceeded: { message = "límite de anidamiento (128) excedido" }
+        ParseProblem.UnexpectedToken: { message = "token inesperado" }
     }
-    var line = 1
-    var column = 1
-    for i in lexStart(source)..offset {
-        let b = source.byteAt(i)
-        if b == 10 {
+    change line = 1
+    change column = 1
+    each i among lexStart(source)..offset {
+        hold b = source@byteAt(i)
+        when b == 10 {
             line += 1
             column = 1
-        } else if b < 128 || b >= 192 {
+        } otherwise when b < 128 || b >= 192 {
             column += 1
         }
     }
-    let exp = &error.expected_token
-    if exp.byteLength > 0 {
+    hold exp = view error.expected_token
+    when exp.byteLength > 0 {
         printError("{path}:{line}:{column}: error[PARSER]: {message}: '{exp}' (byte {offset})")
-    } else {
+    } otherwise {
         printError("{path}:{line}:{column}: error[PARSER]: {message} (byte {offset})")
     }
 }
 
-fn parseFile(path: &Text) -> Int {
-    match readText(path, 16 * 1024 * 1024) {
-        Ok(source) => {
-            match lexSource(source) {
-                Ok(tokens) => {
-                    var tree = astNew()
-                    let ok = parseProgram(&mut tree, source, tokens, 0)
-                    if !ok || tree.errors.length > 0 {
-                        for i in 0..tree.errors.length {
-                            let err = &tree.errors[i]
+flow parseFile(path: view Text) => Int {
+    choose readText(path, 16 * 1024 * 1024) {
+        Ok(source): {
+            choose lexSource(source) {
+                Ok(tokens): {
+                    change tree = astNew()
+                    hold ok = parseProgram(edit tree, source, tokens, 0)
+                    when !ok || tree.errors.length > 0 {
+                        each i among 0..tree.errors.length {
+                            hold err = view tree.errors[i]
                             reportParseError(path, source, err)
                         }
-                        return 1
+                        give 1
                     }
                     astDumpCanonical(tree)
-                    return 0
+                    give 0
                 }
-                Err(error) => {
+                Err(error): {
                     reportLexError(path, source, error)
-                    return 6
+                    give 6
                 }
             }
         }
-        Err(code) => { return reportFileError(path, code) }
+        Err(code): { give reportFileError(path, code) }
     }
 }
 
-fn main() -> Int {
-    if processArgCount() != 1 {
+flow main() => Int {
+    when processArgCount() != 1 {
         printError("Uso: parser-l <archivo.l>")
-        return 2
+        give 2
     }
-    match processArg(0) {
-        Ok(path) => {
-            if path.byteLength == 0 {
+    choose processArg(0) {
+        Ok(path): {
+            when path.byteLength == 0 {
                 printError("Uso: parser-l <archivo.l>")
-                return 2
+                give 2
             }
-            return parseFile(path)
+            give parseFile(path)
         }
-        Err(code) => {
+        Err(code): {
             printError("parser-l: argumento inválido")
-            return 2
+            give 2
         }
     }
 }

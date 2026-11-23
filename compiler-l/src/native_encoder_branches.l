@@ -1,23 +1,23 @@
-import codegen.x86_64
-import codegen.elf64
+take codegen.x86_64
+take codegen.elf64
 
 // Backward rel32 fixture; the four-byte displacement uses two's complement.
-fn main() -> Int {
-    var code = x64New()
-    x64Ret(&mut code)
-    let conditional = x64ConditionalPlaceholder(&mut code, true)
-    x64PatchRelative(&mut code, conditional, 0)
-    let unconditional = x64JumpPlaceholder(&mut code)
-    x64PatchRelative(&mut code, unconditional, 0)
-    if code.error != 0 { return 1 }
+flow main() => Int {
+    change code = x64New()
+    x64Ret(edit code)
+    hold conditional = x64ConditionalPlaceholder(edit code, true)
+    x64PatchRelative(edit code, conditional, 0)
+    hold unconditional = x64JumpPlaceholder(edit code)
+    x64PatchRelative(edit code, unconditional, 0)
+    when code.error != 0 { give 1 }
 
-    var invalid = x64New()
-    x64Ret(&mut invalid)
-    x64PatchRelative(&mut invalid, 100, 0)
-    if invalid.error != 4 { return 2 }
-    if invalid.bytes.length != 1 { return 3 }
+    change invalid = x64New()
+    x64Ret(edit invalid)
+    x64PatchRelative(edit invalid, 100, 0)
+    when invalid.error != 4 { give 2 }
+    when invalid.bytes.length != 1 { give 3 }
 
-    let text = elf64Hex(&code.bytes)
+    hold text = elf64Hex(view code.bytes)
     print("ELE_BRANCH_HEX:{text}")
-    return 0
+    give 0
 }

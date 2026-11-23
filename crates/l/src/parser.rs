@@ -195,6 +195,7 @@ pub struct Constant {
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
     pub path: String,
+    pub is_file_path: bool,
     pub span: Span,
     /// Resolved direct dependency's source file ID, set by the module loader.
     /// None for standalone parsing or prelude-only imports.
@@ -1643,17 +1644,27 @@ fn parse_inner(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
         if p.at("import") {
             p.need("import")?;
             let span = p.token().span;
-            let mut path = p.name()?;
-            while p.take(".") {
-                path.push('.');
-                path.push_str(&p.name()?);
-            }
+            let (path, is_file_path) = match p.token().kind.clone() {
+                Kind::Text(path) => {
+                    p.pos += 1;
+                    (path, true)
+                }
+                _ => {
+                    let mut path = p.name()?;
+                    while p.take(".") {
+                        path.push('.');
+                        path.push_str(&p.name()?);
+                    }
+                    (path, false)
+                }
+            };
             if !matches!(p.token().kind, Kind::Newline | Kind::Eof) && !p.at(";") {
                 return Err(p.error("se esperaba terminador de módulo/import"));
             }
             p.sep();
             imports.push(ImportDecl {
                 path,
+                is_file_path,
                 span,
                 target_file: None,
             });

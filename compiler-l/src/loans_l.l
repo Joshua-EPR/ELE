@@ -1,5 +1,5 @@
-import tokens
-import flow_cfg
+take tokens
+take flow_cfg
 
 // Loan creation, binding and provenance shared by the Stage 1 borrow
 // checker. Loans live in the FlowGraph so ids are stable per function.
@@ -7,54 +7,54 @@ import flow_cfg
 // names the loan it carries, or -1 for an owner.
 
 // Line (1-based) of a byte offset. Only used when a diagnostic is built.
-pub fn loanLineAt(source: &Text, offset: Int) -> Int {
-    var line = 1
-    var i = 0
-    while i < offset && i < source.byteLength {
-        if source.byteAt(i) == 10 { line += 1 }
+expose flow loanLineAt(source: view Text, offset: Int) => Int {
+    change line = 1
+    change i = 0
+    during i < offset && i < source.byteLength {
+        when source@byteAt(i) == 10 { line += 1 }
         i += 1
     }
-    return line
+    give line
 }
 
 // Column (1-based, code points) of a byte offset, as the CLI reports it.
-pub fn loanColAt(source: &Text, offset: Int) -> Int {
-    var col = 1
-    var i = 0
-    while i < offset && i < source.byteLength {
-        let b = source.byteAt(i)
-        if b == 10 {
+expose flow loanColAt(source: view Text, offset: Int) => Int {
+    change col = 1
+    change i = 0
+    during i < offset && i < source.byteLength {
+        hold b = source@byteAt(i)
+        when b == 10 {
             col = 1
-        } else if b < 128 || b >= 192 {
+        } otherwise when b < 128 || b >= 192 {
             col += 1
         }
         i += 1
     }
-    return col
+    give col
 }
 
-pub fn loanNew(graph: &mut FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) -> Int {
-    let id = graph.loans.length
-    graph.loans.push(Loan(kind: kind, place: place, parent: parent, alt: -1, param: -1, start: start, end: end))
-    return id
+expose flow loanNew(graph: edit FlowGraph, kind: Int, place: Int, parent: Int, start: Int, end: Int) => Int {
+    hold id = graph.loans.length
+    graph.loans@push(Loan(kind: kind, place: place, parent: parent, alt: -1, param: -1, start: start, end: end))
+    give id
 }
 
-pub fn loanIsMut(graph: &FlowGraph, loan: Int) -> Bool {
-    if loan < 0 || loan >= graph.loans.length { return false }
-    return graph.loans[loan].kind == LOAN_MUT
+expose flow loanIsMut(graph: view FlowGraph, loan: Int) => Bool {
+    when loan < 0 || loan >= graph.loans.length { give false }
+    give graph.loans[loan].kind == LOAN_MUT
 }
 
 // The loan carried by the reference binding that roots `path`, or -1.
-pub fn loanOfPath(graph: &FlowGraph, path: Int) -> Int {
-    let root = flowRootPath(graph, path)
-    if root < 0 || root >= graph.binding_loans.length { return -1 }
-    return graph.binding_loans[root]
+expose flow loanOfPath(graph: view FlowGraph, path: Int) => Int {
+    hold root = flowRootPath(graph, path)
+    when root < 0 || root >= graph.binding_loans.length { give -1 }
+    give graph.binding_loans[root]
 }
 
-fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
-    if path < 0 { return }
-    while graph.binding_loans.length < graph.paths.length {
-        graph.binding_loans.push(-1)
+flow loanBind(graph: edit FlowGraph, path: Int, loan: Int) {
+    when path < 0 { give }
+    during graph.binding_loans.length < graph.paths.length {
+        graph.binding_loans@push(-1)
     }
     graph.binding_loans[path] = loan
 }
@@ -62,116 +62,116 @@ fn loanBind(graph: &mut FlowGraph, path: Int, loan: Int) {
 // Exported binding boundary for semantic lowering: only a real root path
 // may receive an existing loan. The unvalidated loanBind primitive stays
 // module-private and is used internally by loanBindParam.
-pub fn loanBindReferenceRoot(graph: &mut FlowGraph, path: Int, loan: Int) -> Bool {
-    if path < 0 || path >= graph.paths.length { return false }
-    if graph.paths[path].parent >= 0 { return false }
-    if loan < 0 || loan >= graph.loans.length { return false }
-    loanBind(&mut graph, path, loan)
-    return true
+expose flow loanBindReferenceRoot(graph: edit FlowGraph, path: Int, loan: Int) => Bool {
+    when path < 0 || path >= graph.paths.length { give false }
+    when graph.paths[path].parent >= 0 { give false }
+    when loan < 0 || loan >= graph.loans.length { give false }
+    loanBind(edit graph, path, loan)
+    give true
 }
 
 // A reference parameter carries a loan on its own place. The loan has no
 // creation event: it is live from entry and roots parameter provenance.
-pub fn loanBindParam(graph: &mut FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
-    var kind = LOAN_SHARED
-    if is_mut { kind = LOAN_MUT }
-    let loan = loanNew(&mut graph, kind, path, -1, start, end)
+expose flow loanBindParam(graph: edit FlowGraph, path: Int, index: Int, is_mut: Bool, start: Int, end: Int) {
+    change kind = LOAN_SHARED
+    when is_mut { kind = LOAN_MUT }
+    hold loan = loanNew(edit graph, kind, path, -1, start, end)
     graph.loans[loan].param = index
-    loanBind(&mut graph, path, loan)
+    loanBind(edit graph, path, loan)
 }
 
 // The storage a place denotes. A projection below a reference binding is
 // replayed on the place borrowed by the binding's loan.
-pub fn loanPlaceOf(graph: &mut FlowGraph, path: Int) -> Int {
-    if path < 0 || path >= graph.paths.length { return -1 }
-    let loan = loanOfPath(graph, path)
-    if loan < 0 { return path }
-    let root = flowRootPath(graph, path)
-    var depth = 0
-    var cursor = path
-    while cursor != root {
+expose flow loanPlaceOf(graph: edit FlowGraph, path: Int) => Int {
+    when path < 0 || path >= graph.paths.length { give -1 }
+    hold loan = loanOfPath(graph, path)
+    when loan < 0 { give path }
+    hold root = flowRootPath(graph, path)
+    change depth = 0
+    change cursor = path
+    during cursor != root {
         depth += 1
         cursor = graph.paths[cursor].parent
     }
-    var place = graph.loans[loan].place
-    var i = 0
-    while i < depth {
-        var hops = depth - 1 - i
+    change place = graph.loans[loan].place
+    change i = 0
+    during i < depth {
+        change hops = depth - 1 - i
         cursor = path
-        while hops > 0 {
+        during hops > 0 {
             cursor = graph.paths[cursor].parent
             hops -= 1
         }
         // Snapshot the projection index before taking a mutable loan of graph.
         // This preserves the exact path and avoids aliasing the graph argument.
-        let field = graph.paths[cursor].field
-        place = flowField(&mut graph, place, field)
+        hold field = graph.paths[cursor].field
+        place = flowField(edit graph, place, field)
         i += 1
     }
-    return place
+    give place
 }
 
 // Is `ancestor` on the reborrow chain of `loan` (inclusive)?
-pub fn loanDescendsFrom(graph: &FlowGraph, loan: Int, ancestor: Int) -> Bool {
-    var cursor = loan
-    while cursor >= 0 && cursor < graph.loans.length {
-        if cursor == ancestor { return true }
+expose flow loanDescendsFrom(graph: view FlowGraph, loan: Int, ancestor: Int) => Bool {
+    change cursor = loan
+    during cursor >= 0 && cursor < graph.loans.length {
+        when cursor == ancestor { give true }
         cursor = graph.loans[cursor].parent
     }
-    return false
+    give false
 }
 
 // Loans form a DAG through `parent` (reborrow) and `alt` (another origin
 // of a borrowed call result). Both always point to a smaller id, so walks
 // terminate. True when every root reachable from `loan` is a reference
 // parameter: the value cannot outlive the call that received it.
-fn loanRootedAtParams(graph: &FlowGraph, loan: Int) -> Bool {
-    var stack: List<Int> = List[]
-    stack.push(loan)
-    while stack.length > 0 {
-        var node = -1
-        match stack.pop() {
-            Some(n) => { node = n }
-            None => { break }
+flow loanRootedAtParams(graph: view FlowGraph, loan: Int) => Bool {
+    change stack: List of[Int] = List[]
+    stack@push(loan)
+    during stack.length > 0 {
+        change node = -1
+        choose stack@pop() {
+            Some(n) : { node = n }
+            None : { leave }
         }
-        if node >= 0 && node < graph.loans.length {
-            let parent = graph.loans[node].parent
-            if parent < 0 {
-                if graph.loans[node].param < 0 { return false }
-            } else {
-                stack.push(parent)
+        when node >= 0 && node < graph.loans.length {
+            hold parent = graph.loans[node].parent
+            when parent < 0 {
+                when graph.loans[node].param < 0 { give false }
+            } otherwise {
+                stack@push(parent)
             }
-            if graph.loans[node].alt >= 0 { stack.push(graph.loans[node].alt) }
+            when graph.loans[node].alt >= 0 { stack@push(graph.loans[node].alt) }
         }
     }
-    return true
+    give true
 }
 
 // Validates a borrowed return across the module boundary without exposing
 // the provenance walker itself. Status: 0 allowed, 1 missing/invalid loan,
 // 2 mutable mode mismatch, 3 loan origin not rooted in a parameter.
-pub fn loanBorrowedReturnStatus(graph: &FlowGraph, loan: Int, requires_mut: Bool) -> Int {
-    if loan < 0 || loan >= graph.loans.length { return 1 }
-    if requires_mut && !loanIsMut(graph, loan) { return 2 }
-    if !loanRootedAtParams(graph, loan) { return 3 }
-    return 0
+expose flow loanBorrowedReturnStatus(graph: view FlowGraph, loan: Int, requires_mut: Bool) => Int {
+    when loan < 0 || loan >= graph.loans.length { give 1 }
+    when requires_mut && !loanIsMut(graph, loan) { give 2 }
+    when !loanRootedAtParams(graph, loan) { give 3 }
+    give 0
 }
 
 // Result loan of a call to a borrowing function: one node per origin
 // argument, chained through `alt`. Each node reborrows its origin so a use
 // of the result keeps every possible owner borrowed.
-pub fn loanResult(graph: &mut FlowGraph, kind: Int, origins: &List<Int>, start: Int, end: Int) -> Int {
-    var head = -1
-    var i = origins.length - 1
-    while i >= 0 {
-        let origin = origins[i]
+expose flow loanResult(graph: edit FlowGraph, kind: Int, origins: view List of[Int], start: Int, end: Int) => Int {
+    change head = -1
+    change i = origins.length - 1
+    during i >= 0 {
+        hold origin = origins[i]
         // Capture the origin place before the exclusive borrow for loanNew.
         // This preserves which location is reborrowed without overlapping loans.
-        let borrowed_place = graph.loans[origin].place
-        let node = loanNew(&mut graph, kind, borrowed_place, origin, start, end)
+        hold borrowed_place = graph.loans[origin].place
+        hold node = loanNew(edit graph, kind, borrowed_place, origin, start, end)
         graph.loans[node].alt = head
         head = node
         i -= 1
     }
-    return head
+    give head
 }

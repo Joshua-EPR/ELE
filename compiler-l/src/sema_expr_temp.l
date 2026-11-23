@@ -1,13 +1,13 @@
-import ast
-import sema_context
-import sema_drop
+take ast
+take sema_context
+take sema_drop
 
 // Kept separate to preserve the Stage 0 CORE-1 token budget per module.
-pub fn semaReadTemp(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: Int, ty: Int, mark: Int) {
-    if ctx.expression_path >= 0 || expr_id < 0 { return }
-    match tree.expressions[expr_id].kind {
-        AstExprKind.TextLit => { return }
-        _ => {}
+expose flow semaReadTemp(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, ty: Int, mark: Int) {
+    when ctx.expression_path >= 0 || expr_id < 0 { give }
+    choose tree.expressions[expr_id].kind {
+        AstExprKind.TextLit : { give }
+        _ : {}
     }
-    semaTempAt(&mut ctx, source, tree, ty, tree.expressions[expr_id].start, tree.expressions[expr_id].end, mark)
+    semaTempAt(edit ctx, source, tree, ty, tree.expressions[expr_id].start, tree.expressions[expr_id].end, mark)
 }

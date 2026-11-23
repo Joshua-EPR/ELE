@@ -1,153 +1,153 @@
-import lexer
-import tokens
-import cursor
-import ast
-import parse_util
+take lexer
+take tokens
+take cursor
+take ast
+take parse_util
 
-pub fn parseType(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) -> Int {
-    if depth > 128 {
-        let s = cursorSpanStart(cursor, tokens, source.byteLength)
-        let e = cursorSpanEnd(cursor, tokens, source.byteLength)
-        astAddError(&mut tree, ParseProblem.NestingLimitExceeded, "", s, e)
-        return -1
+expose flow parseType(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], depth: Int) => Int {
+    when depth > 128 {
+        hold s = cursorSpanStart(cursor, tokens, source.byteLength)
+        hold e = cursorSpanEnd(cursor, tokens, source.byteLength)
+        astAddError(edit tree, ParseProblem.NestingLimitExceeded, "", s, e)
+        give -1
     }
-    var t = parseTypeAtom(&mut tree, source, &mut cursor, tokens, depth + 1)
-    if t < 0 { return -1 }
+    change t = parseTypeAtom(edit tree, source, edit cursor, tokens, depth + 1)
+    when t < 0 { give -1 }
 
-    while parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "??") {
-        let isDouble = parserTakeSymbol(source, &mut cursor, tokens, "??")
-        if !isDouble {
-            parserTakeSymbol(source, &mut cursor, tokens, "?")
+    during parserAtSymbol(source, cursor, tokens, "?") || parserAtSymbol(source, cursor, tokens, "??") {
+        hold isDouble = parserTakeSymbol(source, edit cursor, tokens, "??")
+        when !isDouble {
+            parserTakeSymbol(source, edit cursor, tokens, "?")
         }
-        let layers = selectInt(isDouble, 2, 1)
-        for _ in 0..layers {
-            let extra_idx = astAddExtra(&mut tree, 1)
-            astAddExtra(&mut tree, t)
-            let type_start = tree.types[t].start
-            let type_end = tree.types[t].end + 1
-            t = astAddType(&mut tree, AstTypeKind.Named, type_start, type_end, 0, 0, extra_idx)
+        hold layers = selectInt(isDouble, 2, 1)
+        each _ among 0..layers {
+            hold extra_idx = astAddExtra(edit tree, 1)
+            astAddExtra(edit tree, t)
+            hold type_start = tree.types[t].start
+            hold type_end = tree.types[t].end + 1
+            t = astAddType(edit tree, AstTypeKind.Named, type_start, type_end, 0, 0, extra_idx)
         }
     }
-    return t
+    give t
 }
 
-fn parseTypeAtom(tree: &mut AstTree, source: &Text, cursor: &mut TokenCursor, tokens: &List<LexToken>, depth: Int) -> Int {
-    if cursor.pos >= tokens.length {
-        astAddError(&mut tree, ParseProblem.ExpectedType, "", source.byteLength, source.byteLength)
-        return -1
+flow parseTypeAtom(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], depth: Int) => Int {
+    when cursor.pos >= tokens.length {
+        astAddError(edit tree, ParseProblem.ExpectedType, "", source.byteLength, source.byteLength)
+        give -1
     }
-    let tok = &tokens[cursor.pos]
+    hold tok = view tokens[cursor.pos]
 
-    let is_view = parserTakeWord(source, &mut cursor, tokens, "view")
-    let is_edit = parserTakeWord(source, &mut cursor, tokens, "edit")
-    if is_view || is_edit {
-        let inner = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let end_p = astTypeEnd(&tree, inner, tok.end)
-        return astAddType(&mut tree, AstTypeKind.Ref, tok.start, end_p, inner, selectInt(is_edit, 1, 0), 0)
-    }
-
-    if parserTakeSymbol(source, &mut cursor, tokens, "&") {
-        let mutable = parserTakeWord(source, &mut cursor, tokens, "mut")
-        let inner = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
-        let is_mut = selectInt(mutable, 1, 0)
-        let end_p = astTypeEnd(&tree, inner, tok.end)
-        return astAddType(&mut tree, AstTypeKind.Ref, tok.start, end_p, inner, is_mut, 0)
+    hold is_view = parserTakeWord(source, edit cursor, tokens, "view")
+    hold is_edit = parserTakeWord(source, edit cursor, tokens, "edit")
+    when is_view || is_edit {
+        hold inner = parseType(edit tree, source, edit cursor, tokens, depth + 1)
+        hold end_p = astTypeEnd(view tree, inner, tok.end)
+        give astAddType(edit tree, AstTypeKind.Ref, tok.start, end_p, inner, selectInt(is_edit, 1, 0), 0)
     }
 
-    if parserTakeSymbol(source, &mut cursor, tokens, "[") {
-        let elem = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
-        if parserTakeSymbol(source, &mut cursor, tokens, ";") {
-            if cursor.pos >= tokens.length {
-                astAddError(&mut tree, ParseProblem.ExpectedToken, "entero", source.byteLength, source.byteLength)
-                return -1
+    when parserTakeSymbol(source, edit cursor, tokens, "&") {
+        hold mutable = parserTakeWord(source, edit cursor, tokens, "mut")
+        hold inner = parseType(edit tree, source, edit cursor, tokens, depth + 1)
+        hold is_mut = selectInt(mutable, 1, 0)
+        hold end_p = astTypeEnd(view tree, inner, tok.end)
+        give astAddType(edit tree, AstTypeKind.Ref, tok.start, end_p, inner, is_mut, 0)
+    }
+
+    when parserTakeSymbol(source, edit cursor, tokens, "[") {
+        hold elem = parseType(edit tree, source, edit cursor, tokens, depth + 1)
+        when parserTakeSymbol(source, edit cursor, tokens, ";") {
+            when cursor.pos >= tokens.length {
+                astAddError(edit tree, ParseProblem.ExpectedToken, "entero", source.byteLength, source.byteLength)
+                give -1
             }
-            let lenTok = &tokens[cursor.pos]
-            var arrLen = 0
-            match tokenKindValue(&lenTok.kind) {
-                LexKind.Integer => {
+            hold lenTok = view tokens[cursor.pos]
+            change arrLen = 0
+            choose tokenKindValue(view lenTok.kind) {
+                LexKind.Integer : {
                     arrLen = parserParseDecimalInt(source, lenTok.start, lenTok.end)
                     cursor.pos += 1
                 }
-                _ => {
-                    astAddError(&mut tree, ParseProblem.ExpectedToken, "entero", lenTok.start, lenTok.end)
-                    return -1
+                _ : {
+                    astAddError(edit tree, ParseProblem.ExpectedToken, "entero", lenTok.start, lenTok.end)
+                    give -1
                 }
             }
-            parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "]")
-            let end_p = cursorPrevEnd(cursor, tokens, tok.end)
-            return astAddType(&mut tree, AstTypeKind.Array, tok.start, end_p, elem, arrLen, 0)
+            parserNeedSymbol(edit tree, source, edit cursor, tokens, "]")
+            hold end_p = cursorPrevEnd(cursor, tokens, tok.end)
+            give astAddType(edit tree, AstTypeKind.Array, tok.start, end_p, elem, arrLen, 0)
         }
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "]")
-        let end_p = cursorPrevEnd(cursor, tokens, tok.end)
-        return astAddType(&mut tree, AstTypeKind.Slice, tok.start, end_p, elem, 0, 0)
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, "]")
+        hold end_p = cursorPrevEnd(cursor, tokens, tok.end)
+        give astAddType(edit tree, AstTypeKind.Slice, tok.start, end_p, elem, 0, 0)
     }
 
-    if parserTakeWord(source, &mut cursor, tokens, "Int") {
-        return astAddType(&mut tree, AstTypeKind.Int, tok.start, tok.end, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "Int") {
+        give astAddType(edit tree, AstTypeKind.Int, tok.start, tok.end, 0, 0, 0)
     }
-    if parserTakeWord(source, &mut cursor, tokens, "Float") || parserTakeWord(source, &mut cursor, tokens, "f64") {
-        return astAddType(&mut tree, AstTypeKind.Float, tok.start, tok.end, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "Float") || parserTakeWord(source, edit cursor, tokens, "f64") {
+        give astAddType(edit tree, AstTypeKind.Float, tok.start, tok.end, 0, 0, 0)
     }
-    if parserTakeWord(source, &mut cursor, tokens, "f32") {
-        return astAddType(&mut tree, AstTypeKind.F32, tok.start, tok.end, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "f32") {
+        give astAddType(edit tree, AstTypeKind.F32, tok.start, tok.end, 0, 0, 0)
     }
-    if parserTakeWord(source, &mut cursor, tokens, "Bool") {
-        return astAddType(&mut tree, AstTypeKind.Bool, tok.start, tok.end, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "Bool") {
+        give astAddType(edit tree, AstTypeKind.Bool, tok.start, tok.end, 0, 0, 0)
     }
-    if parserTakeWord(source, &mut cursor, tokens, "Text") {
-        return astAddType(&mut tree, AstTypeKind.Text, tok.start, tok.end, 0, 0, 0)
+    when parserTakeWord(source, edit cursor, tokens, "Text") {
+        give astAddType(edit tree, AstTypeKind.Text, tok.start, tok.end, 0, 0, 0)
     }
-    if parserTakeSymbol(source, &mut cursor, tokens, "(") {
-        parserNeedSymbol(&mut tree, source, &mut cursor, tokens, ")")
-        let end_p = cursorPrevEnd(cursor, tokens, tok.end)
-        return astAddType(&mut tree, AstTypeKind.Unit, tok.start, end_p, 0, 0, 0)
+    when parserTakeSymbol(source, edit cursor, tokens, "(") {
+        parserNeedSymbol(edit tree, source, edit cursor, tokens, ")")
+        hold end_p = cursorPrevEnd(cursor, tokens, tok.end)
+        give astAddType(edit tree, AstTypeKind.Unit, tok.start, end_p, 0, 0, 0)
     }
 
-    match tokenKindValue(&tok.kind) {
-        LexKind.Word => {
-            let name_start = tok.start
-            let name_end = tok.end
+    choose tokenKindValue(view tok.kind) {
+        LexKind.Word : {
+            hold name_start = tok.start
+            hold name_end = tok.end
             cursor.pos += 1
-            var extra_idx = -1
+            change extra_idx = -1
             // ELE v2: Type of[Arg, ...]. The historic Type<Arg> remains
             // accepted during bootstrap migration. Both have the same AST.
-            var closes_square = false
-            var has_args = parserTakeSymbol(source, &mut cursor, tokens, "<")
-            if !has_args && parserTakeWord(source, &mut cursor, tokens, "of") {
-                if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "[") {
-                    return -1
+            change closes_square = false
+            change has_args = parserTakeSymbol(source, edit cursor, tokens, "<")
+            when !has_args && parserTakeWord(source, edit cursor, tokens, "of") {
+                when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "[") {
+                    give -1
                 }
                 has_args = true
                 closes_square = true
             }
-            if has_args {
-                var type_args: List<Int> = List[]
-                while cursor.pos < tokens.length {
-                    var at_end = parserAtSymbol(source, cursor, tokens, ">")
-                    if closes_square { at_end = parserAtSymbol(source, cursor, tokens, "]") }
-                    if at_end { break }
-                    let arg = parseType(&mut tree, source, &mut cursor, tokens, depth + 1)
-                    if arg >= 0 { type_args.push(arg) }
-                    if !parserTakeSymbol(source, &mut cursor, tokens, ",") { break }
+            when has_args {
+                change type_args: List of[Int] = List[]
+                during cursor.pos < tokens.length {
+                    change at_end = parserAtSymbol(source, cursor, tokens, ">")
+                    when closes_square { at_end = parserAtSymbol(source, cursor, tokens, "]") }
+                    when at_end { leave }
+                    hold arg = parseType(edit tree, source, edit cursor, tokens, depth + 1)
+                    when arg >= 0 { type_args@push(arg) }
+                    when !parserTakeSymbol(source, edit cursor, tokens, ",") { leave }
                 }
-                if closes_square {
-                    if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, "]") { return -1 }
-                } else {
-                    if !parserNeedSymbol(&mut tree, source, &mut cursor, tokens, ">") { return -1 }
+                when closes_square {
+                    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "]") { give -1 }
+                } otherwise {
+                    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, ">") { give -1 }
                 }
-                let first_pos = tree.extra.length
-                astAddExtra(&mut tree, type_args.length)
-                for a in 0..type_args.length {
-                    astAddExtra(&mut tree, type_args[a])
+                hold first_pos = tree.extra.length
+                astAddExtra(edit tree, type_args.length)
+                each a among 0..type_args.length {
+                    astAddExtra(edit tree, type_args[a])
                 }
                 extra_idx = first_pos
             }
-            let end_pos = cursorPrevEnd(cursor, tokens, name_end)
-            return astAddType(&mut tree, AstTypeKind.Named, name_start, end_pos, name_start, name_end, extra_idx)
+            hold end_pos = cursorPrevEnd(cursor, tokens, name_end)
+            give astAddType(edit tree, AstTypeKind.Named, name_start, end_pos, name_start, name_end, extra_idx)
         }
-        _ => {
-            astAddError(&mut tree, ParseProblem.ExpectedType, "", tok.start, tok.end)
-            return -1
+        _ : {
+            astAddError(edit tree, ParseProblem.ExpectedType, "", tok.start, tok.end)
+            give -1
         }
     }
 }

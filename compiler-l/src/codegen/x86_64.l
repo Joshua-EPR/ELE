@@ -7,178 +7,178 @@
 // RSI=6, RDI=7, R8=8 ... R15=15.
 // Bytes are Int values in [0,255], not Unicode code points.
 
-pub struct X64Code {
-    bytes: List<Int>
+expose shape X64Code {
+    bytes: List of[Int]
     error: Int
 }
 
-pub fn x64New() -> X64Code {
-    return X64Code(bytes: List[], error: 0)
+expose flow x64New() => X64Code {
+    give X64Code(bytes: List[], error: 0)
 }
 
-fn x64RegisterValid(reg: Int) -> Bool {
-    return reg >= 0 && reg < 16
+flow x64RegisterValid(reg: Int) => Bool {
+    give reg >= 0 && reg < 16
 }
 
-fn x64Put(code: &mut X64Code, value: Int) {
-    if code.error != 0 { return }
-    if value < 0 || value > 255 {
+flow x64Put(code: edit X64Code, value: Int) {
+    when code.error != 0 { give }
+    when value < 0 || value > 255 {
         code.error = 1
-        return
+        give
     }
-    code.bytes.push(value)
+    code.bytes@push(value)
 }
 
 // Little-endian signed integer, expressed using Euclidean byte remainders.
 // This avoids relying on implementation-defined signed right shifts.
-fn x64PutSigned(code: &mut X64Code, value: Int, count: Int) {
-    if count < 1 || count > 8 { code.error = 2; return }
-    var remaining = value
-    var last = 0
-    for i in 0..count {
-        var b = remaining % 256
-        if b < 0 { b += 256 }
-        x64Put(&mut code, b)
+flow x64PutSigned(code: edit X64Code, value: Int, count: Int) {
+    when count < 1 || count > 8 { code.error = 2; give }
+    change remaining = value
+    change last = 0
+    each i among 0..count {
+        change b = remaining % 256
+        when b < 0 { b += 256 }
+        x64Put(edit code, b)
         last = b
         remaining = (remaining - b) / 256
     }
     // Reject values that cannot fit in the requested signed width.
-    if remaining != 0 && remaining != -1 { code.error = 2 }
-    if remaining == 0 && last >= 128 { code.error = 2 }
-    if remaining == -1 && last < 128 { code.error = 2 }
+    when remaining != 0 && remaining != -1 { code.error = 2 }
+    when remaining == 0 && last >= 128 { code.error = 2 }
+    when remaining == -1 && last < 128 { code.error = 2 }
 }
 
 // REX.W with source in ModRM.reg and destination in ModRM.r/m.
-fn x64RexRegRm(code: &mut X64Code, src: Int, dst: Int) {
-    var rex = 72
-    if src >= 8 { rex += 4 }
-    if dst >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
+flow x64RexRegRm(code: edit X64Code, src: Int, dst: Int) {
+    change rex = 72
+    when src >= 8 { rex += 4 }
+    when dst >= 8 { rex += 1 }
+    x64Put(edit code, rex)
 }
 
-fn x64ModRmRegisters(code: &mut X64Code, reg: Int, rm: Int) {
-    x64Put(&mut code, 192 + (reg % 8) * 8 + (rm % 8))
+flow x64ModRmRegisters(code: edit X64Code, reg: Int, rm: Int) {
+    x64Put(edit code, 192 + (reg % 8) * 8 + (rm % 8))
 }
 
-pub fn x64MovImm64(code: &mut X64Code, dst: Int, value: Int) {
-    if !x64RegisterValid(dst) { code.error = 3; return }
-    var rex = 72
-    if dst >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
-    x64Put(&mut code, 184 + dst % 8)
-    x64PutSigned(&mut code, value, 8)
+expose flow x64MovImm64(code: edit X64Code, dst: Int, value: Int) {
+    when !x64RegisterValid(dst) { code.error = 3; give }
+    change rex = 72
+    when dst >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 184 + dst % 8)
+    x64PutSigned(edit code, value, 8)
 }
 
 // Encoding: MOV r/m64,r64 (destination register encoded as r/m).
-pub fn x64MovReg(code: &mut X64Code, dst: Int, src: Int) {
-    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
-    x64RexRegRm(&mut code, src, dst)
-    x64Put(&mut code, 137)
-    x64ModRmRegisters(&mut code, src, dst)
+expose flow x64MovReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 137)
+    x64ModRmRegisters(edit code, src, dst)
 }
 
-pub fn x64AddReg(code: &mut X64Code, dst: Int, src: Int) {
-    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
-    x64RexRegRm(&mut code, src, dst)
-    x64Put(&mut code, 1)
-    x64ModRmRegisters(&mut code, src, dst)
+expose flow x64AddReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 1)
+    x64ModRmRegisters(edit code, src, dst)
 }
 
 // AND r/m64,r64, needed for page alignment in the native heap.
 // Emitted opcode 0x21: destination is ModRM.r/m.
-pub fn x64AndReg(code: &mut X64Code, dst: Int, src: Int) {
-    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
-    x64RexRegRm(&mut code, src, dst)
-    x64Put(&mut code, 33)
-    x64ModRmRegisters(&mut code, src, dst)
+expose flow x64AndReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 33)
+    x64ModRmRegisters(edit code, src, dst)
 }
 
-pub fn x64SubReg(code: &mut X64Code, dst: Int, src: Int) {
-    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
-    x64RexRegRm(&mut code, src, dst)
-    x64Put(&mut code, 41)
-    x64ModRmRegisters(&mut code, src, dst)
+expose flow x64SubReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 41)
+    x64ModRmRegisters(edit code, src, dst)
 }
 
-pub fn x64CmpReg(code: &mut X64Code, left: Int, right: Int) {
-    if !x64RegisterValid(left) || !x64RegisterValid(right) { code.error = 3; return }
-    x64RexRegRm(&mut code, right, left)
-    x64Put(&mut code, 57)
-    x64ModRmRegisters(&mut code, right, left)
+expose flow x64CmpReg(code: edit X64Code, left: Int, right: Int) {
+    when !x64RegisterValid(left) || !x64RegisterValid(right) { code.error = 3; give }
+    x64RexRegRm(edit code, right, left)
+    x64Put(edit code, 57)
+    x64ModRmRegisters(edit code, right, left)
 }
 
 // IMUL r64,r/m64 (unlike ADD, destination is ModRM.reg).
-pub fn x64MulReg(code: &mut X64Code, dst: Int, src: Int) {
-    if !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; return }
-    x64RexRegRm(&mut code, dst, src)
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 175)
-    x64ModRmRegisters(&mut code, dst, src)
+expose flow x64MulReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, dst, src)
+    x64Put(edit code, 15)
+    x64Put(edit code, 175)
+    x64ModRmRegisters(edit code, dst, src)
 }
 
-pub fn x64Ret(code: &mut X64Code) {
-    x64Put(&mut code, 195)
+expose flow x64Ret(code: edit X64Code) {
+    x64Put(edit code, 195)
 }
 
-pub fn x64Syscall(code: &mut X64Code) {
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 5)
+expose flow x64Syscall(code: edit X64Code) {
+    x64Put(edit code, 15)
+    x64Put(edit code, 5)
 }
 
 // Writes E9 rel32 with a placeholder and returns the displacement position.
-pub fn x64JumpPlaceholder(code: &mut X64Code) -> Int {
-    x64Put(&mut code, 233)
-    let at = code.bytes.length
-    for i in 0..4 { x64Put(&mut code, 0) }
-    return at
+expose flow x64JumpPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 233)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
 }
 
 // Writes 0F 84 (JE) or 0F 85 (JNE).
-pub fn x64ConditionalPlaceholder(code: &mut X64Code, if_equal: Bool) -> Int {
-    x64Put(&mut code, 15)
-    if if_equal { x64Put(&mut code, 132) } else { x64Put(&mut code, 133) }
-    let at = code.bytes.length
-    for i in 0..4 { x64Put(&mut code, 0) }
-    return at
+expose flow x64ConditionalPlaceholder(code: edit X64Code, if_equal: Bool) => Int {
+    x64Put(edit code, 15)
+    when if_equal { x64Put(edit code, 132) } otherwise { x64Put(edit code, 133) }
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
 }
 
 // Writes 0F 83 (JAE): unsigned "above or equal", used for bounds checks so
 // that a negative index, read as unsigned, is also out of range.
-pub fn x64AboveEqualPlaceholder(code: &mut X64Code) -> Int {
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 131)
-    let at = code.bytes.length
-    for i in 0..4 { x64Put(&mut code, 0) }
-    return at
+expose flow x64AboveEqualPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 15)
+    x64Put(edit code, 131)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
 }
 
 // Patch a rel32 displacement. Invalid patches set error without modifying it.
-pub fn x64PatchRelative(code: &mut X64Code, at: Int, target: Int) {
-    if at < 0 || at + 4 > code.bytes.length || target < 0 || target > code.bytes.length {
+expose flow x64PatchRelative(code: edit X64Code, at: Int, target: Int) {
+    when at < 0 || at + 4 > code.bytes.length || target < 0 || target > code.bytes.length {
         code.error = 4
-        return
+        give
     }
-    let delta = target - (at + 4)
-    if delta < -2147483648 || delta > 2147483647 {
+    hold delta = target - (at + 4)
+    when delta < -2147483648 || delta > 2147483647 {
         code.error = 5
-        return
+        give
     }
-    var n = delta
-    for i in 0..4 {
-        var b = n % 256
-        if b < 0 { b += 256 }
+    change n = delta
+    each i among 0..4 {
+        change b = n % 256
+        when b < 0 { b += 256 }
         code.bytes[at + i] = b
         n = (n - b) / 256
     }
 }
 
 // JO rel32: signed arithmetic overflow branch, target patched later.
-pub fn x64OverflowPlaceholder(code: &mut X64Code) -> Int {
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 128)
-    let at = code.bytes.length
-    for i in 0..4 { x64Put(&mut code, 0) }
-    return at
+expose flow x64OverflowPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 15)
+    x64Put(edit code, 128)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
 }
 
 // ----- Direct native multi-function backend primitives (Linux x86-64). -----
@@ -186,11 +186,11 @@ pub fn x64OverflowPlaceholder(code: &mut X64Code) -> Int {
 // 16-byte-aligned frame and preserves RBP. RAX/RCX are scratch registers;
 // up to two ELE-internal integer arguments use RDI/RSI, return uses RAX.
 
-pub fn x64CallPlaceholder(code: &mut X64Code) -> Int {
-    x64Put(&mut code, 232)
-    let at = code.bytes.length
-    for i in 0..4 { x64Put(&mut code, 0) }
-    return at
+expose flow x64CallPlaceholder(code: edit X64Code) => Int {
+    x64Put(edit code, 232)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
 }
 
 // Largest frame, in 8-byte slots. Slot k lives at [RBP - 8*(k+1)], a signed
@@ -243,39 +243,39 @@ expose flow x64FrameBegin(code: edit X64Code, slots: Int) {
     }
 }
 
-pub fn x64FrameEnd(code: &mut X64Code) {
-    x64Put(&mut code, 201) // leave
-    x64Ret(&mut code)
+expose flow x64FrameEnd(code: edit X64Code) {
+    x64Put(edit code, 201) // leave
+    x64Ret(edit code)
 }
 
 // Memory accesses by [base + signed displacement]. This uses mod=10 and
 // disp32 consistently, including displacement zero, to simplify fixups and
 // keep stack-field offsets independent of operand size. RSP and R12 require
 // the special SIB byte 0x24; RBP and R13 work with mod=10 as usual.
-fn x64MemoryAddress(code: &mut X64Code, reg: Int, base: Int, displacement: Int) {
-    x64Put(&mut code, 128 + (reg % 8) * 8 + base % 8)
-    if base % 8 == 4 { x64Put(&mut code, 36) }
-    x64PutSigned(&mut code, displacement, 4)
+flow x64MemoryAddress(code: edit X64Code, reg: Int, base: Int, displacement: Int) {
+    x64Put(edit code, 128 + (reg % 8) * 8 + base % 8)
+    when base % 8 == 4 { x64Put(edit code, 36) }
+    x64PutSigned(edit code, displacement, 4)
 }
 
-fn x64MemoryValid(code: &mut X64Code, reg: Int, base: Int, displacement: Int) -> Bool {
-    if code.error != 0 { return false }
-    if !x64RegisterValid(reg) || !x64RegisterValid(base) {
+flow x64MemoryValid(code: edit X64Code, reg: Int, base: Int, displacement: Int) => Bool {
+    when code.error != 0 { give false }
+    when !x64RegisterValid(reg) || !x64RegisterValid(base) {
         code.error = 7
-        return false
+        give false
     }
-    if displacement < -2147483648 || displacement > 2147483647 {
+    when displacement < -2147483648 || displacement > 2147483647 {
         code.error = 9
-        return false
+        give false
     }
-    return code.error == 0
+    give code.error == 0
 }
 
-pub fn x64LoadMem64(code: &mut X64Code, dst: Int, base: Int, displacement: Int) {
-    if !x64MemoryValid(&mut code, dst, base, displacement) { return }
-    x64RexRegRm(&mut code, dst, base)
-    x64Put(&mut code, 139) // mov r64, r/m64
-    x64MemoryAddress(&mut code, dst, base, displacement)
+expose flow x64LoadMem64(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    x64RexRegRm(edit code, dst, base)
+    x64Put(edit code, 139) // mov r64, r/m64
+    x64MemoryAddress(edit code, dst, base, displacement)
 }
 
 expose flow x64LoadMem32(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
@@ -287,32 +287,32 @@ expose flow x64LoadMem32(code: edit X64Code, dst: Int, base: Int, displacement: 
     x64MemoryAddress(edit code, dst, base, displacement)
 }
 
-pub fn x64StoreMem64(code: &mut X64Code, base: Int, displacement: Int, src: Int) {
-    if !x64MemoryValid(&mut code, src, base, displacement) { return }
-    x64RexRegRm(&mut code, src, base)
-    x64Put(&mut code, 137) // mov r/m64, r64
-    x64MemoryAddress(&mut code, src, base, displacement)
+expose flow x64StoreMem64(code: edit X64Code, base: Int, displacement: Int, src: Int) {
+    when !x64MemoryValid(edit code, src, base, displacement) { give }
+    x64RexRegRm(edit code, src, base)
+    x64Put(edit code, 137) // mov r/m64, r64
+    x64MemoryAddress(edit code, src, base, displacement)
 }
 
 // Bool and packed-byte aggregates require byte loads and stores. For stores,
 // emit a REX prefix even for low registers 4..7 to select SPL/BPL/SIL/DIL
 // rather than the legacy high-byte registers AH/CH/DH/BH.
-pub fn x64LoadMem8(code: &mut X64Code, dst: Int, base: Int, displacement: Int) {
-    if !x64MemoryValid(&mut code, dst, base, displacement) { return }
-    x64RexRegRm(&mut code, dst, base)
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 182) // movzx r64,r/m8
-    x64MemoryAddress(&mut code, dst, base, displacement)
+expose flow x64LoadMem8(code: edit X64Code, dst: Int, base: Int, displacement: Int) {
+    when !x64MemoryValid(edit code, dst, base, displacement) { give }
+    x64RexRegRm(edit code, dst, base)
+    x64Put(edit code, 15)
+    x64Put(edit code, 182) // movzx r64,r/m8
+    x64MemoryAddress(edit code, dst, base, displacement)
 }
 
-pub fn x64StoreMem8(code: &mut X64Code, base: Int, displacement: Int, src: Int) {
-    if !x64MemoryValid(&mut code, src, base, displacement) { return }
-    var rex = 64
-    if src >= 8 { rex += 4 }
-    if base >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
-    x64Put(&mut code, 136) // mov r/m8,r8
-    x64MemoryAddress(&mut code, src, base, displacement)
+expose flow x64StoreMem8(code: edit X64Code, base: Int, displacement: Int, src: Int) {
+    when !x64MemoryValid(edit code, src, base, displacement) { give }
+    change rex = 64
+    when src >= 8 { rex += 4 }
+    when base >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 136) // mov r/m8,r8
+    x64MemoryAddress(edit code, src, base, displacement)
 }
 
 // Slot accesses within the frame bound of x64MaxFrameSlots (disp32).
@@ -326,98 +326,98 @@ expose flow x64StoreSlot(code: edit X64Code, slot: Int, src: Int) {
     x64StoreMem64(edit code, 5, -8 * (slot + 1), src)
 }
 
-pub fn x64TestRax(code: &mut X64Code) {
-    x64Put(&mut code, 72)
-    x64Put(&mut code, 133)
-    x64Put(&mut code, 192) // test rax,rax
+expose flow x64TestRax(code: edit X64Code) {
+    x64Put(edit code, 72)
+    x64Put(edit code, 133)
+    x64Put(edit code, 192) // test rax,rax
 }
 
 // Setcc AL followed by movzx eax,al. Uses signed comparisons on Int.
 // 4 eq, 5 ne, 6 lt, 7 le, 8 gt, 9 ge.
-pub fn x64SetCondition(code: &mut X64Code, condition: Int) {
-    var opcode = 0
-    if condition == 4 { opcode = 148 }
-    if condition == 5 { opcode = 149 }
-    if condition == 6 { opcode = 156 }
-    if condition == 7 { opcode = 158 }
-    if condition == 8 { opcode = 159 }
-    if condition == 9 { opcode = 157 }
-    if opcode == 0 { code.error = 8; return }
-    x64Put(&mut code, 15)
-    x64Put(&mut code, opcode)
-    x64Put(&mut code, 192) // AL
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 182) // movzx eax,al
-    x64Put(&mut code, 192)
+expose flow x64SetCondition(code: edit X64Code, condition: Int) {
+    change opcode = 0
+    when condition == 4 { opcode = 148 }
+    when condition == 5 { opcode = 149 }
+    when condition == 6 { opcode = 156 }
+    when condition == 7 { opcode = 158 }
+    when condition == 8 { opcode = 159 }
+    when condition == 9 { opcode = 157 }
+    when opcode == 0 { code.error = 8; give }
+    x64Put(edit code, 15)
+    x64Put(edit code, opcode)
+    x64Put(edit code, 192) // AL
+    x64Put(edit code, 15)
+    x64Put(edit code, 182) // movzx eax,al
+    x64Put(edit code, 192)
 }
 
-pub fn x64Unreachable(code: &mut X64Code) {
-    x64Put(&mut code, 15)
-    x64Put(&mut code, 11) // ud2: deterministic invalid-op trap
+expose flow x64Unreachable(code: edit X64Code) {
+    x64Put(edit code, 15)
+    x64Put(edit code, 11) // ud2: deterministic invalid-op trap
 }
 
 // NEG r/m64 (REX.W F7 /3). Negating the minimum Int leaves the same bit
 // pattern, which is its magnitude when read as unsigned.
-pub fn x64NegReg(code: &mut X64Code, reg: Int) {
-    if !x64RegisterValid(reg) { code.error = 3; return }
-    var rex = 72
-    if reg >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
-    x64Put(&mut code, 247)
-    x64Put(&mut code, 216 + reg % 8)
+expose flow x64NegReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    change rex = 72
+    when reg >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 247)
+    x64Put(edit code, 216 + reg % 8)
 }
 
 // DIV r/m64 (REX.W F7 /6): unsigned RDX:RAX / reg -> RAX quotient, RDX
 // remainder. The caller must zero RDX and guarantee a nonzero divisor.
-pub fn x64DivUnsignedReg(code: &mut X64Code, reg: Int) {
-    if !x64RegisterValid(reg) { code.error = 3; return }
-    var rex = 72
-    if reg >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
-    x64Put(&mut code, 247)
-    x64Put(&mut code, 240 + reg % 8)
+expose flow x64DivUnsignedReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    change rex = 72
+    when reg >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 247)
+    x64Put(edit code, 240 + reg % 8)
 }
 
 // CQO (REX.W 99): sign-extends RAX into RDX before a signed division.
-pub fn x64Cqo(code: &mut X64Code) {
-    x64Put(&mut code, 72)
-    x64Put(&mut code, 153)
+expose flow x64Cqo(code: edit X64Code) {
+    x64Put(edit code, 72)
+    x64Put(edit code, 153)
 }
 
 // IDIV r/m64 (REX.W F7 /7): signed RDX:RAX / reg -> RAX quotient, RDX
 // remainder, truncating toward zero. The caller must exclude a zero
 // divisor and Int.MIN / -1, which trap in hardware.
-pub fn x64IdivReg(code: &mut X64Code, reg: Int) {
-    if !x64RegisterValid(reg) { code.error = 3; return }
-    var rex = 72
-    if reg >= 8 { rex += 1 }
-    x64Put(&mut code, rex)
-    x64Put(&mut code, 247)
-    x64Put(&mut code, 248 + reg % 8)
+expose flow x64IdivReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    change rex = 72
+    when reg >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 247)
+    x64Put(edit code, 248 + reg % 8)
 }
 
 // PUSH r64 (50+r, REX.B for R8-R15).
-pub fn x64PushReg(code: &mut X64Code, reg: Int) {
-    if !x64RegisterValid(reg) { code.error = 3; return }
-    if reg >= 8 { x64Put(&mut code, 65) }
-    x64Put(&mut code, 80 + reg % 8)
+expose flow x64PushReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    when reg >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 80 + reg % 8)
 }
 
 // REP MOVSB: copies RCX bytes from [RSI] to [RDI], ascending. The direction
 // flag is clear at process entry and this backend never sets it.
-pub fn x64RepMovsb(code: &mut X64Code) {
-    x64Put(&mut code, 243)
-    x64Put(&mut code, 164)
+expose flow x64RepMovsb(code: edit X64Code) {
+    x64Put(edit code, 243)
+    x64Put(edit code, 164)
 }
 
 // Overwrites the 8-byte immediate of an earlier MOV r64,imm64.
-pub fn x64PatchAbsolute64(code: &mut X64Code, at: Int, value: Int) {
-    if at < 0 || at + 8 > code.bytes.length || value < 0 {
+expose flow x64PatchAbsolute64(code: edit X64Code, at: Int, value: Int) {
+    when at < 0 || at + 8 > code.bytes.length || value < 0 {
         code.error = 4
-        return
+        give
     }
-    var n = value
-    for i in 0..8 {
+    change n = value
+    each i among 0..8 {
         code.bytes[at + i] = n % 256
         n = n / 256
     }

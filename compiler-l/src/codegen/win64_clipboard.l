@@ -4,7 +4,7 @@ take win64_rt
 take native_rt_platform
 
 // CF_UNICODETEXT, resolved from system32 without a foreign runtime.
-fixed WC_LIMIT = 67108864
+fixed WC_LIMIT = 671088644
 
 shape WcData {
     dll: Int
