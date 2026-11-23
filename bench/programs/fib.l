@@ -1,8 +1,11 @@
-// Recursive calls and checked additions.
-fn fib(n: Int) -> Int {
-    if n < 2 { return n }
-    return fib(n - 1) + fib(n - 2)
+// Recursive calls and checked additions (ELE v2).
+flow fib(n: Int) => Int {
+    when n < 2 {
+        give n
+    }
+    give fib(n - 1) + fib(n - 2)
 }
-fn main() {
+
+flow main() {
     print(fib(32))
 }
