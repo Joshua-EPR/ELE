@@ -81,3 +81,8 @@ fn view_edit_source_has_distinct_borrow_modes() {
 fn legacy_spelling_is_temporarily_parseable() {
     check("fn main() -> Int { let n = 42\n return n }").unwrap();
 }
+
+#[test]
+fn migrated_text_build_benchmark_uses_canonical_v2_syntax() {
+    check(include_str!("../../../bench/programs/text_build.l")).unwrap();
+}
