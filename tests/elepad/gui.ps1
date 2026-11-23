@@ -63,7 +63,13 @@ function Cancel-Prompt($hwnd) {
 }
 
 function Same-Content([string]$file, [string]$expected) {
-    $actual = [IO.File]::ReadAllBytes($file)
+    try {
+        $actual = [IO.File]::ReadAllBytes($file)
+    } catch [IO.IOException] {
+        # The editor may still hold the file while its save completes. Treat a
+        # sharing violation as "not ready yet"; Wait-Content will retry.
+        return $false
+    }
     $wanted = $utf8.GetBytes($expected)
     if ($actual.Length -ne $wanted.Length) { return $false }
     for ($j = 0; $j -lt $actual.Length; $j++) {
@@ -77,7 +83,9 @@ function Wait-Content([string]$file, [string]$expected) {
         if (Same-Content $file $expected) { return }
         Start-Sleep -Milliseconds 25
     }
-    throw "file bytes differ from expected UTF-8 ($(([IO.File]::ReadAllBytes($file)).Length) bytes)"
+    $length = 'unavailable (file remained locked)'
+    try { $length = "$(([IO.File]::ReadAllBytes($file)).Length) bytes" } catch [IO.IOException] {}
+    throw "file bytes differ from expected UTF-8 ($length)"
 }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
