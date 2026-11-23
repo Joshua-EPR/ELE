@@ -18,7 +18,7 @@ class EnumPayloadBridgeContract(unittest.TestCase):
         write = read('compiler-l/src/lir_write.l')
         self.assertIn('variant_type: List of[Int]', build)
         self.assertIn('ctx.lir_module.variant_type@push(payload_ty)', module)
-        self.assertIn('const LIR_PAYLOAD = 23', build)
+        self.assertIn('expose fixed LIR_PAYLOAD = 23', build)
         self.assertIn('i variant v{dst} e{inst.a} {inst.b} 1 {payload}', write)
         self.assertIn('i payload v{dst} {place} e{inst.b} {inst.c}', write)
 
