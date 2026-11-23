@@ -49,11 +49,11 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     let dir = prepare_real_imports();
 
     let loans_check = fs::read_to_string(dir.join("loans_check.l")).unwrap();
-    assert!(loans_check.contains("import loans_l"));
+    assert!(loans_check.contains("take loans_l"));
     assert!(loans_check.contains("loanDescendsFrom("));
     assert!(loans_check.contains("loanPlaceOf("));
     let drop_plan = fs::read_to_string(dir.join("drops_plan.l")).unwrap();
-    assert!(drop_plan.contains("import ownership_l"));
+    assert!(drop_plan.contains("take ownership_l"));
     assert!(drop_plan.contains("FLOW_LIVE"));
     assert!(drop_plan.contains("FLOW_MAYBE"));
     assert!(drop_plan.contains("FLOW_UNINIT"));
