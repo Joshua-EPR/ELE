@@ -3,10 +3,10 @@ take std.ui.clipboard
 flow main() => Int {
     change good: List of[Int] = List[107, 101, 101, 112]
     when clipboardWrite(view good) != 0 { give 1 }
-    change overlong: List of[Int] = List[192, 175]
-    when clipboardWrite(view overlong) != -1 { give 2 }
     change nul: List of[Int] = List[0]
     when clipboardWrite(view nul) != -1 { give 3 }
+    change overlong: List of[Int] = List[192, 175]
+    when clipboardWrite(view overlong) != -1 { give 2 }
     change nonbyte: List of[Int] = List[256]
     when clipboardWrite(view nonbyte) != -1 { give 4 }
     hold after = clipboardRead(CLIPBOARD_LIMIT)

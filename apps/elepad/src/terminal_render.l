@@ -119,9 +119,24 @@ flow emitStatus(out: edit List of[Int], editor: view Editor, path: view Text, he
         appendText(edit out, view result)
         give
     }
+    when editor.mode == MODE_OPEN {
+        hold label = "Abrir: "
+        appendText(edit out, view label)
+        change k = 0
+        during k < editor.path_len {
+            out@push(editor.path_input[k])
+            k += 1
+        }
+        change hint = "  Enter abrir  Esc volver"
+        when editor.open_failed == 1 { hint = "  (cambios sin guardar: ^S primero)  Esc volver" }
+        when editor.open_failed == 2 { hint = "  (ruta no válida)  Esc volver" }
+        when editor.open_failed == 3 { hint = "  (no se pudo abrir)  Esc volver" }
+        appendText(edit out, view hint)
+        give
+    }
     change marker = ""
     when editor.document.dirty { marker = " *" }
-    hold status = "{path}{marker}  Ln {line}, Col {col}  ^S guardar ^Q salir ^F buscar ^Z/^Y deshacer/rehacer"
+    hold status = "{path}{marker}  Ln {line}, Col {col}  ^S guardar ^Q salir ^O abrir ^F buscar ^Z/^Y"
     appendText(edit out, view status)
 }
 

@@ -1,5 +1,6 @@
 take terminal_dispatch
 take terminal_render
+take document_io
 
 flow event(key: Int, scalar: Int, mods: Int) => ConsoleEvent {
     give ConsoleEvent(kind: EVENT_KEY, key: key, character: scalar, modifiers: mods, pressed: true, repeat: 1, x: 0, y: 0, buttons: 0, wheel: 0)
@@ -56,6 +57,8 @@ flow main() => Int {
     when cursor.length < 4 || cursor[0] != 27 { give 14 }
     hold history = historyChecks()
     when history != 0 { give history }
+    hold opening = openChecks()
+    when opening != 0 { give opening }
     print("elepad-dispatch-ok")
     give 0
 }
@@ -162,4 +165,62 @@ flow containsReverse(frame: view List of[Int]) => Bool {
         i += 1
     }
     give false
+}
+
+// Ctrl+O: the open prompt, then openDocument against real files.
+flow openChecks() => Int {
+    hold target = "elepad-open-target.l"
+    hold content: List of[Int] = List[110, 101, 119, 13, 10, 76]         // "new\r\nL"
+    when writeBytes(target, content) != 0 { give 70 }
+    hold start = "abc"
+    change e = newEditor(view start)
+    change current = "first.l"
+    when key(edit e, KEY_CHAR, 111, MOD_CTRL) != ACTION_REDRAW { give 71 }
+    when e.mode != MODE_OPEN { give 72 }
+    // Typing the path; Backspace removes a whole scalar ("é" is two bytes).
+    hold typed = "elepad-open-target.lé"
+    change k = 0
+    during k < typed.byteLength {
+        hold b = typed@byteAt(k)
+        when b < 128 { key(edit e, KEY_CHAR, b, 0) }
+        k += 1
+    }
+    key(edit e, KEY_CHAR, 233, 0)
+    when e.path_len != 22 { give 73 }
+    key(edit e, KEY_BACKSPACE, 0, 0)
+    when e.path_len != 20 { give 74 }
+    // Typing in the prompt never edits the document.
+    when !equals(view e.document, view start) { give 75 }
+    when key(edit e, KEY_ENTER, 0, 0) != ACTION_OPEN { give 76 }
+    // Unsaved changes refuse the open.
+    e.clipboard@push(90)
+    e.mode = MODE_EDIT
+    key(edit e, KEY_CHAR, 33, 0)
+    e.mode = MODE_OPEN
+    when openDocument(edit e, edit current) != OPEN_UNSAVED { give 77 }
+    hold edited = "!abc"
+    when !equals(view e.document, view edited) || e.open_failed != OPEN_UNSAVED { give 78 }
+    // Back to the clean text, the open succeeds.
+    e.mode = MODE_EDIT
+    key(edit e, KEY_CHAR, 122, MOD_CTRL)
+    e.mode = MODE_OPEN
+    when openDocument(edit e, edit current) != OPEN_OK { give 79 }
+    hold opened = "new\r\nL"
+    when !equals(view e.document, view opened) { give 80 }
+    when current.byteLength != 20 || current@byteAt(0) != 101 { give 81 }
+    when e.mode != MODE_EDIT || e.document.dirty || !e.newline_crlf { give 82 }
+    when e.clipboard.length != 1 || e.clipboard[0] != 90 || e.path_len != 20 { give 83 }
+    // A missing file and a path that is not UTF-8.
+    e.path_input@push(0)
+    e.path_len = 21
+    e.path_input[20] = 120                      // "elepad-open-target.lx"
+    when openDocument(edit e, edit current) != OPEN_READ_FAILED { give 84 }
+    e.path_input[20] = 255
+    when openDocument(edit e, edit current) != OPEN_BAD_PATH { give 85 }
+    when !equals(view e.document, view opened) || current.byteLength != 20 { give 86 }
+    // Escape leaves the prompt.
+    e.mode = MODE_OPEN
+    key(edit e, KEY_ESCAPE, 0, 0)
+    when e.mode != MODE_EDIT { give 87 }
+    give 0
 }

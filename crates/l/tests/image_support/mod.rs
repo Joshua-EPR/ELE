@@ -241,7 +241,7 @@ pub struct Pe {
 
 /// KERNEL32 functions the ELE Windows runtime (codegen/win64_rt.l,
 /// codegen/win64_heap.l, codegen/win64_rt_platform.l) is allowed to import. Anything else is a violation.
-pub const ALLOWED_KERNEL32: [&str; 31] = [
+pub const ALLOWED_KERNEL32: [&str; 32] = [
     "GetStdHandle",
     "WriteFile",
     "ExitProcess",
@@ -281,6 +281,7 @@ pub const ALLOWED_KERNEL32: [&str; 31] = [
     "GlobalUnlock",
     "GlobalFree",
     "GlobalSize",
+    "Sleep",
 ];
 
 const SCN_CODE: u32 = 0x20;

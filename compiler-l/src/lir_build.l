@@ -85,6 +85,7 @@ expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
 // UTF-8 clipboard transfer; returns a status or the number of bytes read.
 expose fixed LIR_PLATFORM_CLIPBOARD_WRITE = 28
 expose fixed LIR_PLATFORM_CLIPBOARD_READ = 29
+expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 
 // ---- Linear resource operation table ------------------------------------
 // Each resource family is a small table shared by sema (argument checking

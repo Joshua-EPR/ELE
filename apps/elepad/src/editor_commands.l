@@ -5,8 +5,10 @@ take std.io.console
 // input and -1 = console error):
 // 0 = handled/ignored (cursor or current line may have changed),
 // 1 = save requested, 2 = quit requested,
-// 4 = handled, full redraw needed (selection, undo/redo, paste, find).
+// 4 = handled, full redraw needed (selection, undo/redo, paste, find),
+// 5 = open the path typed in the open prompt (the frontend does the I/O).
 expose fixed ACTION_REDRAW = 4
+expose fixed ACTION_OPEN = 5
 
 flow isMove(key: Int) => Bool {
     give key == KEY_LEFT || key == KEY_RIGHT || key == KEY_UP || key == KEY_DOWN || key == KEY_HOME || key == KEY_END || key == KEY_PAGE_UP || key == KEY_PAGE_DOWN
@@ -65,12 +67,38 @@ flow dispatchFind(editor: edit Editor, ev: view ConsoleEvent) => Int {
 
 // The editor command of one key event, shared by the terminal and window
 // frontends (terminal_dispatch.l, gui_dispatch.l): the one key table.
+flow dispatchOpen(editor: edit Editor, ev: view ConsoleEvent) => Int {
+    when ev.key == KEY_ENTER {
+        when editor.path_len == 0 { give 0 }
+        give ACTION_OPEN
+    }
+    when ev.key == KEY_ESCAPE {
+        editor.mode = MODE_EDIT
+        give ACTION_REDRAW
+    }
+    when ev.modifiers >= MOD_CTRL { give 0 }
+    when ev.key == KEY_BACKSPACE {
+        editorPathPop(edit editor)
+        give ACTION_REDRAW
+    }
+    when ev.key == KEY_CHAR && ev.character >= 32 {
+        editorPathPush(edit editor, ev.character)
+        give ACTION_REDRAW
+    }
+    give 0
+}
+
 expose flow editorCommand(editor: edit Editor, ev: view ConsoleEvent) => Int {
     when ev.kind != EVENT_KEY || !ev.pressed { give 0 }
     editor.clipboard_status = 0
     when isCtrl(ev, 115) { give 1 }
     when isCtrl(ev, 113) { give 2 }
     when editor.mode == MODE_FIND { give dispatchFind(edit editor, ev) }
+    when editor.mode == MODE_OPEN { give dispatchOpen(edit editor, ev) }
+    when isCtrl(ev, 111) {
+        editorOpenPrompt(edit editor)
+        give ACTION_REDRAW
+    }
     when isCtrl(ev, 102) {
         editor.mode = MODE_FIND
         give ACTION_REDRAW

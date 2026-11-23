@@ -353,6 +353,39 @@ fn semaInferExpr(ctx: &mut SemaContext, source: &Text, tree: &AstTree, expr_id: 
                 semaPlatformEmit(&mut ctx, LIR_PLATFORM_READ_TEXT, &args, res_t, true)
                 return res_t
             }
+            // textFromBytes(bytes: List<Int>, count: Int) => Result<Text, Int>:
+            // the first `count` bytes as an owned Text (Err 1 bad count or
+            // byte, Err 4 not UTF-8). The list is borrowed shared.
+            hold name_text_bytes = "textFromBytes"
+            when symbolNameEqualsText(source, name_start, name_end, name_text_bytes) {
+                when arg_count != 2 {
+                    semaAddError(edit ctx, "L0004", "textFromBytes requiere (bytes: List<Int>, cantidad: Int)", expr.start, expr.end)
+                    give 7
+                }
+                hold bytes_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg], ACCESS_READ)
+                hold bytes_loan = semaPlatformArgLoan(edit ctx, bytes_t, expr.start, expr.end)
+                hold bytes_place = ctx.lir.borrowed
+                hold count_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + 1], ACCESS_MOVE)
+                hold count = lirTakeOperand(edit ctx, count_t)
+                when !semaIsByteList(view ctx, bytes_t) || count_t != 1 {
+                    semaAddError(edit ctx, "L0004", "textFromBytes requiere (bytes: List<Int>, cantidad: Int)", expr.start, expr.end)
+                    give 7
+                }
+                when bytes_place < 0 || bytes_loan < 0 {
+                    semaAddError(edit ctx, "L0016", "textFromBytes requiere un lugar List<Int> prestable", expr.start, expr.end)
+                    give 7
+                }
+                hold text_res_t = semTypeMakeResult(edit ctx.types, 5, 1)
+                change text_loans: List of[Int] = List[]
+                text_loans@push(bytes_loan)
+                semaCallLoans(edit ctx, view text_loans, text_res_t, SITE_NONE, expr.start, expr.end)
+                change text_args: List of[Int] = List[]
+                text_args@push(lirArg(edit ctx.lir, true, bytes_place, false))
+                text_args@push(lirArg(edit ctx.lir, false, count, false))
+                when lirBuiltinRegister(edit ctx.lir_module, view ctx.types, text_res_t) < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                semaPlatformEmit(edit ctx, LIR_PLATFORM_TEXT_FROM_BYTES, view text_args, text_res_t, true)
+                give text_res_t
+            }
             let name_write_bytes = "writeBytes"
             if symbolNameEqualsText(source, name_start, name_end, name_write_bytes) {
                 if arg_count != 2 {

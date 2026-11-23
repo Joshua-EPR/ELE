@@ -1,19 +1,24 @@
-// Branch-heavy integer workload.
-fn pasos(n: Int) -> Int {
-    var x = n
-    var p = 0
-    while x != 1 {
-        if x % 2 == 0 { x = x / 2 } else { x = 3 * x + 1 }
+// Branch-heavy integer workload (ELE v2).
+flow pasos(n: Int) => Int {
+    change x = n
+    change p = 0
+    during x != 1 {
+        when x % 2 == 0 {
+            x = x / 2
+        } otherwise {
+            x = 3 * x + 1
+        }
         p += 1
     }
-    return p
+    give p
 }
-fn main() {
-    var mejor = 0
-    var arg = 0
-    for n in 1..1000000 {
-        let p = pasos(n)
-        if p > mejor {
+
+flow main() {
+    change mejor = 0
+    change arg = 0
+    each n among 1..1000000 {
+        hold p = pasos(n)
+        when p > mejor {
             mejor = p
             arg = n
         }

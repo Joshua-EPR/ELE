@@ -48,7 +48,7 @@ Lo que hace:
   línea, tabuladores a 4 columnas, scroll horizontal y vertical que siguen
   al cursor, selección resaltada, cursor, y barra de estado con línea y
   columna (o el prompt de búsqueda).
-- **Teclado:** los mismos atajos que la terminal: Ctrl+S, Ctrl+Q, Ctrl+Z,
+- **Teclado:** los mismos atajos que la terminal: Ctrl+S, Ctrl+Q, Ctrl+O, Ctrl+Z,
   Ctrl+Y, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+F, Shift+flechas y Escape.
 - **Ratón:** clic izquierdo para mover el cursor y rueda para desplazarse.
 - **Cerrar:** cerrar la ventana con cambios sin guardar pide una segunda
@@ -78,7 +78,7 @@ Pruebas:
 
 Pendiente en la ventana:
 
-- Ctrl+O y varios documentos;
+- varios documentos a la vez (Ctrl+O sustituye el documento actual);
 - selección arrastrando el ratón;
 - grafemas y caracteres anchos;
 - DPI alto;
@@ -137,6 +137,6 @@ Edición avanzada (núcleo compartido `editor_core.l`, utilizable también por u
 
 El historial guarda las operaciones (no copias del documento). Si sus bytes superan 32 MiB, se descarta entero y el documento queda marcado como modificado hasta guardar.
 
-Pendiente: Ctrl+O (necesita una primitiva para construir `Text` a partir de bytes, que el lenguaje todavía no expone), selección con ratón, scroll horizontal, anchura visual de grafemas y caracteres anchos, activación automática de VT en Windows. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
+Ctrl+O abre otro archivo en ambos editores con el prompt «Abrir:» y `textFromBytes`, y rechaza cambios sin guardar. Pendiente: selección con ratón, scroll horizontal, anchura visual de grafemas y caracteres anchos, activación automática de VT en Windows. El renderer actual admite ANSI/VT y asume 80×24 hasta recibir un evento de resize; las columnas cuentan escalares Unicode, sin ancho de grafemas ni caracteres de doble ancho. En Windows, la consola debe tener procesamiento VT habilitado; esta rama todavía no lo activa. El guardado usa `writeBytes`, que no conserva todos los metadatos del archivo. No se promete restauración ante terminación forzada del proceso.
 
 `terminal.ps1` verifica el ciclo nativo con entrada redirigida. `terminal_console.ps1` usa una consola Windows real, inyecta eventos de teclado, edita y guarda el archivo de prueba indicado, y comprueba la restauración del modo de entrada. Use un archivo de prueba desechable: la segunda prueba modifica su contenido.

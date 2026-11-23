@@ -4,16 +4,20 @@ take win64_rt
 take native_rt_platform
 
 // CF_UNICODETEXT, resolved from system32 without a foreign runtime.
-fixed WC_LIMIT = 67108864
+fixed WC_LIMIT = 671088644
 
 shape WcData {
     dll: Int
+    class_name: Int
+    empty_title: Int
     open: Int
     close: Int
     empty: Int
     set: Int
     get: Int
     available: Int
+    create: Int
+    destroy: Int
 }
 
 flow wcAscii(code: edit X64Code, value: view Text) => Int {
@@ -32,26 +36,37 @@ flow wcWide(code: edit X64Code, value: view Text) => Int {
 }
 flow wcData(code: edit X64Code) => WcData {
     hold dll_name = "user32.dll"
+    hold class_name_text = "STATIC"
+    hold empty_title_text = ""
     hold open_name = "OpenClipboard"
     hold close_name = "CloseClipboard"
     hold empty_name = "EmptyClipboard"
     hold set_name = "SetClipboardData"
     hold get_name = "GetClipboardData"
     hold available_name = "IsClipboardFormatAvailable"
+    hold create_name = "CreateWindowExW"
+    hold destroy_name = "DestroyWindow"
     hold dll = wcWide(edit code, view dll_name)
+    hold class_name = wcWide(edit code, view class_name_text)
+    hold empty_title = wcWide(edit code, view empty_title_text)
     hold open = wcAscii(edit code, view open_name)
     hold close = wcAscii(edit code, view close_name)
     hold empty = wcAscii(edit code, view empty_name)
     hold set = wcAscii(edit code, view set_name)
     hold get = wcAscii(edit code, view get_name)
     hold available = wcAscii(edit code, view available_name)
-    give WcData(dll: dll, open: open, close: close, empty: empty, set: set, get: get, available: available)
+    hold create = wcAscii(edit code, view create_name)
+    hold destroy = wcAscii(edit code, view destroy_name)
+    give WcData(dll: dll, class_name: class_name, empty_title: empty_title, open: open, close: close, empty: empty, set: set, get: get, available: available, create: create, destroy: destroy)
 }
 flow wcLea(code: edit X64Code, reg: Int, at: Int) {
     hold fix = x64LeaRipPlaceholder(edit code, reg)
     x64PatchRelative(edit code, fix, at)
 }
-flow wcPatch(code: edit X64Code, at: Int) { x64PatchRelative(edit code, at, code.bytes.length) }
+flow wcPatch(code: edit X64Code, at: Int) {
+    hold size = code.bytes.length
+    x64PatchRelative(edit code, at, size)
+}
 flow wcPatchAll(code: edit X64Code, at: view List of[Int]) {
     each i among 0..at.length { wcPatch(edit code, at[i]) }
 }
@@ -63,7 +78,7 @@ flow wcCall(code: edit X64Code, at: Int) {
     hold fix = x64CallPlaceholder(edit code)
     x64PatchRelative(edit code, fix, at)
 }
-flow wcBegin(code: edit X64Code) { x64FrameBegin(edit code, 16); w64AlignStack(edit code, 64) }
+flow wcBegin(code: edit X64Code) { x64FrameBegin(edit code, 16); w64AlignStack(edit code, 128) }
 flow wcStack(code: edit X64Code, index: Int, reg: Int) { x64StoreMem64(edit code, 4, 32 + 8 * index, reg) }
 flow wcIf(code: edit X64Code, reg: Int, value: Int, cond: Int) => Int {
     x64MovImm64(edit code, 10, value)
@@ -96,7 +111,7 @@ flow wcResolve(code: edit X64Code, imports: edit Pe64Imports, name: Int, slot: I
 
 // 0 list, 1 count, 2 DLL, 3 Open, 4 Close, 5 Empty, 6 Set,
 // 7 HGLOBAL, 8 lock, 9 UTF-8 buffer, 10 capacity, 11 WCHAR count,
-// 12 status, 13 opened, 14 index.
+// 12 status, 13 opened, 14 index/create function, 15 owner HWND.
 flow wcEmitWrite(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntime, d: view WcData) => Int {
     hold entry = code.bytes.length
     wcBegin(edit code)
@@ -198,10 +213,38 @@ flow wcEmitWrite(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRunti
     resolve_failed@push(wcResolve(edit code, edit imports, d.close, 4))
     resolve_failed@push(wcResolve(edit code, edit imports, d.empty, 5))
     resolve_failed@push(wcResolve(edit code, edit imports, d.set, 6))
+    resolve_failed@push(wcResolve(edit code, edit imports, d.create, 14))
+    resolve_failed@push(wcResolve(edit code, edit imports, d.destroy, 11))
+    // A private message-only STATIC window supplies a valid clipboard owner
+    // even when this process has no console or visible ELE window.
+    x64MovImm64(edit code, 0, 0)
+    each s among 0..8 { wcStack(edit code, s, 0) }
+    x64MovImm64(edit code, 0, -3) // HWND_MESSAGE
+    wcStack(edit code, 4, 0)
     x64MovImm64(edit code, 1, 0)
+    wcLea(edit code, 2, d.class_name)
+    wcLea(edit code, 8, d.empty_title)
+    x64MovImm64(edit code, 9, 0)
+    wcFn(edit code, 14)
+    x64StoreSlot(edit code, 15, 0)
+    x64TestRax(edit code)
+    hold no_window = x64ConditionalPlaceholder(edit code, true)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 1, 0) // the count is no longer needed
+    hold open_loop = code.bytes.length
+    x64LoadSlot(edit code, 1, 15)
     wcFn(edit code, 3)
     x64TestEax(edit code)
-    hold open_failed = x64ConditionalPlaceholder(edit code, true)
+    hold opened = x64ConditionalPlaceholder(edit code, false)
+    x64LoadSlot(edit code, 1, 1)
+    hold open_failed = wcIf(edit code, 1, 20, 9)
+    x64MovImm64(edit code, 10, 1)
+    x64AddReg(edit code, 1, 10)
+    x64StoreSlot(edit code, 1, 1)
+    x64MovImm64(edit code, 1, 1)
+    w64CallImport(edit code, edit imports, pe64ImportSleep())
+    wcJump(edit code, open_loop)
+    wcPatch(edit code, opened)
     x64MovImm64(edit code, 0, 1)
     x64StoreSlot(edit code, 13, 0)
     wcFn(edit code, 5)
@@ -215,10 +258,10 @@ flow wcEmitWrite(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRunti
     x64MovImm64(edit code, 0, 0)
     x64StoreSlot(edit code, 7, 0) // ownership transferred to Windows
     x64StoreSlot(edit code, 12, 0)
-    hold cleanup = code.bytes.length
     wcPatch(edit code, no_dll)
     wcPatchAll(edit code, view resolve_failed)
     wcPatch(edit code, open_failed)
+    wcPatch(edit code, no_window)
     wcPatch(edit code, empty_failed)
     wcPatch(edit code, set_failed)
     wcPatch(edit code, alloc_failed)
@@ -240,6 +283,12 @@ flow wcEmitWrite(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRunti
     x64StoreSlot(edit code, 12, 0)
     wcPatch(edit code, closed)
     wcPatch(edit code, no_close)
+    x64LoadSlot(edit code, 0, 15)
+    x64TestRax(edit code)
+    hold no_destroy = x64ConditionalPlaceholder(edit code, true)
+    x64MovReg(edit code, 1, 0)
+    wcFn(edit code, 11)
+    wcPatch(edit code, no_destroy)
     x64LoadSlot(edit code, 0, 7)
     x64TestRax(edit code)
     hold no_free = x64ConditionalPlaceholder(edit code, true)
@@ -264,9 +313,11 @@ flow wcEmitWrite(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRunti
     wcPatch(edit code, bad_zero)
     wcPatch(edit code, bad_byte)
     wcPatch(edit code, convert_failed)
+    x64LoadSlot(edit code, 7, 9)
+    x64LoadSlot(edit code, 6, 10)
+    wcCall(edit code, rt.text_drop)
     x64MovImm64(edit code, 0, -1)
-    x64StoreSlot(edit code, 12, 0)
-    wcJump(edit code, cleanup)
+    x64FrameEnd(edit code)
     wcPatchAll(edit code, view invalid)
     x64MovImm64(edit code, 0, -1)
     x64FrameEnd(edit code)
@@ -297,10 +348,22 @@ flow wcEmitRead(code: edit X64Code, imports: edit Pe64Imports, rt: view PfRuntim
     resolve_failed@push(wcResolve(edit code, edit imports, d.close, 4))
     resolve_failed@push(wcResolve(edit code, edit imports, d.get, 5))
     resolve_failed@push(wcResolve(edit code, edit imports, d.available, 6))
+    hold open_loop = code.bytes.length
     x64MovImm64(edit code, 1, 0)
     wcFn(edit code, 3)
     x64TestEax(edit code)
-    hold open_failed = x64ConditionalPlaceholder(edit code, true)
+    hold opened = x64ConditionalPlaceholder(edit code, false)
+    x64LoadSlot(edit code, 1, 15)
+    hold open_failed = wcIf(edit code, 1, 20, 9)
+    x64MovImm64(edit code, 10, 1)
+    x64AddReg(edit code, 1, 10)
+    x64StoreSlot(edit code, 15, 1)
+    x64MovImm64(edit code, 1, 1)
+    w64CallImport(edit code, edit imports, pe64ImportSleep())
+    wcJump(edit code, open_loop)
+    wcPatch(edit code, opened)
+    x64MovImm64(edit code, 0, 0)
+    x64StoreSlot(edit code, 15, 0) // scan offset
     x64MovImm64(edit code, 0, 1)
     x64StoreSlot(edit code, 13, 0)
     x64MovImm64(edit code, 1, 13)
