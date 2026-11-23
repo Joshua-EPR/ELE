@@ -131,7 +131,7 @@ fn only_required_cross_module_helper_apis_are_visible() {
 
     // A real private helper still cannot cross a module boundary.
     let loans = fs::read_to_string(dir.join("loans_l.l")).unwrap();
-    assert!(loans.contains("fn loanRootedAtParams("));
+    assert!(loans.contains("flow loanRootedAtParams("));
     assert!(!loans.contains("pub fn loanRootedAtParams("));
     let private = check(
         &dir,
