@@ -81,7 +81,7 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
     );
     assert!(visible_states.is_empty(), "{visible_states}");
     let loans = fs::read_to_string(dir.join("loans_l.l")).unwrap();
-    assert!(loans.contains("fn loanBind("));
+    assert!(loans.contains("flow loanBind("));
     assert!(!loans.contains("pub fn loanBind("));
     let private_loan = check(
         &dir,
