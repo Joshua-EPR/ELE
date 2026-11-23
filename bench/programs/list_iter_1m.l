@@ -1,23 +1,24 @@
-// Iteration and sum: build 1 000 000 elements once, then 20 for-each passes.
-fn sumar(datos: &[Int]) -> Int {
-    var total = 0
-    for x in datos {
+// Iteration and sum: build 1 000 000 elements once, then 20 each passes (ELE v2).
+flow sumar(datos: view List of[Int]) => Int {
+    change total = 0
+    each x among datos {
         total += x
     }
-    return total
+    give total
 }
-fn main() {
-    var datos: List<Int> = List[]
-    datos.reserve(1000000)
-    var i = 0
-    while i < 1000000 {
-        datos.push(i % 1000)
+
+flow main() {
+    change datos: List of[Int] = List[]
+    datos@reserve(1000000)
+    change i = 0
+    during i < 1000000 {
+        datos@push(i % 1000)
         i += 1
     }
-    var total = 0
-    var pasada = 0
-    while pasada < 20 {
-        total += sumar(datos)
+    change total = 0
+    change pasada = 0
+    during pasada < 20 {
+        total += sumar(view datos)
         pasada += 1
     }
     print(total)
