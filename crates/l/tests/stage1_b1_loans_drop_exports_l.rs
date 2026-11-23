@@ -95,8 +95,8 @@ fn b1_loan_ancestry_and_live_drop_states_are_public_but_not_all_internals() {
         "{private_loan}"
     );
     let owners = fs::read_to_string(dir.join("ownership_l.l")).unwrap();
-    assert!(owners.contains("const FLOW_MOVED ="));
-    assert!(!owners.contains("pub const FLOW_MOVED ="));
+    assert!(owners.contains("fixed FLOW_MOVED ="));
+    assert!(!owners.contains("expose fixed FLOW_MOVED ="));
     let private_moved = check(
         &dir,
         "private_moved_state",
