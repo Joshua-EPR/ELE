@@ -69,7 +69,7 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         self.assertIn('when n == 1 && !lirBuiltinPrimitive(lm.variant_type[v]) { give false }', union)
         # Extracting an owned payload moves its scrutinee, not a borrowed alias.
         self.assertIn('semaAccess(edit ctx, scrut_path, scrut_t, ACCESS_MOVE, start, finish)', binding)
-        self.assertIn('lirBuiltinEnumIndex(edit ctx.lir_module, scrut_t)', binding)
+        self.assertIn('lirBuiltinEnumIndex(view ctx.lir_module, scrut_t)', binding)
         self.assertIn('LIR_PAYLOAD, place, enum_id, which', binding)
         self.assertIn('semaBuiltinUnionValue', front)
         # Owned-enum payload layout is supported for alignments <= 8, but
