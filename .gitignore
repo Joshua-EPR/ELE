@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 
 # ============================================
 # ELE — Git Ignore
@@ -56,11 +55,3 @@ coverage/
 htmlcov/
 *.profraw
 *.profdata
-=======
-/target/
-__pycache__/
-*.pyc
-
-/bin/
-/dist/
->>>>>>> edbee369923ef67b0986a0191cce2594b8ef94fa
