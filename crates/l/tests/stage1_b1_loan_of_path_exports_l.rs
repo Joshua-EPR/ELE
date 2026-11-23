@@ -53,7 +53,7 @@ fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
 fn b1_read_only_loan_of_path_is_public_but_mutating_loan_helper_is_private() {
     let dir = prepare_modules();
     let consumer = fs::read_to_string(dir.join("sema_context.l")).unwrap();
-    assert!(consumer.contains("import loans_l"));
+    assert!(consumer.contains("take loans_l"));
     assert!(consumer.contains("loanOfPath("));
 
     let public = check(
