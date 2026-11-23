@@ -64,15 +64,15 @@ class NestedStructFixtureContract(unittest.TestCase):
         # The recursive copy helper is shared with the list lowering, so it
         # lives next to the other place helpers in native_cfg_text.l.
         shared=(ROOT / "compiler-l/src/codegen/native_cfg_text.l").read_text()
-        self.assertIn("fn cfgCopyValue(", shared)
+        self.assertIn("expose flow cfgCopyValue(", shared)
         copy = shared.split("fn cfgCopyValue(", 1)[1].split("\npub fn cfgStoreValueAt(", 1)[0]
         # Addressing is intentionally parameterized: src_base/dst_base may
         # point at a stack slot or a borrowed referent (not always RBP=5).
-        self.assertIn("x64LoadMem64(&mut code, 0, src_base, src_disp)", copy)
-        self.assertIn("x64StoreMem64(&mut code, dst_base, dst_disp, 0)", copy)
-        self.assertIn("x64LoadMem8(&mut code, 0, src_base, src_disp)", copy)
-        self.assertIn("x64StoreMem8(&mut code, dst_base, dst_disp, 0)", copy)
-        self.assertIn("cfgCopyValue(&mut code, p, member.ty,", copy)
+        self.assertIn("x64LoadMem64(edit code, 0, src_base, src_disp)", copy)
+        self.assertIn("x64StoreMem64(edit code, dst_base, dst_disp, 0)", copy)
+        self.assertIn("x64LoadMem8(edit code, 0, src_base, src_disp)", copy)
+        self.assertIn("x64StoreMem8(edit code, dst_base, dst_disp, 0)", copy)
+        self.assertIn("cfgCopyValue(edit code, p, member.ty,", copy)
         # Struct moves must use the computed destination address, including
         # through a reference, and preserve the recursive copy helper.
         self.assertIn("cfgCopyValue(edit code, p, ty, at.base, at.disp, 5, cfgVarBase(", code)
