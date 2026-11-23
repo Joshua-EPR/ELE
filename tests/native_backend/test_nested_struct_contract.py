@@ -65,7 +65,7 @@ class NestedStructFixtureContract(unittest.TestCase):
         # lives next to the other place helpers in native_cfg_text.l.
         shared=(ROOT / "compiler-l/src/codegen/native_cfg_text.l").read_text()
         self.assertIn("expose flow cfgCopyValue(", shared)
-        copy = shared.split("fn cfgCopyValue(", 1)[1].split("\npub fn cfgStoreValueAt(", 1)[0]
+        copy = shared.split("expose flow cfgCopyValue(", 1)[1].split("\nexpose flow cfgStoreValueAt(", 1)[0]
         # Addressing is intentionally parameterized: src_base/dst_base may
         # point at a stack slot or a borrowed referent (not always RBP=5).
         self.assertIn("x64LoadMem64(edit code, 0, src_base, src_disp)", copy)
