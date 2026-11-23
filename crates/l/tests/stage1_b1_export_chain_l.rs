@@ -51,7 +51,7 @@ fn check(dir: &Path, name: &str, source: &str, expected: bool) -> String {
 
 fn assert_consumer(dir: &Path, consumer: &str, import: &str, call: &str) {
     let text = fs::read_to_string(dir.join(consumer)).unwrap();
-    assert!(text.contains(&format!("import {import}")), "{consumer}");
+    assert!(text.contains(&format!("take {import}")), "{consumer}");
     assert!(text.contains(call), "{consumer} no longer uses {call}");
 }
 
