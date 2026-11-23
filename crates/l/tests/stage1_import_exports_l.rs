@@ -96,10 +96,10 @@ fn only_required_cross_module_helper_apis_are_visible() {
     // The consumers really use those three helpers. A test for a copied
     // declaration alone would not catch a renamed or removed call site.
     let owners = fs::read_to_string(dir.join("ownership_l.l")).unwrap();
-    assert!(owners.contains("import flow_cfg"));
+    assert!(owners.contains("take flow_cfg"));
     assert!(owners.contains("flowNextPath("));
     let verifier = fs::read_to_string(dir.join("lir_verify_core.l")).unwrap();
-    assert!(verifier.contains("import lir_build"));
+    assert!(verifier.contains("take lir_build"));
     assert!(verifier.contains("lirIsVar("));
     assert!(verifier.contains("lirConstId("));
 
@@ -120,7 +120,7 @@ fn only_required_cross_module_helper_apis_are_visible() {
 
     // loans_check.l also needs this overlap predicate across module boundaries.
     let loans_check = fs::read_to_string(dir.join("loans_check.l")).unwrap();
-    assert!(loans_check.contains("import flow_cfg"));
+    assert!(loans_check.contains("take flow_cfg"));
     assert!(loans_check.contains("loanOverlaps("));
     check(
         &dir,
@@ -147,9 +147,9 @@ fn parser_export_chain_exposes_only_cross_module_entrypoints() {
     let dir = prepare_imports();
     let decl = fs::read_to_string(dir.join("decl.l")).unwrap();
     let parser = fs::read_to_string(dir.join("parser.l")).unwrap();
-    assert!(decl.contains("import stmt"));
+    assert!(decl.contains("take stmt"));
     assert!(decl.contains("parseStmt("));
-    assert!(parser.contains("import decl"));
+    assert!(parser.contains("take decl"));
     assert!(parser.contains("parseDecl("));
 
     // Real Stage 1 source modules, not dummy interfaces.
@@ -195,7 +195,7 @@ fn lir_place_field_is_public_for_actual_cross_module_consumers() {
     let finish = fs::read_to_string(dir.join("lir_finish.l")).unwrap();
     let ops = fs::read_to_string(dir.join("sema_ops.l")).unwrap();
     for source in [&lower, &finish, &ops] {
-        assert!(source.contains("import lir_build"));
+        assert!(source.contains("take lir_build"));
         assert!(source.contains("lirPlaceField("));
     }
 
