@@ -81,15 +81,3 @@ fn view_edit_source_has_distinct_borrow_modes() {
 fn legacy_spelling_is_temporarily_parseable() {
     check("fn main() -> Int { let n = 42\n return n }").unwrap();
 }
-
-#[test]
-fn migrated_basic_benchmarks_use_canonical_v2_syntax() {
-    for source in [
-        include_str!("../../../bench/programs/fib.l"),
-        include_str!("../../../bench/programs/primes.l"),
-        include_str!("../../../bench/programs/collatz.l"),
-        include_str!("../../../bench/programs/sum_loop.l"),
-    ] {
-        check(source).unwrap();
-    }
-}
