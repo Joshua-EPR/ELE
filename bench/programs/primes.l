@@ -1,17 +1,24 @@
-// Trial division: nested loops and early exits.
-fn primo(n: Int) -> Bool {
-    if n < 2 { return false }
-    var d = 2
-    while d * d <= n {
-        if n % d == 0 { return false }
+// Trial division: nested loops and early exits (ELE v2).
+flow primo(n: Int) => Bool {
+    when n < 2 {
+        give false
+    }
+    hold d = 2
+    during d * d <= n {
+        when n % d == 0 {
+            give false
+        }
         d += 1
     }
-    return true
+    give true
 }
-fn main() {
-    var c = 0
-    for n in 0..2000000 {
-        if primo(n) { c += 1 }
+
+flow main() {
+    change c = 0
+    each n among 0..2000000 {
+        when primo(n) {
+            c += 1
+        }
     }
     print(c)
 }
