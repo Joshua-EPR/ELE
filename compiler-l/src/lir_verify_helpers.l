@@ -81,11 +81,11 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
     var arity = -1
     if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
     if op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_WRITE_CONSOLE { arity = 1 }
-    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE { arity = 2 }
+    if op == LIR_PLATFORM_READ_TEXT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_CLIPBOARD_WRITE || op == LIR_PLATFORM_CLIPBOARD_READ { arity = 2 }
     if arity < 0 { return 1 }
     if count != arity || first < 0 || first > l.operands.length || count > l.operands.length - first { return 4 }
     let result = l.vars[dst].ty
-    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_READ_EVENT || op == LIR_PLATFORM_WRITE_CONSOLE {
+    if op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_READ_EVENT || op == LIR_PLATFORM_WRITE_CONSOLE || op == LIR_PLATFORM_CLIPBOARD_WRITE || op == LIR_PLATFORM_CLIPBOARD_READ {
         if result != 1 { return 3 }
     } else if op == LIR_PLATFORM_PRINT_ERROR {
         if result != 6 { return 3 }
@@ -109,6 +109,12 @@ pub fn lirVerifyPlatform(v: &mut LirVerifier, l: &LirFn, types: &TypeTable, lm: 
         if arg < 0 || arg >= l.args.length { return 1 }
         var borrowed = false
         var expected = 1
+        when (op == LIR_PLATFORM_CLIPBOARD_WRITE || op == LIR_PLATFORM_CLIPBOARD_READ) && i == 0 {
+            when !l.args[arg].by_ref || l.args[arg].mutable != (op == LIR_PLATFORM_CLIPBOARD_READ) { give 4 }
+            when !lirIsByteList(types, lirArgType(l, types, lm, arg)) { give 3 }
+            when !lirArgDefined(edit v, l, arg, check) { give 5 }
+            proceed
+        }
         if op == LIR_PLATFORM_PRINT_ERROR || (op == LIR_PLATFORM_READ_TEXT && i == 0) || op == LIR_PLATFORM_WRITE_BYTES || op == LIR_PLATFORM_SAME_FILE || op == LIR_PLATFORM_WRITE_CONSOLE {
             borrowed = true
             expected = 5

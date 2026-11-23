@@ -1664,13 +1664,9 @@ fn parse_inner(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
             p.sep();
             imports.push(ImportDecl {
                 path,
-<<<<<<< HEAD
                 is_file_path,
                 span,
-=======
-                span,
                 target_file: None,
->>>>>>> edbee369923ef67b0986a0191cce2594b8ef94fa
             });
             continue;
         }

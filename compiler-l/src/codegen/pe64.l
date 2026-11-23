@@ -38,7 +38,7 @@ fixed PE64_DOS_SIZE = 128
 // 40-byte section headers.
 fixed PE64_OPTIONAL_END = 392
 // Known imports; the first PE64_BASE_IMPORTS are in every image.
-fixed PE64_IMPORT_COUNT = 26
+fixed PE64_IMPORT_COUNT = 31
 fixed PE64_BASE_IMPORTS = 5
 fixed PE64_STACK_SIZE = 8388608
 fixed PE64_PAGE = 4096
@@ -74,6 +74,11 @@ expose flow pe64ImportReadConsoleInputW() => Int { give 23 }
 // File streams (fileSeek, fileSize).
 expose flow pe64ImportSetFilePointerEx() => Int { give 24 }
 expose flow pe64ImportGetFileSizeEx() => Int { give 25 }
+expose flow pe64ImportGlobalAlloc() => Int { give 26 }
+expose flow pe64ImportGlobalLock() => Int { give 27 }
+expose flow pe64ImportGlobalUnlock() => Int { give 28 }
+expose flow pe64ImportGlobalFree() => Int { give 29 }
+expose flow pe64ImportGlobalSize() => Int { give 30 }
 
 // Number of known imported functions: valid import indexes are 0..count-1.
 expose flow pe64ImportCount() => Int { give PE64_IMPORT_COUNT }
@@ -144,7 +149,12 @@ flow peImportName(index: Int) => Text {
     when index == 22 { give "SetConsoleMode" }
     when index == 23 { give "ReadConsoleInputW" }
     when index == 24 { give "SetFilePointerEx" }
-    give "GetFileSizeEx"
+    when index == 25 { give "GetFileSizeEx" }
+    when index == 26 { give "GlobalAlloc" }
+    when index == 27 { give "GlobalLock" }
+    when index == 28 { give "GlobalUnlock" }
+    when index == 29 { give "GlobalFree" }
+    give "GlobalSize"
 }
 
 // The imports of an image, in IAT slot order: the base set, then each

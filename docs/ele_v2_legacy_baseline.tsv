@@ -1,30 +1,30 @@
 # ELE v2 legacy-syntax ratchet baseline (issue #12). GENERATED: do not edit.
 # Regenerate: ELE_UPDATE_LEGACY_BASELINE=1 cargo test -p project-l --test ele_v2_legacy_ratchet
 # Counts may only go down; see crates/l/tests/ele_v2_legacy_ratchet.rs.
-# files with legacy syntax: 68; total legacy constructs: 11659
+# files with legacy syntax: 66; total legacy constructs: 11552
 # total	angle_generic	329
-# total	borrow_mut	2003
-# total	borrow_ref	852
-# total	dot_method_call	406
+# total	borrow_mut	1998
+# total	borrow_ref	842
+# total	dot_method_call	404
 # total	kw_break	44
 # total	kw_const	94
 # total	kw_continue	26
-# total	kw_else	171
+# total	kw_else	167
 # total	kw_enum	9
-# total	kw_fn	443
-# total	kw_for	195
-# total	kw_if	1593
-# total	kw_import	320
-# total	kw_in	195
-# total	kw_let	1355
-# total	kw_match	169
-# total	kw_pub	447
-# total	kw_return	1542
+# total	kw_fn	437
+# total	kw_for	192
+# total	kw_if	1580
+# total	kw_import	313
+# total	kw_in	192
+# total	kw_let	1347
+# total	kw_match	165
+# total	kw_pub	446
+# total	kw_return	1529
 # total	kw_struct	61
-# total	kw_var	404
+# total	kw_var	398
 # total	kw_while	104
-# total	match_arm_arrow	594
-# total	return_arrow	303
+# total	match_arm_arrow	575
+# total	return_arrow	300
 # file	category	count
 compiler-l/src/ast.l	angle_generic	19
 compiler-l/src/ast.l	borrow_mut	10
@@ -470,21 +470,6 @@ compiler-l/src/main.l	kw_return	22
 compiler-l/src/main.l	kw_var	2
 compiler-l/src/main.l	match_arm_arrow	16
 compiler-l/src/main.l	return_arrow	4
-compiler-l/src/main_parser.l	borrow_mut	1
-compiler-l/src/main_parser.l	borrow_ref	10
-compiler-l/src/main_parser.l	dot_method_call	2
-compiler-l/src/main_parser.l	kw_else	3
-compiler-l/src/main_parser.l	kw_fn	5
-compiler-l/src/main_parser.l	kw_for	3
-compiler-l/src/main_parser.l	kw_if	12
-compiler-l/src/main_parser.l	kw_import	5
-compiler-l/src/main_parser.l	kw_in	3
-compiler-l/src/main_parser.l	kw_let	7
-compiler-l/src/main_parser.l	kw_match	4
-compiler-l/src/main_parser.l	kw_return	13
-compiler-l/src/main_parser.l	kw_var	6
-compiler-l/src/main_parser.l	match_arm_arrow	19
-compiler-l/src/main_parser.l	return_arrow	3
 compiler-l/src/main_sema.l	angle_generic	5
 compiler-l/src/main_sema.l	borrow_mut	3
 compiler-l/src/main_sema.l	borrow_ref	31
@@ -814,13 +799,6 @@ compiler-l/src/sema_expr_temp.l	kw_match	1
 compiler-l/src/sema_expr_temp.l	kw_pub	1
 compiler-l/src/sema_expr_temp.l	kw_return	2
 compiler-l/src/sema_expr_temp.l	match_arm_arrow	2
-compiler-l/src/sema_loop_jump.l	borrow_mut	4
-compiler-l/src/sema_loop_jump.l	kw_else	1
-compiler-l/src/sema_loop_jump.l	kw_fn	1
-compiler-l/src/sema_loop_jump.l	kw_if	1
-compiler-l/src/sema_loop_jump.l	kw_import	2
-compiler-l/src/sema_loop_jump.l	kw_let	1
-compiler-l/src/sema_loop_jump.l	kw_pub	1
 compiler-l/src/sema_lower.l	angle_generic	1
 compiler-l/src/sema_lower.l	borrow_mut	29
 compiler-l/src/sema_lower.l	borrow_ref	6

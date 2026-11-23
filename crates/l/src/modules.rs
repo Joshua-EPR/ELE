@@ -5,12 +5,8 @@ use crate::{
 use std::{
     collections::HashMap,
     fs,
-<<<<<<< HEAD
-    path::{Component, Path, PathBuf},
-=======
     io::{self, Read},
-    path::{Path, PathBuf},
->>>>>>> edbee369923ef67b0986a0191cce2594b8ef94fa
+    path::{Component, Path, PathBuf},
 };
 
 pub const MAX_MODULE_BYTES: usize = 16 * 1024 * 1024;
