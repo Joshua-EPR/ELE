@@ -370,10 +370,10 @@ fn main() {
     let tokens_normalized = TOKENS.replace("\r\n", "\n");
     let cursor_normalized = CURSOR.replace("\r\n", "\n");
     let tokens_inline = tokens_normalized
-        .strip_prefix("import lexer\n\n")
+        .strip_prefix("take lexer\n\n")
         .expect("tokens.l must import lexer explicitly");
     let cursor_inline = cursor_normalized
-        .strip_prefix("import lexer\nimport tokens\n\n")
+        .strip_prefix("take lexer\ntake tokens\n\n")
         .expect("cursor.l must import lexer and tokens explicitly");
     check(
         "cursor",
