@@ -1,17 +1,17 @@
-// Indexed (bounds-checked) reads: build 1 000 000 elements, 20 passes of datos[i].
-fn main() {
-    var datos: List<Int> = List[]
-    datos.reserve(1000000)
-    var i = 0
-    while i < 1000000 {
-        datos.push(i % 1000)
+// Indexed (bounds-checked) reads: build 1 000 000 elements, 20 passes of datos[i] (ELE v2).
+flow main() {
+    change datos: List of[Int] = List[]
+    datos@reserve(1000000)
+    change i = 0
+    during i < 1000000 {
+        datos@push(i % 1000)
         i += 1
     }
-    var total = 0
-    var pasada = 0
-    while pasada < 20 {
-        var j = 0
-        while j < datos.length {
+    change total = 0
+    change pasada = 0
+    during pasada < 20 {
+        change j = 0
+        during j < datos.length {
             total += datos[j]
             j += 1
         }
