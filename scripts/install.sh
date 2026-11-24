@@ -96,34 +96,8 @@ if [ -n "$ARCHIVE" ]; then
     done
     rm -rf "$TMP_EXTRACT"
 else
-    echo "[install] Archive not found. Generating package or copying repo files..."
-    if [ -f "$REPO_ROOT/scripts/package_distribution.py" ]; then
-        python3 "$REPO_ROOT/scripts/package_distribution.py" --target linux
-        ARCHIVE="$REPO_ROOT/dist/ele-linux-x86_64.tar.gz"
-        TMP_EXTRACT="$(mktemp -d)"
-        tar -xzf "$ARCHIVE" -C "$TMP_EXTRACT"
-        cp -f "$TMP_EXTRACT/ele/bin/"* "$INSTALL_DIR/bin/"
-        if [ -d "$TMP_EXTRACT/ele/examples" ]; then
-            cp -rf "$TMP_EXTRACT/ele/examples/"* "$INSTALL_DIR/examples/"
-        fi
-        for doc in README.md README.es.md VERSION; do
-            if [ -f "$TMP_EXTRACT/ele/$doc" ]; then
-                cp -f "$TMP_EXTRACT/ele/$doc" "$INSTALL_DIR/$doc"
-            fi
-        done
-        rm -rf "$TMP_EXTRACT"
-    elif [ -f "$REPO_ROOT/bin/ele.elf" ]; then
-        cp -f "$REPO_ROOT/bin/ele.elf" "$INSTALL_DIR/bin/ele"
-        cp -rf "$REPO_ROOT/examples/"* "$INSTALL_DIR/examples/"
-        for doc in README.md README.es.md VERSION; do
-            if [ -f "$REPO_ROOT/$doc" ]; then
-                cp -f "$REPO_ROOT/$doc" "$INSTALL_DIR/$doc"
-            fi
-        done
-    else
-        echo "Error: Could not locate ELE distribution package or binary." >&2
-        exit 1
-    fi
+    echo "Error: ELE distribution archive not found. Pass --package or run the installer from a directory containing dist/ele-linux-x86_64.tar.gz." >&2
+    exit 1
 fi
 
 # 2. Set executable permissions

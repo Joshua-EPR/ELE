@@ -63,11 +63,22 @@ cargo test -p project-l --test ele_build_driver_l driver_cli_help_flag
 # target/stage1-tests/main_driver/normal/target/cranelift/x86_64-pc-windows-gnu/main_driver.exe
 ```
 
-Alternatively, build official distribution packages using the packaging script:
-```bash
-python scripts/package_distribution.py --target all
+Alternatively, build a package on its native runner from the verified seed for
+that host. The package builder requires the seed explicitly and verifies the
+Gen 2 -> Gen 3 fixpoint; it has no Stage 0/Cargo fallback:
+
+```powershell
+python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
+python scripts/package_distribution.py --target windows --driver-path .\seed\ele-seed-pe.exe
 ```
-This produces `dist/ele-windows-x86_64.zip`, `dist/ele-linux-x86_64.tar.gz`, and `dist/SHA256SUMS.txt`.
+
+```sh
+python3 tools/verify_seed_archive.py elf --output ./seed/ele-seed-elf
+chmod 755 ./seed/ele-seed-elf
+python3 scripts/package_distribution.py --target linux --driver-path ./seed/ele-seed-elf
+```
+
+Each native runner produces its own archive and `dist/SHA256SUMS.txt`.
 
 
 ---

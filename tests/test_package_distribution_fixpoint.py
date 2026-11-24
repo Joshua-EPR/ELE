@@ -19,6 +19,25 @@ SPEC.loader.exec_module(dist)
 
 
 class FixpointTests(unittest.TestCase):
+    def test_distribution_requires_an_explicit_verified_seed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            src = root / "compiler-l/src/main_driver.l"
+            src.parent.mkdir(parents=True)
+            src.write_text("flow main() => Int { give 0 }", encoding="utf-8")
+            work = root / "build"
+            work.mkdir()
+            with mock.patch.object(dist.subprocess, "run") as run:
+                with self.assertRaisesRegex(ValueError, "requires --driver-path"):
+                    dist.build_autonomous_compiler(root, "windows", work)
+                run.assert_not_called()
+
+    def test_package_cli_requires_seed_path(self):
+        with mock.patch.object(sys, "argv", ["package_distribution.py", "--target", "linux"]):
+            with self.assertRaises(SystemExit) as raised:
+                dist.main()
+        self.assertEqual(raised.exception.code, 2)
+
     def test_identical_generations_are_accepted(self):
         with tempfile.TemporaryDirectory() as td:
             gen2, gen3 = Path(td) / "gen2", Path(td) / "gen3"

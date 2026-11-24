@@ -48,7 +48,7 @@ class Stage0PathAuditTests(unittest.TestCase):
             workflow = root / ".github/workflows/distribution.yml"
             workflow.parent.mkdir(parents=True)
             workflow.write_text("run: rustc compiler.rs\n", encoding="utf-8")
-            result = audit_files(root, [workflow])
+            result = audit_files(root, [workflow], allowlist={})
         self.assertEqual(len(result.violations), 1)
         self.assertEqual(result.violations[0].token, "rustc")
 
