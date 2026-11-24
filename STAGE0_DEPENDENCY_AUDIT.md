@@ -49,3 +49,69 @@ PR #158 (`3393ff98d4bc84dc216d4ba4c973f7630245f790`) is already merged into insp
 ## Conclusion
 
 Stage 0 removal is not currently safe: there is no complete replacement for the Rust frontend/driver, Cranelift build path, test bootstrap, or distribution path. Keep current dependencies until the staged substitutions and their tests are in place. No ENCA files were inspected for modification or changed.
+
+## Consumer inventory (static audit, file:line)
+
+Second pass, 2026-11-24, read-only. It answers: what breaks if `crates/l` disappears? ENCA was excluded.
+
+### How Stage 0 runs today
+
+- Workspace members: `crates/l` (`project-l`) and `crates/nexo`. Source: `Cargo.toml:2`.
+- `crates/nexo` has no dependencies and does not reference `project_l`. It is a separate product, outside the compiler path, touched only by fmt/clippy and the nexo bench scripts.
+- Cranelift crates: `crates/l/Cargo.toml:18-23`.
+- `l` subcommands: `check`, `build`, `run`, `build-lir`, `run-lir`, and `--backend rustc|cranelift`. Source: `crates/l/src/main.rs:39-64`.
+  - The rustc backend shells out to `rustc` (`main.rs:241,260`).
+  - The Cranelift backend links with MSVC `link.exe` (`crates/l/src/linker.rs`).
+- `crates/l/build.rs` invokes `$RUSTC` for the Win64 platform object.
+
+### Who builds what
+
+| Artifact | Built by today |
+|---|---|
+| Driver Gen 1 (`compiler-l/src/main_driver.l`) | Stage 0. Cranelift on Windows, rustc backend on Linux. See `stage1_support/mod.rs:74-83`, `native-selfhosting-validation.yml:145-148`, `package_distribution.py:148-157`. |
+| Driver Gen 2 / Gen 3 | The ELE driver itself (`package_distribution.py:175-208`) |
+| `apps/elepad/**`, `std/**`, `tests/std/*.l` | The ELE driver only. No Stage 0 reference, but the driver used in CI comes from Stage 0. |
+| Compiler-l tools (`main_sema`, `main_parser`, `native_cfg_demo`, …) | Stage 0 only, via `stage1_support`. |
+| Distribution archive `ele/bin/ele[.exe]` | Gen 3 after a Gen 2 == Gen 3 check (`package_distribution.py:63-75`). Gen 1 comes from `--driver-path`, then `bin/ele*`, then a cached driver, then Stage 0. In CI the Stage 0 fallback is the effective path (`distribution.yml:43`). |
+
+### Cargo test targets (`crates/l/tests/*.rs`, 92 targets)
+
+| Class | Count | Meaning |
+|---|---|---|
+| Stage 0 frontend/backends | 31 | Use `project_l::` or `CARGO_BIN_EXE_l --backend` directly (e.g. `conformance`, `differential`, `cfg`, `modules`, `references`, `examples_ele_v2`) |
+| Stage 0 builds Stage 1/driver, ELE-built program tested — pure | 39 | e.g. `ele_build_driver_l`, `native_*_l`, `window_l`, `file_streams_l`, `stage2_bootstrap_l`, `stage3_native_probe_l` |
+| Same, plus Stage 0 library as oracle | 20 | e.g. `sema_l`, `borrow_l`, `lir_l`, `parser_l`, `drops_l`, `stage2_hook_l` |
+| Static contracts that still link Stage 0 | 2 | `ele_v2_legacy_ratchet` uses Stage 0 lexer and `check`; `lir_payload_protocol` uses `lir_protocol` |
+
+No test target is free of Stage 0 today.
+
+### Active consumers that break without Stage 0
+
+| Consumer | Location | Class |
+|---|---|---|
+| All three workflows | `distribution.yml:33-46`, `docs-and-benchmarks.yml:33,58-62`, `native-selfhosting-validation.yml:28-146,179-185,322-328,454-470` | D/E |
+| Driver built with `--backend cranelift` for window/ELEPad/console tests | `native-selfhosting-validation.yml:145-197` | B/D |
+| `self_coverage_gate.py` reads Stage-0-built tool executables | `native-selfhosting-validation.yml:206`, `tools/self_coverage_gate.py:70-76` | D/G |
+| Packaging fallback to Stage 0 | `scripts/package_distribution.py:78-97,148-157` | F |
+| Installers fall back to `package_distribution.py` | `scripts/install.ps1:103-105`, `scripts/install.sh:100-101` | F |
+| Stage 0 bootstrap scripts | `scripts/bootstrap_stage2.ps1`, `scripts/stage3_native_bootstrap_probe.ps1`, `compiler-l/build-{lexer,parser,sema}.ps1`, `run_full_trace.ps1` | A/B/G |
+| Benchmark and verify scripts | `bench/*.ps1` (≈25 scripts call cargo or `l --backend`) | A/B/E/G |
+| Contributor gates and getting started | `README.md:257-259`, `README.es.md:257-259`, `docs/getting-started.md:15,51-63`, `std/README.md:37,73,128` | D/F/G |
+| Experimental LIR→C backend | `tools/ele_c_backend.py`, `tools/ele_build.py` | G (not on the compiler path; needs a C compiler) |
+
+### Unaffected by removing `crates/l`
+
+These keep working as long as a prebuilt ELE driver (`bin/ele*`) exists:
+
+- `apps/**`, `std/**`, `editors/**`
+- `benchmarks/**`
+- Installers when given an archive
+- `crates/nexo`
+- Python/C tools other than `verify_native_cfg_migration.py` and `self_coverage_gate.py`
+
+### Consequence for the removal order
+
+1. **Trust root.** Replace Stage 0 as the trust root with a hash-pinned seed driver.
+2. **Driver consumers.** Move the driver consumers onto it: CI GUI/console tests, packaging, installers. These already need only a driver.
+3. **Test suite.** Give the 59 class-B test targets a Stage-0-free harness: the driver builds the compiler-l tools.
+4. **Oracle tests.** Port the frontend/oracle tests (31 + 20) to driver-based conformance before deleting `crates/l`.
