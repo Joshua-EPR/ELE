@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           clean_path="${RUNNER_TEMP}/ele-distribution-path"
           mkdir -p "$clean_path"
-          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git tar python3; do
+          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git tar gzip uname python3; do
             resolved=$(command -v "$tool")
             test -n "$resolved"
             ln -sf "$resolved" "$clean_path/$tool"
@@ -104,7 +104,8 @@ jobs:
 
       - name: Test Native Installer & Verify (Windows)
         if: runner.os == 'Windows'
-        run: powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ele-installed" -NoPathUpdate
+        shell: pwsh
+        run: ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ele-installed" -NoPathUpdate
 
       - name: Test Native Installer & Verify (Linux)
         if: runner.os == 'Linux'
