@@ -92,6 +92,8 @@ jobs:
           --test native_list_l
           --test native_pe64_l
           --test native_corpus_l
+          --test driver_regressions_l
+          --test native_trap_diagnostics_l
           -- --test-threads=1
       # Stage 1 is already built by the Linux step above. Explicitly exercise
       # the autonomous driver with external std roots and fail-closed imports
