@@ -1,6 +1,6 @@
 # Stage 0 removal roadmap
 
-Status date: 2026-11-24. `main` is `4444e0252b07726bac86a2363f7a9be1a4cb960a` (PR #168 merged). PR #167 seed/bootstrap and PR #169 distribution changes remain under CI validation; PR #170 implements owned Text choice payloads. This is an execution order, not a claim of completion.
+Status date: 2026-11-24. `main` is `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged). PR #169 distribution and PR #170 owned Text choice payloads are under CI validation. This is an execution order, not a claim of completion.
 
 ## Phase 0 — Baseline and evidence (in progress)
 
@@ -8,7 +8,7 @@ Status date: 2026-11-24. `main` is `4444e0252b07726bac86a2363f7a9be1a4cb960a` (P
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
 - [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
-- [x] Reconcile current main and open PR state (2026-11-24): #168 is merged; #167, #169 and #170 are open and tracked in `STAGE0_PROGRESS.md`.
+- [x] Reconcile current main and open PR state (2026-11-24): #167 and #168 are merged; #169 and #170 are open and tracked in `STAGE0_PROGRESS.md`.
 
 ## Phase 1 — Define the replaceable compiler boundary
 
@@ -35,12 +35,12 @@ Status date: 2026-11-24. `main` is `4444e0252b07726bac86a2363f7a9be1a4cb960a` (P
 ## Phase 4 — Remove bootstrap dependencies from CI and distribution
 
 - [x] Add a reproducible bootstrap from a hash-checked seed without Rust/Cargo/Cranelift (PR #159). The seed is still produced by Stage 0.
-- [ ] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job. PR #167 is open at `4c26152`; Linux/bootstrap/distribution/docs checks pass and the full Windows/MSVC suite is still running.
+- [x] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job (PR #167 merged at `2fa0af8`; Linux/Windows bootstrap and full native checks passed).
 - [x] Add a CI migration ratchet that separates historical from active Stage 0 references, pins per-route reference counts and fails on new unlisted active occurrences (`tools/audit_stage0_paths.py`); enforce it in both native seed bootstrap jobs.
 - [x] First Stage-0-free regression suite: `tests/native_corpus`, initially 85 cases in PR #160; current main has 94 cases. Local Windows PE run: 89 PASS, 5 XFAIL; no FAIL/XPASS.
 - [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
-- [ ] Complete CI for PR #169, which removes package-builder Stage 0/Cargo/cached-driver fallbacks, requires a pinned host-native seed, isolates runner PATH and restricts installers to package archives. The first CI run exposed missing `gzip` and a nested PowerShell call; fixes were pushed at `4f3b7c4`, rerun pending.
+- [ ] Complete CI for PR #169, which removes package-builder Stage 0/Cargo/cached-driver fallbacks, requires a pinned host-native seed, isolates runner PATH and restricts installers to package archives. The first CI run exposed missing `gzip` and a nested PowerShell call; fixes are pushed and the rebased run is active.
 - Exit criteria: CI, distribution and install verification pass with Stage 0 and Cranelift absent.
 
 ## Phase 5 — Retire Stage 0

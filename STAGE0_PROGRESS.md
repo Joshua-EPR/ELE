@@ -1,7 +1,7 @@
 # Stage 0 removal progress
 
 Updated: 2026-11-24
-Current `main`: `4444e0252b07726bac86a2363f7a9be1a4cb960a` (PR #168 merged; PR #167 is still open).
+Current `main`: `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PR #167 merged after PR #168).
 Current phase: finish pinned seed CI, remove Stage 0 from distribution, then close native compiler gaps.
 Estimated completion: **35%** against final acceptance criteria. Seed/bootstrap and compiler slices are verified, while the official compiler/test pipeline and most backend/runtime coverage still use Stage 0, Rust or Cranelift.
 
@@ -16,14 +16,14 @@ Estimated completion: **35%** against final acceptance criteria. Seed/bootstrap 
 
 | Agent | Status | Branch/PR | Files | Tests/evidence | Result |
 |---|---|---|---|---|---|
-| Engineering director | Active | PRs #167–#170 | Seed CI, distribution, integration and evidence | PR #168 merged; #167 Windows full suite still running; #169 CI failures fixed at new head; #170 CI pending | Integrating verified slices while keeping the Stage 0 retirement boundary explicit. |
+| Engineering director | Active | PRs #167–#170 | Seed CI, distribution, integration and evidence | PRs #167/#168 merged; #169 rerunning after its PATH fixes; #170 rerunning after the drop regression fix | Integrating verified slices while keeping the Stage 0 retirement boundary explicit. |
 | Stage 0 dependency auditor | Complete | None | None | Source audit; no tests run | Dependencies classified A–G; no edits |
 | Self-hosting auditor | Complete | None | None | Source audit plus measured Gen chain and 87-program coverage (below) | Driver self-rebuild verified; blockers ranked |
 | Static consumer auditor | Complete | `codex/stage0-audit` | `STAGE0_DEPENDENCY_AUDIT.md` | Read-only grep audit with file:line | Consumer inventory integrated |
-| Seed/CI engineer | PR #167 open | `codex/versioned-seeds`, head `4c26152` | `.github/workflows/stage0-free-bootstrap.yml`, `scripts/bootstrap/seeds/*`, verifier/audit and tests | 17/17 bootstrap/audit tests pass; local Windows fixpoint, 7 smoke and 4 reject pass; Linux bootstrap and distribution CI pass; full Windows/MSVC suite remains in progress. | Pinned ELF/PE seeds and isolated bootstrap PATH are implemented; awaiting the final Windows suite. |
+| Seed/CI engineer | Complete | PR #167 merged at `2fa0af8` | `.github/workflows/stage0-free-bootstrap.yml`, `scripts/bootstrap/seeds/*`, verifier/audit and tests | Linux/Windows bootstrap, docs and distribution checks passed; full Windows/MSVC suite and ELF execution passed. 17 bootstrap/audit tests pass. | Versioned ELF/PE seeds are in main; the transitional Cargo seed job is removed. |
 | Frontend choose-expression engineer | Complete | PR #168 merged at `4444e02` | `compiler-l` frontend and corpus regressions | CI passed on Linux/Windows; native corpus and ELF execution checks passed | `choose_expression` is removed from main's known gaps. |
 | Choice Text payload engineer | PR #170 open | `codex/choice-text-payload`, head `c3840d5` | Enum construction/match lowering and corpus regressions | Prior Gen3 PE corpus: 95 cases, 91 PASS, 4 XFAIL, 0 FAIL/XPASS; rebase onto merged #168 is clean; PR CI pending | `choice_text_payload` implementation and use-after-move rejection are under CI review. |
-| Distribution engineer | PR #169 open | `codex/stage0-free-distribution`, head `63ed9cd` | Distribution workflow, package builder, installers and docs | 7 package fixpoint tests and 17 bootstrap/audit tests pass; local restricted-PATH Windows package/install passes. First CI run exposed missing `gzip` and nested `powershell`; fixes pushed and branch rebased onto current main. | Removes Cargo/Stage0 fallbacks and packages only from pinned host-native seeds. |
+| Distribution engineer | PR #169 open | `codex/stage0-free-distribution`, head `07ba2ba` | Distribution workflow, package builder, installers and docs | 7 package fixpoint tests and 17 bootstrap/audit tests pass; local restricted-PATH Windows package/install passes. First CI run exposed missing `gzip` and nested `powershell`; fixes pushed and branch rebased onto current main. | Removes Cargo/Stage0 fallbacks and packages only from pinned host-native seeds. |
 | Stage 0 path audit | Complete | Local changes included in PR #167 worktree | `tools/audit_stage0_paths.py`, `tests/bootstrap/test_stage0_path_audit.py` | Tests cover allowlisted references, new paths/tokens/counts, history classification, binary seeds and fail-closed reads | Migration allowlist/count gate now runs in both seed jobs. |
 | Frontend fix (choose on Text, lexer diagnostics) | Complete | PR #161, merged at `ce69d15` | compiler-l frontend, driver regressions, corpus | PR #161 merged; its report records 5 regression tests and corpus 83 pass / 5 XFAIL | Text/Int/Bool choose literals and positioned lexer errors fixed; unrelated expression gap remains. |
 | Backend fix (runtime trap diagnostics) | Complete | PR #162, merged at `79b937c` | compiler-l codegen/runtime, trap regression tests | PR #162 merged; seven diagnostic tests and Linux/Windows integration checks reported passing | Native runtime traps now report stderr diagnostics while retaining documented exit codes. |
@@ -42,12 +42,12 @@ Estimated completion: **35%** against final acceptance criteria. Seed/bootstrap 
 | #164 | Fold constant expressions in the ELE driver frontend | Merged at `8d9d789` | Constant folding now exists in the ELE frontend | #161 | Merged |
 | #165 | Run driver regressions and trap diagnostics on Linux | Merged at `049231f` | Linux regression and trap suites wired into CI | #161, #162 | Merged |
 | #166 | Structural verification for native PE32+ images | Merged at `91006b9` | Python backend suite and Windows verifier checks passed | None | Merged |
-| #167 | Versioned independent ELF/PE seeds and toolchain-free bootstrap | Open | Linux, bootstrap, distribution and docs green; full Windows/MSVC suite still running at head `4c26152` | #166 | Pending required checks |
+| #167 | Versioned independent ELF/PE seeds and toolchain-free bootstrap | Merged at `2fa0af8` | Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed | #166 | Merged |
 | #168 | Value-producing `choose` expressions | Merged at `4444e02` | Linux/Windows and native execution checks green | #161, #164 | Merged |
-| #169 | Stage0-free native-seed distribution and package-only installers | Open | First run failed at installer steps; fixes for `gzip` and direct `pwsh` script execution pushed; branch rebased on main at `63ed9cd`, CI rerun pending | #167 | Pending required checks |
+| #169 | Stage0-free native-seed distribution and package-only installers | Open | Fixes for `gzip` and direct `pwsh` execution pushed; rebased on updated main; current CI at head `07ba2ba` is running | #167 merged | Pending required checks |
 | #170 | Owned Text payloads in native choice matches | Open | CI pending; rebased onto main after #168 | #168 | Pending required checks |
 
-The connected GitHub query above is a historical baseline only. Current open PRs and their exact status are listed in the table; #167 is the independent-seed PR, #169 is distribution, and #170 is native choice Text payload support.
+The connected GitHub query above is a historical baseline only. PR #167 merged and #168 merged; current open work is #169 distribution and #170 native choice Text payload support.
 
 ## Dependency snapshot
 
@@ -152,4 +152,4 @@ The 26 heap-trace tests depend on an allocation-trace feature that the ELE backe
 
 Gen2 and Gen3 come out bitwise identical across hosts even when the seeds differ: CI and local seed hashes differed, yet Gen2/Gen3 matched exactly.
 
-Remaining trust gap: current main still produces the seed by Stage 0 in that transitional job. PR #167 removes that job and adds committed ZIP seeds plus a pinned manifest and archive verifier; Linux/bootstrap CI and local PE bootstrap pass, while the full Windows/MSVC suite is still running.
+PR #167 removed the transitional Cargo seed job and added committed ZIP seeds plus a pinned manifest and archive verifier. Linux/Windows bootstrap and native validation passed. Stage 0 remains active elsewhere in the compiler, primary build/test workflows and historical integration suites.

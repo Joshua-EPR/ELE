@@ -1,21 +1,21 @@
 # Stage 0 dependency audit
 
 Audit date: 2026-11-24
-Current `main`: `4444e0252b07726bac86a2363f7a9be1a4cb960a` (PR #168).
-The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status has since been updated through PR #168. PR #168 adds value-producing `choose` expressions and removes that corpus gap. PR #167 is still validating pinned seeds and Stage-0-free bootstrap; PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds; PR #170 is implementing owned Text payload matches. Those open changes do not yet remove the audited Rust/Cargo/Cranelift compiler and test dependencies.
+Current `main`: `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged).
+The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status has since been updated through PR #168 and the seed/bootstrap portion of #167. PR #168 adds value-producing `choose` expressions and removes that corpus gap. PR #167 pins ELF/PE seeds and removes the transitional Cargo seed job. PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds; PR #170 implements owned Text payload matches. The latter two are open. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
 Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was excluded.
 
 ## Latest execution snapshot
 
 - PR #168 (`4444e02`) is merged. Its Linux/Windows native checks and ELF execution passed.
-- PR #167 (`4c26152`) pins ELF64/PE32+ seed artifacts, removes the Cargo seed job, and validates seed → Gen1′ → Gen2 → Gen3 with compiler tools absent from runner PATH. Linux and bootstrap checks pass; the full Windows/MSVC workflow is still running.
-- PR #169 (`4f3b7c4`) makes distribution require an explicit native seed, removes Stage 0/Cargo/cached-driver fallbacks, restricts distribution PATH, and makes installers consume package archives. Its first CI run found missing `gzip` and a nested `powershell` command after PATH isolation; both fixes are pushed and awaiting rerun.
-- PR #170 (`c3840d5`) adds owned Text payloads to `choice` match lowering and a use-after-move rejection case. CI is pending.
+- PR #167 (`2fa0af8`) pins ELF64/PE32+ seed artifacts, removes the Cargo seed job, and validates seed → Gen1′ → Gen2 → Gen3 with compiler tools absent from runner PATH. Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed; merged.
+- PR #169 (`07ba2ba`) makes distribution require an explicit native seed, removes Stage 0/Cargo/cached-driver fallbacks, restricts distribution PATH, and makes installers consume package archives. Its first CI run found missing `gzip` and a nested `powershell` command after PATH isolation; both fixes are pushed and the rebased CI is running.
+- PR #170 (`1bdd54b`) adds owned Text payloads to `choice` match lowering and a use-after-move rejection case. CI is rerunning after replacing the obsolete rejection test with a positive drop-glue regression.
 - Stage 0, Rust/Cargo and Cranelift remain active in the compiler, historical suites and primary build workflow. Do not declare full independence or remove `crates/l` yet.
 
 ## Current branch delta: versioned independent seeds (PR #167)
 
-On PR #167 (`codex/versioned-seeds`), the transitional Cargo seed job is removed. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary-format identification before extraction. The bootstrap runner adds a scoped `tools/audit_stage0_paths.py --enforce` ratchet, and both OS jobs reduce `PATH` to required runtime utilities so Rust, GCC/Clang, linkers and Stage 0 executables are not resolvable. The audit keeps path-specific migration references and exact counts; historical documents are reported separately. Local bootstrap and unit tests pass. Linux and bootstrap checks pass on GitHub; the full Windows/MSVC suite remains in progress.
+PR #167 (`codex/versioned-seeds`) merged the seed-job removal. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary-format identification before extraction. The bootstrap runner adds a scoped `tools/audit_stage0_paths.py --enforce` ratchet, and both OS jobs reduce `PATH` to required runtime utilities so Rust, GCC/Clang, linkers and Stage 0 executables are not resolvable. The audit keeps path-specific migration references and exact counts; historical documents are reported separately. Linux and Windows bootstrap, native execution and full Windows/MSVC checks passed.
 
 ## Findings
 
