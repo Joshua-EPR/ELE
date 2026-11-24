@@ -1,0 +1,2 @@
+non_exhaustive_choose_text.l:3:5: error[L0004]
+match no exhaustivo sobre Text: falta el caso _

@@ -35,7 +35,7 @@ flow lirUtf8(bytes: edit List of[Int], scalar: Int) {
 }
 
 // Decode the escapes of a literal span already validated by the lexer.
-flow lirDecode(source: view Text, start: Int, end: Int) => List of[Int] {
+expose flow lirDecode(source: view Text, start: Int, end: Int) => List of[Int] {
     change bytes: List of[Int] = List[]
     change i = start
     during i < end {
