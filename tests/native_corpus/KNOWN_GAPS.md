@@ -13,6 +13,7 @@ targets.
 
 | Case | Driver behavior | Stage 0 behavior |
 |---|---|---|
+| `option_default_owned_payload` | rejects `Option<Text> ?? fallback` with `error[L0016]` until branch-sensitive ownership/drop lowering is verified | compiles and prints the expected output |
 | `result_propagation` | rejects `half(n)?` with `error[L0016]: expresión fuera del subconjunto verificado de Stage 1` | compiles and prints the expected output |
 
 `choose_expression` is implemented through the shared match coverage, arm
@@ -22,9 +23,10 @@ statement form. The native corpus exercises owned and primitive results.
 `option_default` is implemented for drop-free native-supported `Option<T>`
 payloads. The positive corpus covers `Some` and `None`, Int and Bool payloads,
 and confirms the fallback is evaluated only on the `None` branch. A mismatched
-fallback type is rejected with `L0003`. Owner-bearing payloads are explicitly
-rejected with `L0016` and covered as a negative case until branch-sensitive
-drop handling passes without LIR verifier errors.
+fallback type is rejected with `L0003`. Owner-bearing payloads remain an active
+gap: `option_default_owned_payload` has a positive expected-output fixture and
+stays in `known_gaps.txt` until branch-sensitive drop handling passes without
+LIR verifier errors.
 
 ## Stage 0 divergences (not driver gaps)
 

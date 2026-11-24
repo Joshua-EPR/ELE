@@ -1,2 +1,0 @@
-option_default_owned_payload.l:3:11: error[L0016]
-payload propietario de Option con ?? fuera del subconjunto verificado
