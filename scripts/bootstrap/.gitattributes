@@ -1,0 +1,6 @@
+# The POSIX bootstrap must keep LF endings on every checkout (incl. Windows).
+*.sh text eol=lf
+# Smoke manifests are parsed line by line by both scripts.
+*.txt text eol=lf
+# Expected stdout is compared byte for byte; never convert line endings.
+*.stdout -text
