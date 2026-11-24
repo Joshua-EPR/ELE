@@ -32,7 +32,10 @@ flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree
     // its owner (L0016, never an unchecked copy).
     hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
     hold scrut_place = ctx.lir.place
-    when owned_scrut && scrut_place >= 0 {
+    // A Text scrutinee is only read (length and bytes) by literal tests, so
+    // a borrowed or projected place is examined in place, never copied.
+    hold text_in_place = scrut_t == 5 && scrut_place >= 0
+    when owned_scrut && scrut_place >= 0 && !text_in_place {
         when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
             lirMarkUnsupported(edit ctx.lir, expr.start)
         }
@@ -65,8 +68,16 @@ flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree
             }
             _ : {}
         }
+        match_covered = match_covered || semaPrimitiveMatchCovered(edit ctx, source, tree, expr, scrut_t)
     }
-    hold scrut_var = lirMatchScrutVar(edit ctx, scrut_t)
+    change scrut_var = -1
+    change text_place = -1
+    when text_in_place {
+        text_place = scrut_place
+        lirDiscard(edit ctx)
+    } otherwise {
+        scrut_var = lirMatchScrutVar(edit ctx, scrut_t)
+    }
     hold join = flowBlock(edit ctx.flow)
     // The scope of an owned temporary scrutinee is the whole match.
     semaScopeEnter(edit ctx)
@@ -80,7 +91,7 @@ flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree
         hold body_stmt = tree.extra[first_arm + 3 * i + 2]
         hold arm_body = flowBlock(edit ctx.flow)
         hold next_test = flowBlock(edit ctx.flow)
-        hold is_wildcard = lirMatchArmTest(edit ctx, source, tree, p_start, p_end, scrut_var, scrut_t, arm_body, next_test, i == arm_count - 1 && match_covered)
+        hold is_wildcard = lirMatchArmTest(edit ctx, source, tree, p_start, p_end, scrut_var, text_place, scrut_t, arm_body, next_test, i == arm_count - 1 && match_covered)
         ctx.flow.current = arm_body
         scopePush(edit ctx.scopes)
         semaScopeEnter(edit ctx)

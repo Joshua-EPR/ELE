@@ -9,6 +9,8 @@ take sema_context
 take sema_drop
 take sema_lower
 take lir_builtin_union
+take lir_emit
+take sema_match_coverage
 
 // Statement lowering helpers for the semantic pass (sema_stmt.l). They run
 // right after the statement's CFG events, so the instructions they emit sit
@@ -99,13 +101,92 @@ expose flow lirMatchScrutVar(ctx: edit SemaContext, scrut_t: Int) => Int {
     give v
 }
 
-expose flow lirMatchArmTest(ctx: edit SemaContext, source: view Text, tree: view AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) => Bool {
+// Branch of the current block on `cond`: to `then_block` when true,
+// otherwise to `else_block`.
+flow lirBranchOn(ctx: edit SemaContext, cond: Int, then_block: Int, else_block: Int) {
+    ctx.lir.val = cond
+    ctx.lir.place = -1
+    lirCondition(edit ctx)
+    flowLink(edit ctx.flow, then_block, else_block)
+}
+
+// Test of one literal arm over Int, Bool or Text (semaPrimitiveMatchCovered
+// already checked the pattern types and coverage). Int and Bool compare the
+// scrutinee with the constant. Text has no equality instruction: compare the
+// byte length, then each byte of the decoded literal in its own block, read
+// with `byte_at` from the scrutinee place (never moved or copied).
+flow lirPrimArmTest(ctx: edit SemaContext, source: view Text, p_start: Int, p_end: Int, scrut_var: Int, scrut_place: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) => Bool {
+    when is_last {
+        // Only `true`/`false` both present makes a final literal arm total.
+        flowLink(edit ctx.flow, arm_body, -1)
+        give true
+    }
+    hold kind = semaPrimPatternKind(source, p_start, p_end)
+    when kind == PRIM_PATTERN_BINDER {
+        // A binder matches every value like `_`; its lowering is
+        // unsupported (L0016, marked by semaPrimitiveMatchCovered).
+        flowLink(edit ctx.flow, arm_body, -1)
+        give true
+    }
+    when kind != scrut_t {
+        // A mismatched pattern was already reported: keep the CFG well formed.
+        hold never = lirConst(edit ctx.lir, LIR_CONST_BOOL, 0, 0, 0)
+        hold cond = lirNew(edit ctx, 4, false, LIR_USE, never, 0, 0)
+        lirBranchOn(edit ctx, cond, arm_body, next_test)
+        give false
+    }
+    when kind == 1 || kind == 4 {
+        change target = LIR_NONE
+        when kind == 1 {
+            target = lirConst(edit ctx.lir, LIR_CONST_INT, semaPrimPatternInt(source, p_start, p_end), 0, 0)
+        } otherwise {
+            change truth = 0
+            when source@byteAt(p_start) == 116 { truth = 1 }
+            target = lirConst(edit ctx.lir, LIR_CONST_BOOL, truth, 0, 0)
+        }
+        hold cond = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, scrut_var, target)
+        lirBranchOn(edit ctx, cond, arm_body, next_test)
+        give false
+    }
+    change place = scrut_place
+    when place < 0 { place = lirPlaceVar(edit ctx.lir, scrut_var) }
+    hold bytes = lirDecode(source, p_start + 1, p_end - 1)
+    hold length = lirNew(edit ctx, 1, false, LIR_LEN, place, 0, 0)
+    hold expected = lirConst(edit ctx.lir, LIR_CONST_INT, bytes.length, 0, 0)
+    hold same_length = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, length, expected)
+    when bytes.length == 0 {
+        lirBranchOn(edit ctx, same_length, arm_body, next_test)
+        give false
+    }
+    change check = flowBlock(edit ctx.flow)
+    lirBranchOn(edit ctx, same_length, check, next_test)
+    each i among 0..bytes.length {
+        ctx.flow.current = check
+        hold index = lirConst(edit ctx.lir, LIR_CONST_INT, i, 0, 0)
+        hold actual = lirVar(edit ctx.lir, 1, false)
+        lirAt(edit ctx, LIR_BYTE_AT, actual, place, index, 0)
+        hold literal = lirConst(edit ctx.lir, LIR_CONST_INT, bytes[i], 0, 0)
+        hold same_byte = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, actual, literal)
+        when i == bytes.length - 1 {
+            lirBranchOn(edit ctx, same_byte, arm_body, next_test)
+        } otherwise {
+            check = flowBlock(edit ctx.flow)
+            lirBranchOn(edit ctx, same_byte, check, next_test)
+        }
+    }
+    give false
+}
+
+expose flow lirMatchArmTest(ctx: edit SemaContext, source: view Text, tree: view AstTree, p_start: Int, p_end: Int, scrut_var: Int, scrut_place: Int, scrut_t: Int, arm_body: Int, next_test: Int, is_last: Bool) => Bool {
     // A wildcard needs no discriminant or payload binding. A proven final
     // named arm is handled by its type-specific branch below: builtin
     // Option/Result arms must still bind their payloads before entry.
     when p_end - p_start == 1 && source@byteAt(p_start) == 95 {
         flowLink(edit ctx.flow, arm_body, -1)
         give true
+    }
+    when scrut_t == 1 || scrut_t == 4 || scrut_t == 5 {
+        give lirPrimArmTest(edit ctx, source, p_start, p_end, scrut_var, scrut_place, scrut_t, arm_body, next_test, is_last)
     }
     change enum_decl = -1
     change elem_t = -1
@@ -194,7 +275,9 @@ expose flow lirMatchArmTest(ctx: edit SemaContext, source: view Text, tree: view
             give false
         }
     }
-    when enum_decl >= 0 { lirMarkUnsupported(edit ctx.lir, p_start) }
+    // No test was emitted for this pattern: the arm cannot be lowered
+    // (an unconditioned branch would be invalid LIR, never a silent default).
+    lirMarkUnsupported(edit ctx.lir, p_start)
     flowLink(edit ctx.flow, arm_body, next_test)
     give false
 }

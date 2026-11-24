@@ -2,36 +2,9 @@ take lexer
 take tokens
 take cursor
 
-flow problemMessage(problem: view LexProblem) => Text {
-    choose problem {
-        LexProblem.UnexpectedByte : { give "carácter inválido o fuera del subconjunto léxico" }
-        LexProblem.UnclosedComment : { give "comentario sin cerrar" }
-        LexProblem.UnsupportedNumber : { give "literal de punto flotante fuera del subconjunto léxico" }
-        LexProblem.UnclosedString : { give "cadena sin cerrar" }
-        LexProblem.InvalidEscape : { give "escape no implementado o inválido" }
-        LexProblem.InvalidUnicodeEscape : { give "escape Unicode inválido" }
-        LexProblem.InvalidUnicodeScalar : { give "scalar Unicode inválido" }
-        LexProblem.UnclosedInterpolation : { give "interpolación sin cerrar: falta '}}'" }
-        LexProblem.UnopenedBrace : { give "llave '}}' sin apertura en Text; use '}}}}' para una llave literal" }
-        LexProblem.ExcessiveDepth : { give "límite de anidamiento Text (64) excedido" }
-    }
-}
-
 flow reportLexError(path: view Text, source: view Text, error: view LexError) {
-    hold offset = error.offset
-    hold message = problemMessage(error.problem)
-    change line = 1
-    change column = 1
-    each i among lexStart(source)..offset {
-        hold b = source@byteAt(i)
-        when b == 10 {
-            line += 1
-            column = 1
-        } otherwise when b < 128 || b >= 192 {
-            column += 1
-        }
-    }
-    printError("{path}:{line}:{column}: {message} (byte {offset})")
+    hold no_prefix = ""
+    printError(lexDiagnostic(path, source, error, view no_prefix))
 }
 
 flow reportFileError(path: view Text, code: Int) => Int {
