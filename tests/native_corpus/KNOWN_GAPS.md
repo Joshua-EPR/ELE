@@ -8,13 +8,12 @@ ELE-written driver gains the feature.
 
 Observed with the driver `compiler-l/src/main_driver.l` built by Stage 0
 (Cranelift, Windows) and with the ELF64 driver it rebuilds, on PE32+ and
-ELF64 alike: both remaining cases are front-end rejections, so they apply to `all`
+ELF64 alike: the remaining case is a front-end rejection, so it applies to `all`
 targets.
 
 | Case | Driver behavior | Stage 0 behavior |
 |---|---|---|
 | `option_default_owned_payload` | rejects `Option<Text> ?? fallback` with `error[L0016]` until branch-sensitive ownership/drop lowering is verified | compiles and prints the expected output |
-| `result_propagation` | rejects `half(n)?` with `error[L0016]: expresión fuera del subconjunto verificado de Stage 1` | compiles and prints the expected output |
 
 `choose_expression` is implemented through the shared match coverage, arm
 testing, payload binding, ownership and result-slot lowering used by the
@@ -27,6 +26,12 @@ fallback type is rejected with `L0003`. Owner-bearing payloads remain an active
 gap: `option_default_owned_payload` has a positive expected-output fixture and
 stays in `known_gaps.txt` until branch-sensitive drop handling passes without
 LIR verifier errors.
+
+`result_propagation` is implemented for `Option<T>?` and `Result<T, E>?` in the
+existing native frontend. The success payload flows into the expression result;
+the None/Err branch propagates from the enclosing function, and `Result` error
+types must match. Positive corpus cases cover both branches and owned payloads;
+negative cases cover incompatible return/error types and use after consumption.
 
 ## Stage 0 divergences (not driver gaps)
 
