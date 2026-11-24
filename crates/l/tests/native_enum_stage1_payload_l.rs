@@ -198,11 +198,11 @@ fn enum_payload_missing_argument_is_rejected_by_stage1() {
 }
 
 #[test]
-fn enum_payload_resource_type_is_rejected_until_drops_are_native() {
+fn enum_text_payload_is_dropped_by_the_native_backend() {
     let base = root();
-    let temp = base.join("target/stage1-tests/enum-payload-negative");
+    let temp = base.join("target/stage1-tests/enum-text-payload-drop");
     fs::create_dir_all(&temp).unwrap();
-    let source = temp.join("owned_text.l");
+    let source = temp.join("owned_text_drop.l");
     fs::write(&source, "enum Estado { No, Texto(Text) }\nfn main() -> Int { let e = Estado.Texto(\"abc\")\n return 0\n}\n").unwrap();
     let result = Command::new(sema())
         .arg(&source)
@@ -210,9 +210,38 @@ fn enum_payload_resource_type_is_rejected_until_drops_are_native() {
         .output()
         .unwrap();
     assert!(
-        !result.status.success(),
-        "owned enum payload needs verified drops"
+        result.status.success(),
+        "Text enum payload must be accepted once native drop glue is available: {}",
+        String::from_utf8_lossy(&result.stderr)
     );
+    let lir = String::from_utf8(result.stdout).unwrap();
+    assert!(lir.contains("i variant "), "{lir}");
+    assert!(lir.contains("i drop "), "owned enum must be dropped on return: {lir}");
+
+    let lir_file = temp.join("owned_text_drop.lir");
+    let executable = temp.join("owned_text_drop.elf");
+    fs::write(&lir_file, &lir).unwrap();
+    let compiled = Command::new(native())
+        .arg(&lir_file)
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "native backend must emit enum Text drop glue: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let bytes = fs::read(&executable).unwrap();
+    assert_eq!(&bytes[..7], b"\x7fELF\x02\x01\x01");
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).unwrap();
+        let actual = Command::new(&executable).output().unwrap();
+        assert_eq!(actual.status.code(), Some(0), "{}", String::from_utf8_lossy(&actual.stderr));
+    }
 }
 
 fn reject_match_source(name: &str, source: &str) {
