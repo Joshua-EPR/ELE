@@ -1,0 +1,2 @@
+choose_non_exhaustive.l:2:10: error[L0004]
+match no exhaustivo sobre Bool

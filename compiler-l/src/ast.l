@@ -19,6 +19,7 @@ expose choice AstExprKind {
     ArrayLit
     ListLit
     Match
+    Choose
     Named
 }
 
@@ -291,6 +292,7 @@ flow astExprKindName(kind: AstExprKind) => Text {
         AstExprKind.ArrayLit : { give "ArrayLit" }
         AstExprKind.ListLit : { give "ListLit" }
         AstExprKind.Match : { give "Match" }
+        AstExprKind.Choose : { give "Choose" }
         AstExprKind.Named : { give "Named" }
     }
 }
