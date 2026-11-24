@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 import zipfile
@@ -21,6 +22,24 @@ class SeedArchiveTests(unittest.TestCase):
             with self.subTest(target=target):
                 seed = verify_seed_archive(SEEDS / record["archive"], target, self.manifest)
                 self.assertEqual(len(seed), record["seed_size"])
+
+    def test_manifest_source_hashes_match_lf_and_windows_checkouts(self):
+        provenance = self.manifest["provenance"]
+        source = (ROOT / provenance["driver_source"]).read_bytes()
+        lf_source = source.replace(b"\r\n", b"\n")
+        crlf_source = lf_source.replace(b"\n", b"\r\n")
+        self.assertEqual(
+            hashlib.sha256(lf_source).hexdigest(),
+            provenance["driver_source_blob_sha256"],
+        )
+        self.assertEqual(
+            hashlib.sha256(lf_source).hexdigest(),
+            provenance["driver_source_checkout_sha256"]["elf"],
+        )
+        self.assertEqual(
+            hashlib.sha256(crlf_source).hexdigest(),
+            provenance["driver_source_checkout_sha256"]["pe"],
+        )
 
     def test_tampered_archive_is_rejected(self):
         record = self.manifest["targets"]["pe"]

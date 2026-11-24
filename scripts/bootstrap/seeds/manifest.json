@@ -7,7 +7,15 @@
     "workflow_run_url": "https://github.com/Joshua-EPR/ELE/actions/runs/45494392548",
     "workflow_run_head": "122c411eff59687f3a33abbe0470137517126b8c",
     "driver_source": "compiler-l/src/main_driver.l",
-    "driver_source_sha256": "ca3fbc8eaa29ed195155b2c130c8deb11b5aabeec3acfd2aaacde82ff8772939",
+    "driver_source_blob_sha256": "6cef09cd828581c47f4b9938e1ed1746c4fe7aab2040c19a9ff731c1cd9fcd2d",
+    "driver_source_checkout_sha256": {
+      "elf": "6cef09cd828581c47f4b9938e1ed1746c4fe7aab2040c19a9ff731c1cd9fcd2d",
+      "pe": "ca3fbc8eaa29ed195155b2c130c8deb11b5aabeec3acfd2aaacde82ff8772939"
+    },
+    "checkout_line_endings": {
+      "elf": "LF",
+      "pe": "CRLF"
+    },
     "generated_utc_date": "2026-11-24",
     "generator": "Stage 0 project-l; Cranelift for PE32+ and rustc backend for ELF64",
     "verification": "The seed and Stage-0-free Gen1-to-Gen3 bootstrap jobs passed in the linked workflow run."
