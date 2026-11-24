@@ -20,7 +20,7 @@ Estimated completion: **15%** against the requested final acceptance criteria. T
 | Stage 0 dependency auditor | Complete | None | None | Source audit; no tests run | Dependencies classified A–G; no edits |
 | Self-hosting auditor | Complete | None | None | Source audit plus measured Gen chain and 87-program coverage (below) | Driver self-rebuild verified; blockers ranked |
 | Static consumer auditor | Complete | `codex/stage0-audit` | `STAGE0_DEPENDENCY_AUDIT.md` | Read-only grep audit with file:line | Consumer inventory integrated |
-| Bootstrap/CI engineer | In progress | `feat/stage0-free-seed-bootstrap` | `scripts/bootstrap/*`, new workflow | Pending | Pending |
+| Bootstrap/CI engineer | Complete | PR #159, merged at `4d034d2` | `scripts/bootstrap/*`, `.github/workflows/stage0-free-bootstrap.yml`, `docs/STAGE0_FREE_BOOTSTRAP.md` | Local: PE Gen1'=Gen2=Gen3 `0fa24fe4…`; ELF in WSL `77666ed0…`; smoke 7/7; reject 4/4. CI run 45442400955: all jobs green | The bootstrap jobs run with Rust removed from PATH. The seed still comes from Stage 0 in the `seed` job. |
 | Test/regression engineer | In progress | `test/native-conformance-corpus` | `tests/native_corpus/*` | Pending | Pending |
 | Frontend fix (choose on Text, lexer diagnostics) | In progress | `fix/driver-choose-text-and-lexer-diagnostics` | compiler-l frontend | Pending | Pending |
 | Backend fix (runtime trap diagnostics) | In progress | `fix/native-runtime-trap-diagnostics` | compiler-l codegen | Pending | Pending |
@@ -31,7 +31,7 @@ Estimated completion: **15%** against the requested final acceptance criteria. T
 | PR | Objective | State | CI | Dependencies | Merge |
 |---|---|---|---|---|---|
 | #158 | ELE v2 migration CI corrections | Merged at `d27dc67` | Connected diagnostics: Linux/Windows and distribution jobs succeeded; differential CFG job skipped | Historical CI fix | Already merged |
-| New Stage 0 work | None created during baseline | None | N/A | Audit and validated implementation slice required | N/A |
+| #159 | Stage-0-free seed bootstrap (scripts and CI job) | Merged at `4d034d2` | All checks green, including `bootstrap ELF64/PE32+ without Rust` | None | Merged after review |
 
 The connected GitHub query returned no open PRs at the time of inspection.
 
@@ -122,3 +122,18 @@ The driver runs these phases:
    - Runtime traps exit 125/126/127 silently. In progress.
 
 The 26 heap-trace tests depend on an allocation-trace feature that the ELE backend lacks. It needs an ELE-side equivalent before those tests can move.
+
+## Stage-0-free stretch now in CI (PR #159)
+
+`stage0-free-bootstrap.yml` runs on `ubuntu-latest` and `windows-latest` with `cargo`, `rustc` and `rustup` removed from PATH. The job asserts that none of them resolves. Each run then does the following:
+
+- checks the seed's SHA-256;
+- rebuilds the driver: seed → Gen1' → Gen2 → Gen3;
+- requires Gen2 == Gen3 bitwise;
+- runs 7 smoke programs, comparing stdout and exit code exactly;
+- requires 4 invalid programs to be rejected;
+- writes `provenance.json` and `SHA256SUMS`.
+
+Gen2 and Gen3 come out bitwise identical across hosts even when the seeds differ: CI and local seed hashes differed, yet Gen2/Gen3 matched exactly.
+
+Remaining trust gap: the seed is still produced by Stage 0 in the transitional `seed` job. The next step is a published release with a hash-pinned seed, which needs the owner's approval because it publishes content.
