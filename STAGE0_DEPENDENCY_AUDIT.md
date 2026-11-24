@@ -7,7 +7,7 @@ Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was exclud
 
 ## Current branch delta: versioned independent seeds
 
-On `codex/versioned-seeds` (not yet pushed or reviewed), the transitional Cargo seed job is removed. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary format before extraction. Five archive tests pass, and the local Windows PE seed bootstrap reached Gen1′ → Gen2 → Gen3 with Gen2 == Gen3 and Rust/Cargo absent from PATH. Ubuntu native execution and both GitHub bootstrap jobs remain pending, so this change is not yet verified in CI.
+On PR #167 (`codex/versioned-seeds`), the transitional Cargo seed job is removed. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary-format identification before extraction. The bootstrap runner adds a scoped `tools/audit_stage0_paths.py --enforce` ratchet, and both OS jobs reduce `PATH` to required runtime utilities so Rust, GCC/Clang, linkers and Stage 0 executables are not resolvable. The audit keeps path-specific migration references and exact counts; historical documents are reported separately. Local bootstrap and unit tests pass; the PATH restriction and audit gate await CI for the latest PR head.
 
 ## Findings
 

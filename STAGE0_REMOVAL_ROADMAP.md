@@ -35,7 +35,8 @@ Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e
 ## Phase 4 — Remove bootstrap dependencies from CI and distribution
 
 - [x] Add a reproducible bootstrap from a hash-checked seed without Rust/Cargo/Cranelift (PR #159). The seed is still produced by Stage 0.
-- [ ] Commit versioned, hash-pinned ELF64 and PE32+ seeds; remove the transitional Cargo `seed` job. Implemented locally on `codex/versioned-seeds`; PR and Ubuntu/Windows CI are pending.
+- [ ] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job. PR #167 is open; seed bootstrap passed both native runners at head `13addb1`. A scoped Stage 0 route audit and minimal PATH isolation were added after that run and are awaiting CI.
+- [x] Add a CI migration ratchet that separates historical from active Stage 0 references, pins per-route reference counts and fails on new unlisted active occurrences (`tools/audit_stage0_paths.py`); enforce it in both native seed bootstrap jobs.
 - [x] First Stage-0-free regression suite: `tests/native_corpus`, initially 85 cases in PR #160; current main has 94 cases. Local Windows PE run: 89 PASS, 5 XFAIL; no FAIL/XPASS.
 - [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
