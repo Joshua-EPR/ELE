@@ -1,0 +1,7 @@
+# Invalid programs Gen3 must reject: non-zero exit, the listed diagnostic code
+# on stderr, and no output image written.
+# Format: name|source (repo-relative)|expected exit code|required stderr substring
+immutable|examples/invalid/immutable.l|1|error[L0006]
+text_moved|examples/invalid/text_moved.l|1|error[L0005]
+return_type|examples/invalid/return.l|1|error[L0003]
+unknown_ident|examples/invalid/unknown.l|1|error[L0001]
