@@ -97,10 +97,10 @@ expose flow semaEnumMatchCovered(ctx: edit SemaContext, source: view Text, tree:
                     semaAddError(edit ctx, "L0004", "patrón de payload mal formado", p_start, p_end)
                     valid = false
                 } otherwise {
-                    // In the native Stage 1 subset a primitive payload arm
-                    // binds exactly one identifier (or '_'). Do not accept
-                    // literals, multiple binders or arbitrary expressions
-                    // here: they have no verified lowering or move paths.
+                    // In the native Stage 1 subset a payload arm binds exactly
+                    // one identifier (or '_'). Do not accept literals,
+                    // multiple binders or arbitrary expressions here: they
+                    // have no verified lowering or move paths.
                     hold first = open + 1
                     hold last = p_end - 1
                     change binder_valid = true

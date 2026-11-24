@@ -1,0 +1,2 @@
+choice_text_payload_use_after_move.l:15:13: error[L0005]
+uso de valor movido

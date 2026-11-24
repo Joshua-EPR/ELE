@@ -779,7 +779,7 @@ flow semaEnumVariantCall(ctx: edit SemaContext, source: view Text, tree: view As
                 semaAddError(edit ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
                 give 7
             }
-            when expected != 1 && expected != 4 {
+            when expected != 1 && expected != 4 && expected != 5 {
                 semaAddError(edit ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
                 give 7
             }

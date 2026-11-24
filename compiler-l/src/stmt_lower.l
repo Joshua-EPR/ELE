@@ -410,9 +410,19 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
             give
         }
         hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
-        when ty != 1 && ty != 4 {
+        when ty != 1 && ty != 4 && ty != 5 {
             lirMarkUnsupported(edit ctx.lir, p_start)
             give
+        }
+        // Text is an owned payload. Extracting it consumes the tagged value,
+        // just as the builtin Option/Result lowering does, and keeps the
+        // scrutinee frozen for the rest of this arm.
+        when ty == 5 {
+            semaAccess(edit ctx, scrut_path, scrut_t, ACCESS_MOVE, binding_start, binding_end)
+            when scrut_path >= 0 && scrut_path < ctx.flow.paths.length && ctx.flow.paths[scrut_path].symbol >= 0 {
+                hold frozen = ctx.flow.paths[scrut_path].symbol
+                ctx.frozen_symbols@push(frozen)
+            }
         }
         change enum_id = -1
         each k among 0..ctx.lir_module.en_decl.length {
@@ -427,6 +437,7 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
         lirSetVal(edit ctx, value)
         hold bind_path = ctx.symbols.symbols[sym_id].move_path
         lirLetBind(edit ctx, bind_path, ty, false)
+        when ty == 5 { semaOwn(edit ctx, source, tree, bind_path, ty, binding_start) }
         give
     }
     lirMarkUnsupported(edit ctx.lir, p_start)
