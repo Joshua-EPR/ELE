@@ -42,7 +42,19 @@ fn execute(image: &Path) -> (Option<i32>, String) {
     permissions.set_mode(0o700);
     fs::set_permissions(image, permissions).unwrap();
     let run = Command::new(image).output().unwrap();
-    assert!(run.stderr.is_empty());
+    // A failed index check reports itself (native_trap.l); these LIR
+    // fixtures carry no ` @line:col`, so the line has no position. Every
+    // other run writes nothing to stderr.
+    let expected = match run.status.code() {
+        Some(127) => "ELE: índice fuera de rango\n",
+        _ => "",
+    };
+    assert_eq!(
+        String::from_utf8_lossy(&run.stderr),
+        expected,
+        "{}",
+        image.display()
+    );
     (run.status.code(), String::from_utf8(run.stdout).unwrap())
 }
 

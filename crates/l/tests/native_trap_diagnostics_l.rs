@@ -127,13 +127,10 @@ fn check(name: &str, source: &str, stdout: &str, stderr: &str, code: i32) {
     }
 }
 
-/// Stage 0 (Cranelift) diagnostic for the same source, when this host can
-/// build and run it.
+/// Stage 0 (Cranelift) diagnostic for the same source. The Cranelift
+/// backend only targets Windows x86-64 (L0008 elsewhere).
 fn stage0_stderr(name: &str, source: &str) -> Option<String> {
-    if !cfg!(any(
-        all(windows, target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "x86_64")
-    )) {
+    if !cfg!(all(windows, target_arch = "x86_64")) {
         return None;
     }
     let dir = work(&format!("{name}-stage0"));
