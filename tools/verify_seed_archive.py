@@ -88,11 +88,15 @@ def extract_seed(target: str, output: Path, archive_path: Path | None = None) ->
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     record = manifest["targets"][target]
     archive_path = archive_path or SEEDS / record["archive"]
-    if output.exists():
-        raise FileExistsError(f"refusing to overwrite seed output {output}")
     seed = verify_seed_archive(archive_path, target, manifest)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(seed)
+    try:
+        # Exclusive creation also refuses dangling symlinks and closes the
+        # check-then-write race that Path.exists() would leave open.
+        with output.open("xb") as stream:
+            stream.write(seed)
+    except FileExistsError as exc:
+        raise FileExistsError(f"refusing to overwrite seed output {output}") from exc
     return output
 
 

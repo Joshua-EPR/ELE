@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SEEDS = ROOT / "scripts" / "bootstrap" / "seeds"
-from tools.verify_seed_archive import verify_image, verify_seed_archive  # noqa: E402
+from tools.verify_seed_archive import extract_seed, verify_image, verify_seed_archive  # noqa: E402
 
 
 class SeedArchiveTests(unittest.TestCase):
@@ -58,6 +58,14 @@ class SeedArchiveTests(unittest.TestCase):
             changed_manifest["targets"]["elf"]["archive_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
             with self.assertRaisesRegex(ValueError, "unexpected or missing"):
                 verify_seed_archive(path, "elf", changed_manifest)
+
+    def test_extract_refuses_to_overwrite_existing_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "seed.exe"
+            output.write_bytes(b"keep existing data")
+            with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):
+                extract_seed("pe", output)
+            self.assertEqual(output.read_bytes(), b"keep existing data")
 
 
 if __name__ == "__main__":

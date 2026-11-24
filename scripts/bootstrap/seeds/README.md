@@ -26,4 +26,7 @@ python3 tools/verify_seed_archive.py elf --output ./seed/ele-seed-elf
 ```
 
 The verifier checks the pinned archive and payload hashes, ZIP member names,
-image architecture and binary format. It refuses to overwrite an output file.
+image architecture and binary-format identification fields. Native execution
+and bootstrap smoke tests on each target runner provide the executable check;
+the format parser is not a complete structural ELF/PE validator. Output files
+are created exclusively, so existing paths are never overwritten.
