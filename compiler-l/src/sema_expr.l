@@ -17,6 +17,7 @@ take sema_collection_ops
 take stmt_lower
 take sema_builtin_union
 take lir_builtin_union
+take sema_match_coverage
 
 flow semaCheckConstructor(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, decl_id: Int, struct_t: Int) {
     hold decl = view tree.declarations[decl_id]
@@ -141,6 +142,7 @@ expose flow semaExprMode(ctx: edit SemaContext, source: view Text, tree: view As
     choose tree.expressions[expr_id].kind {
         AstExprKind.ListLit : { ctx.expected_list_type = expected_list }
         AstExprKind.Named : { ctx.expected_list_type = expected_list }
+        AstExprKind.Choose : { ctx.expected_list_type = expected_list }
         _ : {}
     }
     hold ty = semaInferExpr(edit ctx, source, tree, expr_id, mode)
@@ -153,6 +155,132 @@ expose flow semaExprMode(ctx: edit SemaContext, source: view Text, tree: view As
         _ : { ctx.expression_path = -1 }
     }
     give ty
+}
+
+// Lower a value-producing choose using the same coverage, arm tests and
+// payload binding as the statement form. Each arm assigns one shared result
+// slot, while flow ownership remains branch-local until the join.
+flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, mode: Int) => Int {
+    when mode == ACCESS_PLACE {
+        semaAddError(edit ctx, "L0016", "choose produce un valor y no puede usarse como destino", expr.start, expr.end)
+        give 7
+    }
+    hold expected_list = ctx.expected_list_type
+    hold scrut_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_READ)
+    change scrut_path = ctx.expression_path
+    hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
+    hold scrut_place = ctx.lir.place
+    hold text_in_place = scrut_t == 5 && scrut_place >= 0
+    when owned_scrut && scrut_place >= 0 && !text_in_place {
+        when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
+            lirMarkUnsupported(edit ctx.lir, expr.start)
+        }
+    }
+    change covered = false
+    when scrut_t >= 0 && scrut_t < ctx.types.types.length {
+        choose ctx.types.types[scrut_t].kind {
+            SemTypeKind.Option : {
+                when !lirBuiltinSupported(view ctx.types, view ctx.lir_module, scrut_t) { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                covered = semaBuiltinMatchCovered(source, tree, expr, false)
+            }
+            SemTypeKind.Result : {
+                when !lirBuiltinSupported(view ctx.types, view ctx.lir_module, scrut_t) { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                covered = semaBuiltinMatchCovered(source, tree, expr, true)
+            }
+            SemTypeKind.Enum : {
+                hold nominal = ctx.types.types[scrut_t].nominal_id
+                covered = semaEnumMatchCovered(edit ctx, source, tree, expr, nominal)
+                when nominal >= 0 && nominal < tree.declarations.length {
+                    hold decl = view tree.declarations[nominal]
+                    each v among decl.c..(decl.c + decl.d) {
+                        hold variant = view tree.variants[v]
+                        when variant.payload_count > 1 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                        when variant.payload_count == 1 {
+                            hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
+                            when ty != 1 && ty != 4 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                        }
+                    }
+                }
+            }
+            _ : {}
+        }
+        covered = covered || semaPrimitiveMatchCovered(edit ctx, source, tree, expr, scrut_t)
+    }
+    change scrut_var = -1
+    change text_place = -1
+    when text_in_place {
+        text_place = scrut_place
+        lirDiscard(edit ctx)
+    } otherwise {
+        scrut_var = lirMatchScrutVar(edit ctx, scrut_t)
+    }
+    hold join = flowBlock(edit ctx.flow)
+    semaScopeEnter(edit ctx)
+    when owned_scrut && scrut_path < 0 && scrut_place < 0 {
+        scrut_path = semaOwnScrutinee(edit ctx, source, tree, scrut_var, scrut_t, expr.start, expr.end)
+    }
+    change result_t = -1
+    change result_var = -1
+    each i among 0..expr.c {
+        hold p_start = tree.extra[expr.b + 3 * i]
+        hold p_end = tree.extra[expr.b + 3 * i + 1]
+        hold arm_expr = tree.extra[expr.b + 3 * i + 2]
+        hold arm_body = flowBlock(edit ctx.flow)
+        hold next_test = flowBlock(edit ctx.flow)
+        hold is_wildcard = lirMatchArmTest(edit ctx, source, tree, p_start, p_end, scrut_var, text_place, scrut_t, arm_body, next_test, i == expr.c - 1 && covered)
+        ctx.flow.current = arm_body
+        scopePush(edit ctx.scopes)
+        semaScopeEnter(edit ctx)
+        hold frozen_mark = ctx.frozen_symbols.length
+        lirMatchArmBind(edit ctx, source, tree, p_start, p_end, scrut_var, scrut_t, scrut_path)
+        hold temp_mark = ctx.pending_temps.length
+        ctx.expected_list_type = expected_list
+        hold value_t = semaExprMode(edit ctx, source, tree, arm_expr, ACCESS_MOVE)
+        ctx.expected_list_type = -1
+        when result_t < 0 {
+            result_t = value_t
+            when value_t >= 0 && value_t < ctx.types.types.length {
+                hold value = lirTakeOperand(edit ctx, value_t)
+                result_var = lirVar(edit ctx.lir, value_t, false)
+                lirAt(edit ctx, LIR_USE, result_var, value, 0, 0)
+            }
+        } otherwise when !semTypeEquals(view ctx.types, result_t, value_t) {
+            hold expected_name = semTypeName(view ctx.types, source, result_t)
+            hold actual_name = semTypeName(view ctx.types, source, value_t)
+            semaAddError(edit ctx, "L0003", "brazos de choose incompatibles: esperado '{expected_name}', recibido '{actual_name}'", tree.expressions[arm_expr].start, tree.expressions[arm_expr].end)
+        } otherwise {
+            hold value = lirTakeOperand(edit ctx, value_t)
+            lirAt(edit ctx, LIR_USE, result_var, value, 0, 0)
+        }
+        during ctx.frozen_symbols.length > frozen_mark { ctx.frozen_symbols@pop() }
+        during ctx.pending_temps.length > temp_mark {
+            choose ctx.pending_temps@pop() {
+                Some(path) : { flowEvent(edit ctx.flow, FLOW_DROP, path, p_end, p_end) }
+                None : {}
+            }
+        }
+        semaScopeExit(edit ctx, p_end, p_end)
+        scopePop(edit ctx.scopes)
+        flowLink(edit ctx.flow, join, -1)
+        when is_wildcard { leave }
+        ctx.flow.current = next_test
+    }
+    ctx.flow.current = join
+    semaScopeExit(edit ctx, expr.end, expr.end)
+    when result_t < 0 || result_var < 0 {
+        semaAddError(edit ctx, "L0004", "choose requiere al menos un brazo exhaustivo", expr.start, expr.end)
+        lirDiscard(edit ctx)
+        give 7
+    }
+    lirSetVal(edit ctx, result_var)
+    when semaNeedsDrop(edit ctx, source, tree, result_t) {
+        semaTemp(edit ctx, source, tree, result_t, expr.start, expr.end)
+        when ctx.pending_temps.length > 0 {
+            hold path = ctx.pending_temps[ctx.pending_temps.length - 1]
+            semaAccess(edit ctx, path, result_t, mode, expr.start, expr.end)
+        }
+    }
+    give result_t
 }
 
 flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, mode: Int) => Int {
@@ -578,6 +706,9 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
         }
         AstExprKind.Match : {
             give 6
+        }
+        AstExprKind.Choose : {
+            give semaChooseExpr(edit ctx, source, tree, expr, mode)
         }
         _ : {
             semaAddError(edit ctx, "L0016", "expresión fuera del subconjunto verificado de Stage 1", expr.start, expr.end)

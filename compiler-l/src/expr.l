@@ -122,6 +122,49 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
     give lhs
 }
 
+// Value-producing `choose`: keep its arm expressions distinct from the
+// statement `choose` AST, whose bodies are statements and have no value.
+flow parseChooseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], tok: view LexToken, parens: Int, depth: Int) => Int {
+    cursor.pos += 1
+    parserSkipNewlines(edit cursor, tokens)
+    hold scrutinee = parseExpr(edit tree, source, edit cursor, tokens, 0, parens + 1, depth + 1)
+    parserSkipNewlines(edit cursor, tokens)
+    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "{{") { give -1 }
+
+    change arm_starts: List of[Int] = List[]
+    change arm_ends: List of[Int] = List[]
+    change arm_values: List of[Int] = List[]
+    parserSkipSeparators(source, edit cursor, tokens)
+    during !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
+        hold p_start = cursorSpanStart(cursor, tokens, source.byteLength)
+        during cursor.pos < tokens.length && !parserAtSymbol(source, cursor, tokens, ":") && !parserAtSymbol(source, cursor, tokens, "}}") {
+            cursor.pos += 1
+        }
+        hold p_end = cursorPrevEnd(cursor, tokens, p_start)
+        when !parserNeedSymbol(edit tree, source, edit cursor, tokens, ":") { give -1 }
+        parserSkipNewlines(edit cursor, tokens)
+        hold value = parseExpr(edit tree, source, edit cursor, tokens, 0, parens + 1, depth + 1)
+        when value < 0 { give -1 }
+        arm_starts@push(p_start)
+        arm_ends@push(p_end)
+        arm_values@push(value)
+        parserSkipNewlines(edit cursor, tokens)
+        parserTakeSymbol(source, edit cursor, tokens, ",")
+        parserSkipSeparators(source, edit cursor, tokens)
+    }
+    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "}}") { give -1 }
+
+    hold first_arm = tree.extra.length
+    hold arm_count = arm_values.length
+    each i among 0..arm_count {
+        astAddExtra(edit tree, arm_starts[i])
+        astAddExtra(edit tree, arm_ends[i])
+        astAddExtra(edit tree, arm_values[i])
+    }
+    hold end_pos = cursorPrevEnd(cursor, tokens, tok.end)
+    give astAddExpr(edit tree, AstExprKind.Choose, tok.start, end_pos, scrutinee, first_arm, arm_count, 0)
+}
+
 flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], parens: Int, depth: Int) => Int {
     when cursor.pos >= tokens.length {
         astAddError(edit tree, ParseProblem.ExpectedExpression, "", source.byteLength, source.byteLength)
@@ -188,6 +231,9 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
             give astAddExpr(edit tree, AstExprKind.Interpolate, tok.start, end_pos, first_part, children.length, 0, 0)
         }
         LexKind.Word : {
+            when parserAtWord(source, cursor, tokens, "match") {
+                give parseChooseExpr(edit tree, source, edit cursor, tokens, tok, parens, depth)
+            }
             when parserTakeWord(source, edit cursor, tokens, "true") {
                 give astAddExpr(edit tree, AstExprKind.BoolLit, tok.start, tok.end, 1, 0, 0, 0)
             }
