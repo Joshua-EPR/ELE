@@ -1,0 +1,46 @@
+{
+  "schema": "ele-bootstrap-seeds/v1",
+  "provenance": {
+    "repository": "Joshua-EPR/ELE",
+    "workflow": ".github/workflows/stage0-free-bootstrap.yml",
+    "workflow_run_id": 45494392548,
+    "workflow_run_url": "https://github.com/Joshua-EPR/ELE/actions/runs/45494392548",
+    "workflow_run_head": "122c411eff59687f3a33abbe0470137517126b8c",
+    "driver_source": "compiler-l/src/main_driver.l",
+    "driver_source_blob_sha256": "6cef09cd828581c47f4b9938e1ed1746c4fe7aab2040c19a9ff731c1cd9fcd2d",
+    "driver_source_checkout_sha256": {
+      "elf": "6cef09cd828581c47f4b9938e1ed1746c4fe7aab2040c19a9ff731c1cd9fcd2d",
+      "pe": "ca3fbc8eaa29ed195155b2c130c8deb11b5aabeec3acfd2aaacde82ff8772939"
+    },
+    "checkout_line_endings": {
+      "elf": "LF",
+      "pe": "CRLF"
+    },
+    "generated_utc_date": "2026-11-24",
+    "generator": "Stage 0 project-l; Cranelift for PE32+ and rustc backend for ELF64",
+    "verification": "The seed and Stage-0-free Gen1-to-Gen3 bootstrap jobs passed in the linked workflow run."
+  },
+  "targets": {
+    "elf": {
+      "archive": "ele-seed-elf.zip",
+      "archive_sha256": "c66496132cbea3636236c6b5e355aec7adaae8da251566d202372e2e97d9a0ae",
+      "archive_artifact_id": 14966149348,
+      "seed_file": "ele-seed-elf",
+      "seed_sha256": "e1beca90c98141d5bd88638a26599f9791ca5458f0e2b1ae900ca9b9c465f115",
+      "seed_size": 5726768,
+      "format": "ELF64",
+      "architecture": "x86_64",
+      "image_type": "ET_DYN (PIE)"
+    },
+    "pe": {
+      "archive": "ele-seed-pe.zip",
+      "archive_sha256": "7962ef274718fd614ffba6b8ac30843cec393b82143dec384bf01e37d5904413",
+      "archive_artifact_id": 14968246874,
+      "seed_file": "ele-seed-pe.exe",
+      "seed_sha256": "eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5",
+      "seed_size": 1220096,
+      "format": "PE32+",
+      "architecture": "AMD64"
+    }
+  }
+}

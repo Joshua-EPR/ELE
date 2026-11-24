@@ -1,12 +1,9 @@
-name: Stage-0-free seed bootstrap
+name: Independent seed bootstrap
 
-# The `seed` job is the ONLY place in this workflow that uses Stage 0 (the
-# Rust crate `crates/l`) or any Rust tooling. It is transitional: it exists
-# until a published, hash-pinned seed release replaces it. The bootstrap jobs
-# never install Rust, scrub cargo/rustc/rustup from PATH, assert they cannot
-# be resolved, and rebuild the ELE driver from compiler-l/src/main_driver.l
-# with ELE-built drivers only (seed -> Gen1' -> Gen2 -> Gen3, Gen2 == Gen3).
-# See docs/STAGE0_FREE_BOOTSTRAP.md.
+# Both bootstrap jobs start from versioned, SHA-256-pinned seeds. They never
+# build or download a Stage 0 compiler and rebuild the driver with ELE only
+# (seed -> Gen1' -> Gen2 -> Gen3, Gen2 == Gen3). Seed provenance and pins live
+# beside the seed archives in scripts/bootstrap/seeds/manifest.json.
 
 on:
   push:
@@ -22,66 +19,23 @@ permissions:
   contents: read
 
 jobs:
-  seed:
-    name: "seed (TRANSITIONAL: only Stage 0 use) ${{ matrix.target }}"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: pe
-          - os: ubuntu-latest
-            target: elf
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build Stage 0 (`l`)
-        run: cargo build -p project-l --bin l
-      # Gen1 = compiler-l/src/main_driver.l built by Stage 0. Windows uses
-      # Stage 0's Cranelift backend; Linux uses Stage 0's reference rustc
-      # backend (Cranelift in Stage 0 targets Windows x86-64 only).
-      - name: Build the Gen1 seed driver with Stage 0
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/seed-build seed-out
-          cd target/seed-build
-          if [ "${{ matrix.target }}" = pe ]; then
-            out=$(../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift)
-            name=ele-seed-pe.exe
-          else
-            out=$(../debug/l build ../../compiler-l/src/main_driver.l)
-            name=ele-seed-elf
-          fi
-          echo "$out"
-          built=$(printf '%s\n' "$out" | sed -n 's/^Build: //p' | head -n 1 | tr -d '\r' | tr '\\' '/')
-          test -n "$built" && test -f "$built"
-          cp "$built" "../../seed-out/$name"
-          cd ../../seed-out
-          sha256sum "$name" | tee "$name.sha256"
-      - name: Upload seed driver and its SHA-256
-        uses: actions/upload-artifact@v4
-        with:
-          name: ele-seed-${{ matrix.target }}
-          path: seed-out/
-          if-no-files-found: error
-          retention-days: 7
-
   bootstrap-linux:
     name: bootstrap ELF64 without Rust (ubuntu)
-    needs: seed
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download seed
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: ele-seed-elf
-          path: ${{ runner.temp }}/seed
+          python-version: "3.11"
+      - name: Audit active Stage 0 dependencies
+        run: python3 tools/audit_stage0_paths.py --enforce
+      - name: Verify and extract the pinned ELF64 seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
+          python3 tools/verify_seed_archive.py elf --output "${{ runner.temp }}/seed/ele-seed-elf"
       - name: Scrub cargo/rustc/rustup from PATH
         shell: bash
         run: |
@@ -100,14 +54,36 @@ jobs:
             if p=$(command -v "$t"); then echo "::error::$t still resolvable at $p"; bad=1; else echo "$t: not resolvable"; fi
           done
           exit $bad
+      - name: Restrict PATH to runtime utilities, no compiler backends
+        shell: bash
+        run: |
+          set -euo pipefail
+          clean_path="${RUNNER_TEMP}/ele-bootstrap-path"
+          mkdir -p "$clean_path"
+          # The runner still starts bash by absolute path. These symlinks are
+          # the only commands the bootstrap and corpus scripts need on PATH.
+          # In particular, do not expose gcc/clang/cc/ld/lld or MSVC tools.
+          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git; do
+            resolved=$(command -v "$tool")
+            test -n "$resolved"
+            ln -sf "$resolved" "$clean_path/$tool"
+          done
+          for tool in cargo rustc rustup l cl link gcc clang ld lld ld.lld cc; do
+            if PATH="$clean_path" command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::$tool remains available on the bootstrap PATH"
+              exit 1
+            fi
+          done
+          echo "PATH=$clean_path" >> "$GITHUB_ENV"
       - name: Stage-0-free bootstrap (seed -> Gen1' -> Gen2 -> Gen3)
         shell: bash
         env:
           ELE_BOOTSTRAP_FORBID_TOOLCHAIN: "1"
+          ELE_SOURCE_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           seed="${{ runner.temp }}/seed/ele-seed-elf"
-          sha=$(cut -d' ' -f1 "$seed.sha256")
+          sha=$(python3 -c 'import json; print(json.load(open("scripts/bootstrap/seeds/manifest.json", encoding="utf-8"))["targets"]["elf"]["seed_sha256"])')
           sh scripts/bootstrap/ele_seed_bootstrap.sh --seed "$seed" --seed-sha256 "$sha" \
             --target elf --out-dir "${{ runner.temp }}/bootstrap-elf" --forbid-toolchain-on-path
       - name: Native conformance corpus with Gen3 (no Rust on PATH)
@@ -128,16 +104,22 @@ jobs:
 
   bootstrap-windows:
     name: bootstrap PE32+ without Rust (windows)
-    needs: seed
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download seed
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: ele-seed-pe
-          path: ${{ runner.temp }}/seed
+          python-version: "3.11"
+      - name: Audit active Stage 0 dependencies
+        run: python tools/audit_stage0_paths.py --enforce
+      - name: Verify and extract the pinned PE32+ seed
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/verify_seed_archive.py pe --output (Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Scrub cargo/rustc/rustup from PATH
         shell: pwsh
         run: |
@@ -155,13 +137,30 @@ jobs:
             if ($c) { Write-Host "::error::$t still resolvable at $($c.Source)"; $bad = $true } else { Write-Host "${t}: not resolvable" }
           }
           if ($bad) { exit 1 }
+      - name: Restrict PATH to Windows runtime utilities, no compiler backends
+        shell: pwsh
+        run: |
+          $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          $allowed = @($PSHOME, (Join-Path $env:SystemRoot 'System32'))
+          if ($git) { $allowed += (Split-Path -Parent $git.Source) }
+          $cleanPath = $allowed -join ';'
+          $env:PATH = $cleanPath
+          $bad = $false
+          foreach ($t in 'cargo', 'rustc', 'rustup', 'l', 'cl', 'link', 'gcc', 'clang', 'ld', 'lld', 'cc') {
+            $c = Get-Command $t -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($c) { Write-Host "::error::$t remains available at $($c.Source)"; $bad = $true }
+          }
+          if ($bad) { exit 1 }
+          "PATH=$cleanPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Stage-0-free bootstrap (seed -> Gen1' -> Gen2 -> Gen3)
         shell: pwsh
         env:
           ELE_BOOTSTRAP_FORBID_TOOLCHAIN: "1"
+          ELE_SOURCE_COMMIT: ${{ github.sha }}
         run: |
           $seed = Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe'
-          $sha = ((Get-Content -Raw "$seed.sha256").Trim() -split '\s+')[0]
+          $manifest = Get-Content -Raw 'scripts/bootstrap/seeds/manifest.json' | ConvertFrom-Json
+          $sha = $manifest.targets.pe.seed_sha256
           ./scripts/bootstrap/ele_seed_bootstrap.ps1 -Seed $seed -SeedSha256 $sha -Target pe `
             -OutDir (Join-Path '${{ runner.temp }}' 'bootstrap-pe') -ForbidToolchainOnPath
           exit $LASTEXITCODE

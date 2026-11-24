@@ -1,6 +1,6 @@
 # Stage 0 removal roadmap
 
-Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27dc67`; it is an execution order, not a claim of completion.
+Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e75e` (PR #166). This roadmap tracks active work in `codex/versioned-seeds`; its changes are not merged or CI-verified yet. It is an execution order, not a claim of completion.
 
 ## Phase 0 — Baseline and evidence (in progress)
 
@@ -8,7 +8,7 @@ Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27d
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
 - [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
-- [ ] Reconcile audit against any newly opened PRs and current default-branch workflow runs.
+- [x] Reconcile current main and open PR state (2026-11-24): #161–#166 are merged; connected GitHub search reports no open PRs on main.
 
 ## Phase 1 — Define the replaceable compiler boundary
 
@@ -35,8 +35,9 @@ Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27d
 ## Phase 4 — Remove bootstrap dependencies from CI and distribution
 
 - [x] Add a reproducible bootstrap from a hash-checked seed without Rust/Cargo/Cranelift (PR #159). The seed is still produced by Stage 0.
-- [ ] Publish a hash-pinned seed release and remove the transitional `seed` job. Publishing needs the owner's approval.
-- [x] First Stage-0-free regression suite: `tests/native_corpus`, 85 cases, run with Gen3 in CI (PR #160).
+- [ ] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job. PR #167 is open; seed bootstrap passed both native runners at head `13addb1`. A scoped Stage 0 route audit and minimal PATH isolation were added after that run and are awaiting CI.
+- [x] Add a CI migration ratchet that separates historical from active Stage 0 references, pins per-route reference counts and fails on new unlisted active occurrences (`tools/audit_stage0_paths.py`); enforce it in both native seed bootstrap jobs.
+- [x] First Stage-0-free regression suite: `tests/native_corpus`, initially 85 cases in PR #160; current main has 94 cases. Local Windows PE run: 89 PASS, 5 XFAIL; no FAIL/XPASS.
 - [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
 - [ ] Package and install the standalone compiler from clean Linux and Windows environments.
