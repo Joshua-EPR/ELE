@@ -2,8 +2,8 @@
 
 Updated: 2026-11-24
 Inspected revision: `d27dc67` on `main` (`origin/main`)
-Current phase: Baseline/evidence and architecture boundary.
-Estimated completion: **15%** against the requested final acceptance criteria. This is a coarse estimate: several native output and generation probes exist, while compiler, backend, CI and distribution independence remain unmet.
+Current phase: Phase 2 (self-hosting stability) and Phase 5 (Stage-0-free CI, first jobs live).
+Estimated completion: **25%** against the requested final acceptance criteria. This is a coarse estimate: several native output and generation probes exist, while compiler, backend, CI and distribution independence remain unmet.
 
 ## State
 
@@ -21,7 +21,7 @@ Estimated completion: **15%** against the requested final acceptance criteria. T
 | Self-hosting auditor | Complete | None | None | Source audit plus measured Gen chain and 87-program coverage (below) | Driver self-rebuild verified; blockers ranked |
 | Static consumer auditor | Complete | `codex/stage0-audit` | `STAGE0_DEPENDENCY_AUDIT.md` | Read-only grep audit with file:line | Consumer inventory integrated |
 | Bootstrap/CI engineer | Complete | PR #159, merged at `4d034d2` | `scripts/bootstrap/*`, `.github/workflows/stage0-free-bootstrap.yml`, `docs/STAGE0_FREE_BOOTSTRAP.md` | Local: PE Gen1'=Gen2=Gen3 `0fa24fe4…`; ELF in WSL `77666ed0…`; smoke 7/7; reject 4/4. CI run 45442400955: all jobs green | The bootstrap jobs run with Rust removed from PATH. The seed still comes from Stage 0 in the `seed` job. |
-| Test/regression engineer | In progress | `test/native-conformance-corpus` | `tests/native_corpus/*` | Pending | Pending |
+| Test/regression engineer | Complete | PR #160, merged at `bc372e8` | `tests/native_corpus/*`, `crates/l/tests/native_corpus_l.rs`, CI wiring | 85 cases (59 run + 26 reject). Gen3 built without Rust passes 80, with 5 XFAIL and 0 XPASS, on PE and on ELF (CI run 45448136543) | XFAIL gaps: Text payload in choice, choose as expression, `??`, `?`, `extend` |
 | Frontend fix (choose on Text, lexer diagnostics) | In progress | `fix/driver-choose-text-and-lexer-diagnostics` | compiler-l frontend | Pending | Pending |
 | Backend fix (runtime trap diagnostics) | In progress | `fix/native-runtime-trap-diagnostics` | compiler-l codegen | Pending | Pending |
 | Native backend auditor | Complete | None | None | Source audit; no tests run | ELF64/PE64 and Cranelift boundary documented; no edits |
@@ -31,6 +31,9 @@ Estimated completion: **15%** against the requested final acceptance criteria. T
 | PR | Objective | State | CI | Dependencies | Merge |
 |---|---|---|---|---|---|
 | #158 | ELE v2 migration CI corrections | Merged at `d27dc67` | Connected diagnostics: Linux/Windows and distribution jobs succeeded; differential CFG job skipped | Historical CI fix | Already merged |
+| #160 | Native conformance corpus that needs only an ELE compiler | Merged at `bc372e8` | All green; corpus runs in the Stage-0-free jobs | #159 | Merged after review |
+| #161 | choose over Text crash + real lexer diagnostics | Open | Rechecking against the new main | #160 | Pending |
+| #162 | Run-time traps reported on stderr | Open | Ubuntu job failed; under investigation | #160 | Pending |
 | #159 | Stage-0-free seed bootstrap (scripts and CI job) | Merged at `4d034d2` | All checks green, including `bootstrap ELF64/PE32+ without Rust` | None | Merged after review |
 
 The connected GitHub query returned no open PRs at the time of inspection.

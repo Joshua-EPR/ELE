@@ -7,7 +7,7 @@ Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27d
 - [x] Inspect local `main`, recent commits, dependency manifests, bootstrap scripts, workflow, tests and distribution paths.
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
-- [ ] Obtain Linux native execution evidence for the Stage 3 probe (or configured WSL evidence on Windows).
+- [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
 - [ ] Reconcile audit against any newly opened PRs and current default-branch workflow runs.
 
 ## Phase 1 — Define the replaceable compiler boundary
@@ -20,7 +20,7 @@ Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27d
 ## Phase 2 — Successive native compiler generations
 
 - [ ] Build the full compiler entry point from ELE sources using the ELE native backend.
-- [ ] Have generated generation N compile the same compiler sources into generation N+1.
+- [x] Have generated generation N compile the same compiler sources into generation N+1. Verified fixed point: Gen2 = Gen3 bitwise on PE and ELF, enforced in CI by PR #159.
 - [ ] Run appropriate compiler/runtime suites under each generation, with Stage 0 only as a comparison oracle.
 - [ ] Compare behavior and deterministic LIR/image output; document expected metadata differences.
 - Exit criteria: at least generations 1–3 pass the same declared validation set and rebuild the compiler.
@@ -34,8 +34,10 @@ Status date: 2026-11-24. This roadmap reflects the inspected repository at `d27d
 
 ## Phase 4 — Remove bootstrap dependencies from CI and distribution
 
-- [ ] Add a reproducible bootstrap that starts from the last trusted compiler artifact and rebuilds without Rust/Cargo/Cranelift.
-- [ ] Migrate tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
+- [x] Add a reproducible bootstrap from a hash-checked seed without Rust/Cargo/Cranelift (PR #159). The seed is still produced by Stage 0.
+- [ ] Publish a hash-pinned seed release and remove the transitional `seed` job. Publishing needs the owner's approval.
+- [x] First Stage-0-free regression suite: `tests/native_corpus`, 85 cases, run with Gen3 in CI (PR #160).
+- [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
 - [ ] Package and install the standalone compiler from clean Linux and Windows environments.
 - Exit criteria: CI, distribution and install verification pass with Stage 0 and Cranelift absent.
