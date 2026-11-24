@@ -56,6 +56,14 @@ class PayloadContractTests(unittest.TestCase):
             with self.subTest(read=read):
                 self.assertIn(read, payload_part)
                 self.assertLess(payload_part.index(guard), payload_part.index(read))
-        self.assertIn('x64PatchRelative(edit code, fix.bad_variant_at[i], bad_variant_handler)', emit)
+        # Every inactive-variant guard is patched by native_trap.l to a stub
+        # that reaches the reporter of status 126.
+        trap = (ROOT/'compiler-l/src/codegen/native_trap.l').read_text(encoding='utf-8')
+        self.assertIn('trapEmitAll(edit code, edit imports, target, view fix, view spans)', emit)
+        variant_part = trap.split('when fix.bad_variant_at.length > 0 {', 1)[1].split('}', 1)[0]
+        self.assertIn('hold message = ": acceso a variante enum inactiva\\n"', variant_part)
+        self.assertIn('trapEmitKind(edit code, reporter, view message, 126)', variant_part)
+        self.assertIn('trapEmitStubs(edit code, view fix.bad_variant_at, view spans.variant, entry)', variant_part)
+        self.assertIn('x64PatchRelative(edit code, sites[i], stub)', trap)
 
 if __name__ == '__main__': unittest.main()
