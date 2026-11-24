@@ -1,0 +1,2 @@
+type_mismatch_return.l:3:5: error[L0003]
+tipo de retorno incompatible: esperado 'Int', recibido 'Bool'

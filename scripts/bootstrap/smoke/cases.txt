@@ -1,0 +1,10 @@
+# Smoke programs compiled by Gen3 and executed by the seed bootstrap scripts.
+# Format: name|source (repo-relative)|expected exit code
+# Expected stdout (exact bytes, LF line endings) lives in expected/<name>.stdout.
+hello|examples/hello.l|0
+fibonacci|examples/fibonacci.l|0
+arithmetic|examples/arithmetic.l|0
+loops|examples/loops.l|0
+control_flow|examples/control_flow.l|0
+interpolation|examples/interpolation.l|0
+exit_code|scripts/bootstrap/smoke/exit_code.l|7

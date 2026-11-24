@@ -1,0 +1,184 @@
+name: Stage-0-free seed bootstrap
+
+# The `seed` job is the ONLY place in this workflow that uses Stage 0 (the
+# Rust crate `crates/l`) or any Rust tooling. It is transitional: it exists
+# until a published, hash-pinned seed release replaces it. The bootstrap jobs
+# never install Rust, scrub cargo/rustc/rustup from PATH, assert they cannot
+# be resolved, and rebuild the ELE driver from compiler-l/src/main_driver.l
+# with ELE-built drivers only (seed -> Gen1' -> Gen2 -> Gen3, Gen2 == Gen3).
+# See docs/STAGE0_FREE_BOOTSTRAP.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: stage0-free-bootstrap-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    name: "seed (TRANSITIONAL: only Stage 0 use) ${{ matrix.target }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: pe
+          - os: ubuntu-latest
+            target: elf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Stage 0 (`l`)
+        run: cargo build -p project-l --bin l
+      # Gen1 = compiler-l/src/main_driver.l built by Stage 0. Windows uses
+      # Stage 0's Cranelift backend; Linux uses Stage 0's reference rustc
+      # backend (Cranelift in Stage 0 targets Windows x86-64 only).
+      - name: Build the Gen1 seed driver with Stage 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/seed-build seed-out
+          cd target/seed-build
+          if [ "${{ matrix.target }}" = pe ]; then
+            out=$(../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift)
+            name=ele-seed-pe.exe
+          else
+            out=$(../debug/l build ../../compiler-l/src/main_driver.l)
+            name=ele-seed-elf
+          fi
+          echo "$out"
+          built=$(printf '%s\n' "$out" | sed -n 's/^Build: //p' | head -n 1 | tr -d '\r' | tr '\\' '/')
+          test -n "$built" && test -f "$built"
+          cp "$built" "../../seed-out/$name"
+          cd ../../seed-out
+          sha256sum "$name" | tee "$name.sha256"
+      - name: Upload seed driver and its SHA-256
+        uses: actions/upload-artifact@v4
+        with:
+          name: ele-seed-${{ matrix.target }}
+          path: seed-out/
+          if-no-files-found: error
+          retention-days: 7
+
+  bootstrap-linux:
+    name: bootstrap ELF64 without Rust (ubuntu)
+    needs: seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download seed
+        uses: actions/download-artifact@v4
+        with:
+          name: ele-seed-elf
+          path: ${{ runner.temp }}/seed
+      - name: Scrub cargo/rustc/rustup from PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          clean=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -i -e '\.cargo' -e 'rustup' -e '/rust' | paste -sd: -)
+          echo "PATH=$clean" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=" >> "$GITHUB_ENV"
+      - name: Assert no Rust toolchain is resolvable
+        shell: bash
+        run: |
+          set -u
+          echo "PATH=$PATH"
+          bad=0
+          for t in cargo rustc rustup; do
+            if p=$(command -v "$t"); then echo "::error::$t still resolvable at $p"; bad=1; else echo "$t: not resolvable"; fi
+          done
+          exit $bad
+      - name: Stage-0-free bootstrap (seed -> Gen1' -> Gen2 -> Gen3)
+        shell: bash
+        env:
+          ELE_BOOTSTRAP_FORBID_TOOLCHAIN: "1"
+        run: |
+          set -euo pipefail
+          seed="${{ runner.temp }}/seed/ele-seed-elf"
+          sha=$(cut -d' ' -f1 "$seed.sha256")
+          sh scripts/bootstrap/ele_seed_bootstrap.sh --seed "$seed" --seed-sha256 "$sha" \
+            --target elf --out-dir "${{ runner.temp }}/bootstrap-elf" --forbid-toolchain-on-path
+      - name: Native conformance corpus with Gen3 (no Rust on PATH)
+        shell: bash
+        run: sh tests/native_corpus/run.sh "${{ runner.temp }}/bootstrap-elf/gen3.elf"
+      - name: Upload provenance and Gen3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-free-bootstrap-elf
+          path: |
+            ${{ runner.temp }}/bootstrap-elf/provenance.json
+            ${{ runner.temp }}/bootstrap-elf/SHA256SUMS
+            ${{ runner.temp }}/bootstrap-elf/gen3.elf
+            ${{ runner.temp }}/bootstrap-elf/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  bootstrap-windows:
+    name: bootstrap PE32+ without Rust (windows)
+    needs: seed
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download seed
+        uses: actions/download-artifact@v4
+        with:
+          name: ele-seed-pe
+          path: ${{ runner.temp }}/seed
+      - name: Scrub cargo/rustc/rustup from PATH
+        shell: pwsh
+        run: |
+          $clean = ($env:PATH -split ';' | Where-Object { $_ -and $_ -notmatch '\\\.cargo|rustup|\\Rust\b' }) -join ';'
+          "PATH=$clean" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CARGO_HOME=" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RUSTUP_HOME=" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Assert no Rust toolchain is resolvable
+        shell: pwsh
+        run: |
+          Write-Host "PATH=$env:PATH"
+          $bad = $false
+          foreach ($t in 'cargo', 'rustc', 'rustup') {
+            $c = Get-Command $t -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($c) { Write-Host "::error::$t still resolvable at $($c.Source)"; $bad = $true } else { Write-Host "${t}: not resolvable" }
+          }
+          if ($bad) { exit 1 }
+      - name: Stage-0-free bootstrap (seed -> Gen1' -> Gen2 -> Gen3)
+        shell: pwsh
+        env:
+          ELE_BOOTSTRAP_FORBID_TOOLCHAIN: "1"
+        run: |
+          $seed = Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe'
+          $sha = ((Get-Content -Raw "$seed.sha256").Trim() -split '\s+')[0]
+          ./scripts/bootstrap/ele_seed_bootstrap.ps1 -Seed $seed -SeedSha256 $sha -Target pe `
+            -OutDir (Join-Path '${{ runner.temp }}' 'bootstrap-pe') -ForbidToolchainOnPath
+          exit $LASTEXITCODE
+      - name: Native conformance corpus with Gen3 (no Rust on PATH)
+        shell: pwsh
+        run: |
+          ./tests/native_corpus/run.ps1 (Join-Path '${{ runner.temp }}' 'bootstrap-pe/gen3.exe')
+          exit $LASTEXITCODE
+      - name: Upload provenance and Gen3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-free-bootstrap-pe
+          path: |
+            ${{ runner.temp }}/bootstrap-pe/provenance.json
+            ${{ runner.temp }}/bootstrap-pe/SHA256SUMS
+            ${{ runner.temp }}/bootstrap-pe/gen3.exe
+            ${{ runner.temp }}/bootstrap-pe/logs/
+          if-no-files-found: warn
+          retention-days: 14
