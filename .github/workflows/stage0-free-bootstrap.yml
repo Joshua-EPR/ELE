@@ -110,6 +110,9 @@ jobs:
           sha=$(cut -d' ' -f1 "$seed.sha256")
           sh scripts/bootstrap/ele_seed_bootstrap.sh --seed "$seed" --seed-sha256 "$sha" \
             --target elf --out-dir "${{ runner.temp }}/bootstrap-elf" --forbid-toolchain-on-path
+      - name: Native conformance corpus with Gen3 (no Rust on PATH)
+        shell: bash
+        run: sh tests/native_corpus/run.sh "${{ runner.temp }}/bootstrap-elf/gen3.elf"
       - name: Upload provenance and Gen3
         if: always()
         uses: actions/upload-artifact@v4
@@ -161,6 +164,11 @@ jobs:
           $sha = ((Get-Content -Raw "$seed.sha256").Trim() -split '\s+')[0]
           ./scripts/bootstrap/ele_seed_bootstrap.ps1 -Seed $seed -SeedSha256 $sha -Target pe `
             -OutDir (Join-Path '${{ runner.temp }}' 'bootstrap-pe') -ForbidToolchainOnPath
+          exit $LASTEXITCODE
+      - name: Native conformance corpus with Gen3 (no Rust on PATH)
+        shell: pwsh
+        run: |
+          ./tests/native_corpus/run.ps1 (Join-Path '${{ runner.temp }}' 'bootstrap-pe/gen3.exe')
           exit $LASTEXITCODE
       - name: Upload provenance and Gen3
         if: always()

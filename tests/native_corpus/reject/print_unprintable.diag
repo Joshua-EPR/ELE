@@ -1,0 +1,2 @@
+print_unprintable.l:3:5: error[L0004]
+print requiere un argumento imprimible

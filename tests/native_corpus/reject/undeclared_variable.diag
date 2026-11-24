@@ -1,0 +1,2 @@
+undeclared_variable.l:3:10: error[L0001]
+identificador no declarado

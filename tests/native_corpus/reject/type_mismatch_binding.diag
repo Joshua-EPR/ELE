@@ -1,0 +1,2 @@
+type_mismatch_binding.l:3:5: error[L0003]
+esperado 'Int', recibido 'Text'

@@ -1,0 +1,2 @@
+condition_not_bool.l:3:5: error[L0003]
+debe ser de tipo Bool

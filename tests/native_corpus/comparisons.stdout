@@ -1,0 +1,13 @@
+a<b=true
+a<=b=true
+a>b=false
+a>=b=false
+a==b=false
+a!=b=true
+b<=b=true
+b>=b=true
+neg=true
+minmax=true
+booleq=true
+boolne=true
+boolfalse=false
