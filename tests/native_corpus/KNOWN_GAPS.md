@@ -13,8 +13,18 @@ targets.
 
 | Case | Driver behavior | Stage 0 behavior |
 |---|---|---|
-| `option_default` | rejects `opt ?? fallback` with `error[L0016]: operación de Option fuera del subconjunto verificado` | compiles and prints the expected output |
 | `result_propagation` | rejects `half(n)?` with `error[L0016]: expresión fuera del subconjunto verificado de Stage 1` | compiles and prints the expected output |
+
+`choose_expression` is implemented through the shared match coverage, arm
+testing, payload binding, ownership and result-slot lowering used by the
+statement form. The native corpus exercises owned and primitive results.
+
+`option_default` is implemented for drop-free native-supported `Option<T>`
+payloads. The positive corpus covers `Some` and `None`, Int and Bool payloads,
+and confirms the fallback is evaluated only on the `None` branch. A mismatched
+fallback type is rejected with `L0003`. Owner-bearing payloads are explicitly
+rejected with `L0016` and covered as a negative case until branch-sensitive
+drop handling passes without LIR verifier errors.
 
 ## Stage 0 divergences (not driver gaps)
 
