@@ -1,0 +1,2 @@
+non_exhaustive_choose.l:9:5: error[L0004]
+match de enum no exhaustivo

@@ -1,0 +1,2 @@
+syntax_unclosed_block.l:2:20: error[PARSER]
+bloque sin cerrar

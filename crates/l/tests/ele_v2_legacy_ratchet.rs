@@ -99,11 +99,17 @@ const LEGACY_KEYWORDS: &[(&str, &str)] = &[
 ];
 
 /// Audited trees (relative to the repository root) and single files.
-const AUDITED_TREES: &[&str] = &["compiler-l/src", "examples", "ejemplos"];
+const AUDITED_TREES: &[&str] = &[
+    "compiler-l/src",
+    "examples",
+    "ejemplos",
+    "tests/native_corpus",
+];
 const AUDITED_FILES: &[&str] = &["crates/l/src/prelude.l"];
-/// Trees already migrated to ELE v2 (docs/EXAMPLES_ELE_V2_MIGRATION.md):
-/// they must stay at zero, whatever the baseline says.
-const FULLY_V2_TREES: &[&str] = &["examples", "ejemplos"];
+/// Trees already migrated to ELE v2 (docs/EXAMPLES_ELE_V2_MIGRATION.md) or
+/// written in it from the start: they must stay at zero, whatever the
+/// baseline says.
+const FULLY_V2_TREES: &[&str] = &["examples", "ejemplos", "tests/native_corpus"];
 
 type Counts = BTreeMap<String, usize>;
 
