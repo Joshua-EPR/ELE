@@ -1,12 +1,9 @@
-name: Stage-0-free seed bootstrap
+name: Independent seed bootstrap
 
-# The `seed` job is the ONLY place in this workflow that uses Stage 0 (the
-# Rust crate `crates/l`) or any Rust tooling. It is transitional: it exists
-# until a published, hash-pinned seed release replaces it. The bootstrap jobs
-# never install Rust, scrub cargo/rustc/rustup from PATH, assert they cannot
-# be resolved, and rebuild the ELE driver from compiler-l/src/main_driver.l
-# with ELE-built drivers only (seed -> Gen1' -> Gen2 -> Gen3, Gen2 == Gen3).
-# See docs/STAGE0_FREE_BOOTSTRAP.md.
+# Both bootstrap jobs start from versioned, SHA-256-pinned seeds. They never
+# build or download a Stage 0 compiler and rebuild the driver with ELE only
+# (seed -> Gen1' -> Gen2 -> Gen3, Gen2 == Gen3). Seed provenance and pins live
+# beside the seed archives in scripts/bootstrap/seeds/manifest.json.
 
 on:
   push:
@@ -22,66 +19,21 @@ permissions:
   contents: read
 
 jobs:
-  seed:
-    name: "seed (TRANSITIONAL: only Stage 0 use) ${{ matrix.target }}"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: pe
-          - os: ubuntu-latest
-            target: elf
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build Stage 0 (`l`)
-        run: cargo build -p project-l --bin l
-      # Gen1 = compiler-l/src/main_driver.l built by Stage 0. Windows uses
-      # Stage 0's Cranelift backend; Linux uses Stage 0's reference rustc
-      # backend (Cranelift in Stage 0 targets Windows x86-64 only).
-      - name: Build the Gen1 seed driver with Stage 0
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p target/seed-build seed-out
-          cd target/seed-build
-          if [ "${{ matrix.target }}" = pe ]; then
-            out=$(../debug/l.exe build ../../compiler-l/src/main_driver.l --backend cranelift)
-            name=ele-seed-pe.exe
-          else
-            out=$(../debug/l build ../../compiler-l/src/main_driver.l)
-            name=ele-seed-elf
-          fi
-          echo "$out"
-          built=$(printf '%s\n' "$out" | sed -n 's/^Build: //p' | head -n 1 | tr -d '\r' | tr '\\' '/')
-          test -n "$built" && test -f "$built"
-          cp "$built" "../../seed-out/$name"
-          cd ../../seed-out
-          sha256sum "$name" | tee "$name.sha256"
-      - name: Upload seed driver and its SHA-256
-        uses: actions/upload-artifact@v4
-        with:
-          name: ele-seed-${{ matrix.target }}
-          path: seed-out/
-          if-no-files-found: error
-          retention-days: 7
-
   bootstrap-linux:
     name: bootstrap ELF64 without Rust (ubuntu)
-    needs: seed
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download seed
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: ele-seed-elf
-          path: ${{ runner.temp }}/seed
+          python-version: "3.11"
+      - name: Verify and extract the pinned ELF64 seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
+          python3 tools/verify_seed_archive.py elf --output "${{ runner.temp }}/seed/ele-seed-elf"
       - name: Scrub cargo/rustc/rustup from PATH
         shell: bash
         run: |
@@ -107,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           seed="${{ runner.temp }}/seed/ele-seed-elf"
-          sha=$(cut -d' ' -f1 "$seed.sha256")
+          sha=$(python3 -c 'import json; print(json.load(open("scripts/bootstrap/seeds/manifest.json", encoding="utf-8"))["targets"]["elf"]["seed_sha256"])')
           sh scripts/bootstrap/ele_seed_bootstrap.sh --seed "$seed" --seed-sha256 "$sha" \
             --target elf --out-dir "${{ runner.temp }}/bootstrap-elf" --forbid-toolchain-on-path
       - name: Native conformance corpus with Gen3 (no Rust on PATH)
@@ -128,16 +80,20 @@ jobs:
 
   bootstrap-windows:
     name: bootstrap PE32+ without Rust (windows)
-    needs: seed
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Download seed
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: ele-seed-pe
-          path: ${{ runner.temp }}/seed
+          python-version: "3.11"
+      - name: Verify and extract the pinned PE32+ seed
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/verify_seed_archive.py pe --output (Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Scrub cargo/rustc/rustup from PATH
         shell: pwsh
         run: |
@@ -161,7 +117,8 @@ jobs:
           ELE_BOOTSTRAP_FORBID_TOOLCHAIN: "1"
         run: |
           $seed = Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe'
-          $sha = ((Get-Content -Raw "$seed.sha256").Trim() -split '\s+')[0]
+          $manifest = Get-Content -Raw 'scripts/bootstrap/seeds/manifest.json' | ConvertFrom-Json
+          $sha = $manifest.targets.pe.seed_sha256
           ./scripts/bootstrap/ele_seed_bootstrap.ps1 -Seed $seed -SeedSha256 $sha -Target pe `
             -OutDir (Join-Path '${{ runner.temp }}' 'bootstrap-pe') -ForbidToolchainOnPath
           exit $LASTEXITCODE

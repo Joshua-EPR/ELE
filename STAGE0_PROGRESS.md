@@ -1,13 +1,14 @@
 # Stage 0 removal progress
 
 Updated: 2026-11-24
-Inspected revision: `d27dc67` on `main` (`origin/main`)
-Current phase: Phase 2 (self-hosting stability) and Phase 5 (Stage-0-free CI, first jobs live).
-Estimated completion: **25%** against the requested final acceptance criteria. This is a coarse estimate: several native output and generation probes exist, while compiler, backend, CI and distribution independence remain unmet.
+Current `origin/main`: `91006b94433edc87dfaabf7aabeb287a5b46e75e` (PR #166 merged).
+Working seed branch: `codex/versioned-seeds`, based on that exact main revision; PR not yet opened.
+Current phase: removing Stage 0 from the seed build, then closing compiler/backend conformance gaps.
+Estimated completion: **30%** against the requested final acceptance criteria. This remains a coarse estimate: seed bootstrap is implemented locally but not merged or CI-verified; compiler, backend, CI, test migration and distribution independence remain unmet.
 
 ## State
 
-- **Blockers:** Full ELE source-to-native compiler rebuild has not been shown independent of Stage 0; Rust/Cargo and Cranelift remain active in compiler, tests, CI and distribution. Windows host did not execute Linux ELF64 images in the local probe.
+- **Blockers:** Full ELE source-to-native compiler rebuild has not been shown independent of Stage 0; Rust/Cargo and Cranelift remain active in compiler, tests, CI and distribution. Local Windows cannot execute Linux ELF64 images; Ubuntu CI remains the native Linux execution gate.
 - **Risks:** Stage 0 currently implements the production frontend/CLI and Cranelift runtime path. Removing those pieces before a replacement would break currently supported builds and tests.
 - **Next phase:** Define measurable module/feature coverage and complete native generation validation on Linux and Windows; then migrate one bootstrap/test path at a time.
 - **ENCA:** Excluded from this operation; no ENCA changes made.
@@ -20,10 +21,10 @@ Estimated completion: **25%** against the requested final acceptance criteria. T
 | Stage 0 dependency auditor | Complete | None | None | Source audit; no tests run | Dependencies classified A–G; no edits |
 | Self-hosting auditor | Complete | None | None | Source audit plus measured Gen chain and 87-program coverage (below) | Driver self-rebuild verified; blockers ranked |
 | Static consumer auditor | Complete | `codex/stage0-audit` | `STAGE0_DEPENDENCY_AUDIT.md` | Read-only grep audit with file:line | Consumer inventory integrated |
-| Bootstrap/CI engineer | Complete | PR #159, merged at `4d034d2` | `scripts/bootstrap/*`, `.github/workflows/stage0-free-bootstrap.yml`, `docs/STAGE0_FREE_BOOTSTRAP.md` | Local: PE Gen1'=Gen2=Gen3 `0fa24fe4…`; ELF in WSL `77666ed0…`; smoke 7/7; reject 4/4. CI run 45442400955: all jobs green | The bootstrap jobs run with Rust removed from PATH. The seed still comes from Stage 0 in the `seed` job. |
-| Test/regression engineer | Complete | PR #160, merged at `bc372e8` | `tests/native_corpus/*`, `crates/l/tests/native_corpus_l.rs`, CI wiring | 85 cases (59 run + 26 reject). Gen3 built without Rust passes 80, with 5 XFAIL and 0 XPASS, on PE and on ELF (CI run 45448136543) | XFAIL gaps: Text payload in choice, choose as expression, `??`, `?`, `extend` |
-| Frontend fix (choose on Text, lexer diagnostics) | In progress | `fix/driver-choose-text-and-lexer-diagnostics` | compiler-l frontend | Pending | Pending |
-| Backend fix (runtime trap diagnostics) | In progress | `fix/native-runtime-trap-diagnostics` | compiler-l codegen | Pending | Pending |
+| Seed/CI engineer | In progress | `codex/versioned-seeds`, PR pending | `.github/workflows/stage0-free-bootstrap.yml`, `scripts/bootstrap/seeds/*`, `tools/verify_seed_archive.py`, `tests/bootstrap/*` | 5/5 archive tests pass; local Windows PE seed → Gen1′ → Gen2 → Gen3 fixpoint passes with Rust/Cargo absent from PATH; 7 smoke + 4 rejection cases pass | Durable ELF/PE ZIP seeds and pinned manifest remove the transitional Cargo seed job; Linux native bootstrap still awaits Ubuntu CI. |
+| Frontend choose-expression engineer | Port pending | `codex/native-choose-expression` (based on `049231f`) | `compiler-l` frontend and corpus regressions | Clean Rust harness build and PE corpus: 97 cases, 93 PASS, 4 existing XFAIL, 0 FAIL/XPASS; ELF not run on this Windows host | Must port to `91006b9` and run Linux ELF before removing the gap. |
+| Frontend fix (choose on Text, lexer diagnostics) | Complete | PR #161, merged at `ce69d15` | compiler-l frontend, driver regressions, corpus | PR #161 merged; its report records 5 regression tests and corpus 83 pass / 5 XFAIL | Text/Int/Bool choose literals and positioned lexer errors fixed; unrelated expression gap remains. |
+| Backend fix (runtime trap diagnostics) | Complete | PR #162, merged at `79b937c` | compiler-l codegen/runtime, trap regression tests | PR #162 merged; seven diagnostic tests and Linux/Windows integration checks reported passing | Native runtime traps now report stderr diagnostics while retaining documented exit codes. |
 | Native backend auditor | Complete | None | None | Source audit; no tests run | ELF64/PE64 and Cranelift boundary documented; no edits |
 
 ## Pull requests
@@ -32,11 +33,15 @@ Estimated completion: **25%** against the requested final acceptance criteria. T
 |---|---|---|---|---|---|
 | #158 | ELE v2 migration CI corrections | Merged at `d27dc67` | Connected diagnostics: Linux/Windows and distribution jobs succeeded; differential CFG job skipped | Historical CI fix | Already merged |
 | #160 | Native conformance corpus that needs only an ELE compiler | Merged at `bc372e8` | All green; corpus runs in the Stage-0-free jobs | #159 | Merged after review |
-| #161 | choose over Text crash + real lexer diagnostics | Open | Rechecking against the new main | #160 | Pending |
-| #162 | Run-time traps reported on stderr | Open | Ubuntu job failed; under investigation | #160 | Pending |
+| #161 | choose over Text crash + real lexer diagnostics | Merged at `ce69d15` | Merged; see PR diagnostics/history | #160 | Merged |
+| #162 | Run-time traps reported on stderr | Merged at `79b937c` | Merged after fixing Linux stderr expectations | #160, #161 | Merged |
 | #159 | Stage-0-free seed bootstrap (scripts and CI job) | Merged at `4d034d2` | All checks green, including `bootstrap ELF64/PE32+ without Rust` | None | Merged after review |
+| #163 | Stage 0 dependency audit and roadmap | Merged at `2ce8626` | Documentation CI passed | Audit baseline | Merged |
+| #164 | Fold constant expressions in the ELE driver frontend | Merged at `8d9d789` | Constant folding now exists in the ELE frontend | #161 | Merged |
+| #165 | Run driver regressions and trap diagnostics on Linux | Merged at `049231f` | Linux regression and trap suites wired into CI | #161, #162 | Merged |
+| #166 | Structural verification for native PE32+ images | Merged at `91006b9` | Python backend suite and Windows verifier checks passed | None | Merged |
 
-The connected GitHub query returned no open PRs at the time of inspection.
+The connected GitHub query returned no open PRs on main at the time of inspection. The independent-seed implementation below is local and will become the next PR after review.
 
 ## Dependency snapshot
 
@@ -52,13 +57,15 @@ Full inventory and locations: `STAGE0_DEPENDENCY_AUDIT.md`.
 
 ## Test and CI evidence
 
+Current `origin/main` corpus run from the Windows PE seed: 94 cases, 89 PASS, 5 XFAIL, 0 FAIL/XPASS. The remaining known gaps are `choice_text_payload`, `choose_expression`, `option_default`, `result_propagation`, and `shape_methods`. ELF native execution for this local run was unavailable; Ubuntu CI is required.
+
 | Command / check | Platform | Result | Date | Limits |
 |---|---|---|---|---|
 | `cargo test -p project-l --test stage2_bootstrap_l -- --test-threads=1` | Windows host | 5 passed, 0 failed | 2026-11-24 | ELF64 images were built/structurally checked; native Linux execution was skipped on this host |
 | `cargo test -p project-l --test stage3_native_probe_l -- --test-threads=1` | Windows host | 5 passed, 0 failed | 2026-11-24 | Linux ELF execution skipped; native semantic-analyzer parity is opt-in and was skipped |
 | PR #158 check diagnostics, head `3393ff98d4bc84dc216d4ba4c973f7630245f790` | GitHub Linux/Windows | Reported checks succeeded; differential CFG was skipped | As reported by connected GitHub check service on 2026-11-24 | PR is merged; checks still exercised Stage 0/Cargo paths |
 
-These checks are evidence for the tested slices only; they do not prove complete self-hosting or Stage 0 independence.
+These checks are evidence for the tested slices only; they do not prove complete self-hosting or Stage 0 independence. Current main additionally includes PR #161, #162 and #166. The connected GitHub open-PR query returned no open PRs on 2026-11-24. The local seed branch has not yet been pushed or checked by CI.
 
 ## Capability evidence: ELE driver vs Stage 0
 
@@ -128,7 +135,7 @@ The 26 heap-trace tests depend on an allocation-trace feature that the ELE backe
 
 ## Stage-0-free stretch now in CI (PR #159)
 
-`stage0-free-bootstrap.yml` runs on `ubuntu-latest` and `windows-latest` with `cargo`, `rustc` and `rustup` removed from PATH. The job asserts that none of them resolves. Each run then does the following:
+`stage0-free-bootstrap.yml` on `origin/main` still has a transitional `seed` job that installs Rust/Cargo and builds the seed. Its Ubuntu and Windows bootstrap jobs remove `cargo`, `rustc` and `rustup` from PATH, assert that none resolves, then:
 
 - checks the seed's SHA-256;
 - rebuilds the driver: seed → Gen1' → Gen2 → Gen3;
@@ -139,4 +146,4 @@ The 26 heap-trace tests depend on an allocation-trace feature that the ELE backe
 
 Gen2 and Gen3 come out bitwise identical across hosts even when the seeds differ: CI and local seed hashes differed, yet Gen2/Gen3 matched exactly.
 
-Remaining trust gap: the seed is still produced by Stage 0 in the transitional `seed` job. The next step is a published release with a hash-pinned seed, which needs the owner's approval because it publishes content.
+Remaining trust gap: main still produces the seed by Stage 0 in that transitional job. This branch removes that job and adds committed ZIP seeds plus a pinned manifest and archive verifier; local tests and PE bootstrap pass, but no PR or GitHub CI evidence exists yet.

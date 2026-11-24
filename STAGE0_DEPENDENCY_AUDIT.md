@@ -1,8 +1,13 @@
 # Stage 0 dependency audit
 
 Audit date: 2026-11-24
-Revision inspected: `d27dc67` (`main`, same as `origin/main`)
+Current revision: `91006b94433edc87dfaabf7aabeb287a5b46e75e` (`origin/main`; PR #166).
+The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status was rechecked against `91006b9` and the merged PRs #161–#166. Those PRs add Text/Int/Bool literal choose lowering and lexer diagnostics (#161), native trap diagnostics (#162), constant folding (#164), Linux driver regressions/trap CI (#165), and PE32+ structural verification (#166). They do not remove the audited Rust/Cargo/Cranelift consumers.
 Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was excluded.
+
+## Current branch delta: versioned independent seeds
+
+On `codex/versioned-seeds` (not yet pushed or reviewed), the transitional Cargo seed job is removed. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary format before extraction. Five archive tests pass, and the local Windows PE seed bootstrap reached Gen1′ → Gen2 → Gen3 with Gen2 == Gen3 and Rust/Cargo absent from PATH. Ubuntu native execution and both GitHub bootstrap jobs remain pending, so this change is not yet verified in CI.
 
 ## Findings
 
