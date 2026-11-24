@@ -63,14 +63,17 @@ fn compile(source: &Path, name: &str) -> (PathBuf, String) {
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn execute(image: &Path) -> (Option<i32>, String) {
+fn execute(image: &Path) -> (Option<i32>, String, String) {
     use std::os::unix::fs::PermissionsExt;
     let mut permissions = fs::metadata(image).unwrap().permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(image, permissions).unwrap();
     let run = Command::new(image).output().unwrap();
-    assert!(run.stderr.is_empty());
-    (run.status.code(), String::from_utf8(run.stdout).unwrap())
+    (
+        run.status.code(),
+        String::from_utf8(run.stdout).unwrap(),
+        String::from_utf8(run.stderr).unwrap(),
+    )
 }
 
 fn rejected(fixture: &str, code: u32) {
@@ -122,8 +125,9 @@ fn reference_text_and_arithmetic_programs_match_stage0() {
         {
             let expected =
                 fs::read_to_string(root().join(format!("examples/{name}.expected"))).unwrap();
-            let (code, stdout) = execute(&image);
+            let (code, stdout, stderr) = execute(&image);
             assert_eq!(stdout, expected, "{name}");
+            assert_eq!(stderr, "", "{name}");
             assert_eq!(code, Some(0), "{name}");
         }
     }
@@ -159,10 +163,19 @@ fn arithmetic_and_index_failures_stop_with_their_status() {
         let _ = &image;
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let (code, stdout) = execute(&image);
+            let (code, stdout, stderr) = execute(&image);
             assert_eq!(code, Some(_status), "{name}");
             let expected = if _status == 0 { "1\n99\n2\n" } else { "1\n" };
             assert_eq!(stdout, expected, "{name}");
+            // The failed check reports itself (native_trap.l) at the
+            // position Stage 1 wrote into the LIR: the expression after
+            // `give` in f (line 2) or in g (line 6).
+            let diagnostic = match _status {
+                125 => "ELE 2:10: overflow entero o división/resto por cero\n",
+                127 => "ELE 6:10: índice fuera de rango\n",
+                _ => "",
+            };
+            assert_eq!(stderr, diagnostic, "{name}");
         }
     }
 }
@@ -186,8 +199,9 @@ fn reference_fixtures_with_valid_loans_build() {
         );
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let (code, stdout) = execute(&image);
+            let (code, stdout, stderr) = execute(&image);
             assert_eq!(stdout, "");
+            assert_eq!(stderr, "", "{fixture}");
             assert_eq!(code, Some(_status), "{fixture}");
         }
     }

@@ -53,6 +53,10 @@ expose shape CfgInst {
     // fields): an index into `CfgProgram.ext_first`, or -1. See native_cfg_list.
     place_ext: Int
     src_ext: Int
+    // Source position of the record (` @line:col`), 0 when absent. Only the
+    // run-time trap diagnostics of native_trap read it.
+    line: Int
+    col: Int
 }
 
 expose shape CfgField {

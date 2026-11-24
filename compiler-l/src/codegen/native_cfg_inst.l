@@ -7,6 +7,7 @@ take native_cfg_fields
 take native_cfg_list
 take native_cfg_loan
 take native_cfg_platform
+take native_trap
 
 // Source of `print` and `append`: `val <operand>` fills `inst.a` and returns
 // -1; `ref p<N> 0` returns the referenced variable.
@@ -27,7 +28,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     hold kind = nativeWord(source, edit reader)
     change inst = CfgInst(kind: 0, dst: -1, op: 0, callee: -1, argc: 0,
         a: cfgEmptyOperand(), b: cfgEmptyOperand(), c: cfgEmptyOperand(), d: cfgEmptyOperand(),
-        place_var: -1, place_field: -1, place_subfield: -1, arg_first: -1, src_field: -1, src_sub: -1, place_ext: -1, src_ext: -1)
+        place_var: -1, place_field: -1, place_subfield: -1, arg_first: -1, src_field: -1, src_sub: -1, place_ext: -1, src_ext: -1, line: 0, col: 0)
     when nativeEquals(source, view kind, "use") {
         inst.kind = 1
         inst.dst = nativeId(source, edit reader, 118)
@@ -150,6 +151,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     } otherwise when !cfgReadListInst(edit p, f, source, edit reader, edit inst, view kind) {
         p.error = 31
     }
+    cfgReadSpan(source, view reader, edit inst)
     nativeEndLineSpan(source, edit reader)
     hold has_dst = inst.kind != 6 && inst.kind != 10 && inst.kind != 12 && inst.kind != 13 && inst.kind != 17 && inst.kind != 19 && inst.kind != 20
     // An earlier, more precise rejection (e.g. 31 unknown instruction) wins.
