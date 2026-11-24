@@ -1,0 +1,2 @@
+assign_to_hold.l:4:5: error[L0006]
+no se puede reasignar a variable inmutable

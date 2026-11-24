@@ -1,0 +1,2 @@
+int_literal_too_large.l:3:14: error[PARSER]
+entero fuera de rango

@@ -1,0 +1,2 @@
+edit_while_viewed.l:8:28: error[L0012]
+Termine de usar la referencia antes de modificar

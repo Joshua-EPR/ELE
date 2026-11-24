@@ -1,0 +1,2 @@
+byteat_on_int.l:4:10: error[L0003]
+byteAt requiere Text y un argumento Int

@@ -1,0 +1,2 @@
+edit_of_hold.l:8:15: error[L0001]
+no se puede prestar mutablemente una variable inmutable

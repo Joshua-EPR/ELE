@@ -1,0 +1,2 @@
+use_after_move_in_loop.l:8:17: error[L0005]
+uso de valor movido

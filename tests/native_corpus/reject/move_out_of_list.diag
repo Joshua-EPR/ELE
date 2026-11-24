@@ -1,0 +1,2 @@
+move_out_of_list.l:4:18: error[L0005]
+no se puede mover un elemento fuera de una
