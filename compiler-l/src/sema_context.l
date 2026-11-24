@@ -18,6 +18,25 @@ expose fixed SITE_VAR = 2
 expose fixed SITE_ARG = 3
 expose fixed SITE_RETURN = 4
 
+// Compile-time constant (sema_const.l): evaluation state (SEMA_CONST_*),
+// owning declaration (-1 for a local `fixed`), symbol, declared type and the
+// folded value as a LIR constant (kind, value and, for Text, source span).
+expose fixed SEMA_CONST_PENDING = 0
+expose fixed SEMA_CONST_ACTIVE = 1
+expose fixed SEMA_CONST_READY = 2
+expose fixed SEMA_CONST_FAILED = 3
+
+expose shape SemaConst {
+    state: Int
+    decl: Int
+    sym: Int
+    ty: Int
+    kind: Int
+    value: Int
+    start: Int
+    end: Int
+}
+
 expose shape SemaError {
     code: Text
     message: Text
@@ -90,6 +109,13 @@ expose shape SemaContext {
     lir_insts: Int
     lir_blocks: Int
     lir_failed: Int
+    // Constant evaluation (sema_const.l): the table, a dependency cycle seen
+    // by the current root declaration, and the first non-constant operand
+    // of the expression being checked with its reason.
+    consts: List of[SemaConst]
+    const_cycle: Bool
+    const_leaf: Int
+    const_reason: Int
 }
 
 expose flow semaContextNew() => SemaContext {
@@ -151,6 +177,10 @@ expose flow semaContextNew() => SemaContext {
         lir_insts: 0,
         lir_blocks: 0,
         lir_failed: 0,
+        consts: List[],
+        const_cycle: false,
+        const_leaf: -1,
+        const_reason: 0,
     )
 }
 

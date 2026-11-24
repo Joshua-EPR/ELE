@@ -1107,3 +1107,204 @@ fn driver_library_root_cli_validation() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Compile-time constants (`fixed`). The driver folds constant expressions with
+// Stage 0's rules (crates/l/src/consteval.rs): references to other constants
+// in any order, checked Int arithmetic, comparisons, short-circuit `&&`/`||`,
+// and the same diagnostics for overflow, division by zero, runtime operands,
+// calls and dependency cycles. Expected outputs were taken from Stage 0.
+
+/// Builds `name` (already written in `dir`) for `target`, run from `dir` so
+/// diagnostics carry the bare file name.
+fn build_in(dir: &Path, name: &str, target: &str, output: &str) -> Output {
+    Command::new(driver())
+        .current_dir(dir)
+        .args(["build", name, "--target", target, "--output", output])
+        .output()
+        .expect("failed to run driver")
+}
+
+fn assert_constant_program_output(dir: &Path, name: &str, expected: &str) {
+    let pe = build_in(dir, name, "pe", "prog.exe");
+    assert!(
+        pe.status.success(),
+        "{name}: PE build failed: {}",
+        String::from_utf8_lossy(&pe.stderr)
+    );
+    #[cfg(windows)]
+    {
+        let run = Command::new(dir.join("prog.exe")).output().unwrap();
+        assert!(run.status.success(), "{name}: PE image failed");
+        let stdout = String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, expected, "{name}: PE output");
+    }
+    let elf = build_in(dir, name, "elf", "prog.elf");
+    assert!(
+        elf.status.success(),
+        "{name}: ELF build failed: {}",
+        String::from_utf8_lossy(&elf.stderr)
+    );
+    if let Some(run) = execute_elf(&dir.join("prog.elf"), dir) {
+        assert!(run.status.success(), "{name}: ELF image failed");
+        let stdout = String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, expected, "{name}: ELF output");
+    }
+}
+
+#[test]
+fn driver_folds_examples_constants_like_stage0() {
+    let dir = work("const_example");
+    let source = fs::read_to_string(root().join("examples/constants.l")).unwrap();
+    fs::write(dir.join("constants.l"), source).unwrap();
+    assert_constant_program_output(&dir, "constants.l", "42\n43\ntrue\n");
+}
+
+#[test]
+fn driver_folds_constant_expressions() {
+    let dir = work("const_expressions");
+    let source = "\
+fixed ANSWER: Int = BASE * 2
+fixed BASE = 21
+fixed NEG = -5
+fixed MIX = BASE * 6 - 2 / 2 + BASE % 4 - NEG
+fixed FLAG: Bool = ANSWER == 42 && !(MIX <= 0) || false
+fixed LAZY_AND = false && 1 / 0 == 1
+fixed LAZY_OR = true || 1 % 0 == 1
+fixed EDGE = -9223372036854775807 - 1
+fixed GREETING = \"hola\"
+fixed ALIAS: Text = GREETING
+fixed SAME = () == ()
+flow main() {
+    fixed next = ANSWER + 1
+    print(ANSWER)
+    print(next)
+    print(MIX)
+    print(FLAG)
+    print(LAZY_AND)
+    print(LAZY_OR)
+    print(EDGE)
+    print(ALIAS)
+    print(SAME)
+    change total = next
+    total = total + NEG
+    when total > 0 {
+        fixed inner = next * 10
+        print(inner)
+    }
+    print(total)
+}
+";
+    fs::write(dir.join("const_expr.l"), source).unwrap();
+    assert_constant_program_output(
+        &dir,
+        "const_expr.l",
+        "42\n43\n131\ntrue\nfalse\ntrue\n-9223372036854775808\nhola\ntrue\n430\n38\n",
+    );
+}
+
+#[test]
+fn driver_rejects_invalid_constants_with_stage0_diagnostics() {
+    const OVERFLOW: &str = "panic en const: overflow entero o división/resto por cero";
+    const RUNTIME: &str =
+        "const requiere expresión constante; variables runtime y llamadas no permitidas";
+    let example = |path: &str| fs::read_to_string(root().join(path)).unwrap();
+    let cases: Vec<(&str, String, String)> = vec![
+        (
+            "const_overflow.l",
+            example("examples/invalid/const_overflow.l"),
+            format!("1:15: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "const_runtime.l",
+            example("examples/invalid/const_runtime.l"),
+            format!("3:23: error[L0004]: {RUNTIME}"),
+        ),
+        (
+            "div_zero.l",
+            "fixed X = 1 / 0\nflow main() {}\n".into(),
+            format!("1:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "rem_zero.l",
+            "fixed X = 1 % 0\nflow main() {}\n".into(),
+            format!("1:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "div_min.l",
+            "fixed X = -9223372036854775807 - 1\nfixed Y = X / -1\nflow main() {}\n".into(),
+            format!("2:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "neg_min.l",
+            "fixed X = -9223372036854775807 - 1\nfixed Y = -X\nflow main() {}\n".into(),
+            format!("2:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "mul_overflow.l",
+            "fixed X = 4611686018427387904 * 2\nflow main() {}\n".into(),
+            format!("1:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "sub_overflow.l",
+            "fixed X = -9223372036854775807 - 2\nflow main() {}\n".into(),
+            format!("1:11: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "local_overflow.l",
+            "fixed BIG = 9223372036854775807\nflow main() {\n    fixed X = BIG + 1\n}\n".into(),
+            format!("3:15: error[L0004]: {OVERFLOW}"),
+        ),
+        (
+            "call.l",
+            "flow f() => Int { give 1 }\nfixed X = f()\nflow main() {}\n".into(),
+            format!("2:11: error[L0004]: {RUNTIME}"),
+        ),
+        (
+            "print_call.l",
+            "flow main() {\n    fixed X = print(1)\n}\n".into(),
+            format!("2:15: error[L0004]: {RUNTIME}"),
+        ),
+        (
+            "param.l",
+            "flow f(x: Int) {\n    fixed X = x\n}\nflow main() {}\n".into(),
+            format!("2:15: error[L0004]: {RUNTIME}"),
+        ),
+        (
+            "short_circuit_runtime.l",
+            "flow main() {\n    change x = 2\n    fixed X = false && x == 1\n}\n".into(),
+            format!("3:24: error[L0004]: {RUNTIME}"),
+        ),
+        (
+            "struct_ctor.l",
+            "shape P {\n    x: Int\n}\nfixed X = P(x: 1)\nflow main() {}\n".into(),
+            "4:11: error[L0001]: const requiere expresión constante; constructores de struct no permitidos aquí".into(),
+        ),
+        (
+            "cycle.l",
+            "fixed X = Y\nfixed Y = X\nflow main() {}\n".into(),
+            "1:1: error[L0001]: dependencia circular entre constantes".into(),
+        ),
+        (
+            "self_cycle.l",
+            "fixed X = X + 1\nflow main() {}\n".into(),
+            "1:1: error[L0001]: dependencia circular entre constantes".into(),
+        ),
+        (
+            "cycle_dependent.l",
+            "fixed A = 1\nfixed X = B + 1\nfixed B = C\nfixed C = B\nflow main() {}\n".into(),
+            "2:1: error[L0001]: dependencia circular entre constantes".into(),
+        ),
+    ];
+    for (name, source, diagnostic) in cases {
+        let dir = work(&format!("const_reject_{}", name.trim_end_matches(".l")));
+        fs::write(dir.join(name), source).unwrap();
+        let image = dir.join("prog.exe");
+        let _ = fs::remove_file(&image);
+        let out = build_in(&dir, name, "pe", "prog.exe");
+        let stderr = String::from_utf8_lossy(&out.stderr).replace("\r\n", "\n");
+        assert_eq!(out.status.code(), Some(1), "{name}: {stderr}");
+        assert_eq!(stderr, format!("{name}:{diagnostic}\n"), "{name}");
+        assert!(!image.exists(), "{name}: no image may be written");
+    }
+}

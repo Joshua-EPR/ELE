@@ -95,6 +95,7 @@ sema_borrow.l	lir
 sema_borrow_syntax.l	lir
 sema_builtin_union.l	lir
 sema_collection_ops.l	lir
+sema_const.l	lir
 sema_context.l	lir
 sema_drop.l	lir
 sema_expr.l	lir

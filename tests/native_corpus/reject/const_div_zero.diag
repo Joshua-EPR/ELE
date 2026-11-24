@@ -1,0 +1,2 @@
+const_div_zero.l:2:11: error[L0004]
+panic en const: overflow entero o división/resto por cero

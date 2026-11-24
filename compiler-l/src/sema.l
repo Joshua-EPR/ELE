@@ -17,6 +17,7 @@ take lir_build
 take lir_module
 take sema_expr
 take sema_stmt
+take sema_const
 
 // Register nominal declarations before resolving function signatures and
 // constants. Without this pass a function using a type defined later in the
@@ -80,16 +81,9 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
                 when existing >= 0 {
                     semaAddError(edit ctx, "L0002", "constante duplicada en el mismo ámbito", decl.start, decl.end)
                 } otherwise {
-                    change const_t = semaConstantType(edit ctx, source, tree, decl.d)
-                    when decl.c >= 0 {
-                        hold annotated = semaResolveAstType(edit ctx, source, tree, decl.c)
-                        when !semTypeEquals(view ctx.types, const_t, annotated) {
-                            semaAddError(edit ctx, "L0003", "tipo incompatible en constante", decl.start, decl.end)
-                        }
-                        const_t = annotated
-                    }
-                    hold sym_id = symbolAdd(edit ctx.symbols, SymbolKind.Const, decl.a, decl.b, const_t, ctx.scopes.current_scope, false, decl.is_public, i, decl.start, decl.end)
+                    hold sym_id = symbolAdd(edit ctx.symbols, SymbolKind.Const, decl.a, decl.b, 7, ctx.scopes.current_scope, false, decl.is_public, i, decl.start, decl.end)
                     symbolSetModule(edit ctx.symbols, sym_id, ctx.current_module)
+                    semaConstDeclare(edit ctx, i, sym_id)
                     scopeAddSymbol(edit ctx.scopes, sym_id)
                 }
             }
@@ -98,6 +92,8 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
             }
         }
     }
+    // Constants may reference constants declared after them.
+    semaConstEvalAll(edit ctx, source, tree)
 }
 
 // A shape field or choice payload of a linear type is rejected (see
@@ -115,31 +111,6 @@ flow semaRejectLinearMembers(ctx: edit SemaContext, source: view Text, tree: vie
         } otherwise {
             hold ft = semaFieldType(edit ctx, source, tree, m)
             semaRejectLinearElem(edit ctx, ft, tree.fields[m].start, tree.fields[m].end)
-        }
-    }
-}
-
-flow semaConstantType(ctx: edit SemaContext, source: view Text, tree: view AstTree, id: Int) => Int {
-    when id < 0 || id >= tree.expressions.length { give 7 }
-    hold expr = view tree.expressions[id]
-    choose expr.kind {
-        AstExprKind.IntLit : { give 1 }
-        AstExprKind.BoolLit : { give 4 }
-        AstExprKind.TextLit : { give 5 }
-        AstExprKind.UnitLit : { give 6 }
-        AstExprKind.Unary : {
-            when expr.b >= 0 && expr.c == expr.b + 1 && expr.b < source.byteLength && source@byteAt(expr.b) == 45 && expr.a >= 0 && expr.a < tree.expressions.length {
-                choose tree.expressions[expr.a].kind {
-                    AstExprKind.IntLit : { give 1 }
-                    _ : {}
-                }
-            }
-            semaAddError(edit ctx, "L0016", "la constante requiere un literal en este subconjunto", expr.start, expr.end)
-            give 7
-        }
-        _ : {
-            semaAddError(edit ctx, "L0016", "la constante requiere un literal en este subconjunto", expr.start, expr.end)
-            give 7
         }
     }
 }

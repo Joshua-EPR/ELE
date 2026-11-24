@@ -25,6 +25,8 @@ expose shape Symbol {
     decl_span_end: Int
     // Owning module id for top-level declarations, -1 for locals/params.
     module_id: Int
+    // Constant table entry (SemaContext.consts) of a Const symbol, else -1.
+    const_slot: Int
 }
 
 expose shape SymbolTable {
@@ -51,6 +53,7 @@ expose flow symbolAdd(table: edit SymbolTable, kind: SymbolKind, name_start: Int
         decl_span_start: start,
         decl_span_end: end,
         module_id: -1,
+        const_slot: -1,
     ))
     give id
 }

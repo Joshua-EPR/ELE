@@ -525,10 +525,12 @@ fn stage1_negative_constants_require_minus() {
         "const MINUS_FIVE = -5\nfn main() -> Int { return MINUS_FIVE }",
         Ok(()),
     );
+    // Constant expressions are folded (sema_const.l): `!1` is no longer an
+    // unsupported construct but the same type error as anywhere else.
     flow_case(
         "invalid_unary_constant",
         "const BAD = !1\nfn main() {}",
-        Err("L0016"),
+        Err("L0003"),
     );
 }
 
