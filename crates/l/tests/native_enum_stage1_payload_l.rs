@@ -216,7 +216,10 @@ fn enum_text_payload_is_dropped_by_the_native_backend() {
     );
     let lir = String::from_utf8(result.stdout).unwrap();
     assert!(lir.contains("i variant "), "{lir}");
-    assert!(lir.contains("i drop "), "owned enum must be dropped on return: {lir}");
+    assert!(
+        lir.contains("i drop "),
+        "owned enum must be dropped on return: {lir}"
+    );
 
     let lir_file = temp.join("owned_text_drop.lir");
     let executable = temp.join("owned_text_drop.elf");
@@ -240,7 +243,12 @@ fn enum_text_payload_is_dropped_by_the_native_backend() {
         permissions.set_mode(0o700);
         fs::set_permissions(&executable, permissions).unwrap();
         let actual = Command::new(&executable).output().unwrap();
-        assert_eq!(actual.status.code(), Some(0), "{}", String::from_utf8_lossy(&actual.stderr));
+        assert_eq!(
+            actual.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
     }
 }
 
