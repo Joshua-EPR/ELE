@@ -1,0 +1,2 @@
+const_call.l:3:11: error[L0004]
+variables runtime y llamadas no permitidas

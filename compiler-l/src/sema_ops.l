@@ -11,6 +11,7 @@ take sema_drop
 take sema_borrow
 take sema_lower
 take lir_builtin_union
+take sema_const
 
 // Non-recursive parts of expression checking and lowering, kept out of
 // sema_expr.l (CORE-1 budget). Each function receives what the recursive
@@ -62,8 +63,7 @@ expose flow semaNameExpr(ctx: edit SemaContext, source: view Text, tree: view As
     hold ty = ctx.symbols.symbols[sym_id].type_id
     hold path = ctx.symbols.symbols[sym_id].move_path
     when constant {
-        hold decl = ctx.symbols.symbols[sym_id].decl_id
-        hold emitted = lirLiteral(edit ctx, source, tree, tree.declarations[decl].d)
+        hold emitted = semaConstOperand(edit ctx, sym_id)
         lirSetVal(edit ctx, emitted)
         give ty
     }

@@ -16,6 +16,7 @@ take sema_match_coverage
 take lir_builtin_union
 take sema_loop_jump
 take sema_stmt_values
+take sema_const
 
 flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int) {
     hold expr = view tree.expressions[expr_id]
@@ -105,6 +106,7 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
     ctx.lir.at = stmt.start
     choose stmt.kind {
         AstStmtKind.Let : { give semaStmtLet(edit ctx, source, tree, stmt_id) }
+        AstStmtKind.Const : { semaStmtConst(edit ctx, source, tree, stmt_id) }
         AstStmtKind.Assign : {
             hold target_e = stmt.a
             hold val_e = stmt.d
@@ -121,7 +123,9 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
             lirDiscard(edit ctx)
             hold referent = semaRefElem(ctx, target_t)
             when referent >= 0 { target_t = referent }
-            when target < 0 {
+            when target < 0 && semaConstNamed(edit ctx, source, tree, target_e) {
+                semaAddError(edit ctx, "L0006", "no se puede reasignar una constante", stmt.start, stmt.end)
+            } otherwise when target < 0 {
                 semaAddError(edit ctx, "L0016", "destino de asignación no verificado", stmt.start, stmt.end)
             } otherwise {
                 hold sym = ctx.flow.paths[target].symbol

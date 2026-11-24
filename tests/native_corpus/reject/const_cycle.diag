@@ -1,0 +1,2 @@
+const_cycle.l:2:1: error[L0001]
+dependencia circular entre constantes
