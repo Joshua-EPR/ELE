@@ -16,6 +16,7 @@ take native_cfg_ir
 take native_cfg_platform
 take native_rt_platform
 take win64_rt_platform
+take native_trap
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -409,18 +410,6 @@ expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     give cfgBuildFor(p, 0)
 }
 
-// Process exit with a constant status: Linux sys_exit on ELF64 (target 0),
-// ExitProcess through the IAT on PE32+ (target 1).
-flow cfgEmitExit(code: edit X64Code, imports: edit Pe64Imports, target: Int, status: Int) {
-    when target == 1 {
-        w64EmitExit(edit code, edit imports, status)
-        give
-    }
-    x64MovImm64(edit code, 7, status)
-    x64MovImm64(edit code, 0, 60)
-    x64Syscall(edit code)
-}
-
 // Target 0 is Linux x86-64 ELF64; target 1 is Windows x64 PE32+, whose
 // runtime (win64_rt output, win64_heap owned Text and lists on
 // VirtualAlloc/VirtualFree) provides the same entries as native_rt and
@@ -473,19 +462,10 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         x64MovImm64(edit code, 0, 60)
         x64Syscall(edit code)
     }
-    hold overflow_handler = code.bytes.length
-    cfgEmitExit(edit code, edit imports, target, 125)
-
-    hold bad_variant_handler = code.bytes.length
-    cfgEmitExit(edit code, edit imports, target, 126)
-
-    // Index out of range (byteAt, list element): exit 127, emitted only when
-    // used.
-    change bad_index_handler = -1
-    when cfgUsesKind(p, 15) || p.proj_kind.length > 0 {
-        bad_index_handler = code.bytes.length
-        cfgEmitExit(edit code, edit imports, target, 127)
-    }
+    // Run-time checks (overflow 125, inactive variant 126, index 127) are
+    // reported after the functions by native_trap, with their source
+    // position; `spans` follows the check lists of `fix`.
+    change spans = trapNewSpans()
 
     // The runtime is emitted only for programs that print or own Text.
     change runtime_at: List of[Int] = List[]
@@ -537,7 +517,9 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             hold block = view p.blocks[index]
             each i among block.first..(block.first + block.count) {
                 hold inst = view p.insts[i]
+                trapTag(edit spans, view fix, 0)
                 cfgEmitInstruction(edit code, p, f, view inst, edit fix)
+                trapTag(edit spans, view fix, trapPack(inst.line, inst.col))
                 when code.error != 0 { leave }
             }
             when code.error != 0 { leave }
@@ -551,6 +533,8 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 70
         give result
     }
+    trapTag(edit spans, view fix, 0)
+    trapEmitAll(edit code, edit imports, target, view fix, view spans)
     // A runtime routine this target lacks: a safety net, since win64_heap
     // provides every entry of native_rt and native_rt_list.
     change missing_routine = false
@@ -580,15 +564,6 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     }
     each i among 0..fix.jump_at.length {
         x64PatchRelative(edit code, fix.jump_at[i], block_at[fix.jump_to[i]])
-    }
-    each i among 0..fix.bad_index_at.length {
-        x64PatchRelative(edit code, fix.bad_index_at[i], bad_index_handler)
-    }
-    each i among 0..fix.overflow_at.length {
-        x64PatchRelative(edit code, fix.overflow_at[i], overflow_handler)
-    }
-    each i among 0..fix.bad_variant_at.length {
-        x64PatchRelative(edit code, fix.bad_variant_at[i], bad_variant_handler)
     }
     // Text literals follow the code inside the same read-only segment, one
     // copy per occurrence in the LIR.

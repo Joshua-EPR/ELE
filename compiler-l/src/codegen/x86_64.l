@@ -69,6 +69,20 @@ expose flow x64MovImm64(code: edit X64Code, dst: Int, value: Int) {
     x64PutSigned(edit code, value, 8)
 }
 
+// MOV r32,imm32 (B8+r): 0 <= value < 2^32, zero-extended into the whole
+// 64-bit register. Half the size of x64MovImm64 for small constants.
+expose flow x64MovImm32Zx(code: edit X64Code, dst: Int, value: Int) {
+    when !x64RegisterValid(dst) { code.error = 3; give }
+    when value < 0 || value > 4294967295 { code.error = 2; give }
+    when dst >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 184 + dst % 8)
+    change n = value
+    each i among 0..4 {
+        x64Put(edit code, n % 256)
+        n = n / 256
+    }
+}
+
 // Encoding: MOV r/m64,r64 (destination register encoded as r/m).
 expose flow x64MovReg(code: edit X64Code, dst: Int, src: Int) {
     when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }

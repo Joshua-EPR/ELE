@@ -32,6 +32,7 @@ codegen/native_list_int.l	lir
 codegen/native_rt.l	lir
 codegen/native_rt_list.l	lir
 codegen/native_rt_platform.l	lir
+codegen/native_trap.l	lir
 codegen/pe64.l	lir
 codegen/win64_callback.l	lir
 codegen/win64_clipboard.l	lir

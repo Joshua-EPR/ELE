@@ -195,6 +195,7 @@ fn migrated_native_cfg_core_uses_ele_v2_surface() {
         "native_heap_resize.l",
         "native_list_int.l",
         "native_rt_list.l",
+        "native_trap.l",
     ];
     let legacy = [
         "fn", "struct", "enum", "impl", "trait", "let", "var", "const", "return", "if", "else",

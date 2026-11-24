@@ -116,6 +116,22 @@ indica que es exclusiva.
 `@<línea>:<col>` es la posición de origen que usan los diagnósticos de
 ejecución, como el overflow o la división entre cero.
 
+El backend ELE (`compiler-l/src/codegen/native_trap.l`) conserva la
+posición de cada registro `i` y, cuando falla una comprobación en tiempo de
+ejecución, escribe una línea en stderr con el formato de Stage 0 antes de
+salir con el estado propio del backend, que no cambia:
+
+| Estado | Comprobación | Mensaje en stderr |
+|---|---|---|
+| 125 | overflow, división o resto por cero, `MIN / -1`, `-MIN` | `ELE <l>:<c>: overflow entero o división/resto por cero` |
+| 126 | payload de una variante inactiva | `ELE <l>:<c>: acceso a variante enum inactiva` |
+| 127 | índice de `byteAt` o de lista fuera de rango | `ELE <l>:<c>: índice fuera de rango` |
+
+Sin sufijo `@` la línea es `ELE: <mensaje>`, como los pánicos sin posición
+de Stage 0. Stage 0 sale con el estado de `abort` (`0xC0000409` en
+Windows); los estados 125/126/127 son el contrato documentado del backend
+ELE y se mantienen.
+
 ## Validación en el backend
 
 1. Análisis léxico y sintáctico del protocolo, con todos los límites y

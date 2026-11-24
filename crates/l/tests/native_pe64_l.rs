@@ -319,7 +319,21 @@ fn validate_relocs(
 #[cfg(all(windows, target_arch = "x86_64"))]
 fn execute(image: &Path) -> (Option<i32>, Vec<u8>) {
     let run = Command::new(image).output().unwrap();
-    assert!(run.stderr.is_empty());
+    // A run-time check (native_trap.l) reports itself on stderr; these LIR
+    // fixtures carry no ` @line:col`, so the line has no position. Every
+    // other run writes nothing to stderr.
+    let expected: &[u8] = match run.status.code() {
+        Some(125) => "ELE: overflow entero o división/resto por cero\n".as_bytes(),
+        Some(126) => b"ELE: acceso a variante enum inactiva\n",
+        Some(127) => "ELE: índice fuera de rango\n".as_bytes(),
+        _ => b"",
+    };
+    assert_eq!(
+        String::from_utf8_lossy(&run.stderr),
+        String::from_utf8_lossy(expected),
+        "{}",
+        image.display()
+    );
     (run.status.code(), run.stdout)
 }
 
