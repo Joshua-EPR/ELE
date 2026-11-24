@@ -20,7 +20,7 @@ Input: a **seed** ELE driver binary, its expected SHA-256, a target and a new
    printed; on a mismatch the sizes, the number of differing bytes and the
    first differing offsets are printed and recorded, and the run fails.
 6. Gen3 compiles and runs every program in
-   `scripts/bootstrap/smoke/cases.txt` (five examples from `examples/` plus
+   `scripts/bootstrap/smoke/cases.txt` (six examples from `examples/` plus
    `scripts/bootstrap/smoke/exit_code.l`). Stdout is compared byte for byte
    with `scripts/bootstrap/smoke/expected/<name>.stdout`, and the exit code
    with the manifest (one case expects exit code 7).
