@@ -254,8 +254,13 @@ flow loadModuleRecursive(
                     give 0
                 }
                 Err(err) : {
+                    // readText already proved the bytes are valid UTF-8:
+                    // this is a lexical error of this module, reported with
+                    // its own position (never as an I/O or UTF-8 failure).
+                    hold prefix = "error[LEXER]: "
+                    printError(lexDiagnostic(path, view mod_source, view err, view prefix))
                     loading_stack@pop()
-                    give 4
+                    give -14
                 }
             }
         }

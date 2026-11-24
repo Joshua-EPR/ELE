@@ -35,6 +35,41 @@ expose shape LexError {
     offset: Int
 }
 
+// User-facing description of a lexer failure (shared by lexer-l and ele).
+expose flow lexProblemMessage(problem: view LexProblem) => Text {
+    choose problem {
+        LexProblem.UnexpectedByte : { give "carácter inválido o fuera del subconjunto léxico" }
+        LexProblem.UnclosedComment : { give "comentario sin cerrar" }
+        LexProblem.UnsupportedNumber : { give "literal de punto flotante fuera del subconjunto léxico" }
+        LexProblem.UnclosedString : { give "cadena sin cerrar" }
+        LexProblem.InvalidEscape : { give "escape no implementado o inválido" }
+        LexProblem.InvalidUnicodeEscape : { give "escape Unicode inválido" }
+        LexProblem.InvalidUnicodeScalar : { give "scalar Unicode inválido" }
+        LexProblem.UnclosedInterpolation : { give "interpolación sin cerrar: falta '}}'" }
+        LexProblem.UnopenedBrace : { give "llave '}}' sin apertura en Text; use '}}}}' para una llave literal" }
+        LexProblem.ExcessiveDepth : { give "límite de anidamiento Text (64) excedido" }
+    }
+}
+
+// `path:line:column: <prefix><message> (byte offset)` of a lexer failure.
+// Lines and columns start at 1 after a BOM; columns count code points.
+expose flow lexDiagnostic(path: view Text, source: view Text, error: view LexError, prefix: view Text) => Text {
+    hold offset = error.offset
+    hold message = lexProblemMessage(error.problem)
+    change line = 1
+    change column = 1
+    each i among lexStart(source)..offset {
+        hold b = source@byteAt(i)
+        when b == 10 {
+            line += 1
+            column = 1
+        } otherwise when b < 128 || b >= 192 {
+            column += 1
+        }
+    }
+    give "{path}:{line}:{column}: {prefix}{message} (byte {offset})"
+}
+
 flow lexPeek(source: view Text, offset: Int, end: Int) => Int {
     when offset >= end { give -1 }
     give source@byteAt(offset)

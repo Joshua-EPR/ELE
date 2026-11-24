@@ -2,6 +2,8 @@ take ast
 take symbols
 take sema_context
 take lir_build
+take sema_types
+take lir_emit
 
 // Verify enum arm coverage before lowering: a named final arm may be
 // treated as a fallthrough only if every declared variant occurs once.
@@ -189,4 +191,159 @@ expose flow semaBuiltinMatchCovered(source: view Text, tree: view AstTree, expr:
         }
     }
     give seen_zero && seen_one
+}
+
+// Literal patterns over a primitive scrutinee (Int, Bool, Text), as Stage 0
+// accepts them. A pattern is its raw source span. Result: the type id of the
+// literal (1 Int, 4 Bool, 5 Text), PRIM_PATTERN_WILDCARD for `_`,
+// PRIM_PATTERN_BINDER for a plain name and PRIM_PATTERN_OTHER for anything
+// else (variants, interpolated Text, ...).
+expose fixed PRIM_PATTERN_WILDCARD = 0
+expose fixed PRIM_PATTERN_BINDER = 2
+expose fixed PRIM_PATTERN_OTHER = -1
+
+expose flow semaPrimPatternKind(source: view Text, start: Int, end: Int) => Int {
+    when end <= start { give PRIM_PATTERN_OTHER }
+    when end - start == 1 && source@byteAt(start) == 95 { give PRIM_PATTERN_WILDCARD }
+    hold name_true = "true"
+    hold name_false = "false"
+    when symbolNameEqualsText(source, start, end, name_true) || symbolNameEqualsText(source, start, end, name_false) { give 4 }
+    hold first = source@byteAt(start)
+    when first == 34 {
+        // One whole Text token, without interpolation. Escapes were
+        // validated by the lexer; `{{` and `}}` are literal braces.
+        when end - start < 2 || source@byteAt(end - 1) != 34 { give PRIM_PATTERN_OTHER }
+        change i = start + 1
+        during i < end - 1 {
+            hold b = source@byteAt(i)
+            when b == 92 && source@byteAt(i + 1) == 117 {
+                // `\u{...}`: skip through its closing brace.
+                during i < end - 1 && source@byteAt(i) != 125 { i += 1 }
+                i += 1
+            } otherwise when b == 92 {
+                i += 2
+            } otherwise when b == 123 || b == 125 {
+                when i + 1 >= end - 1 || source@byteAt(i + 1) != b { give PRIM_PATTERN_OTHER }
+                i += 2
+            } otherwise when b == 34 {
+                give PRIM_PATTERN_OTHER
+            } otherwise {
+                i += 1
+            }
+        }
+        when i != end - 1 { give PRIM_PATTERN_OTHER }
+        give 5
+    }
+    change digits_start = start
+    when first == 45 { digits_start = start + 1 }
+    when digits_start < end && source@byteAt(digits_start) >= 48 && source@byteAt(digits_start) <= 57 {
+        each i among digits_start..end {
+            hold b = source@byteAt(i)
+            when (b < 48 || b > 57) && b != 95 { give PRIM_PATTERN_OTHER }
+        }
+        give 1
+    }
+    when semaBuiltinBinderIsName(source, start, end) { give PRIM_PATTERN_BINDER }
+    give PRIM_PATTERN_OTHER
+}
+
+// Value of an Int literal pattern already classified by semaPrimPatternKind.
+expose flow semaPrimPatternInt(source: view Text, start: Int, end: Int) => Int {
+    change negative = false
+    change i = start
+    when source@byteAt(i) == 45 {
+        negative = true
+        i += 1
+    }
+    change value = 0
+    during i < end {
+        hold b = source@byteAt(i)
+        when b != 95 { value = value * 10 + (b - 48) }
+        i += 1
+    }
+    when negative { give 0 - value }
+    give value
+}
+
+flow semaPrimTextEqual(source: view Text, a_start: Int, a_end: Int, b_start: Int, b_end: Int) => Bool {
+    hold a = lirDecode(source, a_start + 1, a_end - 1)
+    hold b = lirDecode(source, b_start + 1, b_end - 1)
+    when a.length != b.length { give false }
+    each i among 0..a.length {
+        when a[i] != b[i] { give false }
+    }
+    give true
+}
+
+// Check the arms of a match over Int, Bool or Text like Stage 0: every
+// pattern has the scrutinee's type, no arm is unreachable, and the match is
+// exhaustive (`_`, or both Bool values). A binder pattern is outside the
+// lowered subset (L0016). Returns true only when literal arms alone cover
+// every value (`true` and `false`, the last one final): that arm is then
+// unconditional. Any other scrutinee type is left to the caller.
+expose flow semaPrimitiveMatchCovered(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, scrut_t: Int) => Bool {
+    when scrut_t != 1 && scrut_t != 4 && scrut_t != 5 { give false }
+    hold type_name = semTypeName(view ctx.types, source, scrut_t)
+    change total = false
+    change seen_true = false
+    change seen_false = false
+    each arm among 0..expr.c {
+        hold start = tree.extra[expr.b + 3 * arm]
+        hold end = tree.extra[expr.b + 3 * arm + 1]
+        hold kind = semaPrimPatternKind(source, start, end)
+        when total {
+            semaAddError(edit ctx, "L0004", "patrón inalcanzable: los brazos anteriores ya cubren estos valores", start, end)
+            give false
+        }
+        when kind == PRIM_PATTERN_WILDCARD {
+            total = true
+            proceed
+        }
+        when kind == PRIM_PATTERN_BINDER {
+            lirMarkUnsupported(edit ctx.lir, start)
+            total = true
+            proceed
+        }
+        when kind != scrut_t {
+            // Name the pattern like Stage 0 where it is a literal.
+            change shown = ""
+            when kind == 1 {
+                hold value = semaPrimPatternInt(source, start, end)
+                shown = "{value} "
+            }
+            when kind == 4 && source@byteAt(start) == 116 { shown = "true " }
+            when kind == 4 && source@byteAt(start) != 116 { shown = "false " }
+            when kind == 5 { shown = "Text " }
+            semaAddError(edit ctx, "L0003", "patrón {shown}incompatible con tipo {type_name}", start, end)
+            give false
+        }
+        change repeated = false
+        each prev among 0..arm {
+            hold p_start = tree.extra[expr.b + 3 * prev]
+            hold p_end = tree.extra[expr.b + 3 * prev + 1]
+            when semaPrimPatternKind(source, p_start, p_end) == kind {
+                when kind == 1 && semaPrimPatternInt(source, p_start, p_end) == semaPrimPatternInt(source, start, end) { repeated = true }
+                when kind == 4 && symbolNamesEqual(source, p_start, p_end, start, end) { repeated = true }
+                when kind == 5 && semaPrimTextEqual(source, p_start, p_end, start, end) { repeated = true }
+            }
+        }
+        when repeated {
+            semaAddError(edit ctx, "L0004", "patrón inalcanzable: los brazos anteriores ya cubren estos valores", start, end)
+            give false
+        }
+        when kind == 4 {
+            when source@byteAt(start) == 116 { seen_true = true } otherwise { seen_false = true }
+            when seen_true && seen_false {
+                total = true
+                when arm == expr.c - 1 { give true }
+            }
+        }
+    }
+    when !total {
+        change missing = "_"
+        when scrut_t == 4 && !seen_true { missing = "true" }
+        when scrut_t == 4 && seen_true { missing = "false" }
+        semaAddError(edit ctx, "L0004", "match no exhaustivo sobre {type_name}: falta el caso {missing}", expr.start, expr.end)
+    }
+    give false
 }
