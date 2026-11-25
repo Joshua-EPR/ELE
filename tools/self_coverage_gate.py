@@ -19,6 +19,7 @@ from ele_source_audit import audit as source_graph_audit
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("parser", "ownership", "lir", "native")
+GEN3_TOOLS = ("main_parser", "main_sema", "native_cfg_demo")
 DIAGNOSTIC = re.compile(
     r"^(?P<path>.+):(?P<line>\d+):(?P<column>\d+):\s*"
     r"error\[(?P<code>[^]]+)\]:\s*(?P<message>.*)$"
@@ -75,6 +76,42 @@ def find_binary(target: Path, name: str, sources: Path) -> Path:
     if newest.stat().st_mtime_ns < edited:
         raise ValueError(f"stale {name}.exe under {target}: rebuild Stage 1 first")
     return newest
+
+
+def build_gen3_tools(
+    gen3: Path, target_format: str, source_root: Path,
+    output: Path, root: Path, timeout: int,
+) -> dict[str, Path]:
+    """Build the self-coverage components using a verified native ELE driver."""
+    if target_format not in {"elf", "pe"}:
+        raise ValueError(f"unsupported Gen3 target format: {target_format}")
+    gen3 = gen3.resolve(strict=True)
+    source_root = source_root.resolve(strict=True)
+    output.mkdir(parents=True, exist_ok=True)
+    extension = ".elf" if target_format == "elf" else ".exe"
+    expected_magic = b"\x7fELF" if target_format == "elf" else b"MZ"
+    paths: dict[str, Path] = {}
+    for name in GEN3_TOOLS:
+        source = source_root / f"{name}.l"
+        if not source.is_file():
+            raise ValueError(f"missing self-coverage source: {source}")
+        image = output / f"{name}{extension}"
+        image.unlink(missing_ok=True)
+        built = command(
+            [str(gen3), "build", str(source), "--target", target_format,
+             "--output", str(image)],
+            root,
+            timeout,
+        )
+        if built["exit_code"] != 0:
+            detail = built["stderr"].strip() or built["stdout"].strip()
+            raise ValueError(f"Gen3 failed to build {name}: {detail[:2000]}")
+        if not image.is_file():
+            raise ValueError(f"Gen3 returned success without producing {image}")
+        if not image.read_bytes().startswith(expected_magic):
+            raise ValueError(f"Gen3 produced an invalid {target_format} image for {name}")
+        paths[name] = image
+    return paths
 
 
 def command(argv: list[str], cwd: Path, timeout: int) -> dict[str, Any]:
@@ -265,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-root", type=Path, default=ROOT / "compiler-l/src")
     parser.add_argument("--target", type=Path, default=ROOT / "target/stage1-tests")
     parser.add_argument("--output", type=Path, default=ROOT / "target/stage1-tests/self-coverage-gate")
+    parser.add_argument("--gen3", type=Path, help="native ELE compiler used to build the probe tools")
+    parser.add_argument("--gen3-target", choices=("elf", "pe"), default="elf")
     parser.add_argument("--baseline", type=Path, help="existing JSON or Markdown matrix; fail on formerly green regressions")
     parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args(argv)
@@ -275,9 +314,14 @@ def main(argv: list[str] | None = None) -> int:
         source_paths = sorted(root.rglob("*.l"))
         if not source_paths:
             raise ValueError(f"no ELE sources in {root}")
-        paths = {name: find_binary(args.target, name, root) for name in
-                 ("main_parser", "main_sema", "native_cfg_demo")}
         args.output.mkdir(parents=True, exist_ok=True)
+        if args.gen3:
+            paths = build_gen3_tools(
+                args.gen3, args.gen3_target, root, args.output / "gen3-tools",
+                ROOT, args.timeout,
+            )
+        else:
+            paths = {name: find_binary(args.target, name, root) for name in GEN3_TOOLS}
         rows = [
             probe_source(source, source.relative_to(root).as_posix(),
                          paths["main_parser"], paths["main_sema"],

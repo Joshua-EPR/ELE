@@ -18,6 +18,84 @@ spec.loader.exec_module(gate)
 
 
 class SelfCoverageGateTests(unittest.TestCase):
+    def test_gen3_builds_the_three_native_self_coverage_tools(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source_root = root / "compiler-l/src"
+            source_root.mkdir(parents=True)
+            for name in gate.GEN3_TOOLS:
+                (source_root / f"{name}.l").write_text("flow main() {}\n", encoding="utf-8")
+            gen3 = root / "gen3"
+            gen3.write_bytes(b"compiler")
+            calls = []
+
+            def fake_command(argv, cwd, timeout):
+                calls.append(argv)
+                image = Path(argv[-1])
+                image.write_bytes(b"\x7fELF\x02native")
+                return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+            with patch.object(gate, "command", side_effect=fake_command):
+                paths = gate.build_gen3_tools(
+                    gen3, "elf", source_root, root / "tools", root, 30,
+                )
+            images = {name: path.read_bytes() for name, path in paths.items()}
+
+        self.assertEqual(set(paths), set(gate.GEN3_TOOLS))
+        self.assertEqual(len(calls), 3)
+        for name, argv in zip(gate.GEN3_TOOLS, calls):
+            self.assertEqual(argv[0], str(gen3.resolve()))
+            self.assertEqual(argv[1:2], ["build"])
+            self.assertIn(str(source_root / f"{name}.l"), argv)
+            self.assertEqual(argv[argv.index("--target") + 1], "elf")
+            self.assertTrue(images[name].startswith(b"\x7fELF"))
+
+    def test_gen3_builds_pe_self_coverage_tools(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source_root = root / "src"
+            source_root.mkdir()
+            for name in gate.GEN3_TOOLS:
+                (source_root / f"{name}.l").write_text("flow main() {}\n", encoding="utf-8")
+            gen3 = root / "gen3"
+            gen3.write_bytes(b"compiler")
+            calls = []
+
+            def fake_command(argv, cwd, timeout):
+                calls.append(argv)
+                Path(argv[-1]).write_bytes(b"MZ\x00\x00native")
+                return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+            with patch.object(gate, "command", side_effect=fake_command):
+                paths = gate.build_gen3_tools(
+                    gen3, "pe", source_root, root / "tools", root, 30,
+                )
+            images = {name: path.read_bytes() for name, path in paths.items()}
+
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(argv[argv.index("--target") + 1] == "pe" for argv in calls))
+        self.assertTrue(all(images[name].startswith(b"MZ") for name in gate.GEN3_TOOLS))
+
+    def test_gen3_self_coverage_rejects_wrong_output_format(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source_root = root / "src"
+            source_root.mkdir()
+            for name in gate.GEN3_TOOLS:
+                (source_root / f"{name}.l").write_text("flow main() {}\n", encoding="utf-8")
+            gen3 = root / "gen3"
+            gen3.write_bytes(b"compiler")
+
+            def fake_command(argv, cwd, timeout):
+                Path(argv[-1]).write_bytes(b"MZ\x00\x00not-elf")
+                return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+            with patch.object(gate, "command", side_effect=fake_command):
+                with self.assertRaisesRegex(ValueError, "invalid elf image"):
+                    gate.build_gen3_tools(
+                        gen3, "elf", source_root, root / "tools", root, 30,
+                    )
+
     def test_parse_windows_diagnostic_preserves_original_span(self):
         d = gate.error_details(
             r"C:\repo\compiler-l\src\tokens.l:28:42: error[L0001]: tipo desconocido"
