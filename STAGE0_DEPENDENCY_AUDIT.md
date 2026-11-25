@@ -1,16 +1,18 @@
 # Stage 0 dependency audit
 
 Audit date: 2026-11-24
-Current `main`: `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged).
-The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status has since been updated through PR #168 and the seed/bootstrap portion of #167. PR #168 adds value-producing `choose` expressions and removes that corpus gap. PR #167 pins ELF/PE seeds and removes the transitional Cargo seed job. PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds; PR #170 implements owned Text payload matches. The latter two are open. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
+Current `main`: `21e9cc32758dc23aa1637fbd4441d9849a6cc677` (PRs #167–#170 merged).
+The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status now includes the versioned seeds, value-producing `choose`, native-seed distribution, and owned Text choice matches. PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds. PR #170 implements owned Text payload matches. PR #171 is adding lazy drop-free Option defaults, and PR #172 adds Result/Option propagation; both are still under CI review. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
 Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was excluded.
 
 ## Latest execution snapshot
 
 - PR #168 (`4444e02`) is merged. Its Linux/Windows native checks and ELF execution passed.
 - PR #167 (`2fa0af8`) pins ELF64/PE32+ seed artifacts, removes the Cargo seed job, and validates seed → Gen1′ → Gen2 → Gen3 with compiler tools absent from runner PATH. Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed; merged.
-- PR #169 (`07ba2ba`) makes distribution require an explicit native seed, removes Stage 0/Cargo/cached-driver fallbacks, restricts distribution PATH, and makes installers consume package archives. Its first CI run found missing `gzip` and a nested `powershell` command after PATH isolation; both fixes are pushed and the rebased CI is running.
-- PR #170 (`1bdd54b`) adds owned Text payloads to `choice` match lowering and a use-after-move rejection case. CI is rerunning after replacing the obsolete rejection test with a positive drop-glue regression.
+- PR #169 is merged. Required Linux/Windows package, bootstrap, docs and native checks passed after fixing missing `gzip` and nested PowerShell execution under PATH isolation. Distribution now requires a pinned native seed and package archives for installation.
+- PR #170 is merged at `21e9cc3`. It adds owned Text payloads to `choice` match lowering and a use-after-move rejection regression; Linux/Windows native checks and ELF execution passed.
+- PR #171 (`5227fc8`) implements lazy `??` defaults for drop-free Int/Bool payloads. Owned Text remains an active gap on that branch; required Windows full/MSVC CI is still pending.
+- PR #172 (`a7ebe3c`) implements `?` propagation for Option/Result with ownership checks. Required Windows full/MSVC CI is still pending.
 - Stage 0, Rust/Cargo and Cranelift remain active in the compiler, historical suites and primary build workflow. Do not declare full independence or remove `crates/l` yet.
 
 ## Current branch delta: versioned independent seeds (PR #167)

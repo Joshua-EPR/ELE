@@ -1,30 +1,33 @@
 # Stage 0 removal progress
 
 Updated: 2026-11-24
-Current `main`: `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PR #167 merged after PR #168).
-Current phase: finish pinned seed CI, remove Stage 0 from distribution, then close native compiler gaps.
+Current `main`: `21e9cc32758dc23aa1637fbd4441d9849a6cc677` (PRs #167–#170 merged).
+Current phase: migrate the remaining Stage 0 test/CI paths while closing native compiler gaps.
 Estimated completion: **35%** against final acceptance criteria. Seed/bootstrap and compiler slices are verified, while the official compiler/test pipeline and most backend/runtime coverage still use Stage 0, Rust or Cranelift.
 
 ## State
 
 - **Blockers:** Full ELE source-to-native compiler rebuild has not been shown independent of Stage 0; Rust/Cargo and Cranelift remain active in compiler and most tests/CI. Linux native execution is verified on Ubuntu CI, not on this Windows host.
 - **Risks:** Stage 0 currently implements the production frontend/CLI and Cranelift runtime path. Removing those pieces before a replacement would break currently supported builds and tests.
-- **Next phase:** Finish CI for #167/#169/#170, integrate green PRs, and continue the remaining `option_default`, `result_propagation`, and `shape_methods` gaps.
+- **Next phase:** Integrate #171/#172 after their required CI completes, retain `option_default_owned_payload` as an active gap, and continue `shape_methods` plus remaining backend/runtime coverage.
 - **ENCA:** Excluded from this operation; no ENCA changes made.
 
 ## Agent work
 
 | Agent | Status | Branch/PR | Files | Tests/evidence | Result |
 |---|---|---|---|---|---|
-| Engineering director | Active | PRs #167–#170 | Seed CI, distribution, integration and evidence | PRs #167/#168 merged; #169 rerunning after its PATH fixes; #170 rerunning after the drop regression fix | Integrating verified slices while keeping the Stage 0 retirement boundary explicit. |
+| Engineering director | Active | PRs #169–#172 | Distribution, audit, frontend integration and evidence | #169/#170 merged at current main; #171/#172 required Windows suites still running | Integrating green slices while keeping the Stage 0 retirement boundary explicit. |
 | Stage 0 dependency auditor | Complete | None | None | Source audit; no tests run | Dependencies classified A–G; no edits |
 | Self-hosting auditor | Complete | None | None | Source audit plus measured Gen chain and 87-program coverage (below) | Driver self-rebuild verified; blockers ranked |
 | Static consumer auditor | Complete | `codex/stage0-audit` | `STAGE0_DEPENDENCY_AUDIT.md` | Read-only grep audit with file:line | Consumer inventory integrated |
 | Seed/CI engineer | Complete | PR #167 merged at `2fa0af8` | `.github/workflows/stage0-free-bootstrap.yml`, `scripts/bootstrap/seeds/*`, verifier/audit and tests | Linux/Windows bootstrap, docs and distribution checks passed; full Windows/MSVC suite and ELF execution passed. 17 bootstrap/audit tests pass. | Versioned ELF/PE seeds are in main; the transitional Cargo seed job is removed. |
 | Frontend choose-expression engineer | Complete | PR #168 merged at `4444e02` | `compiler-l` frontend and corpus regressions | CI passed on Linux/Windows; native corpus and ELF execution checks passed | `choose_expression` is removed from main's known gaps. |
-| Choice Text payload engineer | PR #170 open | `codex/choice-text-payload`, head `c3840d5` | Enum construction/match lowering and corpus regressions | Prior Gen3 PE corpus: 95 cases, 91 PASS, 4 XFAIL, 0 FAIL/XPASS; rebase onto merged #168 is clean; PR CI pending | `choice_text_payload` implementation and use-after-move rejection are under CI review. |
-| Distribution engineer | PR #169 open | `codex/stage0-free-distribution`, head `07ba2ba` | Distribution workflow, package builder, installers and docs | 7 package fixpoint tests and 17 bootstrap/audit tests pass; local restricted-PATH Windows package/install passes. First CI run exposed missing `gzip` and nested `powershell`; fixes pushed and branch rebased onto current main. | Removes Cargo/Stage0 fallbacks and packages only from pinned host-native seeds. |
-| Stage 0 path audit | Complete | Local changes included in PR #167 worktree | `tools/audit_stage0_paths.py`, `tests/bootstrap/test_stage0_path_audit.py` | Tests cover allowlisted references, new paths/tokens/counts, history classification, binary seeds and fail-closed reads | Migration allowlist/count gate now runs in both seed jobs. |
+| Choice Text payload engineer | Complete | PR #170 merged at `21e9cc3` | Enum construction/match lowering and corpus regressions | Linux/Windows suites and native ELF execution passed | `choice_text_payload` is removed from main's known gaps. |
+| Distribution engineer | Complete | PR #169 merged | Distribution workflow, package builder, installers and docs | Linux/Windows packages, restricted-path installation, bootstrap, docs and distribution checks passed | Distribution requires pinned native seeds and package-only installers; Stage 0 fallbacks are removed from this route. |
+| Option default engineer | PR #171 open | `codex/option-default`, head `5227fc8` | Lazy `??` lowering and corpus regressions | Linux full suite and Windows full/MSVC suite pending at last check | Drop-free Int/Bool defaults are implemented; owned Text default remains a documented gap. |
+| Result propagation engineer | PR #172 open | `codex/result-propagation`, head `a7ebe3c` | `?` lowering and ownership regressions | Linux full suite and Windows full/MSVC suite pending at last check | `Option`/`Result` propagation is implemented on the branch; CI remains required. |
+| Shape methods engineer | In progress | `codex/shape-methods` | `extend`, receivers and `this` in the existing frontend | Implementation is in progress; bootstrap end-to-end validation remains pending | Gap remains open until native PE and ELF coverage passes. |
+| Stage 0 path audit | Complete | PR #167; audit hardening in progress | `tools/audit_stage0_paths.py`, `tests/bootstrap/test_stage0_path_audit.py` | Base gate passed; 11 focused tests pass on `21e9cc3`, including active `.psm1`/`.cmd`/`.bat` detection and historical-comment classification | Migration allowlist/count gate runs in both seed jobs; new Windows script extensions are now scanned. |
 | Frontend fix (choose on Text, lexer diagnostics) | Complete | PR #161, merged at `ce69d15` | compiler-l frontend, driver regressions, corpus | PR #161 merged; its report records 5 regression tests and corpus 83 pass / 5 XFAIL | Text/Int/Bool choose literals and positioned lexer errors fixed; unrelated expression gap remains. |
 | Backend fix (runtime trap diagnostics) | Complete | PR #162, merged at `79b937c` | compiler-l codegen/runtime, trap regression tests | PR #162 merged; seven diagnostic tests and Linux/Windows integration checks reported passing | Native runtime traps now report stderr diagnostics while retaining documented exit codes. |
 | Native backend auditor | Complete | None | None | Source audit; no tests run | ELF64/PE64 and Cranelift boundary documented; no edits |
@@ -44,10 +47,12 @@ Estimated completion: **35%** against final acceptance criteria. Seed/bootstrap 
 | #166 | Structural verification for native PE32+ images | Merged at `91006b9` | Python backend suite and Windows verifier checks passed | None | Merged |
 | #167 | Versioned independent ELF/PE seeds and toolchain-free bootstrap | Merged at `2fa0af8` | Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed | #166 | Merged |
 | #168 | Value-producing `choose` expressions | Merged at `4444e02` | Linux/Windows and native execution checks green | #161, #164 | Merged |
-| #169 | Stage0-free native-seed distribution and package-only installers | Open | Fixes for `gzip` and direct `pwsh` execution pushed; rebased on updated main; current CI at head `07ba2ba` is running | #167 merged | Pending required checks |
-| #170 | Owned Text payloads in native choice matches | Open | CI pending; rebased onto main after #168 | #168 | Pending required checks |
+| #169 | Stage0-free native-seed distribution and package-only installers | Merged | Required Linux/Windows bootstrap, distribution, docs and native checks passed | #167 | Merged |
+| #170 | Owned Text payloads in native choice matches | Merged at `21e9cc3` | Required Linux/Windows native checks and ELF execution passed | #168 | Merged |
+| #171 | Lazy native Option defaults | Open | Linux passed; Windows full/MSVC suite running at last check | #167–#170 | Pending required checks |
+| #172 | Native Option and Result propagation | Open | Linux passed; Windows full/MSVC suite running at last check | #167–#170 | Pending required checks |
 
-The connected GitHub query above is a historical baseline only. PR #167 merged and #168 merged; current open work is #169 distribution and #170 native choice Text payload support.
+The connected GitHub query above is a historical baseline only. PRs #167–#170 are merged; current open work is #171 Option defaults and #172 Result/Option propagation, alongside the `shape_methods` implementation.
 
 ## Dependency snapshot
 
@@ -63,7 +68,7 @@ Full inventory and locations: `STAGE0_DEPENDENCY_AUDIT.md`.
 
 ## Test and CI evidence
 
-Current `main` known gaps after #168 are `choice_text_payload`, `option_default`, `result_propagation`, and `shape_methods`. PR #170 targets the first of these. Main's latest native corpus count has not yet been rerun after #168; PR #168's Gen3 PE corpus passed 97 cases (93 PASS, 4 XFAIL), and its Linux execution CI passed.
+Current `main` known gaps after #170 are `option_default`, `result_propagation`, and `shape_methods`. PR #171 implements drop-free `option_default` cases but retains owned Text as an active gap on its branch; PR #172 implements `result_propagation` and remains under CI review. The latest corpus counts are branch-specific and are recorded in the corresponding PR checks.
 
 | Command / check | Platform | Result | Date | Limits |
 |---|---|---|---|---|
@@ -71,7 +76,7 @@ Current `main` known gaps after #168 are `choice_text_payload`, `option_default`
 | `cargo test -p project-l --test stage3_native_probe_l -- --test-threads=1` | Windows host | 5 passed, 0 failed | 2026-11-24 | Linux ELF execution skipped; native semantic-analyzer parity is opt-in and was skipped |
 | PR #158 check diagnostics, head `3393ff98d4bc84dc216d4ba4c973f7630245f790` | GitHub Linux/Windows | Reported checks succeeded; differential CFG was skipped | As reported by connected GitHub check service on 2026-11-24 | PR is merged; checks still exercised Stage 0/Cargo paths |
 
-These checks are evidence for the tested slices only; they do not prove complete self-hosting or Stage 0 independence. Current main additionally includes PRs #161, #162 and #166–#168. PRs #167, #169 and #170 remain open, with CI status recorded above.
+These checks are evidence for the tested slices only; they do not prove complete self-hosting or Stage 0 independence. Current main additionally includes PRs #161, #162 and #166–#170. PRs #171 and #172 remain open, with CI status recorded above.
 
 ## Capability evidence: ELE driver vs Stage 0
 
