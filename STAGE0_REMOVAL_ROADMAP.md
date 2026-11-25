@@ -1,6 +1,6 @@
 # Stage 0 removal roadmap
 
-Status date: 2026-11-24. `main` is `3c595759221da0ff9c79d6c8762788241d9f2b71` (PRs #167–#170 and #174 merged). PRs #171/#172/#173/#175 remain under CI validation. This is an execution order, not a claim of completion.
+Status date: 2026-11-24. `main` is `720c25d76709ca0f81cfdbdf27935ccb4fede4b5` (PRs #167–#170 and #174–#175 merged). PRs #171/#172/#173 remain under CI validation. This is an execution order, not a claim of completion.
 
 ## Phase 0 — Baseline and evidence (complete)
 
@@ -8,7 +8,7 @@ Status date: 2026-11-24. `main` is `3c595759221da0ff9c79d6c8762788241d9f2b71` (P
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
 - [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
-- [x] Reconcile current main and open PR state (2026-11-24): #167–#170 and #174 are merged; #171/#172/#173/#175 are tracked in `STAGE0_PROGRESS.md`.
+- [x] Reconcile current main and open PR state (2026-11-24): #167–#170 and #174/#175 are merged; #171/#172/#173 are tracked in `STAGE0_PROGRESS.md`.
 
 ## Phase 1 — Define the replaceable compiler boundary
 
@@ -43,7 +43,8 @@ Status date: 2026-11-24. `main` is `3c595759221da0ff9c79d6c8762788241d9f2b71` (P
 - [x] Complete PR #169 distribution migration: package generation now requires a pinned host-native seed, removes Stage 0/Cargo/cached-driver fallbacks, isolates runner PATH and restricts installers to package archives. Required Linux/Windows checks passed after PATH fixes.
 - [x] Merge PR #170 owned Text choice payload support; native Linux/Windows checks and ELF execution passed.
 - [x] Merge PR #174 ELF data-segment verifier support; Linux/Windows checks passed, including the full suites.
-- [ ] Complete CI for PR #171 (lazy drop-free Option defaults), #172 (Result/Option propagation), #173 (audit script discovery), and #175 (shape methods).
+- [x] Merge PR #175 native shape extension methods; PE Gen3 corpus reached 98 PASS/2 XFAIL and Linux/Windows checks passed.
+- [ ] Complete CI for PR #171 (lazy drop-free Option defaults), #172 (Result/Option propagation), and #173 (audit script discovery).
 - Exit criteria: CI, distribution and install verification pass with Stage 0 and Cranelift absent.
 
 ## Phase 5 — Retire Stage 0
@@ -55,4 +56,4 @@ Status date: 2026-11-24. `main` is `3c595759221da0ff9c79d6c8762788241d9f2b71` (P
 
 ## Current technical boundary
 
-Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend and most test/bootstrap paths still depend on Stage 0. PR #169 migrated distribution, PR #170 closed one frontend gap, and PR #174 improved ELF validation; none establishes full independence.
+Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend and most test/bootstrap paths still depend on Stage 0. PR #169 migrated distribution, PRs #170/#175 closed frontend gaps, and PR #174 improved ELF validation; none establishes full independence.
