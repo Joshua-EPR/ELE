@@ -42,6 +42,58 @@ class NativeELFVerifierTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_elf64(bytes(data))
 
+    def test_valid_executable_with_read_write_data_segment(self):
+        import struct
+        data = bytearray(12288)
+        data[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HHI", data, 16, 2, 62, 1)
+        struct.pack_into("<QQQ", data, 24, 0x401000, 64, 0)
+        struct.pack_into("<IHHH", data, 48, 0, 64, 56, 2)
+        struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0x400000, 0x400000, 4099, 4099, 4096)
+        struct.pack_into("<IIQQQQQQ", data, 120, 1, 6, 8192, 0x402000, 0x402000, 4096, 4096, 4096)
+        data[4096:4099] = b"\x0f\x05\xc3"
+        details = verify_elf64(bytes(data))
+        self.assertEqual(details["code_offset"], 4096)
+        self.assertEqual(details["segment_count"], 2)
+        self.assertEqual(details["data_offset"], 8192)
+        self.assertEqual(details["data_size"], 4096)
+
+    def test_writable_executable_data_segment_is_rejected(self):
+        import struct
+        data = bytearray(12288)
+        data[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HHI", data, 16, 2, 62, 1)
+        struct.pack_into("<QQQ", data, 24, 0x401000, 64, 0)
+        struct.pack_into("<IHHH", data, 48, 0, 64, 56, 2)
+        struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0x400000, 0x400000, 4099, 4099, 4096)
+        struct.pack_into("<IIQQQQQQ", data, 120, 1, 7, 8192, 0x402000, 0x402000, 4096, 4096, 4096)
+        with self.assertRaises(ValueError):
+            verify_elf64(bytes(data))
+
+    def test_overlapping_data_segment_is_rejected(self):
+        import struct
+        data = bytearray(8192)
+        data[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HHI", data, 16, 2, 62, 1)
+        struct.pack_into("<QQQ", data, 24, 0x401000, 64, 0)
+        struct.pack_into("<IHHH", data, 48, 0, 64, 56, 2)
+        struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0x400000, 0x400000, 4099, 4099, 4096)
+        struct.pack_into("<IIQQQQQQ", data, 120, 1, 6, 4096, 0x401000, 0x401000, 4096, 4096, 4096)
+        with self.assertRaises(ValueError):
+            verify_elf64(bytes(data))
+
+    def test_wrapping_virtual_data_segment_is_rejected(self):
+        import struct
+        data = bytearray(12288)
+        data[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HHI", data, 16, 2, 62, 1)
+        struct.pack_into("<QQQ", data, 24, 0x401000, 64, 0)
+        struct.pack_into("<IHHH", data, 48, 0, 64, 56, 2)
+        struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0x400000, 0x400000, 4099, 4099, 4096)
+        struct.pack_into("<IIQQQQQQ", data, 120, 1, 6, 8192, 0xFFFFFFFFFFFFF000, 0xFFFFFFFFFFFFF000, 4096, 4096, 4096)
+        with self.assertRaises(ValueError):
+            verify_elf64(bytes(data))
+
     def test_binary_output_platform_contract_wired(self):
         files = (
             "crates/l/src/lir.rs",
