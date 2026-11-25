@@ -219,6 +219,17 @@ const BYTE_AT: &str = "flow main() => Int {
 }
 ";
 
+const BYTE_AT_DOT: &str = "flow get(t: view Text, i: Int) => Int {
+    give t.byteAt(i)
+}
+
+flow main() => Int {
+    hold t = \"abc\"
+    print(get(view t, 5))
+    give 0
+}
+";
+
 #[test]
 fn overflow_reports_position_and_exits_125() {
     let expected = format!("ELE 2:10{ARITH}");
@@ -266,6 +277,15 @@ fn byte_at_out_of_range_reports_position_and_exits_127() {
     let expected = format!("ELE 4:12{INDEX}");
     check("byte-at", BYTE_AT, "antes\n", &expected, 127);
     if let Some(stage0) = stage0_stderr("byte-at", BYTE_AT) {
+        assert_eq!(stage0, expected, "same diagnostic as Stage 0");
+    }
+}
+
+#[test]
+fn byte_at_dot_out_of_range_reports_operator_position_and_matches_stage0() {
+    let expected = format!("ELE 2:11{INDEX}");
+    check("byte-at-dot", BYTE_AT_DOT, "", &expected, 127);
+    if let Some(stage0) = stage0_stderr("byte-at-dot", BYTE_AT_DOT) {
         assert_eq!(stage0, expected, "same diagnostic as Stage 0");
     }
 }
