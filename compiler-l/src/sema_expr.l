@@ -286,9 +286,7 @@ flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree
 
 // Lazy Option fallback (`option ?? fallback`). The Some payload and the
 // fallback meet in one result slot, with the fallback evaluated only on the
-// None edge. Drop-free payloads use the same checked builtin-union payload
-// instruction as a `choose` arm. Owned payload extraction remains rejected
-// until its branch-sensitive drop plan is verified.
+// None edge. Each arm transfers ownership directly into the shared slot.
 flow semaOptionDefaultExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, mode: Int) => Int {
     when mode == ACCESS_PLACE {
         semaAddError(edit ctx, "L0016", "?? produce un valor y no puede usarse como destino", expr.start, expr.end)
@@ -317,11 +315,7 @@ flow semaOptionDefaultExpr(ctx: edit SemaContext, source: view Text, tree: view 
         lirDiscard(edit ctx)
         give 7
     }
-    when lirBuiltinPayloadOwned(view ctx.types, view ctx.lir_module, payload_t) {
-        semaAddError(edit ctx, "L0016", "payload propietario de Option con ?? fuera del subconjunto verificado", expr.start, expr.end)
-        lirDiscard(edit ctx)
-        give 7
-    }
+    hold owned_payload = lirBuiltinPayloadOwned(view ctx.types, view ctx.lir_module, payload_t)
     change scrut_path = ctx.expression_path
     hold scrut_place = ctx.lir.place
     hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
@@ -346,12 +340,21 @@ flow semaOptionDefaultExpr(ctx: edit SemaContext, source: view Text, tree: view 
     hold result_var = lirVar(edit ctx.lir, payload_t, false)
 
     ctx.flow.current = some_block
+    when owned_payload {
+        semaAccess(edit ctx, scrut_path, scrut_t, ACCESS_MOVE, expr.start, expr.end)
+    }
     hold union_place = lirPlaceVar(edit ctx.lir, scrut_var)
     hold payload = lirNew(edit ctx, payload_t, false, LIR_PAYLOAD, union_place, union_id, 1)
+    // The extracted payload is an SSA value owned by this edge. Move it
+    // straight into the shared result slot; a branch-local flow binding
+    // would schedule a second drop after the value has already moved.
     lirAt(edit ctx, LIR_USE, result_var, payload, 0, 0)
     flowLink(edit ctx.flow, join, -1)
 
     ctx.flow.current = none_block
+    scopePush(edit ctx.scopes)
+    semaScopeEnter(edit ctx)
+    hold temp_mark = ctx.pending_temps.length
     ctx.expected_list_type = payload_t
     hold expected_union = ctx.expected_union_type
     ctx.expected_union_type = payload_t
@@ -365,17 +368,27 @@ flow semaOptionDefaultExpr(ctx: edit SemaContext, source: view Text, tree: view 
     }
     hold fallback = lirTakeOperand(edit ctx, fallback_t)
     lirAt(edit ctx, LIR_USE, result_var, fallback, 0, 0)
+    change fallback_path = -1
+    each i among temp_mark..ctx.pending_temps.length {
+        hold candidate = ctx.pending_temps[i]
+        when lirPathVar(view ctx.lir, candidate) == fallback { fallback_path = candidate }
+    }
+    during ctx.pending_temps.length > temp_mark {
+        choose ctx.pending_temps@pop() {
+            Some(path) : {
+                change event = FLOW_DROP
+                when path == fallback_path { event = FLOW_MOVE }
+                flowEvent(edit ctx.flow, event, path, tree.expressions[expr.b].end, tree.expressions[expr.b].end)
+            }
+            None : {}
+        }
+    }
+    semaScopeExit(edit ctx, tree.expressions[expr.b].start, tree.expressions[expr.b].end)
+    scopePop(edit ctx.scopes)
     flowLink(edit ctx.flow, join, -1)
     ctx.flow.current = join
     semaScopeExit(edit ctx, expr.start, expr.end)
     lirSetVal(edit ctx, result_var)
-    when semaNeedsDrop(edit ctx, source, tree, payload_t) {
-        semaTemp(edit ctx, source, tree, payload_t, expr.start, expr.end)
-        when ctx.pending_temps.length > 0 {
-            hold path = ctx.pending_temps[ctx.pending_temps.length - 1]
-            semaAccess(edit ctx, path, payload_t, mode, expr.start, expr.end)
-        }
-    }
     give payload_t
 }
 
