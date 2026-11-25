@@ -1,0 +1,2 @@
+option_default_owned_use_after_move.l:4:11: error[L0005]
+uso de valor movido

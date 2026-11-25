@@ -6,26 +6,19 @@ The runners fail with XPASS as soon as one of them starts passing, so each
 line below must be removed together with its `known_gaps.txt` entry when the
 ELE-written driver gains the feature.
 
-Observed with the driver `compiler-l/src/main_driver.l` built by Stage 0
-(Cranelift, Windows) and with the ELF64 driver it rebuilds, on PE32+ and
-ELF64 alike: the remaining case is a front-end rejection, so it applies to `all`
-targets.
-
-| Case | Driver behavior | Stage 0 behavior |
-|---|---|---|
-| `option_default_owned_payload` | rejects `Option<Text> ?? fallback` with `error[L0016]` until branch-sensitive ownership/drop lowering is verified | compiles and prints the expected output |
+The current `known_gaps.txt` has no active entries. The corpus runner still
+rejects XPASS if a future entry passes, and rejects a listed case if it is not
+also documented here.
 
 `choose_expression` is implemented through the shared match coverage, arm
 testing, payload binding, ownership and result-slot lowering used by the
 statement form. The native corpus exercises owned and primitive results.
 
-`option_default` is implemented for drop-free native-supported `Option<T>`
-payloads. The positive corpus covers `Some` and `None`, Int and Bool payloads,
-and confirms the fallback is evaluated only on the `None` branch. A mismatched
-fallback type is rejected with `L0003`. Owner-bearing payloads remain an active
-gap: `option_default_owned_payload` has a positive expected-output fixture and
-stays in `known_gaps.txt` until branch-sensitive drop handling passes without
-LIR verifier errors.
+`option_default` is implemented for native-supported `Option<T>` payloads,
+including owned `Text`. The positive corpus covers `Some` and `None`, Int,
+Bool, and Text payloads, lazy function fallbacks, and literal fallbacks. A
+mismatched fallback type is rejected with `L0003`; reusing a moved owned
+payload is rejected with `L0005`.
 
 `result_propagation` is implemented for `Option<T>?` and `Result<T, E>?` in the
 existing native frontend. The success payload flows into the expression result;
