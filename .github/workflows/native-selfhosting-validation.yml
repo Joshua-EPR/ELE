@@ -72,6 +72,7 @@ jobs:
           cargo test -p project-l
           --test native_print_l
           --test native_refs_l
+          --test stage1_b3_readtext_platform_l
           --test native_aggregates_l
           --test native_text_fields_l
           --test native_wide_struct_l
