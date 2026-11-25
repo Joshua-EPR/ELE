@@ -1,0 +1,2 @@
+shape_method_immutable_receiver.l:12:5: error[L0001]
+no se puede prestar mutablemente una variable inmutable

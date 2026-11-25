@@ -49,6 +49,7 @@ flow semaCollectNominalTypes(ctx: edit SemaContext, source: view Text, tree: vie
                     scopeAddSymbol(edit ctx.scopes, sym_id)
                 }
             }
+            AstDeclKind.Extension : {}
             _ : {}
         }
     }
@@ -61,6 +62,7 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
         ctx.current_module = semaDeclModule(ctx, i)
         choose decl.kind {
             AstDeclKind.Function : {
+                when astIsMethod(tree, i) { proceed }
                 hold existing = scopeLookupCurrentModule(view ctx.scopes, view ctx.symbols, source, decl.a, decl.b, ctx.current_module)
                 when existing >= 0 {
                     semaAddError(edit ctx, "L0002", "función duplicada en el mismo ámbito", decl.start, decl.end)
@@ -76,6 +78,17 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
             }
             AstDeclKind.Struct : { semaRejectLinearMembers(edit ctx, source, tree, i, false) }
             AstDeclKind.Enum : { semaRejectLinearMembers(edit ctx, source, tree, i, true) }
+            AstDeclKind.Extension : {
+                hold owner_t = semaResolveAstType(edit ctx, source, tree, decl.a)
+                when owner_t < 0 || owner_t >= ctx.types.types.length {
+                    semaAddError(edit ctx, "L0003", "tipo receptor de extend inválido", decl.start, decl.end)
+                } otherwise {
+                    choose ctx.types.types[owner_t].kind {
+                        SemTypeKind.Struct : {}
+                        _ : { semaAddError(edit ctx, "L0003", "extend requiere un shape", decl.start, decl.end) }
+                    }
+                }
+            }
             AstDeclKind.Const : {
                 hold existing = scopeLookupCurrentModule(view ctx.scopes, view ctx.symbols, source, decl.a, decl.b, ctx.current_module)
                 when existing >= 0 {
@@ -132,12 +145,32 @@ flow semaCheckDeclarations(ctx: edit SemaContext, source: view Text, tree: view 
                     ret_t = semaResolveAstType(edit ctx, source, tree, decl.f)
                 }
                 ctx.current_fn_ret_type = ret_t
-                ctx.current_fn_is_async = decl.c == 1
+                hold is_method = astIsMethod(tree, i)
+                ctx.current_fn_is_async = (!is_method && decl.c == 1) || (is_method && decl.c == 3)
                 when ctx.current_fn_is_async {
                     semaAddError(edit ctx, "L0016", "async fuera del subconjunto de ownership de Stage 1", decl.start, decl.end)
                 }
                 hold first_p = decl.d
                 hold p_count = decl.e
+                change receiver_count = 0
+                when is_method && decl.c < 2 {
+                    hold owner_ast = astMethodOwnerType(view tree, i)
+                    hold owner_t = semaResolveAstType(edit ctx, source, tree, owner_ast)
+                    hold receiver_t = semTypeMakeRef(edit ctx.types, owner_t, decl.c == 1)
+                    hold recv_start = semaMethodReceiverStart(source, tree, decl.g, decl.a)
+                    hold recv_end = recv_start + 4
+                    hold recv_sym = symbolAdd(edit ctx.symbols, SymbolKind.Param, recv_start, recv_end, receiver_t, ctx.scopes.current_scope, false, false, -1, recv_start, recv_end)
+                    scopeAddSymbol(edit ctx.scopes, recv_sym)
+                    semaInitPath(edit ctx, recv_sym, recv_start, recv_end)
+                    hold recv_path = ctx.symbols.symbols[recv_sym].move_path
+                    hold recv_elem = semaRefElem(ctx, receiver_t)
+                    hold recv_var = lirVar(edit ctx.lir, recv_elem, true)
+                    lirBindPath(edit ctx.lir, recv_path, recv_var)
+                    hold recv_mut = semaIsMutRef(ctx, receiver_t)
+                    loanBindParam(edit ctx.flow, recv_path, 0, recv_mut, recv_start, recv_end)
+                    semaOrigin(edit ctx, recv_path, -1)
+                    receiver_count = 1
+                }
                 each p among 0..p_count {
                     hold param = view tree.params[first_p + p]
                     hold p_type = semaResolveAstType(edit ctx, source, tree, param.type_id)
@@ -156,13 +189,13 @@ flow semaCheckDeclarations(ctx: edit SemaContext, source: view Text, tree: view 
                     }
                     when p_elem >= 0 {
                         hold is_mut = semaIsMutRef(ctx, p_type)
-                        loanBindParam(edit ctx.flow, p_path, p, is_mut, param.start, param.end)
-                        semaOrigin(edit ctx, p_path, -1 - p)
+                        loanBindParam(edit ctx.flow, p_path, p + receiver_count, is_mut, param.start, param.end)
+                        semaOrigin(edit ctx, p_path, -1 - p - receiver_count)
                     } otherwise {
-                        semaOwn(edit ctx, source, tree, p_path, p_type, -1 - p)
+                        semaOwn(edit ctx, source, tree, p_path, p_type, -1 - p - receiver_count)
                     }
                 }
-                ctx.lir.params = p_count
+                ctx.lir.params = p_count + receiver_count
                 hold body_s = decl.g
                 when body_s >= 0 {
                     semaCheckStmt(edit ctx, source, tree, body_s)
@@ -200,6 +233,32 @@ flow semaCheckDeclarations(ctx: edit SemaContext, source: view Text, tree: view 
             _ : {}
         }
     }
+}
+
+// The first `this` Name node is the source key for the hidden receiver
+// parameter. Methods that do not refer to `this` use their name as an
+// unreachable synthetic key; it remains scoped to that function.
+flow semaMethodReceiverStart(source: view Text, tree: view AstTree, body_id: Int, fallback: Int) => Int {
+    change body_start = 0
+    change body_end = source.byteLength
+    when body_id >= 0 && body_id < tree.statements.length {
+        body_start = tree.statements[body_id].start
+        body_end = tree.statements[body_id].end
+    }
+    each i among 0..tree.expressions.length {
+        hold expr = view tree.expressions[i]
+        change is_name = false
+        choose expr.kind {
+            AstExprKind.Name : { is_name = true }
+            _ : {}
+        }
+        when is_name && expr.start >= body_start && expr.end <= body_end && expr.end - expr.start == 4 {
+            when source@byteAt(expr.start) == 116 && source@byteAt(expr.start + 1) == 104 && source@byteAt(expr.start + 2) == 105 && source@byteAt(expr.start + 3) == 115 {
+                give expr.start
+            }
+        }
+    }
+    give fallback
 }
 
 // Drop plan of the function (drops_plan.l), proven by drops_verify.l. A

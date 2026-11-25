@@ -87,6 +87,7 @@ expose choice AstDeclKind {
     Function
     Struct
     Enum
+    Extension
     Import
     Const
 }
@@ -336,6 +337,7 @@ flow astDeclKindName(kind: AstDeclKind) => Text {
         AstDeclKind.Function : { give "Function" }
         AstDeclKind.Struct : { give "Struct" }
         AstDeclKind.Enum : { give "Enum" }
+        AstDeclKind.Extension : { give "Extension" }
         AstDeclKind.Import : { give "Import" }
         AstDeclKind.Const : { give "Const" }
     }
@@ -376,6 +378,7 @@ expose flow astDumpCanonical(tree: view AstTree) {
             AstDeclKind.Function : { name = "Function" }
             AstDeclKind.Struct : { name = "Struct" }
             AstDeclKind.Enum : { name = "Enum" }
+            AstDeclKind.Extension : { name = "Extension" }
             AstDeclKind.Import : { name = "Import" }
             AstDeclKind.Const : { name = "Const" }
         }
@@ -392,4 +395,34 @@ expose flow astDumpCanonical(tree: view AstTree) {
         print("Decl::{name} span={s}..{e} pub={pubFlag} a={a} b={b} c={c} d={d} e={extra_e} f={extra_f} g={extra_g}")
     }
     astDumpSummary(tree)
+}
+
+// Extension methods are ordinary function declarations so they use the
+// existing function checker and LIR pipeline. The Extension declaration
+// stores a contiguous declaration range; function `c` stores receiver mode
+// (0=view, 1=exclusive, 2=direct/static).
+expose flow astIsMethod(tree: view AstTree, decl_id: Int) => Bool {
+    each i among 0..tree.declarations.length {
+        hold ext = view tree.declarations[i]
+        choose ext.kind {
+            AstDeclKind.Extension : {
+                when decl_id >= ext.c && decl_id < ext.c + ext.d { give true }
+            }
+            _ : {}
+        }
+    }
+    give false
+}
+
+expose flow astMethodOwnerType(tree: view AstTree, decl_id: Int) => Int {
+    each i among 0..tree.declarations.length {
+        hold ext = view tree.declarations[i]
+        choose ext.kind {
+            AstDeclKind.Extension : {
+                when decl_id >= ext.c && decl_id < ext.c + ext.d { give ext.a }
+            }
+            _ : {}
+        }
+    }
+    give -1
 }
