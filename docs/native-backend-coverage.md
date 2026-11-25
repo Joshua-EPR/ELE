@@ -1,6 +1,9 @@
 # ELF64 and PE32+ backend coverage
 
-Snapshot: repository commit `720c25d76709ca0f81cfdbdf27935ccb4fede4b5`.
+Current main after #173: `ff025e8ac4bff1f183f0c32e556ab326bca7368a`.
+Backend source snapshot: `720c25d76709ca0f81cfdbdf27935ccb4fede4b5`.
+
+PR #173 updated audit scripts and did not alter the backend covered here.
 
 This matrix describes the ELE-written LIR/CFG native backend and the emitted
 programs. It is not a claim that all ELE syntax or all standard-library APIs
