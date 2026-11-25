@@ -210,6 +210,23 @@ expose flow semaTempAt(ctx: edit SemaContext, source: view Text, tree: view AstT
     }
 }
 
+// A value that is not a place (the result of a call) used as the receiver of a
+// `view` method: it is bound to an anonymous variable and move path so the
+// method can borrow it. It dies at the end of its statement when it owns
+// something. Returns the path, or -1 when the value cannot be bound.
+expose flow semaReceiverTemp(ctx: edit SemaContext, source: view Text, tree: view AstTree, ty: Int, start: Int, end: Int) => Int {
+    hold value = lirValueVar(edit ctx, ty)
+    when value < 0 { give -1 }
+    hold path = flowRoot(edit ctx.flow, -1)
+    lirBindPath(edit ctx.lir, path, value)
+    flowPad(edit ctx.flow)
+    ctx.flow.origins[path] = start
+    hold owned = semaMaterialize(edit ctx, source, tree, path, ty)
+    flowEvent(edit ctx.flow, FLOW_INIT, path, start, end)
+    when owned { ctx.pending_temps@push(path) }
+    give path
+}
+
 expose flow semaTemp(ctx: edit SemaContext, source: view Text, tree: view AstTree, ty: Int, start: Int, end: Int) {
     when !semaNeedsDrop(edit ctx, source, tree, ty) { give }
     hold path = flowRoot(edit ctx.flow, -1)

@@ -1,0 +1,2 @@
+flow_inferred_recursive.l:2:6: error[L0006]
+no se puede inferir el tipo de retorno

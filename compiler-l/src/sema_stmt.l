@@ -197,6 +197,7 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
             }
             hold loan = ctx.pending_loan
             ctx.pending_loan = -1
+            ctx.infer_last = ret_t
             change value = LIR_NONE
             when val_e >= 0 { value = lirTakeOperand(edit ctx, ret_t) }
             // Leaving the function: temporaries, then every owned binding.
@@ -206,7 +207,7 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
             flowReturn(edit ctx.flow)
             when borrowed {
                 semaReturnBorrow(edit ctx, ret_t, loan, stmt.start, stmt.end)
-            } otherwise when !semTypeEquals(view ctx.types, ret_t, ctx.current_fn_ret_type) {
+            } otherwise when !ctx.infer_dry && !semTypeEquals(view ctx.types, ret_t, ctx.current_fn_ret_type) {
                 hold exp_n = semTypeName(view ctx.types, source, ctx.current_fn_ret_type)
                 hold act_n = semTypeName(view ctx.types, source, ret_t)
                 semaAddError(edit ctx, "L0003", "tipo de retorno incompatible: esperado '{exp_n}', recibido '{act_n}'", stmt.start, stmt.end)
@@ -263,7 +264,7 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
             hold outer_mark = ctx.loop_mark
             ctx.loop_mark = ctx.owned_locals.length
             hold loop_header = flowLoopStart(edit ctx.flow)
-            lirForTest(edit ctx, counter)
+            lirForTest(edit ctx, counter, tree.extra[stmt.e] == 1)
             flowLoopBody(edit ctx.flow, loop_header, true)
             // `continue` goes to the step block, which increments.
             hold step = flowBlock(edit ctx.flow)
@@ -353,7 +354,7 @@ expose flow semaCheckStmt(ctx: edit SemaContext, source: view Text, tree: view A
             hold outer_mark = ctx.loop_mark
             ctx.loop_mark = ctx.owned_locals.length
             hold loop_header = flowLoopStart(edit ctx.flow)
-            lirForTest(edit ctx, counter)
+            lirForTest(edit ctx, counter, false)
             flowLoopBody(edit ctx.flow, loop_header, true)
             hold step = flowBlock(edit ctx.flow)
             ctx.flow.continue_to = step

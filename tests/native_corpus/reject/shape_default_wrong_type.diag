@@ -1,0 +1,2 @@
+shape_default_wrong_type.l:3:5: error[L0003]
+tipo incompatible en constante

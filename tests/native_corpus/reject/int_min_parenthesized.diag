@@ -1,0 +1,2 @@
+int_min_parenthesized.l:3:13: error[PARSER]
+entero fuera de rango: 9223372036854775808 solo es v

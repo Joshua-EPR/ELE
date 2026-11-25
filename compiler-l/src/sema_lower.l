@@ -91,6 +91,8 @@ expose flow lirLiteral(ctx: edit SemaContext, source: view Text, tree: view AstT
             when expr.b >= 0 && expr.c == expr.b + 1 && expr.b < source.byteLength && source@byteAt(expr.b) == 45 && expr.a >= 0 && expr.a < tree.expressions.length {
                 choose tree.expressions[expr.a].kind {
                     AstExprKind.IntLit : {
+                        // Negating Int.MIN overflows: leave it to the runtime trap.
+                        when tree.expressions[expr.a].a == -9223372036854775807 - 1 { give LIR_NONE }
                         give lirConst(edit ctx.lir, LIR_CONST_INT, 0 - tree.expressions[expr.a].a, 0, 0)
                     }
                     _ : {}

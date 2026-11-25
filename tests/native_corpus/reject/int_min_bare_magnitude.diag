@@ -1,0 +1,2 @@
+int_min_bare_magnitude.l:3:11: error[PARSER]
+entero fuera de rango: 9223372036854775808 solo es v

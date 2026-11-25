@@ -20,6 +20,37 @@ take lir_builtin_union
 take sema_match_coverage
 take sema_try
 
+// Fields omitted from a constructor take their declared default. The default
+// was checked as a constant when the shape was declared
+// (semaCheckFieldDefaults); here its expression is lowered at the
+// construction site, in the global scope of the declaring module, exactly
+// like an explicit argument. A field without default stays unseen and is
+// reported by semaConstructorFinish.
+flow semaConstructorDefaults(ctx: edit SemaContext, source: view Text, tree: view AstTree, decl_id: Int, seen: edit List of[Bool], slots: edit List of[Int]) {
+    hold decl = view tree.declarations[decl_id]
+    each i among 0..decl.d {
+        hold default_id = tree.fields[decl.c + i].default_expr_id
+        when seen[i] || default_id < 0 { proceed }
+        hold saved_scope = ctx.scopes.current_scope
+        hold saved_module = ctx.current_module
+        hold saved_list = ctx.expected_list_type
+        ctx.scopes.current_scope = 0
+        ctx.current_module = semaDeclModule(ctx, decl_id)
+        hold field_t = semaFieldType(edit ctx, source, tree, decl.c + i)
+        ctx.expected_list_type = field_t
+        hold ty = semaExprMode(edit ctx, source, tree, default_id, ACCESS_MOVE)
+        slots[i] = lirTakeOperand(edit ctx, ty)
+        seen[i] = true
+        when !semTypeEquals(view ctx.types, ty, field_t) {
+            hold default_expr = view tree.expressions[default_id]
+            semaAddError(edit ctx, "L0003", "valor predeterminado incompatible con el tipo del campo", default_expr.start, default_expr.end)
+        }
+        ctx.scopes.current_scope = saved_scope
+        ctx.current_module = saved_module
+        ctx.expected_list_type = saved_list
+    }
+}
+
 flow semaCheckConstructor(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, decl_id: Int, struct_t: Int) {
     hold decl = view tree.declarations[decl_id]
     change seen: List of[Bool] = List[]
@@ -36,6 +67,7 @@ flow semaCheckConstructor(ctx: edit SemaContext, source: view Text, tree: view A
         hold ty = semaExprMode(edit ctx, source, tree, arg.c, ACCESS_MOVE)
         semaConstructorField(edit ctx, source, tree, decl_id, arg, ty, edit seen, edit slots)
     }
+    semaConstructorDefaults(edit ctx, source, tree, decl_id, edit seen, edit slots)
     semaConstructorFinish(edit ctx, tree, expr, decl_id, struct_t, view seen, view slots)
 }
 
@@ -725,6 +757,7 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 }
                 SymbolKind.Func : {
                     when decl_id >= 0 && decl_id < tree.declarations.length {
+                        semaNoteCallee(edit ctx, decl_id)
                         hold decl = view tree.declarations[decl_id]
                         hold expected_params = decl.e
                         hold first_p = decl.d
@@ -861,9 +894,8 @@ flow semaExtensionFind(ctx: edit SemaContext, source: view Text, tree: view AstT
 
 flow semaExtensionRet(ctx: edit SemaContext, source: view Text, tree: view AstTree, method_id: Int) => Int {
     when method_id < 0 || method_id >= tree.declarations.length { give 7 }
-    hold method = view tree.declarations[method_id]
-    when method.f < 0 { give 6 }
-    give semaResolveAstType(edit ctx, source, tree, method.f)
+    semaNoteCallee(edit ctx, method_id)
+    give semaDeclRet(edit ctx, source, tree, method_id)
 }
 
 flow semaExtensionStaticCall(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int) => Int {
@@ -937,11 +969,19 @@ flow semaExtensionInstanceCall(ctx: edit SemaContext, source: view Text, tree: v
     when method_id < 0 { give -1 }
     hold method = view tree.declarations[method_id]
     hold mutable = method.c == 1
-    when base_path < 0 || base_place < 0 {
+    change recv_path = base_path
+    change recv_place = base_place
+    when !mutable && base_path < 0 && base_place < 0 && referent < 0 {
+        // The receiver is a call result: keep it in a temporary.
+        hold base_expr = view tree.expressions[expr.a]
+        recv_path = semaReceiverTemp(edit ctx, source, tree, owner_t, base_expr.start, base_expr.end)
+        recv_place = lirPathPlace(edit ctx, recv_path)
+    }
+    when recv_path < 0 || recv_place < 0 {
         semaAddError(edit ctx, "L0012", "un método requiere un receptor que sea un lugar", expr.start, expr.end)
         give 7
     }
-    hold receiver_ref_t = semaBorrowPlace(edit ctx, base_path, owner_t, mutable, SITE_ARG, expr.start, expr.end)
+    hold receiver_ref_t = semaBorrowPlace(edit ctx, recv_path, owner_t, mutable, SITE_ARG, expr.start, expr.end)
     hold receiver_loan = ctx.pending_loan
     ctx.pending_loan = -1
     hold receiver_place = ctx.lir.borrowed

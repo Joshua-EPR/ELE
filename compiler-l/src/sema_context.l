@@ -26,6 +26,11 @@ expose fixed SEMA_CONST_ACTIVE = 1
 expose fixed SEMA_CONST_READY = 2
 expose fixed SEMA_CONST_FAILED = 3
 
+expose fixed SEMA_INFER_NONE = 0
+expose fixed SEMA_INFER_PENDING = 1
+expose fixed SEMA_INFER_DONE = 2
+expose fixed SEMA_INFER_FAILED = 3
+
 expose shape SemaConst {
     state: Int
     decl: Int
@@ -116,6 +121,15 @@ expose shape SemaContext {
     const_cycle: Bool
     const_leaf: Int
     const_reason: Int
+    // Result types inferred for expression-bodied flows without `=>`
+    // (SEMA_INFER_*), by declaration: state and type; whether the dry run
+    // being checked used a result not yet known, whether it is a dry run,
+    // and the type of its last `give`.
+    infer_state: List of[Int]
+    infer_ret: List of[Int]
+    infer_blocked: Bool
+    infer_dry: Bool
+    infer_last: Int
 }
 
 expose flow semaContextNew() => SemaContext {
@@ -181,7 +195,35 @@ expose flow semaContextNew() => SemaContext {
         const_cycle: false,
         const_leaf: -1,
         const_reason: 0,
+        infer_state: List[],
+        infer_ret: List[],
+        infer_blocked: false,
+        infer_dry: false,
+        infer_last: -1,
     )
+}
+
+expose flow semaInferState(ctx: view SemaContext, decl_id: Int) => Int {
+    when decl_id < 0 || decl_id >= ctx.infer_state.length { give SEMA_INFER_NONE }
+    give ctx.infer_state[decl_id]
+}
+
+// Result type of a function declaration: the annotation, `()` when absent,
+// or the type inferred from an expression body (`flow f() = expr`; 7 while it
+// is still unknown).
+expose flow semaDeclRet(ctx: edit SemaContext, source: view Text, tree: view AstTree, decl_id: Int) => Int {
+    when semaInferState(view ctx, decl_id) != SEMA_INFER_NONE {
+        give ctx.infer_ret[decl_id]
+    }
+    hold annotation = tree.declarations[decl_id].f
+    when annotation >= 0 { give semaResolveAstType(edit ctx, source, tree, annotation) }
+    give 6
+}
+
+// A call whose callee result is still being inferred blocks the dry run that
+// contains it: it is retried once the callee is known.
+expose flow semaNoteCallee(ctx: edit SemaContext, decl_id: Int) {
+    when semaInferState(view ctx, decl_id) == SEMA_INFER_PENDING { ctx.infer_blocked = true }
 }
 
 expose flow semaInitPath(ctx: edit SemaContext, symbol: Int, start: Int, end: Int) {
