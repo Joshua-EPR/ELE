@@ -283,6 +283,101 @@ flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree
     give result_t
 }
 
+// Lazy Option fallback (`option ?? fallback`). The Some payload and the
+// fallback meet in one result slot, with the fallback evaluated only on the
+// None edge. Drop-free payloads use the same checked builtin-union payload
+// instruction as a `choose` arm. Owned payload extraction remains rejected
+// until its branch-sensitive drop plan is verified.
+flow semaOptionDefaultExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, mode: Int) => Int {
+    when mode == ACCESS_PLACE {
+        semaAddError(edit ctx, "L0016", "?? produce un valor y no puede usarse como destino", expr.start, expr.end)
+        give 7
+    }
+    hold expected_list = ctx.expected_list_type
+    hold scrut_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_READ)
+    when scrut_t < 0 || scrut_t >= ctx.types.types.length {
+        semaAddError(edit ctx, "L0003", "el operador ?? requiere Option<T>", expr.start, expr.end)
+        lirDiscard(edit ctx)
+        give 7
+    }
+    change is_option = false
+    choose ctx.types.types[scrut_t].kind {
+        SemTypeKind.Option : { is_option = true }
+        _ : {}
+    }
+    when !is_option {
+        semaAddError(edit ctx, "L0003", "el operador ?? requiere Option<T>", expr.start, expr.end)
+        lirDiscard(edit ctx)
+        give 7
+    }
+    hold payload_t = ctx.types.types[scrut_t].elem_type
+    when !lirBuiltinSupported(view ctx.types, view ctx.lir_module, scrut_t) {
+        lirMarkUnsupported(edit ctx.lir, expr.start)
+        lirDiscard(edit ctx)
+        give 7
+    }
+    when lirBuiltinPayloadOwned(view ctx.types, view ctx.lir_module, payload_t) {
+        semaAddError(edit ctx, "L0016", "payload propietario de Option con ?? fuera del subconjunto verificado", expr.start, expr.end)
+        lirDiscard(edit ctx)
+        give 7
+    }
+    change scrut_path = ctx.expression_path
+    hold scrut_place = ctx.lir.place
+    hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
+    hold scrut_var = lirMatchScrutVar(edit ctx, scrut_t)
+    hold union_id = lirBuiltinRegister(edit ctx.lir_module, view ctx.types, scrut_t)
+    when union_id < 0 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+    hold join = flowBlock(edit ctx.flow)
+    hold some_block = flowBlock(edit ctx.flow)
+    hold none_block = flowBlock(edit ctx.flow)
+    semaScopeEnter(edit ctx)
+    when owned_scrut && scrut_path < 0 && scrut_place < 0 {
+        scrut_path = semaOwnScrutinee(edit ctx, source, tree, scrut_var, scrut_t, expr.start, expr.end)
+    }
+    hold place = lirPlaceVar(edit ctx.lir, scrut_var)
+    hold tag = lirNew(edit ctx, 1, false, LIR_DISC, place, 0, 0)
+    hold some_tag = lirConst(edit ctx.lir, LIR_CONST_INT, 1, expr.start, expr.end)
+    hold condition = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, tag, some_tag)
+    ctx.lir.val = condition
+    ctx.lir.place = -1
+    lirCondition(edit ctx)
+    flowLink(edit ctx.flow, some_block, none_block)
+    hold result_var = lirVar(edit ctx.lir, payload_t, false)
+
+    ctx.flow.current = some_block
+    hold union_place = lirPlaceVar(edit ctx.lir, scrut_var)
+    hold payload = lirNew(edit ctx, payload_t, false, LIR_PAYLOAD, union_place, union_id, 1)
+    lirAt(edit ctx, LIR_USE, result_var, payload, 0, 0)
+    flowLink(edit ctx.flow, join, -1)
+
+    ctx.flow.current = none_block
+    ctx.expected_list_type = payload_t
+    hold expected_union = ctx.expected_union_type
+    ctx.expected_union_type = payload_t
+    hold fallback_t = semaExprMode(edit ctx, source, tree, expr.b, ACCESS_MOVE)
+    ctx.expected_list_type = expected_list
+    ctx.expected_union_type = expected_union
+    when !semTypeEquals(view ctx.types, payload_t, fallback_t) {
+        hold expected_name = semTypeName(view ctx.types, source, payload_t)
+        hold actual_name = semTypeName(view ctx.types, source, fallback_t)
+        semaAddError(edit ctx, "L0003", "fallback de ?? incompatible: esperado '{expected_name}', recibido '{actual_name}'", tree.expressions[expr.b].start, tree.expressions[expr.b].end)
+    }
+    hold fallback = lirTakeOperand(edit ctx, fallback_t)
+    lirAt(edit ctx, LIR_USE, result_var, fallback, 0, 0)
+    flowLink(edit ctx.flow, join, -1)
+    ctx.flow.current = join
+    semaScopeExit(edit ctx, expr.start, expr.end)
+    lirSetVal(edit ctx, result_var)
+    when semaNeedsDrop(edit ctx, source, tree, payload_t) {
+        semaTemp(edit ctx, source, tree, payload_t, expr.start, expr.end)
+        when ctx.pending_temps.length > 0 {
+            hold path = ctx.pending_temps[ctx.pending_temps.length - 1]
+            semaAccess(edit ctx, path, payload_t, mode, expr.start, expr.end)
+        }
+    }
+    give payload_t
+}
+
 flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, mode: Int) => Int {
     hold expr = view tree.expressions[expr_id]
     hold site = ctx.borrow_site
@@ -315,8 +410,7 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             change rhs_t = 7
             hold op = source@byteAt(expr.c)
             when op == 63 {
-                semaAddError(edit ctx, "L0016", "operación de Option fuera del subconjunto verificado", expr.start, expr.end)
-                give 7
+                give semaOptionDefaultExpr(edit ctx, source, tree, expr, mode)
             }
             hold lhs = lirTakeOperand(edit ctx, lhs_t)
             change rhs = LIR_NONE
