@@ -219,7 +219,12 @@ expose flow semaIndexFinish(ctx: edit SemaContext, source: view Text, tree: view
         semaAccess(edit ctx, parent_path, elem_t, mode, expr.start, expr.end)
     }
     when base_place >= 0 {
-        hold indexed_place = lirPlaceIndexAt(edit ctx.lir, base_place, idx_var, bounds_at)
+        change indexed_place = -1
+        when bounds_at < 0 {
+            indexed_place = lirPlaceIndex(edit ctx.lir, base_place, idx_var)
+        } otherwise {
+            indexed_place = lirPlaceIndexAt(edit ctx.lir, base_place, idx_var, bounds_at)
+        }
         lirSetPlace(edit ctx, indexed_place)
         when mode != ACCESS_PLACE && elem_t >= 0 && elem_t < ctx.types.types.length {
             hold element = view ctx.types.types[elem_t]
