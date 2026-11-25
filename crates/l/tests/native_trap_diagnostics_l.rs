@@ -202,10 +202,30 @@ const LIST_INDEX: &str = "flow main() => Int {
 }
 ";
 
+const LIST_STORE_INDEX: &str = "flow main() => Int {
+    change xs: List of[Int] = List[]
+    xs@push(1)
+    hold i = xs.length + 1
+    xs[i] = 2
+    give 0
+}
+";
+
 const BYTE_AT: &str = "flow main() => Int {
     hold t = \"abc\"
     print(\"antes\")
     print(t@byteAt(5))
+    give 0
+}
+";
+
+const BYTE_AT_DOT: &str = "flow get(t: view Text, i: Int) => Int {
+    give t.byteAt(i)
+}
+
+flow main() => Int {
+    hold t = \"abc\"
+    print(get(view t, 5))
     give 0
 }
 ";
@@ -236,24 +256,38 @@ fn remainder_by_zero_reports_position_and_exits_125() {
 
 #[test]
 fn list_index_out_of_range_reports_position_and_exits_127() {
-    check(
-        "list-index",
-        LIST_INDEX,
-        "antes\n",
-        &format!("ELE 7:11{INDEX}"),
-        127,
-    );
+    let expected = format!("ELE 7:13{INDEX}");
+    check("list-index", LIST_INDEX, "antes\n", &expected, 127);
+    if let Some(stage0) = stage0_stderr("list-index", LIST_INDEX) {
+        assert_eq!(stage0, expected, "same diagnostic as Stage 0");
+    }
+}
+
+#[test]
+fn list_store_index_out_of_range_reports_position_and_exits_127() {
+    let expected = format!("ELE 5:7{INDEX}");
+    check("list-store-index", LIST_STORE_INDEX, "", &expected, 127);
+    if let Some(stage0) = stage0_stderr("list-store-index", LIST_STORE_INDEX) {
+        assert_eq!(stage0, expected, "same diagnostic as Stage 0");
+    }
 }
 
 #[test]
 fn byte_at_out_of_range_reports_position_and_exits_127() {
-    check(
-        "byte-at",
-        BYTE_AT,
-        "antes\n",
-        &format!("ELE 4:11{INDEX}"),
-        127,
-    );
+    let expected = format!("ELE 4:12{INDEX}");
+    check("byte-at", BYTE_AT, "antes\n", &expected, 127);
+    if let Some(stage0) = stage0_stderr("byte-at", BYTE_AT) {
+        assert_eq!(stage0, expected, "same diagnostic as Stage 0");
+    }
+}
+
+#[test]
+fn byte_at_dot_out_of_range_reports_operator_position_and_matches_stage0() {
+    let expected = format!("ELE 2:11{INDEX}");
+    check("byte-at-dot", BYTE_AT_DOT, "", &expected, 127);
+    if let Some(stage0) = stage0_stderr("byte-at-dot", BYTE_AT_DOT) {
+        assert_eq!(stage0, expected, "same diagnostic as Stage 0");
+    }
 }
 
 /// A program without run-time checks carries no reporter: nothing is

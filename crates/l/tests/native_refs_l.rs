@@ -172,7 +172,7 @@ fn arithmetic_and_index_failures_stop_with_their_status() {
             // `give` in f (line 2) or in g (line 6).
             let diagnostic = match _status {
                 125 => "ELE 2:10: overflow entero o división/resto por cero\n",
-                127 => "ELE 6:10: índice fuera de rango\n",
+                127 => "ELE 6:11: índice fuera de rango\n",
                 _ => "",
             };
             assert_eq!(stderr, diagnostic, "{name}");

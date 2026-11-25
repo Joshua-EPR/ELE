@@ -177,6 +177,9 @@ expose shape LirPlace {
     root: Int
     parent: Int
     field: Int
+    // Source offset of the list index operator that introduced this place,
+    // or -1 when it has no indexed projection.
+    bounds_at: Int
 }
 
 expose shape LirArg {
@@ -247,21 +250,35 @@ expose flow lirConst(l: edit LirFn, kind: Int, value: Int, start: Int, end: Int)
 }
 
 expose flow lirPlaceVar(l: edit LirFn, slot: Int) => Int {
-    l.places@push(LirPlace(root: slot, parent: -1, field: -1))
+    l.places@push(LirPlace(root: slot, parent: -1, field: -1, bounds_at: -1))
     give l.places.length - 1
 }
 
 expose flow lirPlaceField(l: edit LirFn, base: Int, field: Int) => Int {
     hold slot = l.places[base].root
-    l.places@push(LirPlace(root: slot, parent: base, field: field))
+    hold bounds_at = l.places[base].bounds_at
+    l.places@push(LirPlace(root: slot, parent: base, field: field, bounds_at: bounds_at))
     give l.places.length - 1
 }
 
 expose flow lirPlaceIndex(l: edit LirFn, base: Int, index_var: Int) => Int {
+    give lirPlaceIndexAt(edit l, base, index_var, -1)
+}
+
+expose flow lirPlaceIndexAt(l: edit LirFn, base: Int, index_var: Int, bounds_at: Int) => Int {
     hold slot = l.places[base].root
     hold f = 0 - 2 - index_var
-    l.places@push(LirPlace(root: slot, parent: base, field: f))
+    l.places@push(LirPlace(root: slot, parent: base, field: f, bounds_at: bounds_at))
     give l.places.length - 1
+}
+
+// Bounds diagnostics are attached to the indexed projection. Field
+// projections preserve the location so reads, stores and loans through a
+// directly indexed place point at the operator rather than the expression's
+// base identifier.
+expose flow lirPlaceBoundsAt(l: view LirFn, place: Int) => Int {
+    when place < 0 || place >= l.places.length { give -1 }
+    give l.places[place].bounds_at
 }
 
 expose flow lirArg(l: edit LirFn, by_ref: Bool, value: Int, mutable: Bool) => Int {
