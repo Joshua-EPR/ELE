@@ -47,7 +47,7 @@ class SelfCoverageGateTests(unittest.TestCase):
         for name, argv in zip(gate.GEN3_TOOLS, calls):
             self.assertEqual(argv[0], str(gen3.resolve()))
             self.assertEqual(argv[1:2], ["build"])
-            self.assertIn(str(source_root / f"{name}.l"), argv)
+            source_arg = Path(argv[argv.index("build") + 1]).as_posix().lower()\n            expected_suffix = f"compiler-l/src/{name}.l"\n            self.assertTrue(source_arg.endswith(expected_suffix), source_arg)
             self.assertEqual(argv[argv.index("--target") + 1], "elf")
             self.assertTrue(images[name].startswith(b"\x7fELF"))
             if os.name == "posix":
