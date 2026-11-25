@@ -225,7 +225,7 @@ fn main() {
             "word:11:17\nint:18:23\nsymbol:24:25\nnewline:35:36\neof:36:36\n",
             "newline:5:6\nword:19:20\nsymbol:20:23\nword:23:24\n",
             "symbol:25:27\nword:28:29\nsymbol:29:31\nint:31:32\neof:32:32\n",
-            "byte:4\ncomment:0\nnumber:0\nbyte:0\n",
+            "byte:4\ncomment:0\nint:0:3\neof:3:3\nbyte:0\n",
         ),
         None,
     );

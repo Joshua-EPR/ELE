@@ -3,6 +3,7 @@ take tokens
 take cursor
 take ast
 take parse_util
+take float_parse
 
 expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], min_prec: Int, parens: Int, depth: Int) => Int {
     when depth > 128 {

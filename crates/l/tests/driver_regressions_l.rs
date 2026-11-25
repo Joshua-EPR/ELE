@@ -236,43 +236,24 @@ fn primitive_match_patterns_are_diagnosed_not_ice() {
 
 /// 1-based line and code-point column of a byte offset, as the driver
 /// reports them.
-fn line_col(source: &str, offset: usize) -> (usize, usize) {
-    let before = &source[..offset];
-    let line = before.matches('\n').count() + 1;
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    (line, before[line_start..].chars().count() + 1)
-}
-
 #[test]
-fn float_example_reports_the_lexer_error_with_position() {
-    let dir = work("lexer_float_example");
-    let example = root().join("examples/enums.l");
-    let text = fs::read_to_string(&example).unwrap();
-    // First Float literal of the example (digits '.' digit).
-    let bytes = text.as_bytes();
-    let dot = (1..bytes.len() - 1)
-        .find(|&i| {
-            bytes[i] == b'.' && bytes[i - 1].is_ascii_digit() && bytes[i + 1].is_ascii_digit()
-        })
-        .expect("examples/enums.l contains a Float literal");
-    let mut start = dot;
-    while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'_') {
-        start -= 1;
+fn float_literals_build_and_run_natively() {
+    // Float used to be a lexer error of the ELE-written driver; it is now a
+    // native f64 lowered through SSE2 and printed like Stage 0's runtime.
+    let dir = work("float_builds");
+    fs::write(
+        dir.join("float.l"),
+        "flow main() {\n    hold x = 2.5\n    print(x * 2.0)\n    print(1.0 / 0.0)\n    print(0.1 + 0.2)\n}\n",
+    )
+    .unwrap();
+    let (out, image) = build(&dir, Path::new("float.l"), "pe", "float.exe");
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(image.exists());
+    if cfg!(windows) {
+        let run = Command::new(&image).output().unwrap();
+        assert_eq!(run.status.code(), Some(0));
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "5\ninf\n0.3\n");
     }
-    let (line, column) = line_col(&text, start);
-    let source = dir.join("enums.l");
-    fs::copy(&example, &source).unwrap();
-    let (out, image) = build(&dir, Path::new("enums.l"), "pe", "never.exe");
-    let err = stderr(&out);
-    assert_eq!(out.status.code(), Some(1), "{err}");
-    assert_eq!(
-        err,
-        format!(
-            "enums.l:{line}:{column}: error[LEXER]: literal de punto flotante fuera del subconjunto léxico (byte {start})\n"
-        )
-    );
-    assert!(!err.contains("UTF-8"), "{err}");
-    assert!(!image.exists());
 }
 
 #[test]
@@ -281,8 +262,8 @@ fn lexer_errors_name_their_module_and_position() {
     let cases: [(&str, &[u8], &str); 4] = [
         (
             "exponent.l",
-            "flow main() => Int {\n    hold x = 1e5\n    give 0\n}\n".as_bytes(),
-            "exponent.l:2:14: error[LEXER]: literal de punto flotante fuera del subconjunto léxico (byte 34)\n",
+            "flow main() => Int {\n    hold x = 1e\n    give 0\n}\n".as_bytes(),
+            "exponent.l:2:14: error[LEXER]: Float inválido (byte 34)\n",
         ),
         (
             "unicode.l",
@@ -318,16 +299,14 @@ fn lexer_errors_name_their_module_and_position() {
     .unwrap();
     fs::write(
         dir.join("dep.l"),
-        "expose flow f() => Int {\n    give 2.5\n}\n",
+        "expose flow f() => Int {\n    give 2e\n}\n",
     )
     .unwrap();
     let (out, _) = build(&dir, Path::new("entry.l"), "pe", "never.exe");
     let err = stderr(&out);
     assert_eq!(out.status.code(), Some(1), "{err}");
     assert!(
-        err.ends_with(
-            "dep.l:2:10: error[LEXER]: literal de punto flotante fuera del subconjunto léxico (byte 34)\n"
-        ),
+        err.ends_with("dep.l:2:10: error[LEXER]: Float inválido (byte 34)\n"),
         "{err}"
     );
     assert!(!err.contains("entry.l"), "{err}");
