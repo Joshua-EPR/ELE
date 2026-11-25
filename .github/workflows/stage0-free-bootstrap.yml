@@ -63,7 +63,7 @@ jobs:
           # The runner still starts bash by absolute path. These symlinks are
           # the only commands the bootstrap and corpus scripts need on PATH.
           # In particular, do not expose gcc/clang/cc/ld/lld or MSVC tools.
-          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git; do
+          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git python3; do
             resolved=$(command -v "$tool")
             test -n "$resolved"
             ln -sf "$resolved" "$clean_path/$tool"
@@ -89,6 +89,14 @@ jobs:
       - name: Native conformance corpus with Gen3 (no Rust on PATH)
         shell: bash
         run: sh tests/native_corpus/run.sh "${{ runner.temp }}/bootstrap-elf/gen3.elf"
+      - name: Gen3 self-coverage gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/self_coverage_gate.py \
+            --gen3 "${{ runner.temp }}/bootstrap-elf/gen3.elf" --gen3-target elf \
+            --baseline docs/SELF_COVERAGE_MATRIX_2026-11-11.md \
+            --output "${{ runner.temp }}/bootstrap-elf/self-coverage" --timeout 180
       - name: Upload provenance and Gen3
         if: always()
         uses: actions/upload-artifact@v4
@@ -99,6 +107,8 @@ jobs:
             ${{ runner.temp }}/bootstrap-elf/SHA256SUMS
             ${{ runner.temp }}/bootstrap-elf/gen3.elf
             ${{ runner.temp }}/bootstrap-elf/logs/
+            ${{ runner.temp }}/bootstrap-elf/self-coverage/report.json
+            ${{ runner.temp }}/bootstrap-elf/self-coverage/report.md
           if-no-files-found: warn
           retention-days: 14
 
@@ -141,7 +151,9 @@ jobs:
         shell: pwsh
         run: |
           $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-          $allowed = @($PSHOME, (Join-Path $env:SystemRoot 'System32'))
+          $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $python) { throw 'Python from setup-python was not found before PATH isolation' }
+          $allowed = @($PSHOME, (Join-Path $env:SystemRoot 'System32'), (Split-Path -Parent $python.Source))
           if ($git) { $allowed += (Split-Path -Parent $git.Source) }
           $cleanPath = $allowed -join ';'
           $env:PATH = $cleanPath
@@ -169,6 +181,14 @@ jobs:
         run: |
           ./tests/native_corpus/run.ps1 (Join-Path '${{ runner.temp }}' 'bootstrap-pe/gen3.exe')
           exit $LASTEXITCODE
+      - name: Gen3 self-coverage gate
+        shell: pwsh
+        run: |
+          python tools/self_coverage_gate.py `
+            --gen3 (Join-Path '${{ runner.temp }}' 'bootstrap-pe/gen3.exe') --gen3-target pe `
+            --baseline docs/SELF_COVERAGE_MATRIX_2026-11-11.md `
+            --output (Join-Path '${{ runner.temp }}' 'bootstrap-pe/self-coverage') --timeout 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload provenance and Gen3
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,5 +199,7 @@ jobs:
             ${{ runner.temp }}/bootstrap-pe/SHA256SUMS
             ${{ runner.temp }}/bootstrap-pe/gen3.exe
             ${{ runner.temp }}/bootstrap-pe/logs/
+            ${{ runner.temp }}/bootstrap-pe/self-coverage/report.json
+            ${{ runner.temp }}/bootstrap-pe/self-coverage/report.md
           if-no-files-found: warn
           retention-days: 14
