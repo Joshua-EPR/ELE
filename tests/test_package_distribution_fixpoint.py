@@ -86,7 +86,8 @@ class FixpointTests(unittest.TestCase):
 
             self.assertEqual(len(invocations), 3)
             gen1prime, gen2, gen3 = [Path(call[-1]) for call in invocations]
-            self.assertEqual([Path(call[0]) for call in invocations], [gen1, gen1prime, gen2])
+            self.assertTrue(Path(invocations[0][0]).samefile(gen1))
+            self.assertEqual([Path(call[0]) for call in invocations[1:]], [gen1prime, gen2])
             self.assertIn("gen1prime", gen1prime.name)
             self.assertIn("gen2", gen2.name)
             self.assertIn("gen3", gen3.name)
