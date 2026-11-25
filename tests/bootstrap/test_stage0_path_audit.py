@@ -93,9 +93,14 @@ class Stage0PathAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             history = root / "STAGE0_PROGRESS.md"
-            history.write_text("cargo and Cranelift were used historically.\n", encoding="utf-8")
+            history.write_text(
+                "cargo and Cranelift were used historically.\n"
+                "<!-- Migration note: Stage 0 used cargo. -->\n",
+                encoding="utf-8",
+            )
             result = audit_files(root, [history], allowlist={})
         self.assertEqual(result.violations, ())
+        self.assertEqual(len(result.findings), 4)
         self.assertEqual({f.classification for f in result.findings}, {"historical"})
 
     def test_unscoped_file_is_not_discovered(self):
@@ -119,6 +124,24 @@ class Stage0PathAuditTests(unittest.TestCase):
             readme = seeds / "README.md"
             readme.write_text("Seed archive provenance.\n", encoding="utf-8")
             self.assertEqual(discover_official_files(root), (readme,))
+
+    def test_windows_bootstrap_script_types_are_scanned(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bootstrap = root / "scripts/bootstrap"
+            bootstrap.mkdir(parents=True)
+            scripts = [bootstrap / f"entry{suffix}" for suffix in (".psm1", ".cmd", ".bat")]
+            for script in scripts:
+                script.write_text("cargo test -p project-l\n", encoding="utf-8")
+
+            discovered = discover_official_files(root)
+            self.assertEqual(set(discovered), set(scripts))
+            result = audit_files(root, discovered, allowlist={})
+
+        self.assertEqual(len(result.violations), 6)
+        self.assertEqual({finding.path for finding in result.violations}, {
+            f"scripts/bootstrap/entry{suffix}" for suffix in (".psm1", ".cmd", ".bat")
+        })
 
     def test_current_official_routes_have_no_uninventoried_references(self):
         result = audit_repository()

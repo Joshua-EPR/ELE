@@ -1,14 +1,14 @@
 # Stage 0 removal roadmap
 
-Status date: 2026-11-24. `main` is `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged). PR #169 distribution and PR #170 owned Text choice payloads are under CI validation. This is an execution order, not a claim of completion.
+Status date: 2026-11-24. `main` is `720c25d76709ca0f81cfdbdf27935ccb4fede4b5` (PRs #167–#170 and #174–#175 merged). PRs #171/#172/#173 remain under CI validation. This is an execution order, not a claim of completion.
 
-## Phase 0 — Baseline and evidence (in progress)
+## Phase 0 — Baseline and evidence (complete)
 
 - [x] Inspect local `main`, recent commits, dependency manifests, bootstrap scripts, workflow, tests and distribution paths.
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
 - [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
-- [x] Reconcile current main and open PR state (2026-11-24): #167 and #168 are merged; #169 and #170 are open and tracked in `STAGE0_PROGRESS.md`.
+- [x] Reconcile current main and open PR state (2026-11-24): #167–#170 and #174/#175 are merged; #171/#172/#173 are tracked in `STAGE0_PROGRESS.md`.
 
 ## Phase 1 — Define the replaceable compiler boundary
 
@@ -40,7 +40,11 @@ Status date: 2026-11-24. `main` is `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (P
 - [x] First Stage-0-free regression suite: `tests/native_corpus`, initially 85 cases in PR #160; current main has 94 cases. Local Windows PE run: 89 PASS, 5 XFAIL; no FAIL/XPASS.
 - [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
-- [ ] Complete CI for PR #169, which removes package-builder Stage 0/Cargo/cached-driver fallbacks, requires a pinned host-native seed, isolates runner PATH and restricts installers to package archives. The first CI run exposed missing `gzip` and a nested PowerShell call; fixes are pushed and the rebased run is active.
+- [x] Complete PR #169 distribution migration: package generation now requires a pinned host-native seed, removes Stage 0/Cargo/cached-driver fallbacks, isolates runner PATH and restricts installers to package archives. Required Linux/Windows checks passed after PATH fixes.
+- [x] Merge PR #170 owned Text choice payload support; native Linux/Windows checks and ELF execution passed.
+- [x] Merge PR #174 ELF data-segment verifier support; Linux/Windows checks passed, including the full suites.
+- [x] Merge PR #175 native shape extension methods; PE Gen3 corpus reached 98 PASS/2 XFAIL and Linux/Windows checks passed.
+- [ ] Complete CI for PR #171 (lazy drop-free Option defaults), #172 (Result/Option propagation), and #173 (audit script discovery).
 - Exit criteria: CI, distribution and install verification pass with Stage 0 and Cranelift absent.
 
 ## Phase 5 — Retire Stage 0
@@ -52,4 +56,4 @@ Status date: 2026-11-24. `main` is `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (P
 
 ## Current technical boundary
 
-Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend and most test/bootstrap paths still depend on Stage 0. PR #169 migrates packaging only after merge and CI; it does not establish full independence.
+Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend and most test/bootstrap paths still depend on Stage 0. PR #169 migrated distribution, PRs #170/#175 closed frontend gaps, and PR #174 improved ELF validation; none establishes full independence.

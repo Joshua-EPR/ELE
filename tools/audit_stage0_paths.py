@@ -60,8 +60,9 @@ HISTORICAL_GLOBS = (
 )
 
 TEXT_SUFFIXES = {
-    ".cfg", ".ini", ".json", ".l", ".lock", ".md", ".ps1", ".py",
-    ".rs", ".sh", ".toml", ".txt", ".xml", ".yaml", ".yml",
+    ".bat", ".cfg", ".cmd", ".ini", ".json", ".l", ".lock", ".md",
+    ".ps1", ".psm1", ".py", ".rs", ".sh", ".toml", ".txt", ".xml",
+    ".yaml", ".yml",
 }
 
 # The allowlist is the inventory of today's known active transition points.
