@@ -2,7 +2,6 @@
 # all (comma separated); reject cases are named `reject/<name>`. A listed case
 # must still FAIL on that target (XFAIL); if it passes (XPASS) the runner
 # fails until the line is removed. Observed behavior: KNOWN_GAPS.md.
-choice_text_payload all
 option_default all
 result_propagation all
 shape_methods all
