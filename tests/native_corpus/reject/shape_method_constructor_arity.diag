@@ -1,0 +1,2 @@
+shape_method_constructor_arity.l:10:20: error[L0004]
+número incorrecto de argumentos en llamada

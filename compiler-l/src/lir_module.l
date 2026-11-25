@@ -30,7 +30,7 @@ expose flow semaLirSetup(ctx: edit SemaContext, source: view Text, tree: view As
             AstDeclKind.Function : {
                 ctx.lir_func_index[d] = functions
                 hold main_name = "main"
-                when symbolNameEqualsText(source, decl.a, decl.b, main_name) { ctx.lir_main = functions }
+                when !astIsMethod(tree, d) && symbolNameEqualsText(source, decl.a, decl.b, main_name) { ctx.lir_main = functions }
                 functions += 1
             }
             AstDeclKind.Struct : {
@@ -108,7 +108,19 @@ flow semaLirSignature(ctx: edit SemaContext, source: view Text, tree: view AstTr
     ctx.current_module = semaDeclModule(ctx, d)
     hold decl = view tree.declarations[d]
     ctx.lir_module.fn_first@push(ctx.lir_module.param_ty.length)
-    ctx.lir_module.fn_count@push(decl.e)
+    hold is_method = astIsMethod(tree, d)
+    change receiver_count = 0
+    when is_method && decl.c < 2 {
+        hold owner_ast = astMethodOwnerType(view tree, d)
+        hold owner_t = semaResolveAstType(edit ctx, source, tree, owner_ast)
+        hold receiver_t = semTypeMakeRef(edit ctx.types, owner_t, decl.c == 1)
+        hold receiver_elem = semaRefElem(ctx, receiver_t)
+        ctx.lir_module.param_ty@push(receiver_elem)
+        ctx.lir_module.param_ref@push(true)
+        ctx.lir_module.param_mut@push(decl.c == 1)
+        receiver_count = 1
+    }
+    ctx.lir_module.fn_count@push(decl.e + receiver_count)
     ctx.lir_module.fn_decl@push(d)
     each p among 0..decl.e {
         hold ty = semaResolveAstType(edit ctx, source, tree, tree.params[decl.d + p].type_id)

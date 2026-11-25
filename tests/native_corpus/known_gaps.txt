@@ -4,4 +4,3 @@
 # fails until the line is removed. Observed behavior: KNOWN_GAPS.md.
 option_default all
 result_propagation all
-shape_methods all

@@ -679,12 +679,16 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             give semaExprMode(edit ctx, source, tree, expr.c, mode)
         }
         AstExprKind.MethodCall : {
+            hold static_ext = semaExtensionStaticCall(edit ctx, source, tree, expr_id)
+            when static_ext >= 0 { give static_ext }
             hold enum_call = semaEnumVariantCall(edit ctx, source, tree, expr)
             when enum_call >= 0 { give enum_call }
             hold base_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_PLACE)
             hold base_place = ctx.lir.place
             hold base_path = ctx.expression_path
             ctx.expression_path = -1
+            hold extension_call = semaExtensionInstanceCall(edit ctx, source, tree, expr_id, base_t, base_place, base_path)
+            when extension_call >= 0 { give extension_call }
             hold first_call = expr.d
             hold count = tree.extra[first_call]
             change arg_op = LIR_NONE
@@ -715,6 +719,158 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             give 7
         }
     }
+}
+
+// Find a method by its nominal receiver type and receiver mode. The method
+// declaration remains an ordinary Function in the shared semantic/LIR path.
+flow semaExtensionFind(ctx: edit SemaContext, source: view Text, tree: view AstTree, owner_type: Int, name_start: Int, name_end: Int, receiver_mode: Int) => Int {
+    when owner_type < 0 || owner_type >= ctx.types.types.length { give -1 }
+    each i among 0..tree.declarations.length {
+        hold ext = view tree.declarations[i]
+        choose ext.kind {
+            AstDeclKind.Extension : {
+                hold ext_owner = semaResolveAstType(edit ctx, source, tree, ext.a)
+                when ext_owner != owner_type { proceed }
+                each m among 0..ext.d {
+                    hold method_id = ext.c + m
+                    when method_id < 0 || method_id >= tree.declarations.length { proceed }
+                    hold method = view tree.declarations[method_id]
+                    when method.c != receiver_mode { proceed }
+                    when symbolNamesEqual(source, method.a, method.b, name_start, name_end) { give method_id }
+                }
+            }
+            _ : {}
+        }
+    }
+    give -1
+}
+
+flow semaExtensionRet(ctx: edit SemaContext, source: view Text, tree: view AstTree, method_id: Int) => Int {
+    when method_id < 0 || method_id >= tree.declarations.length { give 7 }
+    hold method = view tree.declarations[method_id]
+    when method.f < 0 { give 6 }
+    give semaResolveAstType(edit ctx, source, tree, method.f)
+}
+
+flow semaExtensionStaticCall(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int) => Int {
+    hold expr = view tree.expressions[expr_id]
+    hold base = view tree.expressions[expr.a]
+    choose base.kind {
+        AstExprKind.Name : {}
+        _ : { give -1 }
+    }
+    hold sym_id = semaLookupVisible(edit ctx, source, base.start, base.end)
+    when sym_id < 0 { give -1 }
+    choose ctx.symbols.symbols[sym_id].kind {
+        SymbolKind.Struct : {}
+        _ : { give -1 }
+    }
+    hold owner_type = ctx.symbols.symbols[sym_id].type_id
+    hold method_id = semaExtensionFind(edit ctx, source, tree, owner_type, expr.b, expr.c, 2)
+    when method_id < 0 { give -1 }
+    hold method = view tree.declarations[method_id]
+    hold first = expr.d
+    hold count = tree.extra[first]
+    when count != method.e {
+        semaAddError(edit ctx, "L0004", "número incorrecto de argumentos en llamada", expr.start, expr.end)
+        give 7
+    }
+    change loans: List of[Int] = List[]
+    change args: List of[Int] = List[]
+    each a among 0..count {
+        hold arg_id = tree.extra[first + a + 1]
+        hold param = view tree.params[method.d + a]
+        hold param_t = semaResolveAstType(edit ctx, source, tree, param.type_id)
+        when semaRefElem(ctx, param_t) >= 0 {
+            hold arg_loan = semaRefArg(edit ctx, source, tree, arg_id, param_t, a)
+            hold arg_place = ctx.lir.borrowed
+            hold arg_mut = semaIsMutRef(ctx, param_t)
+            loans@push(arg_loan)
+            hold arg = lirArg(edit ctx.lir, true, arg_place, arg_mut)
+            args@push(arg)
+        } otherwise {
+            loans@push(-1)
+            ctx.expected_list_type = param_t
+            hold actual = semaExprMode(edit ctx, source, tree, arg_id, ACCESS_MOVE)
+            hold operand = lirTakeOperand(edit ctx, actual)
+            args@push(lirArg(edit ctx.lir, false, operand, false))
+            when !semTypeEquals(view ctx.types, actual, param_t) {
+                semaAddError(edit ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
+            }
+        }
+    }
+    hold ret_t = semaExtensionRet(edit ctx, source, tree, method_id)
+    hold call_site = ctx.borrow_site
+    hold call_start = expr.start
+    hold call_end = expr.end
+    hold result = semaCallLoans(edit ctx, view loans, ret_t, call_site, call_start, call_end)
+    semaCallLower(edit ctx, method_id, view args, ret_t)
+    give result
+}
+
+flow semaExtensionInstanceCall(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, base_t: Int, base_place: Int, base_path: Int) => Int {
+    hold expr = view tree.expressions[expr_id]
+    change owner_t = base_t
+    hold referent = semaRefElem(ctx, owner_t)
+    when referent >= 0 { owner_t = referent }
+    when owner_t < 0 || owner_t >= ctx.types.types.length { give -1 }
+    choose ctx.types.types[owner_t].kind {
+        SemTypeKind.Struct : {}
+        _ : { give -1 }
+    }
+    change method_id = semaExtensionFind(edit ctx, source, tree, owner_t, expr.b, expr.c, 0)
+    when method_id < 0 { method_id = semaExtensionFind(edit ctx, source, tree, owner_t, expr.b, expr.c, 1) }
+    when method_id < 0 { give -1 }
+    hold method = view tree.declarations[method_id]
+    hold mutable = method.c == 1
+    when base_path < 0 || base_place < 0 {
+        semaAddError(edit ctx, "L0012", "un método requiere un receptor que sea un lugar", expr.start, expr.end)
+        give 7
+    }
+    hold receiver_ref_t = semaBorrowPlace(edit ctx, base_path, owner_t, mutable, SITE_ARG, expr.start, expr.end)
+    hold receiver_loan = ctx.pending_loan
+    ctx.pending_loan = -1
+    hold receiver_place = ctx.lir.borrowed
+    hold first = expr.d
+    hold count = tree.extra[first]
+    when count != method.e {
+        semaAddError(edit ctx, "L0004", "número incorrecto de argumentos en llamada", expr.start, expr.end)
+        give 7
+    }
+    change loans: List of[Int] = List[]
+    change args: List of[Int] = List[]
+    loans@push(receiver_loan)
+    args@push(lirArg(edit ctx.lir, true, receiver_place, mutable))
+    each a among 0..count {
+        hold arg_id = tree.extra[first + a + 1]
+        hold param = view tree.params[method.d + a]
+        hold param_t = semaResolveAstType(edit ctx, source, tree, param.type_id)
+        when semaRefElem(ctx, param_t) >= 0 {
+            hold arg_loan = semaRefArg(edit ctx, source, tree, arg_id, param_t, a + 1)
+            hold arg_place = ctx.lir.borrowed
+            hold arg_mut = semaIsMutRef(ctx, param_t)
+            loans@push(arg_loan)
+            hold arg = lirArg(edit ctx.lir, true, arg_place, arg_mut)
+            args@push(arg)
+        } otherwise {
+            loans@push(-1)
+            ctx.expected_list_type = param_t
+            hold actual = semaExprMode(edit ctx, source, tree, arg_id, ACCESS_MOVE)
+            hold operand = lirTakeOperand(edit ctx, actual)
+            args@push(lirArg(edit ctx.lir, false, operand, false))
+            when !semTypeEquals(view ctx.types, actual, param_t) {
+                semaAddError(edit ctx, "L0004", "tipo incompatible en argumento", expr.start, expr.end)
+            }
+        }
+    }
+    hold ret_t = semaExtensionRet(edit ctx, source, tree, method_id)
+    hold call_site = ctx.borrow_site
+    hold call_start = expr.start
+    hold call_end = expr.end
+    hold result = semaCallLoans(edit ctx, view loans, ret_t, call_site, call_start, call_end)
+    semaCallLower(edit ctx, method_id, view args, ret_t)
+    ctx.pending_loan = -1
+    give result
 }
 
 flow semaCollectionLit(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, is_array: Bool) => Int {

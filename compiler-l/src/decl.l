@@ -7,9 +7,104 @@ take expr
 take types
 take stmt
 
+// The syntax differs only by the extension receiver mode; the resulting
+// method is an ordinary function declaration with an implicit receiver
+// parameter supplied by semantic analysis.
+flow parseExtensionMethod(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], receiver_mode: Int) => Int {
+    hold is_async = parserTakeWord(source, edit cursor, tokens, "async")
+    when !parserTakeWord(source, edit cursor, tokens, "fn") {
+        hold start = cursorSpanStart(cursor, tokens, source.byteLength)
+        hold end = cursorSpanEnd(cursor, tokens, source.byteLength)
+        astAddError(edit tree, ParseProblem.ExpectedDeclaration, "flow", start, end)
+        give -1
+    }
+    when cursor.pos >= tokens.length {
+        astAddError(edit tree, ParseProblem.ExpectedIdentifier, "", source.byteLength, source.byteLength)
+        give -1
+    }
+    hold nameTok = view tokens[cursor.pos]
+    cursor.pos += 1
+    parserNeedSymbol(edit tree, source, edit cursor, tokens, "(")
+
+    hold first_param = tree.params.length
+    change param_count = 0
+    parserSkipNewlines(edit cursor, tokens)
+    when !parserTakeSymbol(source, edit cursor, tokens, ")") {
+        during cursor.pos < tokens.length {
+            when cursor.pos >= tokens.length { leave }
+            hold pTok = view tokens[cursor.pos]
+            cursor.pos += 1
+            parserNeedSymbol(edit tree, source, edit cursor, tokens, ":")
+            hold p_type = parseType(edit tree, source, edit cursor, tokens, 0)
+            hold end_p = astTypeEnd(view tree, p_type, pTok.end)
+            astAddParam(edit tree, pTok.start, pTok.end, p_type, pTok.start, end_p)
+            param_count += 1
+            parserSkipNewlines(edit cursor, tokens)
+            when parserTakeSymbol(source, edit cursor, tokens, ")") { leave }
+            when !parserNeedSymbol(edit tree, source, edit cursor, tokens, ",") { leave }
+            parserSkipNewlines(edit cursor, tokens)
+            when parserTakeSymbol(source, edit cursor, tokens, ")") { leave }
+        }
+    }
+
+    change ret_type = -1
+    when parserTakeSymbol(source, edit cursor, tokens, "->") {
+        ret_type = parseType(edit tree, source, edit cursor, tokens, 0)
+    }
+    parserSkipNewlines(edit cursor, tokens)
+    change body_stmt = -1
+    when parserTakeSymbol(source, edit cursor, tokens, "=") {
+        parserSkipNewlines(edit cursor, tokens)
+        hold ret_expr = parseExpr(edit tree, source, edit cursor, tokens, 0, 0, 0)
+        hold ret_end = astExprEnd(view tree, ret_expr, nameTok.end)
+        hold s_ret = astAddStmt(edit tree, AstStmtKind.Return, nameTok.start, ret_end, ret_expr, 0, 0, 0, 0)
+        hold extra_b = astAddExtra(edit tree, s_ret)
+        body_stmt = astAddStmt(edit tree, AstStmtKind.Block, nameTok.start, ret_end, extra_b, 1, 0, 0, 0)
+    } otherwise {
+        body_stmt = parseBlock(edit tree, source, edit cursor, tokens, 0)
+    }
+    hold end_pos = astStmtEnd(view tree, body_stmt, nameTok.end)
+    change mode = receiver_mode
+    when is_async { mode = 3 }
+    give astAddDecl(edit tree, AstDeclKind.Function, nameTok.start, end_pos, false, nameTok.start, nameTok.end, mode, first_param, param_count, ret_type, body_stmt)
+}
+
+flow parseExtensionDecl(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken]) => Int {
+    hold start = cursorSpanStart(cursor, tokens, source.byteLength)
+    when !parserTakeWord(source, edit cursor, tokens, "impl") { give -1 }
+    hold owner_type = parseType(edit tree, source, edit cursor, tokens, 0)
+    when owner_type < 0 { give -1 }
+    when !parserNeedSymbol(edit tree, source, edit cursor, tokens, "{{") { give -1 }
+    hold first_method = tree.declarations.length
+    change method_count = 0
+    parserSkipSeparators(source, edit cursor, tokens)
+    during !parserAtSymbol(source, cursor, tokens, "}}") && cursor.pos < tokens.length {
+        hold before = cursor.pos
+        change receiver_mode = 0
+        when parserTakeWord(source, edit cursor, tokens, "mut") {
+            receiver_mode = 1
+        } otherwise when parserTakeWord(source, edit cursor, tokens, "static") {
+            receiver_mode = 2
+        }
+        hold method = parseExtensionMethod(edit tree, source, edit cursor, tokens, receiver_mode)
+        when method >= 0 {
+            method_count += 1
+        }
+        parserSkipSeparators(source, edit cursor, tokens)
+        when cursor.pos == before && cursor.pos < tokens.length { cursor.pos += 1 }
+    }
+    parserNeedSymbol(edit tree, source, edit cursor, tokens, "}}")
+    hold end_pos = cursorPrevEnd(cursor, tokens, astTypeEnd(view tree, owner_type, start))
+    give astAddDecl(edit tree, AstDeclKind.Extension, start, end_pos, false, owner_type, 0, first_method, method_count, 0, 0, 0)
+}
+
 expose flow parseDecl(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken]) => Int {
     when cursor.pos >= tokens.length { give -1 }
     hold is_public = parserTakeWord(source, edit cursor, tokens, "pub")
+
+    when parserAtWord(source, cursor, tokens, "impl") {
+        give parseExtensionDecl(edit tree, source, edit cursor, tokens)
+    }
 
     when parserTakeWord(source, edit cursor, tokens, "import") {
         when cursor.pos >= tokens.length {
