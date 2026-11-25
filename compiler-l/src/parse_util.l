@@ -2,6 +2,7 @@ take lexer
 take tokens
 take cursor
 take ast
+take float_parse
 
 expose flow selectInt(cond: Bool, ifTrue: Int, ifFalse: Int) => Int {
     when cond { give ifTrue }
@@ -93,6 +94,16 @@ expose flow parserIsSymbol(source: view Text, token: view LexToken, expected: Te
         }
         _ : { give false }
     }
+}
+
+// A numeric token is a Float when it has a fraction or an exponent: a plain
+// Int token holds only digits and `_` (the lexer scans both into one kind).
+expose flow parserIsFloatLiteral(source: view Text, start: Int, end: Int) => Bool {
+    each i among start..end {
+        hold b = source@byteAt(i)
+        when b == 46 || b == 101 || b == 69 { give true }
+    }
+    give false
 }
 
 expose flow parserParseDecimalInt(source: view Text, start: Int, end: Int) => Int {

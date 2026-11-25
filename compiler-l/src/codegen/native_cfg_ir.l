@@ -95,7 +95,7 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
     hold blocks = nativeNumber(source, edit reader)
     nativeEndLine(source, edit reader)
     hold ref_mode = cfgReturnedRefMode(returned_ref, returned_mut)
-    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || blocks < 1 || blocks > 1024 || ref_mode == -2 || (ref_mode >= 0 && result_type == cfgUnitType()) || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType() && !cfgIsLinear(result_type)) {
+    when reader.error != 0 || id != f || !cfgEncodedName(source, view name) || params < 0 || params > 16 || vars < params || blocks < 1 || blocks > 1024 || ref_mode == -2 || (ref_mode >= 0 && result_type == cfgUnitType()) || (result_type < 0 && result_type != cfgUnitType() && result_type != cfgTextType() && result_type != cfgFloatType() && !cfgIsLinear(result_type)) {
         p.error = 44
         give
     }
@@ -132,7 +132,7 @@ flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeR
         nativeEndLine(source, edit reader)
         hold unit_var = ty == cfgUnitType()
         hold text_var = ty == cfgTextType()
-        when reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var && !cfgIsLinear(ty)) || (i < params && !is_ref && unit_var) { p.error = 45; leave }
+        when reader.error != 0 || vid != i || (ty < 0 && !unit_var && !text_var && ty != cfgFloatType() && !cfgIsLinear(ty)) || (i < params && !is_ref && unit_var) { p.error = 45; leave }
         // A local reference is defined by a `loan` (native_cfg_loan).
         when is_ref && unit_var { p.error = 96; leave }
         change size = cfgTypeSize(p, ty)
@@ -240,6 +240,6 @@ expose flow cfgParse(source: view Text) => CfgProgram {
         p.error = 49
         give p
     }
-    when p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 || cfgIsLinear(p.functions[main].result_type) || p.functions[main].result_ref >= 0 { p.error = 50 }
+    when p.functions[main].params != 0 || p.functions[main].result_bool || p.functions[main].result_type >= 2 || cfgIsLinear(p.functions[main].result_type) || p.functions[main].result_type == cfgFloatType() || p.functions[main].result_ref >= 0 { p.error = 50 }
     give p
 }

@@ -528,7 +528,7 @@ expose flow lirOwnInst(v: edit LirVerifier, l: view LirFn, types: view TypeTable
     lirOwnDef(edit v, l, dst, -1, check)
     // A reference assigned again borrows afresh.
     when dst < v.stale.length { v.stale[dst] = false }
-    when kind == LIR_PAYLOAD && l.vars[dst].ty != 1 && l.vars[dst].ty != 4 {
+    when kind == LIR_PAYLOAD && l.vars[dst].ty != 1 && l.vars[dst].ty != 2 && l.vars[dst].ty != 4 {
         // A non-Copy payload consumes its whole union.
         when !lirOwnOperand(edit v, l, l.places[a].root, true, check) { give 5 }
     }

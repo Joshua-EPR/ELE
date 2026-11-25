@@ -40,7 +40,7 @@ expose flow lexProblemMessage(problem: view LexProblem) => Text {
     choose problem {
         LexProblem.UnexpectedByte : { give "carácter inválido o fuera del subconjunto léxico" }
         LexProblem.UnclosedComment : { give "comentario sin cerrar" }
-        LexProblem.UnsupportedNumber : { give "literal de punto flotante fuera del subconjunto léxico" }
+        LexProblem.UnsupportedNumber : { give "Float inválido" }
         LexProblem.UnclosedString : { give "cadena sin cerrar" }
         LexProblem.InvalidEscape : { give "escape no implementado o inválido" }
         LexProblem.InvalidUnicodeEscape : { give "escape Unicode inválido" }
@@ -295,10 +295,30 @@ flow lexScan(source: view Text, start_offset: Int, end: Int, interpolation: Int,
                 when !lexDigit(current) && current != 95 { leave }
                 offset += 1
             }
+            // A Float literal (`.` and a digit, and/or an exponent, as in
+            // Stage 0) is lexed as one numeric token; the parser tells it
+            // from an Int by its spelling (parserIsFloatLiteral).
+            when lexPeek(source, offset, end) == 46 && lexDigit(lexPeek(source, offset + 1, end)) {
+                offset += 1
+                during offset < end {
+                    hold current = source@byteAt(offset)
+                    when !lexDigit(current) && current != 95 { leave }
+                    offset += 1
+                }
+            }
             hold suffix = lexPeek(source, offset, end)
-            hold fraction = suffix == 46 && lexDigit(lexPeek(source, offset + 1, end))
-            when suffix == 69 || suffix == 101 || fraction {
-                give Err(LexError(problem: LexProblem.UnsupportedNumber, offset: start))
+            when suffix == 69 || suffix == 101 {
+                offset += 1
+                hold sign = lexPeek(source, offset, end)
+                when sign == 43 || sign == 45 { offset += 1 }
+                change exponent_digits = 0
+                during offset < end && lexDigit(source@byteAt(offset)) {
+                    offset += 1
+                    exponent_digits += 1
+                }
+                when exponent_digits == 0 {
+                    give Err(LexError(problem: LexProblem.UnsupportedNumber, offset: start))
+                }
             }
             tokens@push(LexToken(kind: LexKind.Integer, start: start, end: offset))
             proceed

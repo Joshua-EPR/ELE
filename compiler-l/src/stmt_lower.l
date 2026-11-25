@@ -413,7 +413,7 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
             give
         }
         hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
-        when ty != 1 && ty != 4 && ty != 5 {
+        when ty != 1 && ty != 2 && ty != 4 && ty != 5 {
             lirMarkUnsupported(edit ctx.lir, p_start)
             give
         }

@@ -190,6 +190,8 @@ flow lirVerifyInstCore(v: edit LirVerifier, l: view LirFn, types: view TypeTable
     } otherwise when kind == LIR_UNARY {
         hold ty = lirOperandType(l, inst.b)
         when (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
+        when inst.a == LIR_ITOF && ty == 1 { result = 2 }
+        when inst.a == LIR_FTOI && ty == 2 { result = 1 }
         when !lirUse(edit v, l, inst.b, check) { give 5 }
     } otherwise when kind == LIR_BINARY {
         hold lt = lirOperandType(l, inst.b)

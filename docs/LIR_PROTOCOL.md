@@ -86,7 +86,7 @@ indica que es exclusiva.
 | Forma | Significado |
 | --- | --- |
 | `v<i>` | variable |
-| `ci<n>`, `cb0`, `cb1`, `cu`, `ct<texto>` | constantes Int, Bool, Unit y Text |
+| `ci<n>`, `cf<bits>`, `cb0`, `cb1`, `cu`, `ct<texto>` | constantes Int, Float, Bool, Unit y Text. `cf<bits>` lleva el patrón de bits IEEE-754 binary64 como Int decimal con signo (exacto, sin ida y vuelta por texto decimal) |
 | `p<i>(.<campo>)*` | lugar: variable (el referente si es `ref`) y proyecciones de campo; cada campo se valida contra el struct |
 | `val <operando>` | argumento por valor (mueve un valor propio) |
 | `ref <lugar> <0\|1>` | argumento por referencia compartida o exclusiva |
@@ -96,7 +96,7 @@ indica que es exclusiva.
 | Registro | Block LIR (Stage 0) |
 | --- | --- |
 | `i use v<d> <op>` | `Assign(d, Use(op))` |
-| `i unary v<d> neg\|not <op>` | `Assign(d, Unary)` |
+| `i unary v<d> neg\|not\|itof\|ftoi <op>` | `Assign(d, Unary)`; `neg` sobre Int o Float, `itof` convierte Int a Float (`Float(x)`), `ftoi` Float a Int (`Int(x)`: trunca hacia cero, satura y NaN da 0). `itof`/`ftoi` y `cf` son extensiones de ELE: el lector Rust de Stage 0 no las conoce |
 | `i binary v<d> <add\|sub\|mul\|div\|rem\|eq\|ne\|lt\|le\|gt\|ge> <op> <op>` | `Assign(d, Binary)` |
 | `i call v<d> f<k> <n> <arg>...` | `Assign(d, Call(k, args))` |
 | `i struct v<d> s<k> <n> <op>...` | `Assign(d, Struct)`; `n` debe ser el número de campos |
@@ -150,8 +150,13 @@ Stage 0.
 
 Funciones, structs, Int, Bool, Text, Unit, referencias y préstamos,
 retornos prestados, interpolación, `print`, ramas, bucles y drops (con y
-sin flag). Float no se produce todavía: Stage 1 no tiene literales
-flotantes. Enums, listas, arrays, `Option`/`Result`, regiones y async no
+sin flag). Float (`f`, f64) lo produce el driver ELE: literales `cf`,
+`binary` (`add sub mul div eq ne lt le gt ge`; el tipo de los operandos
+selecciona la operación flotante, sin `rem`), `unary neg`, `itof` y `ftoi`,
+y como campo, parámetro, resultado, elemento de lista o payload. Las
+comparaciones son ordenadas (todo contra NaN es falso salvo `ne`) y la
+aritmética nunca hace trap. `print` y la interpolación usan el formato del
+runtime nativo de Stage 0 (`l_rt_ftoa`). Enums, listas, arrays, `Option`/`Result`, regiones y async no
 formaban parte del subconjunto verificado de la fase 7; Stage 1 los rechazaba con `L0016` antes de emitir.
 
 ## Estado recuperado en fase 8.2

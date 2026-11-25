@@ -41,7 +41,7 @@ El lexer en L emite `LexToken` con `kind: LexKind`, `start: Int` y `end: Int` (r
 | `UnopenedBrace` | `llave '}' sin apertura en Text; use '}}' para una llave literal` | Offset de llave `}` |
 | `ExcessiveDepth` | `límite de anidamiento Text (64) excedido` | Offset de comilla inicial `"` |
 | `UnclosedComment` | `comentario sin cerrar` | Offset de inicio `/*` |
-| `UnsupportedNumber` | `literal de punto flotante fuera del subconjunto léxico` | Offset inicial del número |
+| `UnsupportedNumber` | `Float inválido` (exponente sin dígitos, p. ej. `1e` o `1e+`) | Offset inicial del número |
 | `UnexpectedByte` | `carácter inválido o fuera del subconjunto léxico` | Offset del byte |
 
 ## 4. Cursor de Tokens (`compiler-l/src/cursor.l`)

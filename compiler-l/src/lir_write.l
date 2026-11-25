@@ -36,6 +36,8 @@ flow lirInstText(l: view LirFn, source: view Text, lm: view LirModule, id: Int) 
     when kind == LIR_UNARY {
         hold op = lirOperandText(l, source, inst.b)
         when inst.a == LIR_NOT { give "i unary v{dst} not {op}" }
+        when inst.a == LIR_ITOF { give "i unary v{dst} itof {op}" }
+        when inst.a == LIR_FTOI { give "i unary v{dst} ftoi {op}" }
         give "i unary v{dst} neg {op}"
     }
     when kind == LIR_BINARY {

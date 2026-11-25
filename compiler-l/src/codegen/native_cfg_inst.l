@@ -182,7 +182,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         // Text only reads it: the source stays owned and is dropped later.
         change source_type = first_type
         when inst.op >= 0 { source_type = cfgSourcePlaceType(p, f, view inst) }
-        when source_type != 0 && source_type != 1 && source_type != cfgTextType() { p.error = 90 }
+        when source_type != 0 && source_type != 1 && source_type != cfgTextType() && source_type != cfgFloatType() { p.error = 90 }
     }
     when inst.kind == 11 && dest_type != cfgTextType() { p.error = 91 }
     when inst.kind == 12 || inst.kind == 13 {
@@ -211,10 +211,19 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
     when inst.kind == 1 && first_type != dest_type { p.error = 34 }
     when inst.kind == 2 {
         hold second_type = cfgOperandType(p, f, view inst.b)
-        when inst.op == 0 || first_type < 0 || second_type < 0 { p.error = 35 }
-        when (inst.op <= 3 || inst.op >= 10) && (dest_type != 0 || first_type != 0 || second_type != 0) { p.error = 36 }
-        when inst.op >= 4 && inst.op <= 9 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
-        when inst.op >= 6 && inst.op <= 9 && first_type != 0 { p.error = 36 }
+        // The operand type selects the operation: Float operands use the
+        // scalar double forms (never trapping; no remainder).
+        hold float_op = first_type == cfgFloatType() && second_type == cfgFloatType()
+        when inst.op == 0 || (!float_op && (first_type < 0 || second_type < 0)) { p.error = 35 }
+        when float_op {
+            when inst.op == 11 { p.error = 36 }
+            when (inst.op <= 3 || inst.op == 10) && dest_type != cfgFloatType() { p.error = 36 }
+            when inst.op >= 4 && inst.op <= 9 && dest_type != 1 { p.error = 36 }
+        } otherwise {
+            when (inst.op <= 3 || inst.op >= 10) && (dest_type != 0 || first_type != 0 || second_type != 0) { p.error = 36 }
+            when inst.op >= 4 && inst.op <= 9 && (dest_type != 1 || first_type != second_type || first_type > 1) { p.error = 36 }
+            when inst.op >= 6 && inst.op <= 9 && first_type != 0 { p.error = 36 }
+        }
     }
     when inst.kind == 4 {
         when inst.op < 0 || inst.op >= p.structs.length || dest_type != inst.op + 2 { p.error = 65 }
@@ -269,7 +278,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
                 // (copied) or aggregates/Text (cfgLayoutEnum), whose
                 // extraction MOVES the whole enum (native_cfg_verify). Moving
                 // out of a referent is not allowed.
-                when (payload < 0 && payload != cfgTextType()) || dest_type != payload { p.error = 89 }
+                when (payload < 0 && payload != cfgTextType() && payload != cfgFloatType()) || dest_type != payload { p.error = 89 }
                 when (payload >= 2 || payload == cfgTextType()) && cfgIsRef(p, f, inst.place_var) { p.error = 89 }
             }
         }

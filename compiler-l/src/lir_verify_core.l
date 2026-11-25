@@ -110,6 +110,7 @@ expose flow lirOperandType(l: view LirFn, operand: Int) => Int {
     hold kind = l.consts[id].kind
     when kind == LIR_CONST_INT { give 1 }
     when kind == LIR_CONST_BOOL { give 4 }
+    when kind == LIR_CONST_FLOAT { give 2 }
     when kind == LIR_CONST_UNIT { give 6 }
     when kind == LIR_CONST_TEXT { give 5 }
     give LIR_TY_ERR

@@ -489,3 +489,163 @@ expose flow x64TestEax(code: edit X64Code) {
     x64Put(edit code, 133)
     x64Put(edit code, 192)
 }
+
+// ----- SSE2 scalar double (Float). Float values live in the integer slots
+// as their IEEE-754 bit pattern; these forms move them through xmm0..xmm5
+// only (xmm6-xmm15 are callee-saved on Win64, so nothing needs saving).
+
+// MOVQ xmm,r64 (66 REX.W 0F 6E /r).
+expose flow x64MovqToXmm(code: edit X64Code, xmm: Int, gpr: Int) {
+    when !x64RegisterValid(gpr) || xmm < 0 || xmm > 7 { code.error = 3; give }
+    x64Put(edit code, 102)
+    change rex = 72
+    when gpr >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 15)
+    x64Put(edit code, 110)
+    x64Put(edit code, 192 + xmm * 8 + gpr % 8)
+}
+
+// MOVQ r64,xmm (66 REX.W 0F 7E /r).
+expose flow x64MovqFromXmm(code: edit X64Code, gpr: Int, xmm: Int) {
+    when !x64RegisterValid(gpr) || xmm < 0 || xmm > 7 { code.error = 3; give }
+    x64Put(edit code, 102)
+    change rex = 72
+    when gpr >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 15)
+    x64Put(edit code, 126)
+    x64Put(edit code, 192 + xmm * 8 + gpr % 8)
+}
+
+// Scalar double operation `dst op= src` on xmm registers: 1 addsd,
+// 2 subsd, 3 mulsd, 4 divsd (F2 0F 58/5C/59/5E).
+expose flow x64SdOp(code: edit X64Code, op: Int, dst: Int, src: Int) {
+    when dst < 0 || dst > 7 || src < 0 || src > 7 || op < 1 || op > 4 { code.error = 3; give }
+    change opcode = 88
+    when op == 2 { opcode = 92 }
+    when op == 3 { opcode = 89 }
+    when op == 4 { opcode = 94 }
+    x64Put(edit code, 242)
+    x64Put(edit code, 15)
+    x64Put(edit code, opcode)
+    x64Put(edit code, 192 + dst * 8 + src)
+}
+
+// UCOMISD left,right (66 0F 2E): ZF/PF/CF; unordered sets all three.
+expose flow x64Ucomisd(code: edit X64Code, left: Int, right: Int) {
+    when left < 0 || left > 7 || right < 0 || right > 7 { code.error = 3; give }
+    x64Put(edit code, 102)
+    x64Put(edit code, 15)
+    x64Put(edit code, 46)
+    x64Put(edit code, 192 + left * 8 + right)
+}
+
+// CVTSI2SD xmm,r64 (F2 REX.W 0F 2A /r).
+expose flow x64Cvtsi2sd(code: edit X64Code, xmm: Int, gpr: Int) {
+    when !x64RegisterValid(gpr) || xmm < 0 || xmm > 7 { code.error = 3; give }
+    x64Put(edit code, 242)
+    change rex = 72
+    when gpr >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 15)
+    x64Put(edit code, 42)
+    x64Put(edit code, 192 + xmm * 8 + gpr % 8)
+}
+
+// CVTTSD2SI r64,xmm (F2 REX.W 0F 2C /r): truncates toward zero; NaN and
+// out-of-range give 0x8000000000000000 ("integer indefinite").
+expose flow x64Cvttsd2si(code: edit X64Code, gpr: Int, xmm: Int) {
+    when !x64RegisterValid(gpr) || xmm < 0 || xmm > 7 { code.error = 3; give }
+    x64Put(edit code, 242)
+    change rex = 72
+    when gpr >= 8 { rex += 4 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 15)
+    x64Put(edit code, 44)
+    x64Put(edit code, 192 + (gpr % 8) * 8 + xmm)
+}
+
+// XOR r/m64,r64 (REX.W 31 /r).
+expose flow x64XorReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 49)
+    x64ModRmRegisters(edit code, src, dst)
+}
+
+// Jcc rel32 (0F 80+cc) with a placeholder; cc: 2 B, 3 AE, 4 E, 5 NE,
+// 6 BE, 7 A, 10 P, 11 NP, 12 L, 13 GE, 14 LE, 15 G.
+expose flow x64JccPlaceholder(code: edit X64Code, cc: Int) => Int {
+    x64Put(edit code, 15)
+    x64Put(edit code, 128 + cc)
+    hold at = code.bytes.length
+    each i among 0..4 { x64Put(edit code, 0) }
+    give at
+}
+
+// Points a placeholder at the current end of the code.
+expose flow x64PatchHere(code: edit X64Code, at: Int) {
+    hold here = code.bytes.length
+    x64PatchRelative(edit code, at, here)
+}
+
+// RAX = 0/1 from the flags of `ucomisd`: 4 equal (ordered), 5 not equal
+// (true for NaN), 7 above, 3 above-or-equal (both false when unordered).
+expose flow x64SetFloatFlag(code: edit X64Code, kind: Int) {
+    when kind == 4 {
+        x64Put(edit code, 15)
+        x64Put(edit code, 148)
+        x64Put(edit code, 192) // sete al
+        x64Put(edit code, 15)
+        x64Put(edit code, 155)
+        x64Put(edit code, 193) // setnp cl
+        x64Put(edit code, 32)
+        x64Put(edit code, 200) // and al,cl
+    } otherwise when kind == 5 {
+        x64Put(edit code, 15)
+        x64Put(edit code, 149)
+        x64Put(edit code, 192) // setne al
+        x64Put(edit code, 15)
+        x64Put(edit code, 154)
+        x64Put(edit code, 193) // setp cl
+        x64Put(edit code, 8)
+        x64Put(edit code, 200) // or al,cl
+    } otherwise when kind == 7 {
+        x64Put(edit code, 15)
+        x64Put(edit code, 151)
+        x64Put(edit code, 192) // seta al
+    } otherwise when kind == 3 {
+        x64Put(edit code, 15)
+        x64Put(edit code, 147)
+        x64Put(edit code, 192) // setae al
+    } otherwise {
+        code.error = 8
+        give
+    }
+    x64Put(edit code, 15)
+    x64Put(edit code, 182)
+    x64Put(edit code, 192) // movzx eax,al
+}
+
+// RAX = Int(xmm0): truncates toward zero and saturates; NaN gives 0
+// (Stage 0 fcvt_to_sint_sat). Clobbers RCX and xmm1.
+expose flow x64SaturatingFloatToInt(code: edit X64Code) {
+    x64Cvttsd2si(edit code, 0, 0)
+    x64MovImm64(edit code, 1, -9223372036854775807 - 1)
+    x64CmpReg(edit code, 0, 1)
+    hold done_plain = x64JccPlaceholder(edit code, 5)
+    x64Ucomisd(edit code, 0, 0)
+    hold is_nan = x64JccPlaceholder(edit code, 10)
+    x64MovImm64(edit code, 1, 0)
+    x64Cvtsi2sd(edit code, 1, 1)
+    x64Ucomisd(edit code, 0, 1)
+    hold not_positive = x64JccPlaceholder(edit code, 6)
+    x64MovImm64(edit code, 0, 9223372036854775807)
+    hold done_max = x64JumpPlaceholder(edit code)
+    x64PatchHere(edit code, is_nan)
+    x64MovImm64(edit code, 0, 0)
+    x64PatchHere(edit code, done_plain)
+    x64PatchHere(edit code, not_positive)
+    x64PatchHere(edit code, done_max)
+}

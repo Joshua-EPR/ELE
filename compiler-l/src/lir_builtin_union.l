@@ -13,10 +13,10 @@ take sema_context
 // payload is MOVED into `i variant` (the source becomes moved); the union
 // then carries one atomic drop obligation for its active payload; an owned
 // `i payload` moves the payload out and consumes the whole union. Nominal
-// choices with owned payloads, references, floats and by-value cycles stay
+// choices with owned payloads, references and by-value cycles stay
 // unsupported (L0016).
 expose flow lirBuiltinPrimitive(ty: Int) => Bool {
-    give ty == 1 || ty == 4
+    give ty == 1 || ty == 2 || ty == 4
 }
 
 // Drop-free value of the module tables. `depth` bounds the walk so a

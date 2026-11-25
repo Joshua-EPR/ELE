@@ -41,7 +41,7 @@ expose flow cfgReadList(p: edit CfgProgram, source: view Text, reader: edit Nati
     hold id = nativeId(source, edit reader, 108)
     hold elem = cfgTypeOrUnit(p, source, edit reader)
     nativeEndLine(source, edit reader)
-    change valid = reader.error == 0 && id == k && elem != cfgUnitType() && (elem >= 0 || elem == cfgTextType())
+    change valid = reader.error == 0 && id == k && elem != cfgUnitType() && (elem >= 0 || elem == cfgTextType() || elem == cfgFloatType())
     when valid {
         hold size = cfgTypeSize(p, elem)
         valid = size >= 1 && size <= cfgMaxValueBytes()

@@ -65,6 +65,10 @@ flow parseTypeAtom(tree: edit AstTree, source: view Text, cursor: edit TokenCurs
             change arrLen = 0
             choose tokenKindValue(view lenTok.kind) {
                 LexKind.Integer : {
+                    when parserIsFloatLiteral(source, lenTok.start, lenTok.end) {
+                        astAddError(edit tree, ParseProblem.ExpectedToken, "entero", lenTok.start, lenTok.end)
+                        give -1
+                    }
                     arrLen = parserParseDecimalInt(source, lenTok.start, lenTok.end)
                     cursor.pos += 1
                 }

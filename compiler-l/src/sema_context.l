@@ -319,7 +319,10 @@ expose flow semaResolveAstType(ctx: edit SemaContext, source: view Text, tree: v
     choose at.kind {
         AstTypeKind.Int : { give 1 }
         AstTypeKind.Float : { give 2 }
-        AstTypeKind.F32 : { give 3 }
+        AstTypeKind.F32 : {
+            semaAddError(edit ctx, "L0016", "F32 no está soportado por el driver ELE; use Float", at.start, at.end)
+            give 7
+        }
         AstTypeKind.Bool : { give 4 }
         AstTypeKind.Text : { give 5 }
         AstTypeKind.Unit : { give 6 }

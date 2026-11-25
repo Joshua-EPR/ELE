@@ -1,0 +1,1 @@
+float_convert_bool.l:3:14: error[L0003]: no se puede convertir 'Bool' a un tipo numérico

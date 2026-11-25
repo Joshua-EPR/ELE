@@ -54,3 +54,20 @@ in `compiler-l/src/codegen/native_cfg_arith.l`, `native_cfg_emit.l` and
 - **Not covered:** `Text == Text` is rejected by both compilers (Stage 0:
   `feature not implemented: operadores sobre Text`), so the corpus does not
   assert it yet.
+
+## Float (f64) limits of the ELE-written driver
+
+Float literals, `+ - * /`, unary `-`, ordered comparisons, `Float(x)` /
+`Int(x)`, printing and interpolation (Stage 0 native `l_rt_ftoa` format),
+and Float as parameter, result, local, shape field, choice payload,
+`Option`/`Result` payload and `List` element work on both targets. Not
+supported, each rejected with a diagnostic (none is an XFAIL, since Stage 0
+native rejects the first two too):
+
+- `%` on Float (`L0016`) and `F32`/`f32` (`L0016`).
+- Float arithmetic or comparison inside a `const` initializer (`L0016`);
+  a plain or negated Float literal is a valid constant.
+- Overflowing literals (`1e400`: parser error) and malformed exponents
+  (`1e`: lexer error) have no corpus case, because the Stage 0 lexer
+  refuses those files (the legacy ratchet requires every corpus file to
+  lex under Stage 0).
