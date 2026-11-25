@@ -466,6 +466,6 @@ flow main() => Int {
             "native execution: {}",
             String::from_utf8_lossy(&actual.stderr)
         );
-        assert_eq!(String::from_utf8_lossy(&actual.stdout), "late\\n");
+        assert_eq!(String::from_utf8_lossy(&actual.stdout), "late\n");
     }
 }
