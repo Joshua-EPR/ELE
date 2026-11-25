@@ -383,7 +383,6 @@ fn enum_match_rejects_literal_and_multiple_payload_binders() {
     }
 }
 
-
 #[test]
 fn enum_text_payload_is_dropped_on_early_return_and_fallthrough_cfg_edges() {
     let base = root();
