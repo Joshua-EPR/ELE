@@ -1,13 +1,21 @@
 # Stage 0 dependency audit
 
 Audit date: 2026-11-24
-Current revision: `91006b94433edc87dfaabf7aabeb287a5b46e75e` (`origin/main`; PR #166).
-The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status was rechecked against `91006b9` and the merged PRs #161–#166. Those PRs add Text/Int/Bool literal choose lowering and lexer diagnostics (#161), native trap diagnostics (#162), constant folding (#164), Linux driver regressions/trap CI (#165), and PE32+ structural verification (#166). They do not remove the audited Rust/Cargo/Cranelift consumers.
+Current `main`: `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged).
+The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status has since been updated through PR #168 and the seed/bootstrap portion of #167. PR #168 adds value-producing `choose` expressions and removes that corpus gap. PR #167 pins ELF/PE seeds and removes the transitional Cargo seed job. PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds; PR #170 implements owned Text payload matches. The latter two are open. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
 Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was excluded.
 
-## Current branch delta: versioned independent seeds
+## Latest execution snapshot
 
-On PR #167 (`codex/versioned-seeds`), the transitional Cargo seed job is removed. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary-format identification before extraction. The bootstrap runner adds a scoped `tools/audit_stage0_paths.py --enforce` ratchet, and both OS jobs reduce `PATH` to required runtime utilities so Rust, GCC/Clang, linkers and Stage 0 executables are not resolvable. The audit keeps path-specific migration references and exact counts; historical documents are reported separately. Local bootstrap and unit tests pass; the PATH restriction and audit gate await CI for the latest PR head.
+- PR #168 (`4444e02`) is merged. Its Linux/Windows native checks and ELF execution passed.
+- PR #167 (`2fa0af8`) pins ELF64/PE32+ seed artifacts, removes the Cargo seed job, and validates seed → Gen1′ → Gen2 → Gen3 with compiler tools absent from runner PATH. Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed; merged.
+- PR #169 (`07ba2ba`) makes distribution require an explicit native seed, removes Stage 0/Cargo/cached-driver fallbacks, restricts distribution PATH, and makes installers consume package archives. Its first CI run found missing `gzip` and a nested `powershell` command after PATH isolation; both fixes are pushed and the rebased CI is running.
+- PR #170 (`1bdd54b`) adds owned Text payloads to `choice` match lowering and a use-after-move rejection case. CI is rerunning after replacing the obsolete rejection test with a positive drop-glue regression.
+- Stage 0, Rust/Cargo and Cranelift remain active in the compiler, historical suites and primary build workflow. Do not declare full independence or remove `crates/l` yet.
+
+## Current branch delta: versioned independent seeds (PR #167)
+
+PR #167 (`codex/versioned-seeds`) merged the seed-job removal. Committed ELF64 and PE32+ seed archives are pinned by `scripts/bootstrap/seeds/manifest.json`; `tools/verify_seed_archive.py` verifies ZIP and executable digests, archive membership, architecture and binary-format identification before extraction. The bootstrap runner adds a scoped `tools/audit_stage0_paths.py --enforce` ratchet, and both OS jobs reduce `PATH` to required runtime utilities so Rust, GCC/Clang, linkers and Stage 0 executables are not resolvable. The audit keeps path-specific migration references and exact counts; historical documents are reported separately. Linux and Windows bootstrap, native execution and full Windows/MSVC checks passed.
 
 ## Findings
 
@@ -21,7 +29,7 @@ On PR #167 (`codex/versioned-seeds`), the transitional Cargo seed job is removed
 | Stage 0-built test harness | `crates/l/tests/stage1_support/mod.rs`, `crates/l/tests/*.rs` | Uses Cargo's `CARGO_BIN_EXE_l` to build Stage 1 fixtures and compare against a reference | Yes for current integration suites | Stage 1+ test runner independent of Cargo/Stage 0 | P1 |
 | Stage 0 `build-lir` | `crates/l/tests/stage2_bootstrap_l.rs`, `scripts/bootstrap_stage2.ps1` | Converts Stage 1 emitted LIR into the Stage 2 executable; checks output parity | Yes | ELE native backend invoked as a tested executable generation step | P0 |
 | Stage 0/Cranelift in CI | `.github/workflows/native-selfhosting-validation.yml` | Rust setup, Cargo tests, Stage 1 builds, native and distribution checks | Yes; workflow explicitly runs Stage 0-dependent tests | Stage 0-free CI and test bootstrap | P1 |
-| Python orchestration | `scripts/package_distribution.py`, development/test scripts | Packages or validates compiler artifacts and invokes build steps | Yes in current package script; not intrinsically required by a future compiler binary | ELE distribution driver or a clearly development-only packaging tool | P2 |
+| Python orchestration | `scripts/package_distribution.py`, development/test scripts | Packages or validates compiler artifacts and invokes build steps | Packaging remains Python-based, but PR #169 removes its Stage 0/Cargo fallback and requires a pinned native seed | Keep Python limited to packaging/test orchestration; distribution binary itself is native ELE | P2 |
 | PowerShell/Bash orchestration | `scripts/bootstrap_stage2.ps1`, `scripts/stage3_native_bootstrap_probe.ps1`, install scripts | Local bootstrap, probes and installation | Yes for the current documented script path | Native compiler CLI plus portable packaging/install path | P2 |
 | Cache/build output paths | `scripts/package_distribution.py`, `scripts/install.ps1`, workflow artifact paths | Locate Stage 0-built / Stage 1-built executables and generated ELF fixtures | Yes in current distribution and CI flows | Versioned standalone compiler package | P2 |
 | C toolchain / platform linker | Compiler backend and workflow build steps | Link objects or produce platform-specific artifacts | Host-specific external build tools remain in current pipeline | Direct ELE image/object writer exists for ELF64 and PE32+, but complete link/runtime coverage is not demonstrated | P1 |

@@ -75,46 +75,14 @@ def verify_fixpoint(gen2_bin: Path, gen3_bin: Path) -> Path:
     return gen3_bin
 
 
-def find_or_build_stage0(repo_root: Path) -> Path:
-    ext = ".exe" if sys.platform == "win32" else ""
-    target_l = repo_root / f"target/debug/l{ext}"
-    if target_l.is_file():
-        return target_l
-
-    # Check parent workspace if in worktree
-    alt_l = repo_root.parent / f"ELE/target/debug/l{ext}"
-    if alt_l.is_file():
-        return alt_l
-
-    print("[dist] Stage 0 compiler not found. Building via Cargo...")
-    cmd = ["cargo", "build", "-p", "project-l", "--bin", "l"]
-    res = subprocess.run(cmd, cwd=repo_root)
-    if res.returncode != 0:
-        raise RuntimeError(f"Cargo build failed with exit code {res.returncode}")
-
-    if not target_l.is_file():
-        raise FileNotFoundError(f"Expected Stage 0 binary at {target_l}")
-    return target_l
-
-
-def find_existing_driver(repo_root: Path) -> Path | None:
-    # 1. Check bin/
-    ext = ".exe" if sys.platform == "win32" else ""
-    for name in [f"ele{ext}", f"ele.elf"]:
-        p = repo_root / f"bin/{name}"
-        if p.is_file():
-            return p
-
-    # 2. Check stage1-tests cached main_driver
-    if sys.platform == "win32":
-        candidate = (
-            repo_root
-            / "target/stage1-tests/main_driver/normal/target/cranelift/x86_64-pc-windows-gnu/main_driver.exe"
-        )
-        if candidate.is_file():
-            return candidate
-
-    return None
+def require_seed_driver(driver: Path | None) -> Path:
+    """Require the hash-verified native seed supplied by the caller."""
+    if driver is None:
+        raise ValueError("distribution requires --driver-path to a verified native ELE seed")
+    resolved = driver.resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"verified ELE seed not found: {resolved}")
+    return resolved
 
 
 def build_autonomous_compiler(
@@ -136,40 +104,8 @@ def build_autonomous_compiler(
     gen2_bin = work_dir / f"ele_gen2_{target_os}{out_ext}"
     gen3_bin = work_dir / f"ele_gen3_{target_os}{out_ext}"
 
-    # Resolve or build Gen 1 driver
-    gen1_driver = driver_override
-    if gen1_driver is None or not gen1_driver.is_file():
-        cached = find_existing_driver(repo_root)
-        if cached:
-            gen1_driver = cached
-            print(f"[dist] Using existing ELE driver as Gen 1: {gen1_driver}")
-        else:
-            # Build Gen 1 with Stage 0
-            stage0 = find_or_build_stage0(repo_root)
-            print(f"[dist] Compiling Stage 1 driver with Stage 0: {stage0}")
-            stage1_dir = work_dir / "stage1-build"
-            stage1_dir.mkdir(parents=True, exist_ok=True)
-            cmd = [str(stage0), "build", str(driver_src)]
-            if sys.platform == "win32":
-                cmd.extend(["--backend", "cranelift"])
-            res = subprocess.run(cmd, cwd=stage1_dir, capture_output=True, text=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"Stage 0 build failed: {res.stderr}\n{res.stdout}")
-
-            # Locate produced binary
-            for line in res.stdout.splitlines():
-                if line.startswith("Build: "):
-                    rel = line[7:].strip()
-                    gen1_driver = (stage1_dir / rel).resolve()
-                    break
-
-            if not gen1_driver or not gen1_driver.is_file():
-                # Search stage1_dir for executable
-                exes = list(stage1_dir.rglob("*.exe" if sys.platform == "win32" else "main_driver*"))
-                if exes:
-                    gen1_driver = exes[0]
-                else:
-                    raise RuntimeError("Failed to locate Stage 1 driver executable")
+    # Distribution requires the verified native seed passed explicitly.
+    gen1_driver = require_seed_driver(driver_override)
 
     print(f"[dist] Building Gen 2 ({target_os}) using {gen1_driver.name}...")
     cmd_gen2 = [
@@ -381,9 +317,9 @@ def main():
     parser = argparse.ArgumentParser(description="ELE Distribution Package Builder")
     parser.add_argument(
         "--target",
-        choices=["windows", "linux", "all", "auto"],
+        choices=["windows", "linux", "auto"],
         default="auto",
-        help="Target platform archive to produce (default: auto)",
+        help="Native target archive to produce (must match this runner)",
     )
     parser.add_argument(
         "--dist-dir",
@@ -394,8 +330,8 @@ def main():
     parser.add_argument(
         "--driver-path",
         type=Path,
-        default=None,
-        help="Path to pre-existing autonomous driver binary (optional)",
+        required=True,
+        help="Path to a verified native ELE seed for the current host",
     )
     parser.add_argument(
         "--skip-verify",
@@ -418,8 +354,6 @@ def main():
     targets = []
     if args.target == "auto":
         targets = ["windows" if sys.platform == "win32" else "linux"]
-    elif args.target == "all":
-        targets = ["windows", "linux"]
     else:
         targets = [args.target]
 

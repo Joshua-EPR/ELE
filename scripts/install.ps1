@@ -84,57 +84,7 @@ try {
             }
         }
     } else {
-        # Fallback to local repo artifacts
-        Write-Host "[install] Installing from repository sources..." -ForegroundColor Yellow
-        $compilerBin = $null
-        $candidates = @(
-            (Join-Path $repoRoot "bin\ele.exe"),
-            (Join-Path $repoRoot "target\stage1-tests\main_driver\normal\target\cranelift\x86_64-pc-windows-gnu\main_driver.exe"),
-            (Join-Path $repoRoot "target\gen_test\ele_gen2.exe")
-        )
-        foreach ($c in $candidates) {
-            if (Test-Path -LiteralPath $c) {
-                $compilerBin = $c
-                break
-            }
-        }
-
-        if (-not $compilerBin) {
-            Write-Host "[install] Pre-built binary not found. Generating autonomous compiler..." -ForegroundColor DarkYellow
-            $pkgScript = Join-Path $repoRoot "scripts\package_distribution.py"
-            & python $pkgScript --target windows
-            $archiveToUse = Join-Path $repoRoot "dist\ele-windows-x86_64.zip"
-            if (Test-Path -LiteralPath $archiveToUse) {
-                $tempExtract = Join-Path ([IO.Path]::GetTempPath()) ("ele-install-" + [IO.Path]::GetRandomFileName())
-                [IO.Directory]::CreateDirectory($tempExtract) > $null
-                Add-Type -AssemblyName System.IO.Compression.FileSystem
-                [System.IO.Compression.ZipFile]::ExtractToDirectory($archiveToUse, $tempExtract)
-                $sourceRoot = Join-Path $tempExtract "ele"
-                Get-ChildItem -LiteralPath (Join-Path $sourceRoot "bin") | Copy-Item -Destination $binDir -Force -Recurse
-                if (Test-Path -LiteralPath (Join-Path $sourceRoot "examples")) {
-                    Get-ChildItem -LiteralPath (Join-Path $sourceRoot "examples") | Copy-Item -Destination $examplesDir -Force -Recurse
-                }
-                foreach ($doc in @("README.md", "README.es.md", "VERSION")) {
-                    $srcDoc = Join-Path $sourceRoot $doc
-                    if (Test-Path -LiteralPath $srcDoc) {
-                        Copy-Item -LiteralPath $srcDoc -Destination (Join-Path $InstallDir $doc) -Force
-                    }
-                }
-            } else {
-                throw "Failed to locate or produce ele.exe distribution package"
-            }
-        } else {
-            Copy-Item -LiteralPath $compilerBin -Destination (Join-Path $binDir "ele.exe") -Force
-            if (Test-Path -LiteralPath (Join-Path $repoRoot "examples")) {
-                Get-ChildItem -LiteralPath (Join-Path $repoRoot "examples") | Copy-Item -Destination $examplesDir -Force -Recurse
-            }
-            foreach ($doc in @("README.md", "README.es.md", "VERSION")) {
-                $srcDoc = Join-Path $repoRoot $doc
-                if (Test-Path -LiteralPath $srcDoc) {
-                    Copy-Item -LiteralPath $srcDoc -Destination (Join-Path $InstallDir $doc) -Force
-                }
-            }
-        }
+        throw "ELE distribution archive not found. Pass -PackagePath or run the installer from a directory containing dist/ele-windows-x86_64.zip."
     }
 
     $eleExe = Join-Path $binDir "ele.exe"

@@ -1,6 +1,6 @@
 # Stage 0 removal roadmap
 
-Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e75e` (PR #166). This roadmap tracks active work in `codex/versioned-seeds`; its changes are not merged or CI-verified yet. It is an execution order, not a claim of completion.
+Status date: 2026-11-24. `main` is `2fa0af85e1cfcb516b8929caf32d4d7e495a8d32` (PRs #167 and #168 merged). PR #169 distribution and PR #170 owned Text choice payloads are under CI validation. This is an execution order, not a claim of completion.
 
 ## Phase 0 — Baseline and evidence (in progress)
 
@@ -8,7 +8,7 @@ Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e
 - [x] Check PR #158 CI diagnostics. It is already merged; reported active checks succeeded, with the differential CFG job skipped by condition.
 - [x] Inventory current Stage 0, Cargo, Cranelift, tests, CI and distribution dependencies in `STAGE0_DEPENDENCY_AUDIT.md`.
 - [x] Obtain Linux native execution evidence. ELF Gen2..Gen5 have identical hashes in WSL, and CI `bootstrap ELF64 without Rust` passes.
-- [x] Reconcile current main and open PR state (2026-11-24): #161–#166 are merged; connected GitHub search reports no open PRs on main.
+- [x] Reconcile current main and open PR state (2026-11-24): #167 and #168 are merged; #169 and #170 are open and tracked in `STAGE0_PROGRESS.md`.
 
 ## Phase 1 — Define the replaceable compiler boundary
 
@@ -35,12 +35,12 @@ Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e
 ## Phase 4 — Remove bootstrap dependencies from CI and distribution
 
 - [x] Add a reproducible bootstrap from a hash-checked seed without Rust/Cargo/Cranelift (PR #159). The seed is still produced by Stage 0.
-- [ ] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job. PR #167 is open; seed bootstrap passed both native runners at head `13addb1`. A scoped Stage 0 route audit and minimal PATH isolation were added after that run and are awaiting CI.
+- [x] Merge versioned, hash-pinned ELF64 and PE32+ seeds and remove the transitional Cargo `seed` job (PR #167 merged at `2fa0af8`; Linux/Windows bootstrap and full native checks passed).
 - [x] Add a CI migration ratchet that separates historical from active Stage 0 references, pins per-route reference counts and fails on new unlisted active occurrences (`tools/audit_stage0_paths.py`); enforce it in both native seed bootstrap jobs.
 - [x] First Stage-0-free regression suite: `tests/native_corpus`, initially 85 cases in PR #160; current main has 94 cases. Local Windows PE run: 89 PASS, 5 XFAIL; no FAIL/XPASS.
 - [ ] Migrate the remaining tests to generated ELE compiler generations while retaining Stage 0 differential tests in a separate compatibility job during transition.
 - [ ] Remove Cargo/Cranelift installation from final compiler jobs only after the new path proves parity.
-- [ ] Package and install the standalone compiler from clean Linux and Windows environments.
+- [ ] Complete CI for PR #169, which removes package-builder Stage 0/Cargo/cached-driver fallbacks, requires a pinned host-native seed, isolates runner PATH and restricts installers to package archives. The first CI run exposed missing `gzip` and a nested PowerShell call; fixes are pushed and the rebased run is active.
 - Exit criteria: CI, distribution and install verification pass with Stage 0 and Cranelift absent.
 
 ## Phase 5 — Retire Stage 0
@@ -52,4 +52,4 @@ Status date: 2026-11-24. `origin/main` is `91006b94433edc87dfaabf7aabeb287a5b46e
 
 ## Current technical boundary
 
-Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend, test bootstrap and distribution still depend on Stage 0. Removing Stage 0 now would remove working capabilities before replacements exist.
+Stage 1 source modules, a Stage 2 parity harness, ELE-written native CFG/ELF64/PE32+ generation, and selected Stage 3 self-rebuild probes exist. Current tests prove only slices of that path. The compiler CLI, semantic frontend, Cranelift backend and most test/bootstrap paths still depend on Stage 0. PR #169 migrates packaging only after merge and CI; it does not establish full independence.

@@ -30,32 +30,82 @@ jobs:
         with:
           python-version: "3.11"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Audit active Stage 0 dependencies
+        run: python tools/audit_stage0_paths.py --enforce
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Verify and extract native seed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python tools/verify_seed_archive.py pe --output (Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify and extract native seed (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/verify_seed_archive.py elf --output "${{ runner.temp }}/seed/ele-seed-elf"
+          chmod 755 "${{ runner.temp }}/seed/ele-seed-elf"
+
+      - name: Restrict PATH to packaging utilities, no compiler backends (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $python = Get-Command python -CommandType Application -ErrorAction Stop | Select-Object -First 1
+          $git = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          $allowed = @($PSHOME, (Join-Path $env:SystemRoot 'System32'), (Split-Path -Parent $python.Source))
+          if ($git) { $allowed += (Split-Path -Parent $git.Source) }
+          $cleanPath = $allowed -join ';'
+          $env:PATH = $cleanPath
+          $bad = $false
+          foreach ($t in 'cargo', 'rustc', 'rustup', 'l', 'cl', 'link', 'gcc', 'clang', 'ld', 'lld', 'cc') {
+            $c = Get-Command $t -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($c) { Write-Host "::error::$t remains available at $($c.Source)"; $bad = $true }
+          }
+          if ($bad) { exit 1 }
+          "PATH=$cleanPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Restrict PATH to packaging utilities, no compiler backends (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          clean_path="${RUNNER_TEMP}/ele-distribution-path"
+          mkdir -p "$clean_path"
+          for tool in sh bash timeout sha256sum shasum cut sed tr mkdir wc chmod grep head od cmp find sort rm mktemp cat awk sleep kill tee pwd date basename dirname cp mv env touch readlink realpath xargs tail git tar gzip uname python3; do
+            resolved=$(command -v "$tool")
+            test -n "$resolved"
+            ln -sf "$resolved" "$clean_path/$tool"
+          done
+          for tool in cargo rustc rustup l cl link gcc clang ld lld ld.lld cc; do
+            if PATH="$clean_path" command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::$tool remains available on the distribution PATH"
+              exit 1
+            fi
+          done
+          echo "PATH=$clean_path" >> "$GITHUB_ENV"
 
       - name: Test fail-closed Gen 2 / Gen 3 packaging contract
         run: python -m unittest discover -s tests -p test_package_distribution_fixpoint.py -v
 
-      - name: Build Stage 0 Bootstrap Compiler
-        run: cargo build -p project-l --bin l
-
-      - name: Forbid regressions to legacy syntax (Ratchet gate)
-        run: cargo test -p project-l --test ele_v2_legacy_ratchet -- --test-threads=1
-
       - name: Build Distribution Packages (Windows)
         if: runner.os == 'Windows'
-        run: python scripts/package_distribution.py --target windows
+        shell: pwsh
+        run: |
+          $seed = Join-Path '${{ runner.temp }}' 'seed/ele-seed-pe.exe'
+          python scripts/package_distribution.py --target windows --driver-path $seed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Distribution Packages (Linux)
         if: runner.os == 'Linux'
-        run: python3 scripts/package_distribution.py --target linux
+        shell: bash
+        run: python3 scripts/package_distribution.py --target linux --driver-path "${{ runner.temp }}/seed/ele-seed-elf"
 
       - name: Test Native Installer & Verify (Windows)
         if: runner.os == 'Windows'
-        run: powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ele-installed" -NoPathUpdate
+        shell: pwsh
+        run: ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ele-installed" -NoPathUpdate
 
       - name: Test Native Installer & Verify (Linux)
         if: runner.os == 'Linux'

@@ -68,17 +68,17 @@ TEXT_SUFFIXES = {
 # Each token requires a path-specific reason. A new file or a new token in a
 # file fails --enforce until someone makes and reviews a deliberate update.
 ACTIVE_ALLOWLIST: dict[str, dict[str, str]] = {
+    ".github/workflows/distribution.yml": {
+        "cargo": "The native distribution job explicitly asserts the command is unavailable on PATH.",
+        "rustc": "The native distribution job explicitly asserts the command is unavailable on PATH.",
+        "stage0": "The workflow audits Stage 0 references and restricts the native packaging PATH.",
+    },
     ".github/workflows/native-selfhosting-validation.yml": {
         "cargo": "Stage 0 integration, native regression and lint jobs remain during migration.",
         "rustc": "The Windows/Linux Stage 0 test paths still use the reference backend.",
         "cranelift": "The current Windows Stage 0 path still builds Stage 1 through Cranelift.",
         "stage0": "This workflow is the legacy Stage 0/Stage 1 differential and regression gate.",
         "project-l": "Cargo test/build targets for the retained Stage 0 crate.",
-    },
-    ".github/workflows/distribution.yml": {
-        "cargo": "Distribution CI still builds the transitional Stage 0 driver.",
-        "stage0": "Distribution CI still builds the transitional Stage 0 driver.",
-        "project-l": "The distribution job still builds the retained Stage 0 crate.",
     },
     ".github/workflows/docs-and-benchmarks.yml": {
         "cargo": "Legacy workspace format, lint and syntax-ratchet checks remain in this job.",
@@ -136,27 +136,6 @@ ACTIVE_ALLOWLIST: dict[str, dict[str, str]] = {
     "run_full_trace.ps1": {
         "cranelift": "The legacy compiler tracing helper still selects the Rust backend.",
     },
-    "scripts/package_distribution.py": {
-        "cargo": "Distribution still has a Stage 0 fallback until seed distribution is migrated.",
-        "cranelift": "The Gen1 Windows distribution fallback still invokes the Stage 0 Cranelift backend.",
-        "stage0": "The distribution fallback is an explicit remaining migration path.",
-        "project-l": "The fallback builds the retained Stage 0 crate.",
-    },
-    "install.ps1": {
-        "cargo": "The installer retains a developer fallback to the Cargo-built compiler.",
-        "stage0": "The installer documents the remaining Stage 0 fallback.",
-    },
-    "scripts/install.ps1": {
-        "cargo": "The installer retains a developer fallback to the Cargo-built compiler.",
-        "stage0": "The installer documents the remaining Stage 0 fallback.",
-    },
-    "scripts/install.sh": {
-        "cargo": "The installer retains a developer fallback to the Cargo-built compiler.",
-        "stage0": "The installer documents the remaining Stage 0 fallback.",
-    },
-    "scripts/install.ps1": {
-        "cranelift": "The installer has a fallback path for the legacy Stage 0 Cranelift output.",
-    },
     "README.md": {
         "cargo": "The developer setup still documents workspace tests and lint commands.",
         "rustc": "The README contains an explicit cross-language benchmark comparison.",
@@ -170,8 +149,8 @@ ACTIVE_ALLOWLIST: dict[str, dict[str, str]] = {
         "project-l": "The developer commands still target the Stage 0 crate.",
     },
     "docs/getting-started.md": {
-        "cargo": "The existing developer guide still documents the legacy compiler setup.",
-        "stage0": "The guide documents the Stage 0 bootstrap that remains during migration.",
+        "cargo": "The guide documents remaining developer tests and the explicit no-fallback distribution path.",
+        "stage0": "The guide documents remaining development dependencies and native packaging.",
         "cranelift": "The guide contains a Stage 0 output path under its Cranelift directory.",
         "project-l": "The existing developer guide still references the Stage 0 crate.",
     },
@@ -206,7 +185,7 @@ ACTIVE_ALLOWLIST: dict[str, dict[str, str]] = {
 # only when the existing path-specific rationale still applies.
 ACTIVE_REFERENCE_COUNTS: dict[tuple[str, str], int] = {
     (".github/workflows/distribution.yml", "cargo"): 2,
-    (".github/workflows/distribution.yml", "project-l"): 2,
+    (".github/workflows/distribution.yml", "rustc"): 2,
     (".github/workflows/distribution.yml", "stage0"): 1,
     (".github/workflows/docs-and-benchmarks.yml", "cargo"): 3,
     (".github/workflows/docs-and-benchmarks.yml", "project-l"): 1,
@@ -241,10 +220,10 @@ ACTIVE_REFERENCE_COUNTS: dict[tuple[str, str], int] = {
     ("docs/SELF_HOSTING_ROADMAP.md", "cargo"): 4,
     ("docs/SELF_HOSTING_ROADMAP.md", "cranelift"): 5,
     ("docs/SELF_HOSTING_ROADMAP.md", "stage0"): 3,
-    ("docs/getting-started.md", "cargo"): 3,
+    ("docs/getting-started.md", "cargo"): 4,
     ("docs/getting-started.md", "cranelift"): 1,
     ("docs/getting-started.md", "project-l"): 2,
-    ("docs/getting-started.md", "stage0"): 3,
+    ("docs/getting-started.md", "stage0"): 4,
     ("docs/self-hosting.md", "cargo"): 2,
     ("docs/self-hosting.md", "project-l"): 2,
     ("docs/self-hosting.md", "stage0"): 2,
@@ -255,11 +234,6 @@ ACTIVE_REFERENCE_COUNTS: dict[tuple[str, str], int] = {
     ("scripts/bootstrap/ele_seed_bootstrap.sh", "cargo"): 4,
     ("scripts/bootstrap/ele_seed_bootstrap.sh", "rustc"): 4,
     ("scripts/bootstrap/ele_seed_bootstrap.sh", "stage0"): 1,
-    ("scripts/install.ps1", "cranelift"): 1,
-    ("scripts/package_distribution.py", "cargo"): 3,
-    ("scripts/package_distribution.py", "cranelift"): 2,
-    ("scripts/package_distribution.py", "project-l"): 1,
-    ("scripts/package_distribution.py", "stage0"): 7,
 }
 
 TOKENS: Mapping[str, re.Pattern[str]] = {
