@@ -101,41 +101,56 @@ def build_autonomous_compiler(
 
     target_flag = "pe" if target_os == "windows" else "elf"
     out_ext = ".exe" if target_os == "windows" else ""
+    gen1prime_bin = work_dir / f"ele_gen1prime_{target_os}{out_ext}"
     gen2_bin = work_dir / f"ele_gen2_{target_os}{out_ext}"
     gen3_bin = work_dir / f"ele_gen3_{target_os}{out_ext}"
 
     # Distribution requires the verified native seed passed explicitly.
     gen1_driver = require_seed_driver(driver_override)
 
-    print(f"[dist] Building Gen 2 ({target_os}) using {gen1_driver.name}...")
-    cmd_gen2 = [
+    # A pinned seed can predate the compiler sources being packaged. Build
+    # Gen1' first, then let that compiler produce Gen2 before checking the
+    # autonomous Gen2 -> Gen3 fixpoint.
+    print(f"[dist] Building Gen 1' ({target_os}) using {gen1_driver.name}...")
+    cmd_gen1prime = [
         str(gen1_driver),
         "build",
         str(driver_src),
         "--target",
         target_flag,
         "--output",
-        str(gen2_bin),
+        str(gen1prime_bin),
     ]
-    res_gen2 = subprocess.run(cmd_gen2, cwd=repo_root, capture_output=True, text=True)
-    if res_gen2.returncode != 0 or not gen2_bin.is_file():
-        raise RuntimeError(f"Gen 2 build failed: {res_gen2.stderr}\n{res_gen2.stdout}")
+    res_gen1prime = subprocess.run(cmd_gen1prime, cwd=repo_root, capture_output=True, text=True)
+    if res_gen1prime.returncode != 0 or not gen1prime_bin.is_file():
+        raise RuntimeError(f"Gen 1' build failed: {res_gen1prime.stderr}\n{res_gen1prime.stdout}")
 
-    # Set executable permissions on Unix if needed
     if target_os == "linux" and sys.platform != "win32":
-        gen2_bin.chmod(gen2_bin.stat().st_mode | 0o755)
+        gen1prime_bin.chmod(gen1prime_bin.stat().st_mode | 0o755)
 
-    # Gen 2 must execute on the packaging host: a cross-target binary
-    # cannot certify the autonomous Gen 2 -> Gen 3 fixpoint here.
+    # Gen1' must execute on the packaging host to produce Gen2; a cross-target
+    # binary cannot certify the autonomous Gen2 -> Gen3 fixpoint here.
     can_execute_gen2 = (
         (target_os == "windows" and sys.platform == "win32")
         or (target_os == "linux" and sys.platform.startswith("linux"))
     )
     if not can_execute_gen2:
         raise RuntimeError(
-            f"Cannot verify {target_os} Gen 2 -> Gen 3 on host {sys.platform}; "
+            f"Cannot verify {target_os} Gen1' -> Gen2 -> Gen3 on host {sys.platform}; "
             "build each distribution on its native target runner"
         )
+
+    print(f"[dist] Building Gen 2 ({target_os}) using Gen1'...")
+    cmd_gen2 = [
+        str(gen1prime_bin), "build", str(driver_src), "--target", target_flag,
+        "--output", str(gen2_bin),
+    ]
+    res_gen2 = subprocess.run(cmd_gen2, cwd=repo_root, capture_output=True, text=True)
+    if res_gen2.returncode != 0 or not gen2_bin.is_file():
+        raise RuntimeError(f"Gen 2 build failed: {res_gen2.stderr}\n{res_gen2.stdout}")
+
+    if target_os == "linux" and sys.platform != "win32":
+        gen2_bin.chmod(gen2_bin.stat().st_mode | 0o755)
 
     print(f"[dist] Building Gen 3 ({target_os}) using Gen 2 for fixpoint verification...")
     cmd_gen3 = [
@@ -392,3 +407,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
