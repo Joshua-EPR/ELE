@@ -18,6 +18,9 @@ take sema_drop
 // the protocol header, and the per-function finish (splice the drop plan,
 // verify, serialize). Only `sema-l --emit-lir` finishes and writes LIR.
 
+// First half of the module setup: index tables of functions, structs and
+// enums. Result types inferred from expression bodies need them (a dry run
+// lowers calls), so signatures are written afterwards by semaLirSignatures.
 expose flow semaLirSetup(ctx: edit SemaContext, source: view Text, tree: view AstTree) {
     each f among 0..tree.fields.length { ctx.lir_field_local@push(-1) }
     change functions = 0
@@ -68,6 +71,9 @@ expose flow semaLirSetup(ctx: edit SemaContext, source: view Text, tree: view As
             _ : {}
         }
     }
+}
+
+expose flow semaLirSignatures(ctx: edit SemaContext, source: view Text, tree: view AstTree) {
     each d among 0..tree.declarations.length {
         hold decl = view tree.declarations[d]
         choose decl.kind {
@@ -133,8 +139,7 @@ flow semaLirSignature(ctx: edit SemaContext, source: view Text, tree: view AstTr
         ctx.lir_module.param_ref@push(elem >= 0)
         ctx.lir_module.param_mut@push(semaIsMutRef(ctx, ty))
     }
-    change ret = 6
-    when decl.f >= 0 { ret = semaResolveAstType(edit ctx, source, tree, decl.f) }
+    change ret = semaDeclRet(edit ctx, source, tree, d)
     hold elem = semaRefElem(ctx, ret)
     ctx.lir_module.fn_ret_ref@push(elem >= 0)
     ctx.lir_module.fn_ret_mut@push(semaIsMutRef(ctx, ret))

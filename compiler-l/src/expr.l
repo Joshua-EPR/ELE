@@ -177,6 +177,10 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
             hold val = parserParseDecimalInt(source, tok.start, tok.end)
             cursor.pos += 1
             when val < 0 {
+                when parserIsIntMinMagnitude(source, tok.start, tok.end) {
+                    astAddError(edit tree, ParseProblem.UnexpectedToken, "entero fuera de rango: 9223372036854775808 solo es válido directamente tras '-'", tok.start, tok.end)
+                    give -1
+                }
                 astAddError(edit tree, ParseProblem.UnexpectedToken, "entero fuera de rango", tok.start, tok.end)
                 give -1
             }
@@ -386,6 +390,22 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
                 give astAddExpr(edit tree, AstExprKind.ArrayLit, tok.start, end_pos, first_elem, children.length, 0, 0)
             }
             when parserTakeSymbol(source, edit cursor, tokens, "-") || parserTakeSymbol(source, edit cursor, tokens, "!") {
+                // The magnitude of Int.MIN does not fit an Int. It is only
+                // valid directly under `-`, where the pair is the literal
+                // Int.MIN itself (Stage 0: "magnitud solo válida tras '-'").
+                when tok.end == tok.start + 1 && source@byteAt(tok.start) == 45 && cursor.pos < tokens.length {
+                    hold next_tok = view tokens[cursor.pos]
+                    choose tokenKindValue(view next_tok.kind) {
+                        LexKind.Integer : {
+                            when parserIsIntMinMagnitude(source, next_tok.start, next_tok.end) {
+                                cursor.pos += 1
+                                hold int_min = -9223372036854775807 - 1
+                                give astAddExpr(edit tree, AstExprKind.IntLit, tok.start, next_tok.end, int_min, 0, 0, 0)
+                            }
+                        }
+                        _ : {}
+                    }
+                }
                 parserSkipNewlines(edit cursor, tokens)
                 hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)

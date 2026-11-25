@@ -414,6 +414,18 @@ expose flow astIsMethod(tree: view AstTree, decl_id: Int) => Bool {
     give false
 }
 
+// `flow f(..) = expr` (no `{` block): the parser wraps the expression in a
+// block that starts at the function name, which a written block never does.
+expose flow astIsExprBody(tree: view AstTree, decl_id: Int) => Bool {
+    hold decl = view tree.declarations[decl_id]
+    when decl.g < 0 || decl.g >= tree.statements.length { give false }
+    hold body = view tree.statements[decl.g]
+    choose body.kind {
+        AstStmtKind.Block : { give body.start == decl.a }
+        _ : { give false }
+    }
+}
+
 expose flow astMethodOwnerType(tree: view AstTree, decl_id: Int) => Int {
     each i among 0..tree.declarations.length {
         hold ext = view tree.declarations[i]

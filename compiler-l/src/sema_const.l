@@ -349,7 +349,7 @@ flow semaConstIntOp(code: Int, x: Int, y: Int) => SemaConst {
 
 // Checks and folds the value of a constant declared at `start`..`end`.
 // The result carries the declared type (the annotation when present).
-flow semaConstDefine(ctx: edit SemaContext, source: view Text, tree: view AstTree, value_id: Int, type_ast: Int, start: Int, end: Int) => SemaConst {
+expose flow semaConstDefine(ctx: edit SemaContext, source: view Text, tree: view AstTree, value_id: Int, type_ast: Int, start: Int, end: Int) => SemaConst {
     hold errors_before = ctx.errors.length
     hold saved_leaf = ctx.const_leaf
     hold saved_reason = ctx.const_reason

@@ -109,6 +109,12 @@ expose flow parserParseDecimalInt(source: view Text, start: Int, end: Int) => In
     give val
 }
 
+// The decimal magnitude 9223372036854775808 (2^63): out of range as an Int,
+// valid only as the operand of a unary minus.
+expose flow parserIsIntMinMagnitude(source: view Text, start: Int, end: Int) => Bool {
+    give parserMatchText(source, start, end, "9223372036854775808")
+}
+
 expose flow parserSkipNewlines(cursor: edit TokenCursor, tokens: view List of[LexToken]) {
     during cursor.pos < tokens.length {
         hold current_kind_token = view tokens[cursor.pos]

@@ -79,9 +79,12 @@ expose flow lirForInit(ctx: edit SemaContext, start: Int, end: Int) => Int {
     give counter
 }
 
-expose flow lirForTest(ctx: edit SemaContext, counter: Int) {
+// `inclusive` (`start..=end`) tests `counter <= limit` instead of `<`.
+expose flow lirForTest(ctx: edit SemaContext, counter: Int, inclusive: Bool) {
     // Do not mutate the value channel while constructing its operand.
-    hold comparison = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_LT, counter, counter + 1)
+    change test = LIR_LT
+    when inclusive { test = LIR_LE }
+    hold comparison = lirNew(edit ctx, 4, false, LIR_BINARY, test, counter, counter + 1)
     ctx.lir.val = comparison
     ctx.lir.place = -1
     lirCondition(edit ctx)
