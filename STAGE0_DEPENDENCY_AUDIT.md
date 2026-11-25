@@ -1,8 +1,8 @@
 # Stage 0 dependency audit
 
 Audit date: 2026-11-24
-Current `main`: `21e9cc32758dc23aa1637fbd4441d9849a6cc677` (PRs #167–#170 merged).
-The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status now includes the versioned seeds, value-producing `choose`, native-seed distribution, and owned Text choice matches. PR #169 removes Cargo/Stage 0 distribution fallbacks and packages from verified native seeds. PR #170 implements owned Text payload matches. PR #171 is adding lazy drop-free Option defaults, and PR #172 adds Result/Option propagation; both are still under CI review. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
+Current `main`: `3c595759221da0ff9c79d6c8762788241d9f2b71` (PRs #167–#170 and #174 merged).
+The detailed consumer inventory below was initially collected at `d27dc67`; current compiler/CI status includes versioned seeds, value-producing `choose`, native-seed distribution, owned Text choice matches, and stricter ELF data-segment validation. PR #171 adds lazy drop-free Option defaults and PR #172 adds Result/Option propagation; their current Windows suites are still running. PR #173 hardens script discovery and PR #175 implements shape methods; both are under CI review. These changes do not yet remove the audited Rust/Cargo/Cranelift compiler and historical test dependencies.
 Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was excluded.
 
 ## Latest execution snapshot
@@ -11,9 +11,14 @@ Scope: compiler, bootstrap, backend, tests, CI and distribution. ENCA was exclud
 - PR #167 (`2fa0af8`) pins ELF64/PE32+ seed artifacts, removes the Cargo seed job, and validates seed → Gen1′ → Gen2 → Gen3 with compiler tools absent from runner PATH. Linux/Windows bootstrap, full Windows/MSVC, ELF execution, distribution and docs checks passed; merged.
 - PR #169 is merged. Required Linux/Windows package, bootstrap, docs and native checks passed after fixing missing `gzip` and nested PowerShell execution under PATH isolation. Distribution now requires a pinned native seed and package archives for installation.
 - PR #170 is merged at `21e9cc3`. It adds owned Text payloads to `choice` match lowering and a use-after-move rejection regression; Linux/Windows native checks and ELF execution passed.
-- PR #171 (`5227fc8`) implements lazy `??` defaults for drop-free Int/Bool payloads. Owned Text remains an active gap on that branch; required Windows full/MSVC CI is still pending.
-- PR #172 (`a7ebe3c`) implements `?` propagation for Option/Result with ownership checks. Required Windows full/MSVC CI is still pending.
+- PR #174 is merged at `3c59575`. The ELF verifier now accepts the existing optional RW/NX data segment and rejects malformed or overlapping mappings; all required checks passed.
+- PR #171 (`2210872`) implements lazy `??` defaults for drop-free Int/Bool payloads. Owned Text remains an active gap on that branch; Linux/Windows suites are rerunning after rebase.
+- PR #172 (`4abcff8`) implements `?` propagation for Option/Result with ownership checks. Its self-coverage baseline gained only the new `sema_try.l → lir` row; the Windows full/MSVC suite is rerunning.
+- PR #173 (`20cf653`) adds `.psm1`, `.cmd`, and `.bat` to the active-path audit and refreshes current status docs. Local audit/tests pass; PR CI is rerunning after rebase.
+- PR #175 (`bd20bd8`) implements native shape extension methods. PE seed bootstrap reached Gen2=Gen3 and the Gen3 corpus passed (98 PASS, 2 XFAIL); Linux/CI validation is pending.
 - Stage 0, Rust/Cargo and Cranelift remain active in the compiler, historical suites and primary build workflow. Do not declare full independence or remove `crates/l` yet.
+
+The native backend still rejects Float/f64 and Stage 1 still rejects async; those require larger frontend/LIR/runtime changes and remain open gaps.
 
 ## Current branch delta: versioned independent seeds (PR #167)
 
