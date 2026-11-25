@@ -110,6 +110,8 @@ def build_gen3_tools(
             raise ValueError(f"Gen3 returned success without producing {image}")
         if not image.read_bytes().startswith(expected_magic):
             raise ValueError(f"Gen3 produced an invalid {target_format} image for {name}")
+        if target_format == "elf":
+            image.chmod(image.stat().st_mode | 0o111)
         paths[name] = image
     return paths
 

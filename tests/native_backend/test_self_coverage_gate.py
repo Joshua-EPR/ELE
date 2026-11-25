@@ -40,6 +40,7 @@ class SelfCoverageGateTests(unittest.TestCase):
                     gen3, "elf", source_root, root / "tools", root, 30,
                 )
             images = {name: path.read_bytes() for name, path in paths.items()}
+            modes = {name: path.stat().st_mode for name, path in paths.items()}
 
         self.assertEqual(set(paths), set(gate.GEN3_TOOLS))
         self.assertEqual(len(calls), 3)
@@ -49,6 +50,8 @@ class SelfCoverageGateTests(unittest.TestCase):
             self.assertIn(str(source_root / f"{name}.l"), argv)
             self.assertEqual(argv[argv.index("--target") + 1], "elf")
             self.assertTrue(images[name].startswith(b"\x7fELF"))
+            if os.name == "posix":
+                self.assertTrue(modes[name] & 0o111)
 
     def test_gen3_builds_pe_self_coverage_tools(self):
         with tempfile.TemporaryDirectory() as td:
