@@ -382,3 +382,90 @@ fn enum_match_rejects_literal_and_multiple_payload_binders() {
         reject_match_source(file, &source);
     }
 }
+
+
+#[test]
+fn enum_text_payload_is_dropped_on_early_return_and_fallthrough_cfg_edges() {
+    let base = root();
+    let temp = base.join("target/stage1-tests/enum-text-payload-cfg-drops");
+    fs::create_dir_all(&temp).unwrap();
+    let source = temp.join("payload_cfg_drops.l");
+    fs::write(
+        &source,
+        r#"
+choice Message {
+    Quiet,
+    Named(Text),
+}
+
+flow handle(message: Message, early: Bool) => Int {
+    choose message {
+        Message.Quiet: { give 0 },
+        Message.Named(text): {
+            when early { give 42 }
+            print(text)
+            give 43
+        },
+    }
+    give 44
+}
+
+flow main() => Int {
+    hold early = handle(Message@Named("early"), true)
+    hold fallthrough = handle(Message@Named("late"), false)
+    when early != 42 { give 1 }
+    when fallthrough != 43 { give 2 }
+    give 0
+}
+"#,
+    )
+    .unwrap();
+
+    let emitted = Command::new(sema())
+        .arg(&source)
+        .arg("--emit-lir")
+        .output()
+        .unwrap();
+    assert!(
+        emitted.status.success(),
+        "Stage 1 owned payload CFG lowering: {}",
+        String::from_utf8_lossy(&emitted.stderr)
+    );
+    let lir = String::from_utf8(emitted.stdout).unwrap();
+    assert!(
+        lir.matches("i drop ").count() >= 2,
+        "the owned payload must be dropped on both the early-return and fallthrough paths: {lir}"
+    );
+    let parsed = project_l::lir_protocol::parse(&lir).unwrap();
+    project_l::lir_protocol::validate(&parsed).unwrap();
+
+    let lir_file = temp.join("payload_cfg_drops.lir");
+    let executable = temp.join("payload_cfg_drops.elf");
+    fs::write(&lir_file, &lir).unwrap();
+    let compiled = Command::new(native())
+        .arg(&lir_file)
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "native backend must compile branch-sensitive owned payload drops: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).unwrap();
+        let actual = Command::new(&executable).output().unwrap();
+        assert_eq!(
+            actual.status.code(),
+            Some(0),
+            "native execution: {}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&actual.stdout), "late\\n");
+    }
+}
