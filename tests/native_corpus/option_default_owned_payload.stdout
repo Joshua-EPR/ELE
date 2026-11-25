@@ -1,3 +1,5 @@
 present
 fallback
 default
+literal some
+literal fallback
