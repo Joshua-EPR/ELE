@@ -106,6 +106,7 @@ sema_match_coverage.l	lir
 sema_ops.l	lir
 sema_stmt.l	lir
 sema_stmt_values.l	lir
+sema_try.l	lir
 sema_types.l	lir
 stmt.l	lir
 stmt_lower.l	lir

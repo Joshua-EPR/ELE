@@ -18,6 +18,7 @@ take stmt_lower
 take sema_builtin_union
 take lir_builtin_union
 take sema_match_coverage
+take sema_try
 
 flow semaCheckConstructor(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr: view AstExpr, decl_id: Int, struct_t: Int) {
     hold decl = view tree.declarations[decl_id]
@@ -807,6 +808,12 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
         }
         AstExprKind.Choose : {
             give semaChooseExpr(edit ctx, source, tree, expr, mode)
+        }
+        AstExprKind.Try : {
+            hold input_t = semaExprMode(edit ctx, source, tree, expr.a, ACCESS_READ)
+            hold input_path = ctx.expression_path
+            hold input_place = ctx.lir.place
+            give semaTryUnion(edit ctx, source, tree, expr, input_t, input_path, input_place, mode)
         }
         _ : {
             semaAddError(edit ctx, "L0016", "expresión fuera del subconjunto verificado de Stage 1", expr.start, expr.end)

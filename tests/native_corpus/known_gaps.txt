@@ -3,4 +3,3 @@
 # must still FAIL on that target (XFAIL); if it passes (XPASS) the runner
 # fails until the line is removed. Observed behavior: KNOWN_GAPS.md.
 option_default_owned_payload all
-result_propagation all

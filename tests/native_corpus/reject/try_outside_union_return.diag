@@ -1,0 +1,1 @@
+error[L0003]: el operador ? requiere que la función devuelva el mismo tipo de unión que la expresión
