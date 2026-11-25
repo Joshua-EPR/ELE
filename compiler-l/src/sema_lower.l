@@ -15,7 +15,13 @@ take sema_context
 // - print and interpolation take Text places by reference (no move).
 
 expose flow lirAt(ctx: edit SemaContext, kind: Int, dst: Int, a: Int, b: Int, c: Int) {
+    hold outer_at = ctx.lir.at
+    when kind == LIR_READ || kind == LIR_STORE || kind == LIR_LOAN {
+        hold bounds_at = lirPlaceBoundsAt(view ctx.lir, a)
+        when bounds_at >= 0 { ctx.lir.at = bounds_at }
+    }
     lirEmit(edit ctx.lir, kind, dst, a, b, c, ctx.flow.current, ctx.flow.events.length)
+    ctx.lir.at = outer_at
 }
 
 // New variable assigned by one instruction; returns it as an operand.

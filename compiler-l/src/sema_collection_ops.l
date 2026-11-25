@@ -10,6 +10,18 @@ take sema_context
 take sema_lower
 take lir_builtin_union
 
+// Locate a postfix operator between its base expression and the following
+// index or method name. The AST keeps these expression spans but not the
+// punctuation token itself.
+flow semaPostfixOperator(source: view Text, start: Int, end: Int, symbol: Int) => Int {
+    change at = start
+    during at < end {
+        when source@byteAt(at) == symbol { give at }
+        at += 1
+    }
+    give -1
+}
+
 expose flow semaExpectedListElem(ctx: view SemaContext) => Int {
     hold expected = ctx.expected_list_type
     when expected >= 0 && expected < ctx.types.types.length {
@@ -143,7 +155,15 @@ expose flow semaMethodFinish(ctx: edit SemaContext, source: view Text, tree: vie
         }
         when base_path >= 0 { flowEvent(edit ctx.flow, FLOW_READ, base_path, expr.start, expr.end) }
         hold dst = lirVar(edit ctx.lir, 1, false)
-        when base_place >= 0 { lirAt(edit ctx, LIR_BYTE_AT, dst, base_place, arg_op, 0) }
+        when base_place >= 0 {
+            hold base_expr = view tree.expressions[expr.a]
+            change operator_at = semaPostfixOperator(source, base_expr.end, expr.b, 64)
+            when operator_at < 0 { operator_at = semaPostfixOperator(source, base_expr.end, expr.b, 46) }
+            hold outer_at = ctx.lir.at
+            when operator_at >= 0 { ctx.lir.at = operator_at }
+            lirAt(edit ctx, LIR_BYTE_AT, dst, base_place, arg_op, 0)
+            ctx.lir.at = outer_at
+        }
         lirSetVal(edit ctx, dst)
         give 1
     }
@@ -153,6 +173,9 @@ expose flow semaMethodFinish(ctx: edit SemaContext, source: view Text, tree: vie
 
 expose flow semaIndexFinish(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int, mode: Int, base_t: Int, bp: Int, parent_path: Int, idx_t: Int, idx_op: Int) => Int {
     hold expr = view tree.expressions[expr_id]
+    hold base_expr = view tree.expressions[expr.a]
+    hold index_expr = view tree.expressions[expr.b]
+    hold bounds_at = semaPostfixOperator(source, base_expr.end, index_expr.start, 91)
     when idx_t != 1 {
         semaAddError(edit ctx, "L0003", "el índice debe ser Int", expr.start, expr.end)
         give 7
@@ -196,7 +219,7 @@ expose flow semaIndexFinish(ctx: edit SemaContext, source: view Text, tree: view
         semaAccess(edit ctx, parent_path, elem_t, mode, expr.start, expr.end)
     }
     when base_place >= 0 {
-        hold indexed_place = lirPlaceIndex(edit ctx.lir, base_place, idx_var)
+        hold indexed_place = lirPlaceIndexAt(edit ctx.lir, base_place, idx_var, bounds_at)
         lirSetPlace(edit ctx, indexed_place)
         when mode != ACCESS_PLACE && elem_t >= 0 && elem_t < ctx.types.types.length {
             hold element = view ctx.types.types[elem_t]
