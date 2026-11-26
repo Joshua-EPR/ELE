@@ -389,3 +389,32 @@ Speedups por encima de 2 y las caídas en casos pequeños son ruido de WHPX:
 el anfitrión reparte los vCPU con otros procesos y tiene turbo. Las cifras
 buenas saldrán de la laptop. En TCG la prueba omite 1024 y 2048 y pasa
 igual (hito 11 OK).
+
+### Hito 11 en la laptop (Celeron 3865U, 2 núcleos, 1,8 GHz sin turbo) ✅
+
+Con esta imagen también queda confirmado el arreglo del marco 0 (hito 10):
+montón bien, 3649 -> 3801 MiB libres.
+
+Variantes (512, 1 núcleo): a) 4,74 · b) 4,85 · **c) 5,10** FLOP/ciclo
+(elegida c).
+
+| Caso | 1 núcleo MFLOPS | F/c | 2 núcleos MFLOPS | F/c/núcleo | speedup | % chip | error |
+|---|---|---|---|---|---|---|---|
+| 256 A·B | 8504 | 4,72 | 16636 | 4,61 | 1,95 | 57 | 0 ppm |
+| 256 Aᵀ·B | 8407 | 4,66 | 16465 | 4,57 | 1,95 | 57 | 0 ppm |
+| 256 A·Bᵀ | 7450 | 4,13 | 14670 | 4,07 | 1,96 | 50 | 0 ppm |
+| 256 C+=A·B | 8430 | 4,68 | 16527 | 4,58 | 1,96 | 57 | 0 ppm |
+| 64x256 · 256x1024 | 7990 | 4,43 | 15467 | 4,29 | 1,93 | 53 | 0 ppm |
+| 64x1024 · 1024x256 | 7636 | 4,23 | 14265 | 3,96 | 1,86 | 49 | 0 ppm |
+| 64x256 · 256x768 | 8316 | 4,61 | 15375 | 4,26 | 1,84 | 53 | 0 ppm |
+| **512** | 9060 | 5,03 | 17966 | 4,98 | 1,98 | **62** | 0 ppm |
+| **1024** | 9421 | 5,23 | 18651 | 5,17 | 1,97 | **64** | 0 ppm |
+| **2048** | 9654 | 5,36 | 19065 | 5,29 | 1,97 | **66** | 0 ppm |
+
+Criterio de aceptación cumplido: exacto en todos los casos y por encima del
+50 % del pico del chip completo (16 FLOP/ciclo) con N >= 512 (62-66 %). La
+escala de 1 a 2 núcleos es casi lineal (x1,95-1,98) en hardware real.
+Comparado con la Fase 1 (256, 1 núcleo, 29 % del chip), el chip completo
+rinde ahora más del doble. Lo más débil son las formas planas del
+transformer (M = 64): 49-53 %. El bloque de 96 filas queda a medio llenar y
+el empaquetado de B pesa más. Se puede mejorar cuando lleguen los tensores.
