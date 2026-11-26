@@ -129,6 +129,7 @@ expose flow memFisicaReservar() => Int {
     hold e = estado()
     hold total = leer64(e + 16)
     change f = leer64(e + 32)
+    when f < 1 { f = 1 }
     hold m = mapa()
     during f < total {
         // Salta de 64 en 64 marcos completamente ocupados.
@@ -181,14 +182,17 @@ expose flow memFisicaRecuperarCargador(pila: Int) => Int {
             hold primero = (leer64(ent) + MARCO - 1) / MARCO
             hold ultimo = (leer64(ent) + leer64(ent + 8)) / MARCO
             each f among primero..ultimo {
-                when (f < guarda_inicio || f > guarda_fin) && f < leer64(estado() + 16) && ocupado(f) {
+                // El marco 0 nunca se entrega: su dirección física (0) es el
+                // valor de "sin memoria". En la laptop real Limine marca la
+                // memoria baja, marco 0 incluido, como recuperable.
+                when f > 0 && (f < guarda_inicio || f > guarda_fin) && f < leer64(estado() + 16) && ocupado(f) {
                     marcar(f, false)
                     liberados += MARCO
                 }
             }
         }
     }
-    escribir64(estado() + 32, 0)
+    escribir64(estado() + 32, 1)
     give liberados
 }
 

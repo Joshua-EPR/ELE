@@ -300,3 +300,26 @@ Causa sin confirmar. La única diferencia de comportamiento es el marco de
 prueba: deja la pista de búsqueda del asignador en el primer marco libre
 en vez de en 0. Se mantiene el código tal como se probó en la laptop. El
 diagnóstico se queda: si vuelve a pasar, el informe dirá el motivo.
+
+**Causa encontrada** (segunda foto: `marco de prueba: 0x0000000000000000`).
+En la laptop, Limine marca como "recuperable del cargador" una región que
+empieza en la dirección física 0. `memFisicaRecuperarCargador` liberaba
+también el marco 0, y la primera reserva posterior devolvía la física 0,
+que el asignador usa como "sin memoria". En la primera foto le tocó al
+montón. En la segunda se lo llevó el marco de prueba, así que el montón
+funcionó por casualidad. QEMU marca la memoria baja de otra forma.
+
+Corrección: la recuperación nunca libera el marco 0 y
+`memFisicaReservar` empieza a buscar en el marco 1. Se quita el marco de
+prueba y se mantiene el informe de fallo del montón.
+
+Números de la laptop con el hito 10 (foto 2):
+
+| Medida | Valor |
+|---|---|
+| RAM | 3802 MiB (usable 3649, del cargador 152, kernel 176 KiB) |
+| No RAM | reservada 380 MiB, ACPI 173464 KiB, framebuffer 4128 KiB |
+| Libres | 3649 MiB -> 3801 MiB tras recuperar 151 MiB |
+| Reloj | HPET 24 MHz, TSC 1801 MHz, LAPIC 1500 cuentas/ms; 500 ms = 499 ms |
+| SMP | 1 de 1 AP |
+| SGEMM 256 | 8587 MFLOPS en 1 núcleo; 4,76 FLOP/ciclo por núcleo = 59 % del núcleo, 29 % del chip; micronúcleo 5,45 = 68 % / 34 % |
