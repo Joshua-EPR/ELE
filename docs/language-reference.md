@@ -259,8 +259,8 @@ argument is an `Int`.
 | `nucleo.cpu` | `recargarSegmentos(codigo, datos)` | DS/ES/SS/FS/GS = `datos`, far return to CS = `codigo` | — |
 | `nucleo.cpu` | `fxsave(dir)`, `fxrstor(dir)` | `FXSAVE64` / `FXRSTOR64` | — |
 | `nucleo.cpu` | `stubInterrupcion(vector)` | address of the compiler-generated stub (kernel only) | `Int` |
-| `nucleo.cpu` | `xmmCero(r)`, `xmmCargar(r, dir)`, `xmmGuardar(dir, r)`, `xmmDifundir(r, dir)`, `xmmCopiar(d, s)`, `xmmMultiplicar(d, s)`, `xmmSumar(d, s)` | `XORPS`, `MOVUPS`, `MOVSS`+`SHUFPS`, `MOVAPS`, `MULPS`, `ADDPS` on XMM6..XMM15 | — |
-| `nucleo.cpu` | `xmmDifundirEn(r, dir, desp)`, `xmmMulSumar4(acc, a, dir, desp)` | broadcast of `[dir+desp]`; `acc+j += a * [dir+desp+16j]` for j = 0..3 (`MOVUPS`+`MULPS`+`ADDPS` through XMM0) | — |
+| `nucleo.cpu` | `xmmCero(r)`, `xmmCargar(r, dir)`, `xmmGuardar(dir, r)`, `xmmDifundir(r, dir)`, `xmmCopiar(d, s)`, `xmmMultiplicar(d, s)`, `xmmSumar(d, s)` | `XORPS`, `MOVUPS`, `MOVSS`+`SHUFPS`, `MOVAPS`, `MULPS`, `ADDPS` on XMM1..XMM15 | — |
+| `nucleo.cpu` | `xmmDifundirEn(r, dir, desp)`, `xmmMulSumar4(acc, a, dir, desp)`, `xmmMulSumar4M(acc, a, dir, desp)` (MULPS from memory, 16-byte aligned) | broadcast of `[dir+desp]`; `acc+j += a * [dir+desp+16j]` for j = 0..3 (`MOVUPS`+`MULPS`+`ADDPS` through XMM0) | — |
 | `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
 | `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
 | `nucleo.mem` | `reservar(bytes, alineacion)` | zeroed `.bss` block (kernel only) | its address |
@@ -276,7 +276,8 @@ Static storage is per call site: `flow peticion() => Int { give datos64(...) }`
 returns the same address on every call. The arguments of `reservar` and
 `datos64` must be constant expressions (literals, `fixed` names and their
 operators); `cadena` takes a literal without interpolation. The XMM
-intrinsics take constant register numbers 6..15 (Float code uses XMM0..XMM5)
+intrinsics take constant register numbers 1..15 (XMM0 is their scratch;
+Float code uses XMM0..XMM5, so only XMM6..XMM15 survive Float statements)
 and keep their values across statements, so a loop can hold accumulators in
 XMM registers.
 
@@ -301,7 +302,7 @@ run-time check (overflow, index, inactive variant) stops the CPU with the
 status (125/126/127) in `RDI` and the packed source position in `RAX`.
 Backend codes: 77 static storage or stubs outside `--target kernel`,
 78 non-constant `reservar`/`datos64`/`cadena` arguments, 79 `kinterrupcion`
-missing, 80 XMM register outside 6..15 (for `xmmMulSumar4`, `acc` <= 12 and
+missing, 80 XMM register outside 1..15 (for `xmmMulSumar4`/`xmmMulSumar4M`, `acc` <= 12 and
 `a` outside `acc..acc+3`) or a non-constant displacement.
 
 If the program defines `kpanico(codigo: Int, posicion: Int)`, a failed

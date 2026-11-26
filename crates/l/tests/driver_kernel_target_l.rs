@@ -317,7 +317,7 @@ fn kernel_static_intrinsics_are_checked() {
             "código 79",
         ),
         (
-            "take nucleo.cpu\n\nflow kmain() {\n    xmmCero(3)\n}\n",
+            "take nucleo.cpu\n\nflow kmain() {\n    xmmCero(0)\n}\n",
             "código 80",
         ),
     ];
@@ -414,5 +414,24 @@ fn kernel_reads_the_stack_pointer() {
     assert!(contains(
         &fs::read(&image).unwrap()[0x1000..],
         &[0x48, 0x89, 0xE0]
+    ));
+}
+
+#[test]
+fn kernel_memory_operand_multiply_add() {
+    let dir = work("mem4");
+    let source = "take nucleo.cpu\ntake nucleo.mem\n\nflow kmain() {\n    hold p = reservar(256, 64)\n    xmmMulSumar4M(4, 1, p, 64)\n}\n";
+    let (out, image) = build(&dir, source, &[]);
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // MOVAPS XMM0,XMM1; MULPS XMM0,[RAX+64]; ADDPS XMM4,XMM0.
+    assert!(contains(
+        &fs::read(&image).unwrap()[0x1000..],
+        &[
+            0x0F, 0x28, 0xC1, 0x0F, 0x59, 0x80, 64, 0, 0, 0, 0x0F, 0x58, 0xE0
+        ]
     ));
 }

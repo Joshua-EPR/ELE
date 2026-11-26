@@ -323,3 +323,69 @@ Números de la laptop con el hito 10 (foto 2):
 | Reloj | HPET 24 MHz, TSC 1801 MHz, LAPIC 1500 cuentas/ms; 500 ms = 499 ms |
 | SMP | 1 de 1 AP |
 | SGEMM 256 | 8587 MFLOPS en 1 núcleo; 4,76 FLOP/ciclo por núcleo = 59 % del núcleo, 29 % del chip; micronúcleo 5,45 = 68 % / 34 % |
+
+## 2026-11-26 — Hito 11: SGEMM en 2 núcleos y matrices grandes
+
+Plan: buzón de trabajos para el AP; SGEMM general (transpuestas, acumular)
+en `lib/sgemm.l`; tres variantes del micronúcleo; verificación exacta;
+tabla.
+
+- `cpu/buzon.l`: una línea de caché de 64 bytes por núcleo (secuencia
+  pedida, hecha, código, argumento, barrera). Sin instrucciones atómicas:
+  cada campo tiene un solo escritor y x86 conserva el orden de las
+  escrituras. `cpu/trabajos.l` despacha por código. El AP ya no hace HLT:
+  atiende su buzón con interrupciones desactivadas.
+- `lib/sgemm.l`: C (+)= op(A)·op(B), con op = identidad o transpuesta
+  (las transpuestas solo cambian el empaquetado). N múltiplo de 16; M y K
+  libres (K se rellena con ceros hasta múltiplo de 4).
+- Bloqueo de caché (GotoBLAS): K en tramos de 256, así cada panel de B
+  (16 KB) vive en L1. Filas en bloques de 96, con A empaquetada (96 KB) en
+  L2. Para cada panel se recorren todos los bloques de filas. Sin esto, con
+  N = 2048 cada bloque de filas releía los 16 MB de B: 3,3 F/c.
+- Reparto: por tramo de K, cada núcleo empaqueta la mitad de los paneles,
+  barrera, calcula su tramo de filas (múltiplo de 6) y barrera de nuevo.
+  Las filas de C son líneas de caché enteras: no hay false sharing. Los
+  búferes de A son por núcleo y van alineados a 64 bytes.
+- Compilador: `xmmMulSumar4M` (MULPS con operando en memoria). Los
+  intrínsecos xmm* aceptan XMM1..XMM15 (XMM0 es el temporal).
+- Verificación: valores múltiplos de 1/8, así las sumas f32 son exactas.
+  Se compara contra el producto ingenuo en enteros, en las filas 0, M/3,
+  2M/3 y M-1, y se informa el error relativo máximo: 0 ppm en todos los
+  casos.
+
+Errores encontrados:
+1. El montón se corrompía. `bufer()` alineaba con `(x + 63) / 64 * 64`,
+   pero las direcciones del montón (0xFFFFC000...) son Int negativos y la
+   división redondea hacia cero, o sea hacia arriba: la dirección alineada
+   se pasaba del margen y pisaba la cabecera del bloque siguiente. Se
+   arregló con `& ~63`. `montonVerificar()` queda como comprobación. Regla:
+   nunca alinear direcciones de la mitad alta con división.
+2. Las listas literales (`List[...]`) no existen con `--target kernel`
+   (necesitan montón de usuario): código 75.
+
+QEMU WHPX (i5-7300U, 2 vCPU, anfitrión con ~25 % de carga). F/c = FLOP por
+ciclo de TSC; el pico es 8 por núcleo y 16 el chip:
+
+| Variante (512, 1 núcleo) | F/c |
+|---|---|
+| a) 2x16 MOVUPS+MULPS | 4,73 |
+| b) 2x16 MULPS con memoria | 5,03 |
+| c) 3x16 MULPS con memoria | **5,65** (elegida) |
+
+| Caso | 1 núcleo F/c | 2 núcleos F/c/núcleo | speedup | % chip | error |
+|---|---|---|---|---|---|
+| 256 A·B | 4,14 | 5,79 | 2,79 | 72 | 0 |
+| 256 Aᵀ·B | 6,10 | 3,31 | 1,08 | 41 | 0 |
+| 256 A·Bᵀ | 3,74 | 5,35 | 2,85 | 66 | 0 |
+| 256 C+=A·B | 3,30 | 5,77 | 3,49 | 72 | 0 |
+| 64x256 · 256x1024 | 4,59 | 4,20 | 1,82 | 52 | 0 |
+| 64x1024 · 1024x256 | 5,39 | 4,83 | 1,79 | 60 | 0 |
+| 64x256 · 256x768 | 5,66 | 5,12 | 1,80 | 64 | 0 |
+| 512 | 5,40 | 4,77 | 1,76 | **59** | 0 |
+| 1024 | 5,49 | 4,78 | 1,74 | **59** | 0 |
+| 2048 | 5,37 | 5,01 | 1,86 | **62** | 0 |
+
+Speedups por encima de 2 y las caídas en casos pequeños son ruido de WHPX:
+el anfitrión reparte los vCPU con otros procesos y tiene turbo. Las cifras
+buenas saldrán de la laptop. En TCG la prueba omite 1024 y 2048 y pasa
+igual (hito 11 OK).

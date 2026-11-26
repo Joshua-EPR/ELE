@@ -269,9 +269,11 @@ flow hito8() {
 
 // Hito 9: SGEMM con SSE empaquetado (MULPS/ADDPS, acumuladores en XMM).
 flow hito9() {
-    when sgemmBanco(256) {
-        kprintln(cadena("hito 9 OK"))
+    // Hito 11 (sustituye al banco del hito 9): SGEMM general en todos los
+    // núcleos, variantes del micronúcleo y tabla de rendimiento.
+    when sgemmHito11() {
+        kprintln(cadena("hito 11 OK"))
     } otherwise {
-        kprintln(cadena("hito 9 FALLÓ: resultado incorrecto"))
+        kprintln(cadena("hito 11 FALLÓ"))
     }
 }

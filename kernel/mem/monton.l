@@ -126,3 +126,23 @@ expose flow montonLiberar(dir: Int) {
     escribir64(e + 16, leer64(e + 16) - leer64(b))
     insertarLibre(b)
 }
+
+// Comprobación de la lista libre: cada bloque dentro de la región mapeada,
+// en orden y sin solaparse. Devuelve 0 si está bien, o el número del primer
+// bloque defectuoso (1 = el primero).
+expose flow montonVerificar() => Int {
+    hold e = estado()
+    hold fin = leer64(e)
+    change b = leer64(e + 8)
+    change previo_fin = BASE
+    change n = 1
+    during b != 0 {
+        when b < previo_fin || b >= fin { give n }
+        hold tam = leer64(b)
+        when tam < MINIMO || tam % 16 != 0 || b + tam > fin { give n }
+        previo_fin = b + tam
+        b = leer64(b + 8)
+        n += 1
+    }
+    give 0
+}

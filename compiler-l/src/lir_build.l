@@ -110,8 +110,9 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //   67 invlpg (dir)  68 fxsave (dir)  69 fxrstor (dir)  70 wbinvd
 //   71 stubInterrupcion (vector) -> Int  (`--target kernel` only)
 //   72 leerRflags -> Int   73 int3 (breakpoint #BP, returns)
-// Packed single SSE on XMM6..XMM15 (Float code uses XMM0..XMM5); the
-// register arguments must be constants:
+// Packed single SSE on XMM1..XMM15 (XMM0 is the scratch of these forms;
+// Float code also uses XMM0..XMM5, so only XMM6..XMM15 keep values across
+// Float statements); the register arguments must be constants:
 //   74 xmmCero (r)   75 xmmCargar (r, dir)   76 xmmGuardar (dir, r)
 //   77 xmmDifundir (r, dir)   78 xmmCopiar (d, s)
 //   79 xmmMultiplicar (d, s)  80 xmmSumar (d, s)
@@ -119,8 +120,10 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //      j = 0..3 (desp constant)
 //   82 xmmDifundirEn (r, dir, desp): [dir + desp] to the four lanes of r
 //   83 leerRsp -> Int (stack pointer)
+//   84 xmmMulSumar4M (acc, a, dir, desp): like 81 with MULPS reading memory
+//      ([dir+desp] 16-byte aligned)
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 83
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 84
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
@@ -148,6 +151,7 @@ expose flow lirIntrinsicArity(op: Int) => Int {
     when op == 81 { give 4 }
     when op == 82 { give 3 }
     when op == 83 { give 0 }
+    when op == 84 { give 4 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -213,7 +217,8 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 80 { give "xadd" }
     when op == 81 { give "xmuladd4" }
     when op == 82 { give "xbcastd" }
-    give "rdrsp"
+    when op == 83 { give "rdrsp" }
+    give "xmuladd4m"
 }
 
 // ---- Linear resource operation table ------------------------------------
