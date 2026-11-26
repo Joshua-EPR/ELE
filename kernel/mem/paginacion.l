@@ -121,3 +121,22 @@ expose flow pagIniciar() => Bool {
     escribirCr3(pml4)
     give true
 }
+
+// Dirección física de la virtual `virtual` según el PML4 propio, o -1 si
+// no está mapeada. Entiende las páginas de 2 MiB del HHDM.
+expose flow pagTraducir(virtual: Int) => Int {
+    change tabla = pagPml4()
+    change nivel = 3
+    during nivel >= 1 {
+        hold e = leer64(memVirtual(tabla) + indice(virtual, nivel) * 8)
+        when e & PAG_PRESENTE == 0 { give -1 }
+        when nivel == 1 && e & PAG_GRANDE != 0 {
+            give (e & MASCARA_DIRECCION & (~0x1FFFFF)) | (virtual & 0x1FFFFF)
+        }
+        tabla = e & MASCARA_DIRECCION
+        nivel -= 1
+    }
+    hold e = leer64(memVirtual(tabla) + indice(virtual, 0) * 8)
+    when e & PAG_PRESENTE == 0 { give -1 }
+    give (e & MASCARA_DIRECCION) | (virtual & 0xFFF)
+}

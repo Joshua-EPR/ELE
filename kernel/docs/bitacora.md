@@ -452,3 +452,51 @@ PCI: ECAM en 0xE0000000, buses 0-255, 6 funciones:
   00:1f.3 8086:2930 0c0500 SMBus BAR4e=0000006000/64
 disco: AHCI en el bdf 0xFA (00:1f.2), con MSI
 ```
+
+## 2026-11-26 — Hito 13: driver AHCI y escritura protegida
+
+Plan: AHCI por sondeo; leer la GPT y mostrarla entera; escritura solo
+dentro de la partición marcada (cualquier otra = pánico); medir MB/s;
+escritura de prueba verificada con CRC32.
+
+- `dispositivos/ahci.l`: ABAR (BAR5) sin caché y GHC.AE. Cada puerto con
+  DET = 3 y firma 0x101 lleva un marco propio (lista de órdenes, FIS
+  recibidos y tabla de la orden 0). READ/WRITE DMA EXT (LBA48), hasta 256
+  KiB por orden. Cada página del búfer es una entrada de la PRDT, con su
+  física vía `pagTraducir`. IDENTIFY da el tamaño. Espera por sondeo de CI
+  con tiempo límite (reloj de referencia) y detección de TFES.
+- `almacenamiento/disco.l`: GPT (cabecera en el LBA 1 y todas las
+  entradas), con tipo, LBA, MiB y nombre. Partición permitida:
+  - GUID de tipo propio `7F03465A-8D62-4902-B881-2A624BFA16B6`, o
+  - partición de datos Microsoft con sector de arranque FAT32 y etiqueta
+    `ELEDATOS`. Así se puede preparar desde Windows con diskpart y copiarle
+    el dataset (hito 14). Cambié la idea de una firma en los primeros
+    bytes, que chocaba con el sector de arranque FAT.
+  - `discoEscribir` sin habilitar, o fuera de la partición, llama a
+    `panico()`.
+- `lib/crc32.l` (IEEE, tabla), `lib/panico.l`,
+  `mem/paginacion.pagTraducir`.
+- `herramientas/crear_disco_prueba.py`: disco GPT de 256 MiB con
+  "Datos Windows" (0xAB, no se debe tocar), FAT32 `ELEDATOS` con texto.txt
+  de 3 MiB y una partición cruda con el GUID propio.
+  `construir.ps1 -DiscoDatos prueba` lo conecta al puerto 1 del AHCI.
+
+QEMU:
+```
+AHCI versión 0x10000: 2 disco(s)
+disco 1 (puerto 1): 256 MiB
+       1  datos Microsoft  2048 - 67583  32 MiB  Datos Windows
+       2  datos Microsoft  67584 - 329727  128 MiB  ELEDATOS
+       3  DATOS ELE  329728 - 524254  94 MiB  ELE crudo
+lectura secuencial: 64 MiB en 134 ms = 500 MB/s
+partición ELE: LBA 67584 - 329727
+regla: escritura fuera de la partición rechazada (LBA 0 y frontera)
+escritura de prueba (LBA 329664, 32 KiB): patrón CRC32 0x22AD1964, leído
+0x22AD1964; original 0x011FFCA6, restaurado 0x011FFCA6
+hito 13 OK
+```
+Después de la prueba, desde el anfitrión: la partición "Datos Windows"
+sigue intacta (todo 0xAB) y `fsck.fat` da la FAT32 por buena.
+
+Error encontrado: un búfer de 256 KiB del montón no empieza en página y
+ocupa 65 páginas. La PRDT pasó de 64 a 72 entradas.
