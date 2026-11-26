@@ -500,3 +500,101 @@ sigue intacta (todo 0xAB) y `fsck.fat` da la FAT32 por buena.
 
 Error encontrado: un búfer de 256 KiB del montón no empieza en página y
 ocupa 65 páginas. La PRDT pasó de 64 a 72 entradas.
+
+## 2026-11-26 — Hito 14: FAT32 y checkpoints A/B
+
+Plan: FAT32 de lectura (rutas, nombres largos) y escritura simple
+(crear/sobrescribir en la raíz); checkpoints en dos ranuras alternas con
+CRC y prueba de corte.
+
+- `almacenamiento/fat32.l`: montaje desde el sector de arranque. Lectura por
+  rutas con '/'; nombres largos VFAT comparados sin distinguir mayúsculas
+  (ASCII), o 8.3. Lectura de clusters contiguos en una sola orden.
+  Escritura: `fatCrear` (8.3, raíz; reutiliza los clusters si caben, si no
+  libera y reserva) y `fatEscribir` (en el lugar, por sectores). La FAT se
+  escribe en todas sus copias. La pista de libres de FSInfo se marca como
+  desconocida (0xFFFFFFFF) al reservar.
+- `ahciVaciar` (FLUSH CACHE EXT) y `discoVaciar`.
+- `almacenamiento/checkpoint.l`: ranuras CKPT_A.BIN y CKPT_B.BIN de
+  capacidad fija, creadas una sola vez (es la única operación que toca la
+  FAT). Cabecera: magia, versión, paso, bytes, CRC32 de los datos y CRC32
+  de la propia cabecera. Orden: datos, vaciar, cabecera, vaciar. Se
+  escribe siempre la ranura que no tiene el último paso. Al cargar se
+  prueba primero la más reciente; si sus datos no cuadran, la otra.
+
+QEMU, primer arranque (disco de prueba nuevo):
+```
+FAT32 montada: 512 bytes por cluster
+texto.txt: 3145736 bytes en 21 ms, CRC32 0xAD64C905   (anfitrión: 0xad64c905)
+  primera línea: El compilador mide los datos del día con paciencia.
+SALIDA.TXT escrito y leído de vuelta: idéntico
+checkpoint: ninguno válido (primer arranque)
+guardado el paso 1; corte simulado a mitad del paso 2
+recarga inmediata: paso 1
+hito 14 OK
+```
+Segundo arranque con el mismo disco:
+```
+checkpoint recuperado: paso 1 de la ranura A, datos verificados
+guardado el paso 2; corte simulado a mitad del paso 3
+```
+`fsck.fat -n` sobre la partición después de las escrituras: sin errores
+(solo indica que el contador de libres no está inicializado, como se
+pretendía).
+
+### Hitos 12-14 en la laptop
+
+```
+PCI: ECAM en 0xE0000000, buses 0-255, 17 funciones
+  00:17.0 8086:9d03 010601 SATA AHCI ... BAR5m=0xd1333000/2K MSI
+  02:00.0 10ec:8168 020000 red (Ethernet Realtek)
+  03:00.0 168c:003e 028000 red (Wi-Fi Qualcomm Atheros) MSI MSI-X
+  00:14.0 8086:9d2f 0c0330 USB xHCI ...
+disco: AHCI en 00:17.0, con MSI                        -> hito 12 OK
+AHCI versión 0x10301: 1 disco: 476940 MiB (puerto 0)
+  GPT: 1 2048-4095 (1 MiB, arranque BIOS de GRUB)
+       2 4096-4198399 (2 GiB, Linux)
+       3 4198400-976771071 (474889 MiB, Linux)
+lectura secuencial: 64 MiB en 588 ms = 114 MB/s    (disco duro)
+sin partición marcada para ELE: SOLO LECTURA
+```
+
+El controlador está en modo AHCI, así que no hay que detenerse. El disco
+es un HDD de 500 GB con Linux en todo el disco, sin Windows. Para los hitos
+13 y 14 hace falta crear la partición FAT32 `ELEDATOS`, reduciendo la
+partición 3 desde un USB de GParted. Lo decide el usuario. Se añadieron
+nombres para los tipos de arranque BIOS, swap y LVM de Linux.
+
+### Hitos 13 y 14 en la laptop, con la partición ELEDATOS ✅
+
+El usuario creó la partición en el Ubuntu Server de la laptop, sin USB de
+GParted y sin tocar ningún ext4. El grupo LVM tenía 63,76 GiB libres al
+final del volumen físico:
+`pvresize --setphysicalvolumesize 447G /dev/sda3`,
+`parted resizepart 3 943216639`, `parted mkpart ELEDATOS fat32 943216640
+976771071` y `mkfs.vfat -F 32 -n ELEDATOS /dev/sda4` (16 GiB, clústeres de
+8 KiB, bandera msftdata). `/` y `/srv/postgres` quedaron intactos.
+
+Primer arranque:
+```
+       4  datos Microsoft  943216640 - 976771071  16384 MiB  ELEDATOS
+lectura secuencial: 64 MiB en 599 ms = 111 MB/s
+partición ELE: LBA 943216640 - 976771071
+regla: escritura fuera de la partición rechazada (LBA 0 y frontera)
+escritura de prueba (LBA 976771008, 32 KiB): patrón 0x22AD1964, leído 0x22AD1964;
+original 0x011FFCA6, restaurado 0x011FFCA6
+hito 13 OK
+FAT32 montada: 8192 bytes por cluster
+SALIDA.TXT escrito y leído de vuelta: idéntico
+guardado el paso 1; corte simulado a mitad del paso 2
+hito 14 OK
+```
+Segundo arranque: `checkpoint recuperado: paso 1 de la ranura A, datos
+verificados`.
+
+El texto.txt de la laptop resultó ser una página HTML de 913 bytes: el
+servidor de Gutenberg bloqueó la descarga por curl. El kernel lo leyó bien,
+pero queda pendiente copiar un texto real de varios MB. La lectura de
+varios MB con clústeres de 8 KiB se comprobó en QEMU, con una FAT32 creada
+por mkfs.vfat -s 16 y un texto de 5 MiB: 5242914 bytes en 16 ms, CRC32
+0xBEB090E9, igual que en el anfitrión.

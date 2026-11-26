@@ -29,6 +29,12 @@ fixed WINRE_BAJO = 0x4D4006D1DE94BBA4
 fixed WINRE_ALTO = 0xACD67901D5BF6AA1
 fixed LINUX_BAJO = 0x477284830FC63DAF
 fixed LINUX_ALTO = 0xE47D47D8693D798E
+fixed BIOSBOOT_BAJO = 0x6E6F644921686148
+fixed BIOSBOOT_ALTO = 0x4946456465654E74
+fixed SWAP_BAJO = 0x43C4A4AB0657FD6D
+fixed SWAP_ALTO = 0x4F4F4BC83309E584
+fixed LVM_BAJO = 0x44C2F507E6D6D379
+fixed LVM_ALTO = 0x28F93D2A8F233CA2
 fixed FIRMA_GPT = 0x5452415020494645     // "EFI PART"
 
 // Estado: +0 disco, +8 hay partición permitida (1/0), +16 primer LBA,
@@ -56,6 +62,9 @@ flow tipo(entrada: Int) => Int {
     when bajo == MSRES_BAJO && alto == MSRES_ALTO { give 4 }
     when bajo == WINRE_BAJO && alto == WINRE_ALTO { give 5 }
     when bajo == LINUX_BAJO && alto == LINUX_ALTO { give 6 }
+    when bajo == BIOSBOOT_BAJO && alto == BIOSBOOT_ALTO { give 7 }
+    when bajo == SWAP_BAJO && alto == SWAP_ALTO { give 8 }
+    when bajo == LVM_BAJO && alto == LVM_ALTO { give 9 }
     give 0
 }
 
@@ -66,6 +75,9 @@ flow nombreTipo(t: Int) => Int {
     when t == 4 { give cadena("reservada Microsoft") }
     when t == 5 { give cadena("recuperación Windows") }
     when t == 6 { give cadena("Linux") }
+    when t == 7 { give cadena("arranque BIOS (GRUB)") }
+    when t == 8 { give cadena("intercambio Linux") }
+    when t == 9 { give cadena("LVM Linux") }
     give cadena("otro tipo")
 }
 
@@ -185,4 +197,9 @@ expose flow discoEscribir(lba: Int, sectores: Int, dir: Int) => Bool {
         hecho += trozo
     }
     give true
+}
+
+// Asegura que todo lo escrito está en el medio (caché del disco vaciada).
+expose flow discoVaciar() => Bool {
+    give ahciVaciar(discoActual())
 }
