@@ -367,7 +367,7 @@ flow lirInjectFault(l: edit LirFn, body: edit LirBody, fault: Int) {
             give
         }
         when kind == LIR_PLATFORM {
-            when fault == 9 { l.insts[id].a = 99; give }
+            when fault == 9 { l.insts[id].a = 250; give }
             when fault == 10 { l.insts[id].c += 1; give }
             when fault == 11 && l.insts[id].c > 0 {
                 hold first = l.insts[id].b
