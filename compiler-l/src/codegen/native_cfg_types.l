@@ -380,6 +380,14 @@ expose flow cfgBinaryOp(source: view Text, w: view NativeWord) => Int {
     when nativeEquals(source, w, "ge") { give 9 }
     when nativeEquals(source, w, "div") { give 10 }
     when nativeEquals(source, w, "rem") { give 11 }
+    when nativeEquals(source, w, "band") { give 12 }
+    when nativeEquals(source, w, "bor") { give 13 }
+    when nativeEquals(source, w, "bxor") { give 14 }
+    when nativeEquals(source, w, "shl") { give 15 }
+    when nativeEquals(source, w, "shr") { give 16 }
+    when nativeEquals(source, w, "wadd") { give 17 }
+    when nativeEquals(source, w, "wsub") { give 18 }
+    when nativeEquals(source, w, "wmul") { give 19 }
     give 0
 }
 

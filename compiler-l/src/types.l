@@ -65,6 +65,17 @@ flow parseTypeAtom(tree: edit AstTree, source: view Text, cursor: edit TokenCurs
             change arrLen = 0
             choose tokenKindValue(view lenTok.kind) {
                 LexKind.Integer : {
+                    when parserIsRadixLiteral(source, lenTok.start, lenTok.end) {
+                        hold radix = parserParseRadixInt(source, lenTok.start, lenTok.end)
+                        when !radix.ok || radix.value < 0 {
+                            astAddError(edit tree, ParseProblem.ExpectedToken, "entero", lenTok.start, lenTok.end)
+                            give -1
+                        }
+                        cursor.pos += 1
+                        parserNeedSymbol(edit tree, source, edit cursor, tokens, "]")
+                        hold radix_end = cursorPrevEnd(cursor, tokens, tok.end)
+                        give astAddType(edit tree, AstTypeKind.Array, tok.start, radix_end, elem, radix.value, 0)
+                    }
                     when parserIsFloatLiteral(source, lenTok.start, lenTok.end) {
                         astAddError(edit tree, ParseProblem.ExpectedToken, "entero", lenTok.start, lenTok.end)
                         give -1

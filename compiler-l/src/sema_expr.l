@@ -476,7 +476,7 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             }
             hold lhs = lirTakeOperand(edit ctx, lhs_t)
             change rhs = LIR_NONE
-            when op == 38 || op == 124 {
+            when lirIsLogicalOp(source, expr.c, expr.d) {
                 hold rhs_block = flowBlock(edit ctx.flow)
                 hold join = flowBlock(edit ctx.flow)
                 hold result = semaShortVar(edit ctx, lhs, op == 124)

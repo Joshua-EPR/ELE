@@ -107,6 +107,40 @@ expose flow x64AndReg(code: edit X64Code, dst: Int, src: Int) {
     x64ModRmRegisters(edit code, src, dst)
 }
 
+// OR r/m64,r64 (REX.W 09 /r): destination is ModRM.r/m.
+expose flow x64OrReg(code: edit X64Code, dst: Int, src: Int) {
+    when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
+    x64RexRegRm(edit code, src, dst)
+    x64Put(edit code, 9)
+    x64ModRmRegisters(edit code, src, dst)
+}
+
+// NOT r/m64 (REX.W F7 /2).
+expose flow x64NotReg(code: edit X64Code, reg: Int) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    change rex = 72
+    when reg >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 247)
+    x64Put(edit code, 208 + reg % 8)
+}
+
+// SHL r/m64,CL (REX.W D3 /4) or SHR r/m64,CL (REX.W D3 /5): the count is
+// in CL and the CPU uses only its low 6 bits.
+expose flow x64ShiftClReg(code: edit X64Code, reg: Int, left: Bool) {
+    when !x64RegisterValid(reg) { code.error = 3; give }
+    change rex = 72
+    when reg >= 8 { rex += 1 }
+    x64Put(edit code, rex)
+    x64Put(edit code, 211)
+    x64Put(edit code, selectByte(left, 224, 232) + reg % 8)
+}
+
+flow selectByte(cond: Bool, yes: Int, no: Int) => Int {
+    when cond { give yes }
+    give no
+}
+
 expose flow x64SubReg(code: edit X64Code, dst: Int, src: Int) {
     when !x64RegisterValid(dst) || !x64RegisterValid(src) { code.error = 3; give }
     x64RexRegRm(edit code, src, dst)

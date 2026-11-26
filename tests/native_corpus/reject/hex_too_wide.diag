@@ -1,0 +1,2 @@
+hex_too_wide.l:2:10: error[PARSER]
+literal entero de más de 64 bits

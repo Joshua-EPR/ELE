@@ -192,12 +192,14 @@ flow lirVerifyInstCore(v: edit LirVerifier, l: view LirFn, types: view TypeTable
         when (inst.a == LIR_NEG && (ty == 1 || ty == 2)) || (inst.a == LIR_NOT && ty == 4) { result = ty }
         when inst.a == LIR_ITOF && ty == 1 { result = 2 }
         when inst.a == LIR_FTOI && ty == 2 { result = 1 }
+        when inst.a == LIR_BNOT && ty == 1 { result = 1 }
         when !lirUse(edit v, l, inst.b, check) { give 5 }
     } otherwise when kind == LIR_BINARY {
         hold lt = lirOperandType(l, inst.b)
         hold rt = lirOperandType(l, inst.c)
         when lirTypesCompat(types, lm, lt, rt) && lt != LIR_TY_ERR {
             when inst.a <= LIR_REM && (lt == 1 || lt == 2) { result = lt }
+            when inst.a >= LIR_BAND && inst.a <= LIR_WMUL && lt == 1 { result = 1 }
             when inst.a >= LIR_EQ && inst.a <= LIR_GE && (lt == 1 || rt == 1 || lt == 2 || ((lt == 4 || lirIsUnitEnum(types, lm, lt)) && inst.a <= LIR_NE)) { result = 4 }
         }
         when !lirUse(edit v, l, inst.b, check) || !lirUse(edit v, l, inst.c, check) { give 5 }

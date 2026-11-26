@@ -162,7 +162,9 @@ impl Lexer {
                     self.bump();
                     self.bump();
                     Kind::Sym(pair)
-                } else if "(){}[]:;,=+-*/%!<>.?&@".contains(c) {
+                } else if "(){}[]:;,=+-*/%!<>.?&@|^~".contains(c) {
+                    // `|`, `^` and `~` are only lexed here: the bitwise
+                    // operators are implemented by the ELE-written driver.
                     if c == '{' {
                         braces += 1;
                     }

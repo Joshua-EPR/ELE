@@ -157,6 +157,36 @@ fn angle_close(code: &[&Kind], open: usize) -> Option<usize> {
     None
 }
 
+/// Whether `prev` closes an operand, so a following `&` is infix (bitwise
+/// and). Keywords that introduce an expression (`give &x`) do not.
+fn ends_operand(prev: Option<&Kind>) -> bool {
+    const PREFIX_WORDS: &[&str] = &[
+        "give",
+        "return",
+        "when",
+        "if",
+        "during",
+        "while",
+        "among",
+        "in",
+        "hold",
+        "let",
+        "change",
+        "var",
+        "view",
+        "edit",
+        "else",
+        "otherwise",
+        "yield",
+    ];
+    match prev {
+        Some(Kind::Int(_) | Kind::IntMinMagnitude | Kind::Float(_)) => true,
+        Some(Kind::Sym(s)) => s == ")" || s == "]",
+        Some(Kind::Word(w)) => !PREFIX_WORDS.contains(&w.as_str()),
+        _ => false,
+    }
+}
+
 /// Counts the legacy constructs of one source, by category. Fails only when
 /// Stage 0's lexer rejects the source.
 fn audit(source: &str) -> Result<Counts, String> {
@@ -222,6 +252,9 @@ fn audit(source: &str) -> Result<Counts, String> {
                         bump("match_arm_arrow".into());
                     }
                 }
+                // After an operand (`x & y`, `f() & 1`, `a[i] & m`) `&` is the
+                // ELE v2 bitwise and, not a borrow.
+                "&" if ends_operand(prev) => {}
                 "&" => {
                     if next.and_then(word) == Some("mut") {
                         bump("borrow_mut".into());
@@ -454,6 +487,18 @@ fn audit_counts_legacy_code_tokens() {
     assert_eq!(count("fn f() -> Int { return 1 }", "kw_return"), 1);
     let src = "flow f(a: &Text, b: &mut Int) => Int {\n    hold x = &a\n    give 0\n}";
     assert_eq!(count(src, "borrow_ref"), 2);
+    let bitwise = "flow f(a: Int) => Int {
+    give a & 0xFF | f(1) & a[0] & 3
+}";
+    assert_eq!(count(bitwise, "borrow_ref"), 0);
+    assert_eq!(
+        count(
+            "hold r = view a
+give &x",
+            "borrow_ref"
+        ),
+        1
+    );
     assert_eq!(count(src, "borrow_mut"), 1);
     assert_eq!(count(src, "kw_mut"), 0);
     assert_eq!(count("impl Cuenta {\n    mut fn f() {}\n}", "kw_mut"), 1);

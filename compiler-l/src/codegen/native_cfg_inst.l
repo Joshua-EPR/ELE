@@ -216,7 +216,7 @@ expose flow cfgReadInst(p: edit CfgProgram, source: view Text, reader: edit Nati
         hold float_op = first_type == cfgFloatType() && second_type == cfgFloatType()
         when inst.op == 0 || (!float_op && (first_type < 0 || second_type < 0)) { p.error = 35 }
         when float_op {
-            when inst.op == 11 { p.error = 36 }
+            when inst.op == 11 || inst.op >= 12 { p.error = 36 }
             when (inst.op <= 3 || inst.op == 10) && dest_type != cfgFloatType() { p.error = 36 }
             when inst.op >= 4 && inst.op <= 9 && dest_type != 1 { p.error = 36 }
         } otherwise {

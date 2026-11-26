@@ -211,6 +211,14 @@ flow lirPatchBinary(src: view Text, w: view LirPatchWord) => Int {
     when lirPatchEq(src, w, "le") { give LIR_LE }
     when lirPatchEq(src, w, "gt") { give LIR_GT }
     when lirPatchEq(src, w, "ge") { give LIR_GE }
+    when lirPatchEq(src, w, "band") { give LIR_BAND }
+    when lirPatchEq(src, w, "bor") { give LIR_BOR }
+    when lirPatchEq(src, w, "bxor") { give LIR_BXOR }
+    when lirPatchEq(src, w, "shl") { give LIR_SHL }
+    when lirPatchEq(src, w, "shr") { give LIR_SHR }
+    when lirPatchEq(src, w, "wadd") { give LIR_WADD }
+    when lirPatchEq(src, w, "wsub") { give LIR_WSUB }
+    when lirPatchEq(src, w, "wmul") { give LIR_WMUL }
     give -1
 }
 
@@ -239,6 +247,7 @@ flow lirPatchInst(src: view Text, r: edit LirPatchReader, l: edit LirFn, inst: e
         when lirPatchEq(src, view op, "not") { inst.a = LIR_NOT }
         when lirPatchEq(src, view op, "itof") { inst.a = LIR_ITOF }
         when lirPatchEq(src, view op, "ftoi") { inst.a = LIR_FTOI }
+        when lirPatchEq(src, view op, "bnot") { inst.a = LIR_BNOT }
         inst.b = lirPatchOperand(src, edit r, edit l)
     } otherwise when lirPatchEq(src, view w, "binary") {
         inst.kind = LIR_BINARY

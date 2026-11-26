@@ -17,6 +17,14 @@ flow lirBinaryName(op: Int) => Text {
     when op == LIR_LT { give "lt" }
     when op == LIR_LE { give "le" }
     when op == LIR_GT { give "gt" }
+    when op == LIR_BAND { give "band" }
+    when op == LIR_BOR { give "bor" }
+    when op == LIR_BXOR { give "bxor" }
+    when op == LIR_SHL { give "shl" }
+    when op == LIR_SHR { give "shr" }
+    when op == LIR_WADD { give "wadd" }
+    when op == LIR_WSUB { give "wsub" }
+    when op == LIR_WMUL { give "wmul" }
     give "ge"
 }
 
@@ -38,6 +46,7 @@ flow lirInstText(l: view LirFn, source: view Text, lm: view LirModule, id: Int) 
         when inst.a == LIR_NOT { give "i unary v{dst} not {op}" }
         when inst.a == LIR_ITOF { give "i unary v{dst} itof {op}" }
         when inst.a == LIR_FTOI { give "i unary v{dst} ftoi {op}" }
+        when inst.a == LIR_BNOT { give "i unary v{dst} bnot {op}" }
         give "i unary v{dst} neg {op}"
     }
     when kind == LIR_BINARY {

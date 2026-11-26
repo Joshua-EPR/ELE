@@ -20,6 +20,7 @@ expose flow cfgReadUnary(p: edit CfgProgram, f: Int, source: view Text, reader: 
     when nativeEquals(source, view name, "not") { inst.op = 2 }
     when nativeEquals(source, view name, "itof") { inst.op = 3 }
     when nativeEquals(source, view name, "ftoi") { inst.op = 4 }
+    when nativeEquals(source, view name, "bnot") { inst.op = 5 }
     inst.a = nativeOperand(source, edit reader)
 }
 
@@ -32,6 +33,7 @@ expose flow cfgCheckUnary(p: view CfgProgram, f: Int, inst: view CfgInst) => Int
     when inst.op == 1 && dest == cfgFloatType() && operand == cfgFloatType() { give 0 }
     when inst.op == 3 && dest == cfgFloatType() && operand == 0 { give 0 }
     when inst.op == 4 && dest == 0 && operand == cfgFloatType() { give 0 }
+    when inst.op == 5 && dest == 0 && operand == 0 { give 0 }
     give 36
 }
 
@@ -57,6 +59,25 @@ expose flow cfgEmitDivRem(code: edit X64Code, fix: edit CfgFix, op: Int) {
     x64Cqo(edit code)
     x64IdivReg(edit code, 1)
     when op == 11 { x64MovReg(edit code, 0, 2) }
+}
+
+// Bitwise and wrapping Int operations, RAX = RAX op RCX (ops 12..19):
+// and, or, xor, shl, shr (logical), wrapping add, sub and mul. Only the
+// shifts check: a count outside 0..63 (unsigned RCX >= 64) is the
+// arithmetic failure, exactly as in constant folding.
+expose flow cfgEmitBitwise(code: edit X64Code, fix: edit CfgFix, op: Int) {
+    when op == 12 { x64AndReg(edit code, 0, 1) }
+    when op == 13 { x64OrReg(edit code, 0, 1) }
+    when op == 14 { x64XorReg(edit code, 0, 1) }
+    when op == 15 || op == 16 {
+        x64MovImm64(edit code, 10, 64)
+        x64CmpReg(edit code, 1, 10)
+        fix.overflow_at@push(x64AboveEqualPlaceholder(edit code))
+        x64ShiftClReg(edit code, 0, op == 15)
+    }
+    when op == 17 { x64AddReg(edit code, 0, 1) }
+    when op == 18 { x64SubReg(edit code, 0, 1) }
+    when op == 19 { x64MulReg(edit code, 0, 1) }
 }
 
 // Float binary operation or comparison on bit patterns. Arithmetic never
@@ -99,6 +120,8 @@ expose flow cfgEmitUnary(code: edit X64Code, p: view CfgProgram, f: Int, inst: v
     } otherwise when inst.op == 4 {
         x64MovqToXmm(edit code, 0, 0)
         x64SaturatingFloatToInt(edit code)
+    } otherwise when inst.op == 5 {
+        x64NotReg(edit code, 0)
     } otherwise when inst.op == 1 {
         // NEG sets OF exactly for Int.MIN.
         x64NegReg(edit code, 0)

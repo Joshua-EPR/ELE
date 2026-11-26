@@ -95,7 +95,7 @@ flow semaConstType(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 give 7
             }
             hold op = source@byteAt(expr.b)
-            when op != 45 && op != 33 {
+            when op != 45 && op != 33 && op != 126 {
                 semaConstLeaf(edit ctx, expr_id, CONST_UNSUPPORTED)
                 give 7
             }
@@ -107,6 +107,13 @@ flow semaConstType(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                     give 7
                 }
                 give 4
+            }
+            when op == 126 {
+                when !semTypeEquals(view ctx.types, sub, 1) {
+                    semaAddError(edit ctx, "L0003", "operador '~' requiere operando de tipo Int", expr.start, expr.end)
+                    give 7
+                }
+                give 1
             }
             hold st = view ctx.types.types[sub]
             when !semTypeIsNumeric(st.kind) {
@@ -140,7 +147,7 @@ flow semaConstBinaryType(ctx: edit SemaContext, source: view Text, tree: view As
     hold b0 = source@byteAt(expr.c)
     hold lk = view ctx.types.types[lt]
     hold numeric = semTypeIsNumeric(lk.kind)
-    when b0 == 61 || b0 == 33 || b0 == 60 || b0 == 62 {
+    when lirIsComparisonOp(source, expr.c, expr.d) {
         hold equality = b0 == 61 || b0 == 33
         hold comparable = numeric || (equality && (lt == 4 || lt == 6))
         when !comparable || !semTypeEquals(view ctx.types, lt, rt) {
@@ -155,12 +162,16 @@ flow semaConstBinaryType(ctx: edit SemaContext, source: view Text, tree: view As
         }
         give 4
     }
-    when b0 == 38 || b0 == 124 {
+    when lirIsLogicalOp(source, expr.c, expr.d) {
         when !semTypeEquals(view ctx.types, lt, 4) || !semTypeEquals(view ctx.types, rt, 4) {
             semaAddError(edit ctx, "L0003", "operador lógico requiere operandos de tipo Bool", expr.start, expr.end)
             give 7
         }
         give 4
+    }
+    when lirBinaryOp(source, expr.c, expr.d) >= LIR_BAND && !semTypeEquals(view ctx.types, lt, 1) {
+        semaAddError(edit ctx, "L0003", "operador de bits o envolvente requiere operandos de tipo Int", expr.start, expr.end)
+        give 7
     }
     when !numeric {
         hold l_name = semTypeName(view ctx.types, source, lt)
@@ -287,6 +298,7 @@ flow semaConstFold(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             hold sub = semaConstFold(edit ctx, source, tree, expr.a)
             when sub.state != SEMA_CONST_READY { give sub }
             when source@byteAt(expr.b) == 33 { give semaConstBool(sub.value == 0) }
+            when source@byteAt(expr.b) == 126 { give semaConstInt(constBitwise(sub.value, -1, 3)) }
             // Only a negated Float literal is a constant Float (sign flip).
             when sub.ty == 2 { give semaConstValue(SEMA_CONST_READY, 2, LIR_CONST_FLOAT, floatBitsNegate(sub.value), 0, 0) }
             hold min = -9223372036854775807 - 1
@@ -295,13 +307,14 @@ flow semaConstFold(ctx: edit SemaContext, source: view Text, tree: view AstTree,
         }
         AstExprKind.Binary : {
             hold op = source@byteAt(expr.c)
+            hold logical = lirIsLogicalOp(source, expr.c, expr.d)
             hold left = semaConstFold(edit ctx, source, tree, expr.a)
             when left.state != SEMA_CONST_READY { give left }
-            when op == 38 && left.value == 0 { give semaConstBool(false) }
-            when op == 124 && left.value != 0 { give semaConstBool(true) }
+            when logical && op == 38 && left.value == 0 { give semaConstBool(false) }
+            when logical && op == 124 && left.value != 0 { give semaConstBool(true) }
             hold right = semaConstFold(edit ctx, source, tree, expr.b)
             when right.state != SEMA_CONST_READY { give right }
-            when op == 38 || op == 124 { give semaConstBool(right.value != 0) }
+            when logical { give semaConstBool(right.value != 0) }
             hold code = lirBinaryOp(source, expr.c, expr.d)
             when left.ty == 1 {
                 hold result = semaConstIntOp(code, left.value, right.value)
@@ -316,6 +329,102 @@ flow semaConstFold(ctx: edit SemaContext, source: view Text, tree: view AstTree,
         }
         _ : { give semaConstFailed() }
     }
+}
+
+// 64-bit patterns as four unsigned 16-bit limbs, least significant first.
+// The compiler cannot use the operators it implements (the seed does not
+// have them), so constant folding works limb by limb with checked
+// arithmetic that never overflows.
+flow constLimbs(x: Int) => List of[Int] {
+    change out: List of[Int] = List[]
+    change v = x
+    each i among 0..4 {
+        change r = v % 65536
+        when r < 0 { r += 65536 }
+        // v - r is a multiple of 65536 no smaller than Int.MIN.
+        v = (v - r) / 65536
+        out@push(r)
+    }
+    give out
+}
+
+flow constFromLimbs(l: view List of[Int]) => Int {
+    change top = l[3]
+    when top >= 32768 { top -= 65536 }
+    give ((top * 65536 + l[2]) * 65536 + l[1]) * 65536 + l[0]
+}
+
+// op 0 and, 1 or, 2 xor, 3 not (of x; y ignored).
+flow constBitwise(x: Int, y: Int, op: Int) => Int {
+    hold a = constLimbs(x)
+    hold b = constLimbs(y)
+    change out: List of[Int] = List[]
+    each i among 0..4 {
+        change u = a[i]
+        change w = b[i]
+        change r = 0
+        change place = 1
+        each k among 0..16 {
+            hold p = u % 2
+            hold q = w % 2
+            change bit = 0
+            when op == 0 && p == 1 && q == 1 { bit = 1 }
+            when op == 1 && (p == 1 || q == 1) { bit = 1 }
+            when op == 2 && p != q { bit = 1 }
+            when op == 3 && p == 0 { bit = 1 }
+            r += bit * place
+            place = place * 2
+            u = u / 2
+            w = w / 2
+        }
+        out@push(r)
+    }
+    give constFromLimbs(out)
+}
+
+flow constWrapAdd(x: Int, y: Int) => Int {
+    hold a = constLimbs(x)
+    hold b = constLimbs(y)
+    change out: List of[Int] = List[]
+    change carry = 0
+    each i among 0..4 {
+        hold s = a[i] + b[i] + carry
+        out@push(s % 65536)
+        carry = s / 65536
+    }
+    give constFromLimbs(out)
+}
+
+flow constWrapMul(x: Int, y: Int) => Int {
+    hold a = constLimbs(x)
+    hold b = constLimbs(y)
+    change cols: List of[Int] = List[0, 0, 0, 0]
+    each i among 0..4 {
+        each j among 0..4 - i {
+            cols[i + j] = cols[i + j] + a[i] * b[j]
+        }
+    }
+    change out: List of[Int] = List[]
+    change carry = 0
+    each i among 0..4 {
+        hold s = cols[i] + carry
+        out@push(s % 65536)
+        carry = s / 65536
+    }
+    give constFromLimbs(out)
+}
+
+// Logical shift right: zeros enter at bit 63.
+flow constShiftRight(x: Int, n: Int) => Int {
+    change l = constLimbs(x)
+    each step among 0..n {
+        each i among 0..4 {
+            change high = 0
+            when i < 3 { high = (l[i + 1] % 2) * 32768 }
+            l[i] = l[i] / 2 + high
+        }
+    }
+    give constFromLimbs(l)
 }
 
 // Checked Int operation (Rust checked_* semantics); FAILED on overflow and
@@ -353,6 +462,22 @@ flow semaConstIntOp(code: Int, x: Int, y: Int) => SemaConst {
         when y == 0 || (x == min && y == -1) { give semaConstFailed() }
         when code == LIR_DIV { give semaConstInt(x / y) }
         give semaConstInt(x % y)
+    }
+    when code == LIR_BAND { give semaConstInt(constBitwise(x, y, 0)) }
+    when code == LIR_BOR { give semaConstInt(constBitwise(x, y, 1)) }
+    when code == LIR_BXOR { give semaConstInt(constBitwise(x, y, 2)) }
+    when code == LIR_WADD { give semaConstInt(constWrapAdd(x, y)) }
+    when code == LIR_WSUB { give semaConstInt(constWrapAdd(x, constWrapAdd(constBitwise(y, -1, 3), 1))) }
+    when code == LIR_WMUL { give semaConstInt(constWrapMul(x, y)) }
+    when code == LIR_SHL || code == LIR_SHR {
+        // Same rule as the generated code: a count outside 0..63 fails.
+        when y < 0 || y > 63 { give semaConstFailed() }
+        when code == LIR_SHL {
+            change power = 1
+            each i among 0..y { power = constWrapAdd(power, power) }
+            give semaConstInt(constWrapMul(x, power))
+        }
+        give semaConstInt(constShiftRight(x, y))
     }
     when code == LIR_EQ { give semaConstBool(x == y) }
     when code == LIR_NE { give semaConstBool(x != y) }

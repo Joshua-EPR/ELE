@@ -120,6 +120,57 @@ expose flow parserParseDecimalInt(source: view Text, start: Int, end: Int) => In
     give val
 }
 
+// A `0x` or `0b` literal: its value is the 64-bit two's complement pattern,
+// so 0xFFFF_FFFF_8000_0000 is the address -2147483648 (the higher half).
+expose flow parserIsRadixLiteral(source: view Text, start: Int, end: Int) => Bool {
+    when end - start < 3 || source@byteAt(start) != 48 { give false }
+    hold r = source@byteAt(start + 1)
+    give r == 120 || r == 98
+}
+
+expose shape RadixValue {
+    ok: Bool
+    value: Int
+}
+
+// Accumulates up to 64 bits; more significant bits are an error. Digits
+// are added with ELE's checked arithmetic: bit 63 is added last, as
+// Int.MIN, so no step overflows.
+expose flow parserParseRadixInt(source: view Text, start: Int, end: Int) => RadixValue {
+    hold bits_per = selectInt(source@byteAt(start + 1) == 120, 4, 1)
+    change bits: List of[Int] = List[]
+    each i among start + 2..end {
+        hold b = source@byteAt(i)
+        change d = -1
+        when b >= 48 && b <= 57 { d = b - 48 }
+        when b >= 65 && b <= 70 { d = b - 55 }
+        when b >= 97 && b <= 102 { d = b - 87 }
+        when d >= 0 {
+            change mask = 1
+            each k among 1..bits_per { mask = mask * 2 }
+            during mask > 0 {
+                bits@push((d / mask) % 2)
+                mask = mask / 2
+            }
+        }
+    }
+    // Leading zero bits do not count toward the width.
+    change lead = 0
+    during lead < bits.length && bits[lead] == 0 { lead += 1 }
+    when bits.length - lead > 64 { give RadixValue(ok: false, value: 0) }
+    change value = 0
+    change top = false
+    each i among lead..bits.length {
+        when bits.length - 1 - i == 63 {
+            top = true
+        } otherwise {
+            value = value * 2 + bits[i]
+        }
+    }
+    when top { value = value + (-9223372036854775807 - 1) }
+    give RadixValue(ok: true, value: value)
+}
+
 // The decimal magnitude 9223372036854775808 (2^63): out of range as an Int,
 // valid only as the operand of a unary minus.
 expose flow parserIsIntMinMagnitude(source: view Text, start: Int, end: Int) => Bool {
@@ -201,14 +252,22 @@ expose flow parserNeedSymbol(tree: edit AstTree, source: view Text, cursor: edit
     give false
 }
 
+// Binary precedence, lowest first (as in Rust): ?? 1, || 2, && 3,
+// == != 4, < > <= >= 5, | 6, ^ 7, & 8, << >> 9, + - +% -% 10,
+// * / % *% 11. Prefix operators bind tighter: PARSER_PREC_UNARY.
+expose fixed PARSER_PREC_UNARY = 12
+
 expose flow parserGetBinaryPrecedence(source: view Text, token: view LexToken) => Int {
     choose tokenKindValue(view token.kind) {
         LexKind.Symbol : {
             hold len = token.end - token.start
             hold b0 = source@byteAt(token.start)
             when len == 1 {
-                when b0 == 42 || b0 == 47 || b0 == 37 { give 7 }
-                when b0 == 43 || b0 == 45 { give 6 }
+                when b0 == 42 || b0 == 47 || b0 == 37 { give 11 }
+                when b0 == 43 || b0 == 45 { give 10 }
+                when b0 == 38 { give 8 }
+                when b0 == 94 { give 7 }
+                when b0 == 124 { give 6 }
                 when b0 == 60 || b0 == 62 { give 5 }
                 give 0
             }
@@ -219,6 +278,9 @@ expose flow parserGetBinaryPrecedence(source: view Text, token: view LexToken) =
                 when b0 == 38 && b1 == 38 { give 3 }
                 when (b0 == 61 || b0 == 33) && b1 == 61 { give 4 }
                 when (b0 == 60 || b0 == 62) && b1 == 61 { give 5 }
+                when (b0 == 60 || b0 == 62) && b1 == b0 { give 9 }
+                when b1 == 37 && b0 == 42 { give 11 }
+                when b1 == 37 && (b0 == 43 || b0 == 45) { give 10 }
                 give 0
             }
             give 0

@@ -1,0 +1,2 @@
+const_shift_range.l:1:17: error[L0004]
+panic en const

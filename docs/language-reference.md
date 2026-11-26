@@ -185,6 +185,36 @@ hold greeting = "Hello, {name}! 2 + 2 = {2 + 2}"
 ```
 Literal braces inside text literals are escaped using `{{` and `}}`.
 
+### Integer Literals and Operators
+
+`Int` literals are decimal (`1_000`), hexadecimal (`0xFF_00`) or binary
+(`0b1010`); `_` separates digits. A `0x`/`0b` literal is a **64-bit two's
+complement pattern**: up to 64 significant bits are accepted and bit 63 is
+the sign, so `0xFFFF_FFFF_8000_0000` is `-2147483648` (a higher-half
+address). More than 64 significant bits is an error.
+
+| Operators | Meaning | Traps |
+|---|---|---|
+| `*` `/` `%` `*%` | multiply, divide, remainder, wrapping multiply | `*` `/` `%` on overflow or zero divisor |
+| `+` `-` `+%` `-%` | add, subtract, wrapping add/subtract | `+` `-` on overflow |
+| `<<` `>>` | shift left, logical shift right (zeros enter) | count outside `0..63` |
+| `&` | bitwise and | never |
+| `^` | bitwise xor | never |
+| `\|` | bitwise or | never |
+| `<` `>` `<=` `>=` | comparison (not chainable) | never |
+| `==` `!=` | equality | never |
+| `&&` | logical and (short-circuit) | never |
+| `\|\|` | logical or (short-circuit) | never |
+| `??` | option default | never |
+
+Rows are in decreasing precedence (as in Rust), so `x & MASK == 0` is
+`(x & MASK) == 0` and `1 + 2 << 3` is `24`. The prefix operators `-`, `!`
+and `~` (bitwise not of an `Int`) bind tighter than every binary operator.
+Bitwise, shift and wrapping operators take only `Int` operands; they are
+also folded in `fixed` constants, where a failing operation is a
+compile-time error. A failure at run time stops the program with status
+125, like an overflow.
+
 ---
 
 ## 6. Modules and Visibility
