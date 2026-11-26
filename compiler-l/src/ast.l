@@ -21,6 +21,8 @@ expose choice AstExprKind {
     Match
     Choose
     Named
+    // A Float literal; `a` holds the IEEE-754 binary64 bit pattern.
+    FloatLit
 }
 
 expose shape AstExpr {
@@ -295,6 +297,7 @@ flow astExprKindName(kind: AstExprKind) => Text {
         AstExprKind.Match : { give "Match" }
         AstExprKind.Choose : { give "Choose" }
         AstExprKind.Named : { give "Named" }
+        AstExprKind.FloatLit : { give "FloatLit" }
     }
 }
 

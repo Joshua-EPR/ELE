@@ -85,6 +85,7 @@ expose flow lirLiteral(ctx: edit SemaContext, source: view Text, tree: view AstT
     hold expr = view tree.expressions[expr_id]
     choose expr.kind {
         AstExprKind.IntLit : { give lirConst(edit ctx.lir, LIR_CONST_INT, expr.a, 0, 0) }
+        AstExprKind.FloatLit : { give lirConst(edit ctx.lir, LIR_CONST_FLOAT, expr.a, 0, 0) }
         AstExprKind.BoolLit : { give lirConst(edit ctx.lir, LIR_CONST_BOOL, expr.a, 0, 0) }
         AstExprKind.UnitLit : { give lirConst(edit ctx.lir, LIR_CONST_UNIT, 0, 0, 0) }
         AstExprKind.Unary : {

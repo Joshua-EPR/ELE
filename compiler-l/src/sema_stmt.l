@@ -61,7 +61,7 @@ flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree
                         when variant.payload_count > 1 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         when variant.payload_count == 1 {
                             hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
-                            when ty != 1 && ty != 4 && ty != 5 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                            when ty != 1 && ty != 2 && ty != 4 && ty != 5 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         }
                     }
                 }

@@ -1,0 +1,1 @@
+float_const_arith.l:4:20: error[L0016]: expresión fuera del subconjunto de constantes de ELE

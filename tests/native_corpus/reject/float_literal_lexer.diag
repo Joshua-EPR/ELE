@@ -1,2 +1,0 @@
-float_literal_lexer.l:4:17: error[LEXER]
-literal de punto flotante fuera del subconjunto léxico

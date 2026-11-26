@@ -1,0 +1,12 @@
+1<2 lt=true le=true gt=false ge=false eq=false ne=true
+2<1 lt=false le=false gt=true ge=true eq=false ne=true
+eq lt=false le=true gt=false ge=true eq=true ne=false
+nan,1 lt=false le=false gt=false ge=false eq=false ne=true
+1,nan lt=false le=false gt=false ge=false eq=false ne=true
+nan,nan lt=false le=false gt=false ge=false eq=false ne=true
+inf,1 lt=false le=false gt=true ge=true eq=false ne=true
+-inf,1 lt=true le=true gt=false ge=false eq=false ne=true
+0,-0 lt=false le=true gt=false ge=true eq=true ne=false
+false
+true
+unordered

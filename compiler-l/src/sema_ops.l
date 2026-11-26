@@ -147,6 +147,10 @@ expose flow semaBinaryFinish(ctx: edit SemaContext, source: view Text, tree: vie
         give 7
     }
     hold op = lirBinaryOp(source, expr.c, expr.d)
+    when lhs_t == 2 && op == LIR_REM {
+        semaAddError(edit ctx, "L0016", "el operador '%' sobre Float no está soportado por el driver ELE", expr.start, expr.end)
+        give 7
+    }
     hold emitted = lirNew(edit ctx, lhs_t, false, LIR_BINARY, op, lhs, rhs)
     lirSetVal(edit ctx, emitted)
     give lhs_t

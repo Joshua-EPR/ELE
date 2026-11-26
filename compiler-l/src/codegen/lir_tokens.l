@@ -125,33 +125,41 @@ expose shape NativeOperand {
     is_unit: Bool
     // Text literal: `value` indexes the literal table of the program.
     is_text: Bool
+    // Float constant `cf<bits>`: `value` is the IEEE-754 binary64 bit
+    // pattern (as a signed Int), never a decimal text.
+    is_float: Bool
 }
 
 expose flow nativeOperand(source: view Text, reader: edit NativeReader) => NativeOperand {
     hold w = nativeWord(source, edit reader)
     when w.start >= w.end {
         reader.error = 7
-        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false, is_float: false)
     }
     when source@byteAt(w.start) == 118 {
         hold index = nativeDecimal(source, edit reader, view w, 1)
-        give NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false)
+        give NativeOperand(is_var: true, value: index, is_bool: false, is_unit: false, is_text: false, is_float: false)
     }
     when w.end - w.start >= 3 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 105 {
         hold value = nativeDecimal64(source, edit reader, view w, 2)
-        give NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false)
+        give NativeOperand(is_var: false, value: value, is_bool: false, is_unit: false, is_text: false, is_float: false)
+    }
+    // `cf<bits>`: the binary64 bit pattern as a signed decimal Int.
+    when w.end - w.start >= 3 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 102 {
+        hold bits = nativeDecimal64(source, edit reader, view w, 2)
+        give NativeOperand(is_var: false, value: bits, is_bool: false, is_unit: false, is_text: false, is_float: true)
     }
     when w.end - w.start == 3 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 98 {
         hold value = source@byteAt(w.start + 2)
-        when value == 48 { give NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false) }
-        when value == 49 { give NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false) }
+        when value == 48 { give NativeOperand(is_var: false, value: 0, is_bool: true, is_unit: false, is_text: false, is_float: false) }
+        when value == 49 { give NativeOperand(is_var: false, value: 1, is_bool: true, is_unit: false, is_text: false, is_float: false) }
     }
     // `cu` is the only unit constant. It carries no runtime value.
     when w.end - w.start == 2 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 117 {
-        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false)
+        give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: true, is_text: false, is_float: false)
     }
     reader.error = 7
-    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false, is_float: false)
 }
 
 expose flow nativeAtEnd(source: view Text, reader: view NativeReader) => Bool {

@@ -237,6 +237,8 @@ flow lirPatchInst(src: view Text, r: edit LirPatchReader, l: edit LirFn, inst: e
         hold op = lirPatchWord(src, edit r)
         inst.a = LIR_NEG
         when lirPatchEq(src, view op, "not") { inst.a = LIR_NOT }
+        when lirPatchEq(src, view op, "itof") { inst.a = LIR_ITOF }
+        when lirPatchEq(src, view op, "ftoi") { inst.a = LIR_FTOI }
         inst.b = lirPatchOperand(src, edit r, edit l)
     } otherwise when lirPatchEq(src, view w, "binary") {
         inst.kind = LIR_BINARY

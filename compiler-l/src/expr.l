@@ -3,6 +3,7 @@ take tokens
 take cursor
 take ast
 take parse_util
+take float_parse
 
 expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenCursor, tokens: view List of[LexToken], min_prec: Int, parens: Int, depth: Int) => Int {
     when depth > 128 {
@@ -174,6 +175,15 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
 
     choose tokenKindValue(view tok.kind) {
         LexKind.Integer : {
+            when parserIsFloatLiteral(source, tok.start, tok.end) {
+                hold bits = floatLiteralBits(source, tok.start, tok.end)
+                cursor.pos += 1
+                when bits < 0 {
+                    astAddError(edit tree, ParseProblem.UnexpectedToken, "literal Float fuera de rango", tok.start, tok.end)
+                    give -1
+                }
+                give astAddExpr(edit tree, AstExprKind.FloatLit, tok.start, tok.end, bits, 0, 0, 0)
+            }
             hold val = parserParseDecimalInt(source, tok.start, tok.end)
             cursor.pos += 1
             when val < 0 {

@@ -6,6 +6,7 @@ expose flow cfgType(p: view CfgProgram, source: view Text, reader: edit NativeRe
     hold w = nativeWord(source, edit reader)
     when nativeEquals(source, view w, "i") { give 0 }
     when nativeEquals(source, view w, "b") { give 1 }
+    when nativeEquals(source, view w, "f") { give cfgFloatType() }
     when nativeEquals(source, view w, "h") { give cfgFileType() }
     when nativeEquals(source, view w, "w") { give cfgWindowType() }
     when w.start < w.end && source@byteAt(w.start) == 115 {
@@ -33,6 +34,17 @@ expose flow cfgUnitType() => Int {
 expose flow cfgTextType() => Int {
     give -3
 }
+
+// Call targets of the Float text routines (native_rt_float): -1 - (base + k),
+// above every platform routine (native_cfg_platform: cfgPlatformBase() is
+// 1048576) so the three target spaces never overlap.
+expose flow cfgFloatRoutineBase() => Int { give 1052672 }
+
+// Float: an IEEE-754 binary64 value kept as its bit pattern in one 8-byte
+// word, so it is stored, copied, passed and returned exactly like an Int.
+// It is a distinct type code: only float instructions (the type selects the
+// operation of binary/unary) and the conversions itof/ftoi accept it.
+expose flow cfgFloatType() => Int { give -6 }
 
 // An opaque, linear File handle. Its storage is one machine word, but no
 // integer constant or arithmetic expression has this type.
@@ -67,7 +79,7 @@ expose flow cfgTypeOrUnit(p: view CfgProgram, source: view Text, reader: edit Na
 }
 
 expose flow cfgTypeSize(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 || cfgIsLinear(ty) { give 8 }
+    when ty == 0 || ty == cfgFloatType() || cfgIsLinear(ty) { give 8 }
     // A unit variable owns one never-read slot so that slot math stays uniform.
     when ty == cfgUnitType() { give 8 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 24 }
@@ -87,7 +99,7 @@ expose flow cfgMaxValueBytes() => Int {
 }
 
 expose flow cfgTypeAlign(p: view CfgProgram, ty: Int) => Int {
-    when ty == 0 || cfgIsLinear(ty) { give 8 }
+    when ty == 0 || ty == cfgFloatType() || cfgIsLinear(ty) { give 8 }
     when ty == 1 { give 1 }
     when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 { give 8 }
     when ty >= 2 && ty - 2 < p.structs.length { give p.structs[ty - 2].align }
@@ -124,7 +136,7 @@ expose flow cfgReadStruct(p: edit CfgProgram, source: view Text, reader: edit Na
         // A field may own a Text (three words); see native_cfg_paths.
         hold ty = cfgDeclType(p, source, edit reader, true)
         nativeEndLine(source, edit reader)
-        when reader.error != 0 || !cfgEncodedName(source, view fname) || (ty < 0 && ty != cfgTextType()) {
+        when reader.error != 0 || !cfgEncodedName(source, view fname) || (ty < 0 && ty != cfgTextType() && ty != cfgFloatType()) {
             p.error = 61
             leave
         }
@@ -184,7 +196,7 @@ expose flow cfgReadEnum(p: edit CfgProgram, source: view Text, reader: edit Nati
         change payload = -1
         when argc == 1 { payload = cfgDeclType(p, source, edit reader, true) }
         nativeEndLine(source, edit reader)
-        when reader.error != 0 || !cfgEncodedName(source, view vname) || (argc == 1 && payload < 0 && payload != cfgTextType()) {
+        when reader.error != 0 || !cfgEncodedName(source, view vname) || (argc == 1 && payload < 0 && payload != cfgTextType() && payload != cfgFloatType()) {
             p.error = 82
             give
         }
@@ -376,6 +388,7 @@ expose flow cfgOperandType(p: view CfgProgram, f: Int, op: view NativeOperand) =
         when op.is_unit { give cfgUnitType() }
         when op.is_text { give cfgTextType() }
         when op.is_bool { give 1 }
+        when op.is_float { give cfgFloatType() }
         give 0
     }
     when op.value < 0 || op.value >= p.functions[f].vars { give -1 }
@@ -438,7 +451,7 @@ expose flow cfgOperand(p: edit CfgProgram, source: view Text, reader: edit Nativ
     when w.end - w.start >= 4 && source@byteAt(w.start) == 99 && source@byteAt(w.start + 1) == 116 {
         reader.offset = probe.offset
         hold index = cfgReadTextLiteral(edit p, source, edit reader, view w)
-        give NativeOperand(is_var: false, value: index, is_bool: false, is_unit: false, is_text: index >= 0)
+        give NativeOperand(is_var: false, value: index, is_bool: false, is_unit: false, is_text: index >= 0, is_float: false)
     }
     give nativeOperand(source, edit reader)
 }

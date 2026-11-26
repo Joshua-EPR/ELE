@@ -17,6 +17,7 @@ take native_cfg_platform
 take native_rt_platform
 take win64_rt_platform
 take native_trap
+take native_rt_float
 
 // x86-64 ELF64 lowering for CFG with move-only structs, owned Text and lists
 // (native_cfg_list_emit). Calls use an ELE-internal convention: arguments on the stack, results
@@ -98,6 +99,8 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
             cfgLoadOperand(edit code, p, f, view inst.a, 0)
             x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
         }
+    } otherwise when inst.kind == 2 && cfgOperandType(p, f, view inst.a) == cfgFloatType() {
+        cfgEmitFloatBinary(edit code, p, f, inst)
     } otherwise when inst.kind == 2 {
         cfgLoadOperand(edit code, p, f, view inst.a, 0)
         cfgLoadOperand(edit code, p, f, view inst.b, 1)
@@ -484,6 +487,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             cfgEmitListRuntime(edit code, p, edit fix, edit runtime_at)
         }
     }
+    // Float text routines, only for programs that print or append a Float.
+    change float_at: List of[Int] = List[]
+    when cfgUsesFloatText(p) {
+        float_at = fltEmitAll(edit code, runtime_at[rtWriteAll()], runtime_at[rtTextAppend()])
+    }
     // Runtime and drop-glue indexes share the call target space with the
     // platform routines from cfgPlatformBase() on: they must stay below it.
     when runtime_at.length >= cfgPlatformBase() {
@@ -541,7 +549,10 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     each i among 0..fix.call_at.length {
         hold routine = -1 - fix.call_to[i] - cfgPlatformBase()
         hold platform_routine = routine >= 0 && routine < platform_at.length
-        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine { missing_routine = true }
+        hold float_index = -1 - fix.call_to[i] - cfgFloatRoutineBase()
+        hold float_routine = float_index >= 0 && float_index < float_at.length
+        when target == 1 && fix.call_to[i] < 0 && -1 - fix.call_to[i] >= runtime_at.length && !platform_routine && !float_routine { missing_routine = true }
+        when fix.call_to[i] < 0 && float_index >= 0 && !float_routine { missing_routine = true }
         // A platform routine left out of this image (-1) is never a target.
         when platform_routine && platform_at[routine] < 0 { missing_routine = true }
     }
@@ -554,6 +565,8 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         hold routine = -1 - callee - cfgPlatformBase()
         when callee >= 0 {
             x64PatchRelative(edit code, fix.call_at[i], func_at[callee])
+        } otherwise when -1 - callee - cfgFloatRoutineBase() >= 0 {
+            x64PatchRelative(edit code, fix.call_at[i], float_at[-1 - callee - cfgFloatRoutineBase()])
         } otherwise when routine >= 0 && routine < platform_at.length {
             x64PatchRelative(edit code, fix.call_at[i], platform_at[routine])
         } otherwise when -1 - callee < runtime_at.length {

@@ -1,0 +1,1 @@
+float_rem.l:3:14: error[L0016]: el operador '%' sobre Float no está soportado por el driver ELE

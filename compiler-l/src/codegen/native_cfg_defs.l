@@ -175,7 +175,7 @@ expose shape CfgProgram {
 }
 
 expose flow cfgEmptyOperand() => NativeOperand {
-    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false)
+    give NativeOperand(is_var: false, value: 0, is_bool: false, is_unit: false, is_text: false, is_float: false)
 }
 
 expose flow cfgEmpty() => CfgProgram {

@@ -1,3 +1,4 @@
+take float_parse
 take ast
 take sema_types
 take symbols
@@ -63,6 +64,7 @@ flow semaConstType(ctx: edit SemaContext, source: view Text, tree: view AstTree,
     hold expr = view tree.expressions[expr_id]
     choose expr.kind {
         AstExprKind.IntLit : { give 1 }
+        AstExprKind.FloatLit : { give 2 }
         AstExprKind.BoolLit : { give 4 }
         AstExprKind.TextLit : { give 5 }
         AstExprKind.UnitLit : { give 6 }
@@ -147,6 +149,10 @@ flow semaConstBinaryType(ctx: edit SemaContext, source: view Text, tree: view As
             semaAddError(edit ctx, "L0003", "comparación entre tipos incompatibles '{l_name}' y '{r_name}'", expr.start, expr.end)
             give 7
         }
+        when lt == 2 {
+            semaConstLeaf(edit ctx, expr_id, CONST_UNSUPPORTED)
+            give 7
+        }
         give 4
     }
     when b0 == 38 || b0 == 124 {
@@ -165,6 +171,12 @@ flow semaConstBinaryType(ctx: edit SemaContext, source: view Text, tree: view As
         hold l_name = semTypeName(view ctx.types, source, lt)
         hold r_name = semTypeName(view ctx.types, source, rt)
         semaAddError(edit ctx, "L0003", "operación entre tipos numéricos distintos '{l_name}' y '{r_name}'", expr.start, expr.end)
+        give 7
+    }
+    // The compiler folds constants with integer arithmetic only: Float
+    // arithmetic is evaluated at run time, not in a `const`.
+    when lt == 2 {
+        semaConstLeaf(edit ctx, expr_id, CONST_UNSUPPORTED)
         give 7
     }
     give lt
@@ -249,6 +261,7 @@ flow semaConstFold(ctx: edit SemaContext, source: view Text, tree: view AstTree,
     hold expr = view tree.expressions[expr_id]
     choose expr.kind {
         AstExprKind.IntLit : { give semaConstInt(expr.a) }
+        AstExprKind.FloatLit : { give semaConstValue(SEMA_CONST_READY, 2, LIR_CONST_FLOAT, expr.a, 0, 0) }
         AstExprKind.BoolLit : { give semaConstBool(expr.a != 0) }
         AstExprKind.UnitLit : { give semaConstValue(SEMA_CONST_READY, 6, LIR_CONST_UNIT, 0, 0, 0) }
         AstExprKind.TextLit : {
@@ -274,6 +287,8 @@ flow semaConstFold(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             hold sub = semaConstFold(edit ctx, source, tree, expr.a)
             when sub.state != SEMA_CONST_READY { give sub }
             when source@byteAt(expr.b) == 33 { give semaConstBool(sub.value == 0) }
+            // Only a negated Float literal is a constant Float (sign flip).
+            when sub.ty == 2 { give semaConstValue(SEMA_CONST_READY, 2, LIR_CONST_FLOAT, floatBitsNegate(sub.value), 0, 0) }
             hold min = -9223372036854775807 - 1
             when sub.value == min { give semaConstPanic(edit ctx, expr.start, expr.end) }
             give semaConstInt(0 - sub.value)

@@ -234,6 +234,10 @@ expose flow semaLirFinish(ctx: edit SemaContext, source: view Text, tree: view A
         semaAddError(edit ctx, "L0016", "construcción fuera del subconjunto de la LIR v1 de ELE", at, at)
         give
     }
+    // After a reported error, lowering may have recovered with placeholder
+    // values: no LIR is written then, and verifying it would only turn the
+    // user's error into a spurious internal compiler error.
+    when ctx.errors.length > 0 { give }
     change body = lirFinish(edit ctx.lir, view ctx.flow, plan, view ctx.lir_field_local)
     when ctx.lir_fault > 0 && ctx.lir_fault < 14 { lirInjectFault(edit ctx.lir, edit body, ctx.lir_fault) }
     when ctx.lir_fault >= 14 { lirInjectUnionFault(edit ctx.lir, edit body, view ctx.types, view ctx.lir_module, view ctx.drop_memo, ctx.lir_fault) }

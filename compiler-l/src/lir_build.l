@@ -18,6 +18,8 @@ expose fixed LIR_CONST_INT = 0
 expose fixed LIR_CONST_BOOL = 1
 expose fixed LIR_CONST_UNIT = 2
 expose fixed LIR_CONST_TEXT = 3
+// Float: `value` is the IEEE-754 binary64 bit pattern as a signed Int.
+expose fixed LIR_CONST_FLOAT = 4
 
 // Instruction kinds.
 expose fixed LIR_USE = 0
@@ -156,6 +158,10 @@ expose fixed LIR_GT = 9
 expose fixed LIR_GE = 10
 expose fixed LIR_NEG = 0
 expose fixed LIR_NOT = 1
+// Explicit conversions Float(Int) and Int(Float): Int(x) truncates toward
+// zero and saturates, NaN gives 0 (Stage 0 `fcvt_to_sint_sat`).
+expose fixed LIR_ITOF = 2
+expose fixed LIR_FTOI = 3
 
 expose shape LirVar {
     ty: Int

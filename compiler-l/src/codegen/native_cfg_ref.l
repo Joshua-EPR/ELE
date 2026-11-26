@@ -45,7 +45,7 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
         when reader.error != 0 || place.variable < 0 || (exclusive != 0 && exclusive != 1) { give 37 }
         hold ty = cfgPlaceType(p, f, view place)
         when ty == -1 || ty == cfgUnitType() { give 37 }
-        p.call_args@push(NativeOperand(is_var: true, value: place.variable, is_bool: false, is_unit: false, is_text: false))
+        p.call_args@push(NativeOperand(is_var: true, value: place.variable, is_bool: false, is_unit: false, is_text: false, is_float: false))
         p.call_ref@push(exclusive)
         p.call_field@push(place.field)
         p.call_sub@push(place.subfield)
@@ -61,7 +61,7 @@ expose flow cfgReadCallArg(p: edit CfgProgram, f: Int, source: view Text, reader
     p.call_sub@push(-1)
     p.call_ext@push(-1)
     // By value: primitives, Text, a whole shape/choice, or a linear resource.
-    when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType() && !cfgIsLinear(arg_type)) { give 37 }
+    when reader.error != 0 || (arg_type < 0 && arg_type != cfgTextType() && arg_type != cfgFloatType() && !cfgIsLinear(arg_type)) { give 37 }
     give 0
 }
 

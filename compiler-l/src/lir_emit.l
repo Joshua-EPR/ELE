@@ -173,6 +173,10 @@ expose flow lirOperandText(l: view LirFn, source: view Text, operand: Int) => Te
         give "cb{value}"
     }
     when c.kind == LIR_CONST_UNIT { give "cu" }
+    when c.kind == LIR_CONST_FLOAT {
+        hold bits = c.value
+        give "cf{bits}"
+    }
     hold bytes = lirDecode(source, c.start, c.end)
     hold text = lirBytesText(view bytes)
     give "ct{text}"

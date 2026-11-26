@@ -3,6 +3,7 @@ take native_cfg_types
 take x86_64
 take native_rt
 take native_rt_list
+take native_rt_float
 
 // Shared lowering helpers of the CFG backend and the lowering of Text:
 // literals, owned buffers, print, append and drop.
@@ -202,13 +203,29 @@ flow cfgLoadSource(code: edit X64Code, p: view CfgProgram, f: Int, inst: view Cf
     }
 }
 
+// Whether some `print`/`append` has a Float source: only then the Float text
+// routines are emitted.
+expose flow cfgUsesFloatText(p: view CfgProgram) => Bool {
+    each f among 0..p.functions.length {
+        hold func = view p.functions[f]
+        each b among func.first_block..(func.first_block + func.blocks) {
+            hold block = view p.blocks[b]
+            each i among block.first..(block.first + block.count) {
+                hold inst = view p.insts[i]
+                when (inst.kind == 10 || inst.kind == 12) && cfgSourceType(p, f, view inst) == cfgFloatType() { give true }
+            }
+        }
+    }
+    give false
+}
+
 // Type and operand of the source of `print`/`append`: the referenced
 // variable when `inst.op` names one, otherwise operand `a`.
 flow cfgSourceOperand(inst: view CfgInst) => NativeOperand {
     when inst.op >= 0 {
-        give NativeOperand(is_var: true, value: inst.op, is_bool: false, is_unit: false, is_text: false)
+        give NativeOperand(is_var: true, value: inst.op, is_bool: false, is_unit: false, is_text: false, is_float: false)
     }
-    give NativeOperand(is_var: inst.a.is_var, value: inst.a.value, is_bool: inst.a.is_bool, is_unit: inst.a.is_unit, is_text: inst.a.is_text)
+    give NativeOperand(is_var: inst.a.is_var, value: inst.a.value, is_bool: inst.a.is_bool, is_unit: inst.a.is_unit, is_text: inst.a.is_text, is_float: inst.a.is_float)
 }
 
 expose flow cfgEmitText(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
@@ -224,6 +241,8 @@ expose flow cfgEmitText(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
             cfgLoadSource(edit code, p, f, inst, ty, 7, edit fix)
             when ty == 1 {
                 cfgRuntimeCall(edit code, edit fix, rtPrintBool())
+            } otherwise when ty == cfgFloatType() {
+                cfgRuntimeCall(edit code, edit fix, cfgFloatRoutineBase() + fltPrintIndex())
             } otherwise {
                 cfgRuntimeCall(edit code, edit fix, rtPrintInt())
             }
@@ -248,6 +267,8 @@ expose flow cfgEmitText(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
             cfgVarAddress(edit code, p, f, inst.place_var, edit fix)
             when ty == 1 {
                 cfgRuntimeCall(edit code, edit fix, rtAppendBool())
+            } otherwise when ty == cfgFloatType() {
+                cfgRuntimeCall(edit code, edit fix, cfgFloatRoutineBase() + fltAppendIndex())
             } otherwise {
                 cfgRuntimeCall(edit code, edit fix, rtAppendInt())
             }
@@ -323,7 +344,7 @@ expose flow cfgDropAt(code: edit X64Code, fix: edit CfgFix, ty: Int) {
 // Int=8); fields of a nested struct are copied recursively by layout.
 // Only RAX is used as scratch, so R9 and R11 may hold addresses.
 expose flow cfgCopyValue(code: edit X64Code, p: view CfgProgram, ty: Int, dst_base: Int, dst_disp: Int, src_base: Int, src_disp: Int) => () {
-    when ty == 0 {
+    when ty == 0 || ty == cfgFloatType() {
         x64LoadMem64(edit code, 0, src_base, src_disp)
         x64StoreMem64(edit code, dst_base, dst_disp, 0)
     } otherwise when ty == cfgTextType() || cfgListIndex(p, ty) >= 0 {

@@ -1,0 +1,1 @@
+float_compare_int.l:4:10: error[L0003]: comparación entre tipos incompatibles 'Float' y 'Int'

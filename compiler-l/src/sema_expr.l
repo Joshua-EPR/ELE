@@ -230,7 +230,7 @@ flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree
                         when variant.payload_count > 1 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         when variant.payload_count == 1 {
                             hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
-                            when ty != 1 && ty != 4 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                            when ty != 1 && ty != 2 && ty != 4 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         }
                     }
                 }
@@ -430,6 +430,7 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
     ctx.borrow_site = SITE_NONE
     choose expr.kind {
         AstExprKind.IntLit : { give semaLiteral(edit ctx, source, tree, expr_id, 1) }
+        AstExprKind.FloatLit : { give semaLiteral(edit ctx, source, tree, expr_id, 2) }
         AstExprKind.BoolLit : { give semaLiteral(edit ctx, source, tree, expr_id, 4) }
         AstExprKind.TextLit : { give semaLiteral(edit ctx, source, tree, expr_id, 5) }
         AstExprKind.UnitLit : { give semaLiteral(edit ctx, source, tree, expr_id, 6) }
@@ -518,6 +519,42 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 }
                 semaAddError(edit ctx, "L0004", "print requiere un argumento imprimible", expr.start, expr.end)
                 give 7
+            }
+            // Explicit numeric conversions, never implicit (Stage 0):
+            // Float(x) / f64(x) of an Int or Float, Int(x) of an Int or Float.
+            hold name_float = "Float"
+            hold name_f64 = "f64"
+            hold name_f32 = "f32"
+            hold name_int = "Int"
+            change conversion = 0
+            when symbolNameEqualsText(source, name_start, name_end, name_float) || symbolNameEqualsText(source, name_start, name_end, name_f64) { conversion = 2 }
+            when symbolNameEqualsText(source, name_start, name_end, name_int) { conversion = 1 }
+            when symbolNameEqualsText(source, name_start, name_end, name_f32) {
+                semaAddError(edit ctx, "L0016", "F32 no está soportado por el driver ELE; use Float", expr.start, expr.end)
+                give 7
+            }
+            when conversion != 0 {
+                when arg_count != 1 {
+                    semaAddError(edit ctx, "L0004", "la conversión numérica requiere exactamente un argumento", expr.start, expr.end)
+                    give 7
+                }
+                hold from_t = semaCheckExpr(edit ctx, source, tree, tree.extra[first_arg])
+                hold from_operand = lirTakeOperand(edit ctx, from_t)
+                when from_t == 7 { give 7 }
+                when from_t != 1 && from_t != 2 {
+                    hold from_name = semTypeName(view ctx.types, source, from_t)
+                    semaAddError(edit ctx, "L0003", "no se puede convertir '{from_name}' a un tipo numérico", expr.start, expr.end)
+                    give 7
+                }
+                when from_t == conversion {
+                    lirSetVal(edit ctx, from_operand)
+                    give conversion
+                }
+                change conversion_op = LIR_FTOI
+                when conversion == 2 { conversion_op = LIR_ITOF }
+                hold converted = lirNew(edit ctx, conversion, false, LIR_UNARY, conversion_op, from_operand, 0)
+                lirSetVal(edit ctx, converted)
+                give conversion
             }
             change builtin_variant = -1
             when symbolNameEqualsText(source, name_start, name_end, name_ok) { builtin_variant = 0 }
@@ -1089,7 +1126,7 @@ flow semaEnumVariantCall(ctx: edit SemaContext, source: view Text, tree: view As
                 semaAddError(edit ctx, "L0004", "tipo incompatible de payload de enum", expr.start, expr.end)
                 give 7
             }
-            when expected != 1 && expected != 4 && expected != 5 {
+            when expected != 1 && expected != 2 && expected != 4 && expected != 5 {
                 semaAddError(edit ctx, "L0016", "payload propietario fuera del subconjunto nativo verificado", expr.start, expr.end)
                 give 7
             }

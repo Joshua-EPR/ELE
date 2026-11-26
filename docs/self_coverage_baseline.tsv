@@ -30,6 +30,7 @@ codegen/native_heap_resize.l	lir
 codegen/native_layout.l	lir
 codegen/native_list_int.l	lir
 codegen/native_rt.l	lir
+codegen/native_rt_float.l	lir
 codegen/native_rt_list.l	lir
 codegen/native_rt_platform.l	lir
 codegen/native_trap.l	lir
@@ -47,6 +48,7 @@ drops_dump.l	lir
 drops_plan.l	lir
 drops_verify.l	lir
 expr.l	lir
+float_parse.l	lir
 flow_cfg.l	lir
 flow_self_harness.l	backend
 lexer.l	lir

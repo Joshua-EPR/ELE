@@ -18,6 +18,8 @@ expose flow cfgReadUnary(p: edit CfgProgram, f: Int, source: view Text, reader: 
     hold name = nativeWord(source, edit reader)
     when nativeEquals(source, view name, "neg") { inst.op = 1 }
     when nativeEquals(source, view name, "not") { inst.op = 2 }
+    when nativeEquals(source, view name, "itof") { inst.op = 3 }
+    when nativeEquals(source, view name, "ftoi") { inst.op = 4 }
     inst.a = nativeOperand(source, edit reader)
 }
 
@@ -27,6 +29,9 @@ expose flow cfgCheckUnary(p: view CfgProgram, f: Int, inst: view CfgInst) => Int
     hold operand = cfgOperandType(p, f, view inst.a)
     when inst.op == 1 && dest == 0 && operand == 0 { give 0 }
     when inst.op == 2 && dest == 1 && operand == 1 { give 0 }
+    when inst.op == 1 && dest == cfgFloatType() && operand == cfgFloatType() { give 0 }
+    when inst.op == 3 && dest == cfgFloatType() && operand == 0 { give 0 }
+    when inst.op == 4 && dest == 0 && operand == cfgFloatType() { give 0 }
     give 36
 }
 
@@ -54,9 +59,47 @@ expose flow cfgEmitDivRem(code: edit X64Code, fix: edit CfgFix, op: Int) {
     when op == 11 { x64MovReg(edit code, 0, 2) }
 }
 
+// Float binary operation or comparison on bit patterns. Arithmetic never
+// traps (IEEE: x / 0 is inf or NaN). Comparisons are ordered: any compare
+// with NaN is false except `!=`, which is true. Only xmm0/xmm1 are used.
+expose flow cfgEmitFloatBinary(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst) {
+    cfgLoadOperand(edit code, p, f, view inst.a, 0)
+    cfgLoadOperand(edit code, p, f, view inst.b, 1)
+    x64MovqToXmm(edit code, 0, 0)
+    x64MovqToXmm(edit code, 1, 1)
+    when inst.op >= 1 && inst.op <= 3 {
+        x64SdOp(edit code, inst.op, 0, 1)
+        x64MovqFromXmm(edit code, 0, 0)
+    } otherwise when inst.op == 10 {
+        x64SdOp(edit code, 4, 0, 1)
+        x64MovqFromXmm(edit code, 0, 0)
+    } otherwise when inst.op == 4 || inst.op == 5 {
+        x64Ucomisd(edit code, 0, 1)
+        x64SetFloatFlag(edit code, inst.op)
+    } otherwise when inst.op == 6 || inst.op == 7 {
+        // a < b is b > a and a <= b is b >= a: unordered stays false.
+        x64Ucomisd(edit code, 1, 0)
+        when inst.op == 6 { x64SetFloatFlag(edit code, 7) } otherwise { x64SetFloatFlag(edit code, 3) }
+    } otherwise {
+        x64Ucomisd(edit code, 0, 1)
+        when inst.op == 8 { x64SetFloatFlag(edit code, 7) } otherwise { x64SetFloatFlag(edit code, 3) }
+    }
+    x64StoreSlot(edit code, p.slot_start[p.functions[f].first_var + inst.dst], 0)
+}
+
 expose flow cfgEmitUnary(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
     cfgLoadOperand(edit code, p, f, view inst.a, 0)
-    when inst.op == 1 {
+    when inst.op == 1 && cfgOperandType(p, f, view inst.a) == cfgFloatType() {
+        // Sign flip: -0.0 and NaN included, no trap.
+        x64MovImm64(edit code, 1, -9223372036854775807 - 1)
+        x64XorReg(edit code, 0, 1)
+    } otherwise when inst.op == 3 {
+        x64Cvtsi2sd(edit code, 0, 0)
+        x64MovqFromXmm(edit code, 0, 0)
+    } otherwise when inst.op == 4 {
+        x64MovqToXmm(edit code, 0, 0)
+        x64SaturatingFloatToInt(edit code)
+    } otherwise when inst.op == 1 {
         // NEG sets OF exactly for Int.MIN.
         x64NegReg(edit code, 0)
         fix.overflow_at@push(x64OverflowPlaceholder(edit code))
