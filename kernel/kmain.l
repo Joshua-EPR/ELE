@@ -116,8 +116,26 @@ flow hito4() {
     kprintEntero(memFisicaLibres() * MARCO / mib)
     kprintln(cadena(" MiB"))
 
+    // Diagnóstico: un marco físico de prueba antes del montón.
+    hold prueba = memFisicaReservar()
+    kprint(cadena("marco de prueba: "))
+    kprintHex(prueba)
+    kprintByte(10)
+    memFisicaLiberar(prueba)
+
     montonIniciar()
     hold a = montonReservar(100)
+    when a == 0 {
+        kprint(cadena("hito 4 FALLÓ: el montón no pudo crecer (motivo "))
+        kprintEntero(montonUltimoFallo())
+        kprint(cadena(", marco "))
+        kprintHex(montonMarcoDelFallo())
+        kprint(cadena(", libres "))
+        kprintEntero(memFisicaLibres())
+        kprintln(cadena(" marcos)"))
+        memImprimirMapa()
+        give
+    }
     hold b = montonReservar(5000)
     hold c = montonReservar(40)
     escribir64(a, 11)

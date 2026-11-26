@@ -11,6 +11,7 @@
 
 take nucleo.mem
 take arranque.limine
+take lib.consola
 
 expose fixed MARCO = 4096
 
@@ -189,4 +190,20 @@ expose flow memFisicaRecuperarCargador(pila: Int) => Int {
     }
     escribir64(estado() + 32, 0)
     give liberados
+}
+
+// Diagnóstico: el mapa de memoria copiado de Limine, cuatro entradas por
+// línea (tipo:base+KiB).
+expose flow memImprimirMapa() {
+    hold n = arranqueMemoriaCantidad()
+    each i among 0..n {
+        hold ent = arranqueMemoriaEntrada(i)
+        kprintEntero(leer64(ent + 16))
+        kprintByte(58)
+        kprintHex(leer64(ent))
+        kprintByte(43)
+        kprintEntero(leer64(ent + 8) / 1024)
+        when i % 3 == 2 { kprintByte(10) } otherwise { kprintByte(32) }
+    }
+    kprintByte(10)
 }

@@ -281,3 +281,22 @@ la mañana. Con el kernel de `main` sin cambios ocurría lo mismo, así que
 es el anfitrión, no una regresión. En TCG con esa carga, el hito 6 midió
 733 ms (falla la tolerancia de 400-700 ms): la emulación pierde precisión
 de tiempo. Las cifras que cuentan son las de la laptop.
+
+### Hito 10 en la laptop
+
+Primera prueba: memoria bien (`RAM: 3802 MiB (usable 3649, del cargador
+152, kernel 176 KiB)`, `no RAM: reservada 380 MiB, ACPI 173464 KiB,
+framebuffer 4128 KiB`, libres 3649 -> 3801 MiB tras recuperar 151 MiB).
+Pero justo después, `montonReservar(100)` devolvió 0 y la escritura en esa
+dirección dio un #PF (CR2 = 0, RIP en `hito4`, confirmado con objdump). No
+se reprodujo en QEMU (3,8 / 4 / 6 GiB).
+
+Se añadió diagnóstico: un marco de prueba reservado y liberado antes del
+montón; si el montón no crece, `hito 4 FALLÓ` con el motivo (sin marco /
+falló el mapeo), los marcos libres y el mapa de memoria completo. Con esa
+imagen la laptop arrancó entera ("ya corre correctamente").
+
+Causa sin confirmar. La única diferencia de comportamiento es el marco de
+prueba: deja la pista de búsqueda del asignador en el primer marco libre
+en vez de en 0. Se mantiene el código tal como se probó en la laptop. El
+diagnóstico se queda: si vuelve a pasar, el informe dirá el motivo.

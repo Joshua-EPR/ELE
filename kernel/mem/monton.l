@@ -18,14 +18,20 @@ fixed CRECIMIENTO = 65536
 fixed MINIMO = 32
 
 // Estado: +0 fin de la región mapeada, +8 primer bloque libre (0 = ninguno),
-// +16 bytes en uso.
-flow estado() => Int { give reservar(24, 8) }
+// +16 bytes en uso, +24 motivo del último fallo al crecer (0 ninguno,
+// 1 sin marco físico, 2 pagMapear4k falló), +32 marco del fallo.
+flow estado() => Int { give reservar(40, 8) }
+
+expose flow montonUltimoFallo() => Int { give leer64(estado() + 24) }
+expose flow montonMarcoDelFallo() => Int { give leer64(estado() + 32) }
 
 expose flow montonIniciar() {
     hold e = estado()
     escribir64(e, BASE)
     escribir64(e + 8, 0)
     escribir64(e + 16, 0)
+    escribir64(e + 24, 0)
+    escribir64(e + 32, 0)
 }
 
 expose flow montonEnUso() => Int { give leer64(estado() + 16) }
@@ -62,8 +68,15 @@ flow crecer(bytes: Int) => Bool {
     change d = 0
     during d < total {
         hold marco = memFisicaReservar()
-        when marco == 0 { give false }
-        when !pagMapear4k(inicio + d, marco, PAG_ESCRITURA) { give false }
+        when marco == 0 {
+            escribir64(e + 24, 1)
+            give false
+        }
+        when !pagMapear4k(inicio + d, marco, PAG_ESCRITURA) {
+            escribir64(e + 24, 2)
+            escribir64(e + 32, marco)
+            give false
+        }
         d += MARCO
     }
     escribir64(e, inicio + total)
