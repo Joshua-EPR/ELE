@@ -18,7 +18,7 @@ take mem.monton
 take dispositivos.acpi
 take dispositivos.apic
 take dispositivos.teclado
-take tiempo.hpet
+take tiempo.reloj
 take tiempo.temporizador
 take cpu.smp
 take bench.sgemm
@@ -150,14 +150,15 @@ flow hito6() {
     kprint(cadena(", CPU: "))
     kprintEntero(acpiCpus())
     kprintByte(10)
-    when !hpetIniciar(acpiHpetFisica()) {
-        kprintln(cadena("hito 6 FALLÓ: sin HPET"))
+    hold fuente = relojIniciar()
+    when fuente == RELOJ_NINGUNO {
+        kprintln(cadena("hito 6 FALLÓ: sin HPET ni temporizador PM de ACPI"))
         give
     }
     lapicIniciar()
     lapicCalibrar()
-    kprint(cadena("HPET "))
-    kprintEntero(hpetFrecuencia())
+    when fuente == RELOJ_HPET { kprint(cadena("HPET ")) } otherwise { kprint(cadena("temporizador PM ")) }
+    kprintEntero(relojFrecuencia())
     kprint(cadena(" Hz; TSC "))
     kprintEntero(tscCiclosPorMs() / 1000)
     kprint(cadena(" MHz; LAPIC "))
@@ -166,12 +167,12 @@ flow hito6() {
     temporizadorConfigurar(10)
     lapicTemporizadorPeriodico(10)
     sti()
-    hold h0 = hpetContador()
+    hold r0 = relojNanosegundos()
     temporizadorDormir(500)
-    hold ms = hpetNanosegundos(hpetContador() - h0) / 1000000
+    hold ms = (relojNanosegundos() - r0) / 1000000
     kprint(cadena("500 ms del temporizador = "))
     kprintEntero(ms)
-    kprint(cadena(" ms del HPET ("))
+    kprint(cadena(" ms del reloj de referencia ("))
     kprintEntero(temporizadorTics())
     kprintln(cadena(" tics)"))
     when ms >= 400 && ms <= 700 {

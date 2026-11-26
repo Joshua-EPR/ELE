@@ -12,14 +12,17 @@ take mem.paginacion
 // +16 LAPIC física, +24 IOAPIC física, +32 GSI base de la IOAPIC,
 // +40 HPET física, +48 número de CPU (LAPIC habilitados),
 // +56.. tabla de ISO: GSI de cada IRQ ISA 0..15 (16 palabras),
-// +184.. banderas de cada ISO (16 palabras), +312.. ids LAPIC (64).
-flow estado() => Int { give reservar(832, 8) }
+// +184.. banderas de cada ISO (16 palabras), +312.. ids LAPIC (64),
+// +832 puerto del temporizador PM, +840 1 si ese contador es de 32 bits.
+flow estado() => Int { give reservar(848, 8) }
 
 expose flow acpiLapicFisica() => Int { give leer64(estado() + 16) }
 expose flow acpiIoapicFisica() => Int { give leer64(estado() + 24) }
 expose flow acpiIoapicBase() => Int { give leer64(estado() + 32) }
 expose flow acpiHpetFisica() => Int { give leer64(estado() + 40) }
 expose flow acpiCpus() => Int { give leer64(estado() + 48) }
+expose flow acpiPuertoPm() => Int { give leer64(estado() + 832) }
+expose flow acpiPm32Bits() => Bool { give leer64(estado() + 840) == 1 }
 expose flow acpiIdLapic(i: Int) => Int { give leer64(estado() + 312 + i * 8) }
 
 // GSI de la IRQ ISA `irq` y sus banderas MPS (polaridad / disparo).
@@ -111,5 +114,12 @@ expose flow acpiIniciar() => Bool {
     leerMadt(madt)
     hold hpet = buscar(72, 80, 69, 84)    // "HPET"
     when hpet != 0 { escribir64(e + 40, leer64(tabla(hpet) + 44)) }
+    // FADT: PM_TMR_BLK (+76, puerto de E/S) y TMR_VAL_EXT (bit 8 de +112).
+    hold fadt = buscar(70, 65, 67, 80)    // "FACP"
+    when fadt != 0 {
+        hold t = tabla(fadt)
+        escribir64(e + 832, leer32(t + 76))
+        escribir64(e + 840, (leer32(t + 112) >> 8) & 1)
+    }
     give leer64(e + 24) != 0
 }

@@ -23,7 +23,7 @@ take cpu.idt
 take cpu.caracteristicas
 take dispositivos.acpi
 take dispositivos.apic
-take tiempo.hpet
+take tiempo.reloj
 
 expose fixed VECTOR_ENTRADA_AP = 240
 fixed TAMANO_PILA_AP = 16384
@@ -188,15 +188,15 @@ expose flow smpIniciar() => Int {
             escribir64(v + 0x1B8, pila + TAMANO_PILA_AP)
             hold antes = leer64(e + 16)
             lapicEnviarIpi(id, 0x4500)
-            hpetEsperar(10000)
+            relojEsperar(10000)
             lapicEnviarIpi(id, 0x4600 | (base >> 12))
-            hpetEsperar(200)
+            relojEsperar(200)
             when leer64(e + 16) == antes {
                 lapicEnviarIpi(id, 0x4600 | (base >> 12))
             }
             change espera = 0
             during leer64(e + 16) == antes && espera < 1000 {
-                hpetEsperar(100)
+                relojEsperar(100)
                 espera += 1
             }
         }

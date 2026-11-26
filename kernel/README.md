@@ -26,6 +26,27 @@ Prueba completa de los nueve hitos (4 CPU, teclas inyectadas por el monitor):
 .\kernel\herramientas\construir.ps1 -Prueba -Segundos 180 -Cpus 4 -EsperarAntes "hito 7: escriba" -Teclas "h o l a spc bracket_left a semicolon shift-1 alt_r-q shift-bracket_left u ret" -Esperado "teclado: hola áñ!@ü" -Captura kernel\construccion\hitos.png
 ```
 
+## Probar en el equipo real (Celeron 3865U)
+
+```powershell
+.\kernel\herramientas\construir.ps1 -Prueba -Imagen    # crea y prueba kernel\construccion\ele.img
+```
+
+1. Grabar `kernel\construccion\ele.img` en un USB **en modo imagen/DD**
+   (Rufus: "Escribir en modo Imagen DD"). Se borra todo el USB.
+2. En el firmware del equipo: arranque UEFI, **Secure Boot desactivado**,
+   y arrancar desde el USB (F12/F9/Esc según el fabricante).
+3. Los resultados salen en pantalla. Sin puerto serie físico, la salida
+   serie simplemente se pierde.
+
+Qué puede ser distinto del QEMU:
+- Sin HPET, el reloj de referencia pasa al temporizador PM de ACPI
+  (probado en QEMU con `-SinHpet`).
+- El teclado del hito 7 es PS/2 (i8042). El teclado interno de un portátil
+  suele serlo. Un teclado USB solo funciona si el firmware lo emula.
+- La cifra del hito 9 es la que interesa: el 3865U no tiene turbo, así que
+  los FLOP por ciclo de TSC son FLOP por ciclo de núcleo.
+
 ## Estructura
 
 | Carpeta | Contenido |
@@ -35,10 +56,10 @@ Prueba completa de los nueve hitos (4 CPU, teclas inyectadas por el monitor):
 | `cpu/` | GDT+TSS, IDT, `kinterrupcion`, CPUID/SSE/FXSAVE, SMP |
 | `mem/` | marcos físicos (mapa de bits), paginación propia, montón |
 | `dispositivos/` | COM1, framebuffer, PIC, ACPI, LAPIC/IOAPIC, teclado PS/2 es-LA |
-| `tiempo/` | HPET y temporizador del sistema |
+| `tiempo/` | HPET, reloj de referencia (HPET o temporizador PM) y temporizador del sistema |
 | `lib/` | consola (`kprint`) y fuente 8x16 generada |
 | `bench/` | SGEMM con SSE empaquetado |
-| `herramientas/` | `construir.ps1`, `generar_fuente.py`, `ppm_a_png.py`, Limine |
+| `herramientas/` | `construir.ps1`, `crear_imagen.py` (USB GPT+FAT32), `generar_fuente.py`, `ppm_a_png.py`, Limine |
 | `docs/` | auditoría del Paso 0 y bitácora |
 
 No hay carpeta `asm/`: todo lo que necesita una instrucción especial usa los
