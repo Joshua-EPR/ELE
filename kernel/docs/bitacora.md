@@ -710,3 +710,70 @@ Pendiente y anotado:
 - El paso de bigramas (~55 ms) está dominado por lo escalar: AdamW sobre
   65536 parámetros y entropía cruzada elemento a elemento en Float.
   Vectorizar o paralelizar eso entra en el perfilado del hito 17.
+
+## Cambio de rumbo: la IA del SO es ENCA (2026-11-26)
+
+- Hito 15 queda como está. Ya cumplía el alcance recortado: arena, PCG,
+  exp/ln/softmax con error medido y verificación de gradientes de todas las
+  operaciones hechas. No quedó nada a medias.
+- AdamW, el MLP y los bigramas (el hito 16 anterior, PR #198) quedan en pausa
+  como línea base opcional. Su código sigue en `bench/aprender.l` y se
+  compila como `lineaBaseAdamW()` en kmain, pero no se llama al arrancar.
+- Prueba en el portátil de esa línea base:
+  - XOR: 4/4 a 0,168 ms por paso.
+  - Círculos: 256/256 en prueba a unos 17 ms por paso.
+  - Bigramas: omitidos, porque texto.txt en el portátil es una página HTML.
+
+## Hito 16 (nuevo) — ENCA en el kernel, reproducción exacta (2026-11-26)
+
+Escrito por un agente redactor (Sonnet) con encargo cerrado. Inventario de
+ENCA hecho por un agente lector (Haiku). Referencia medida y verificación
+en QEMU hechas por el líder.
+
+Referencia en Windows: exp009 solo con C5 (`ENCA/experiments/enca_exp009_c5.l`),
+backend Cranelift, 20 s. Imprime cada métrica también como mantisa entera
+por 2^e, porque el print de Float redondea a 15 decimales y no es exacto.
+
+Port (`kernel/enca/`):
+- Archivos: `matematica.l`, `ventana.l`, `memoria_secuencial.l`,
+  `corteza_bytes.l`, `mezclador_geometrico.l`, `modelo.l`, `exp009.l`.
+- Matemática: f64 en todo, con las mismas funciones de `src/math` de ENCA
+  (expFloat de Taylor elevada a 16, lnFloat, lnRapido, la constante
+  0.69314718056 truncada), en el mismo orden de operaciones.
+- Memoria: registros como bloques con desplazamientos de 8 bytes. Todo se
+  reserva al iniciar con montonReservar: 72 086 706 B, de ellos 70 782 976 B
+  de hipocampo. 0 reallocs.
+- Corpus: los 18 archivos de ENCA se leen de la FAT32 ELEDATOS bajo
+  `enca/<ruta>`, con tamaño y CRC32 verificados contra la tabla de Windows.
+- Herramientas: `construir.ps1 -Enca <dir>` copia el corpus al disco de
+  prueba y al ESP del USB (para pasarlo al disco del portátil desde Linux).
+
+QEMU (WHPX, 2 CPU), extracto:
+```
+corpus ENCA verificado (18 archivos: tamaño y CRC32)
+corteza: actualizaciones=180397 (vigilia cerradas=92407, consolidaciones en sueño=147743) | hipocampo: sobrescrituras=10799
+PRUEBA A: bits/byte mezcla=1.307006210338917 hipocampo=1.580774745956898 corteza=3.136908783715093 | top-1=811 por mil
+  exacto: mezcla 5886232681853270 * 2^-52, hipocampo 7119176556848176 * 2^-52, corteza 7063690614717264 * 2^-51
+PRUEBA B: bits/byte mezcla=2.767418975801085 hipocampo=3.952569359328105 corteza=3.976527428229150 | top-1=637 por mil
+  exacto: mezcla 6231673534097902 * 2^-51, hipocampo 8900394946913047 * 2^-51, corteza 8954343722000678 * 2^-51
+entrenamiento: 125061 B; vigilia 3414 B/s; sueño (2 pasadas) 4425 B/s; total 1342 B/s de corpus
+inferencia (evaluación sin autocompletado): 3838 B/s; autocompletado 1,2 s
+RAM reservada por ENCA: 72086706 B (68 MiB); tiempo total ENCA 107 s
+ENCA C5: idéntico a Windows
+hito 16 OK
+```
+
+| | Windows (Cranelift) | kernel (QEMU WHPX) |
+|---|---|---|
+| bits/byte A | 5886232681853270·2^-52 | idéntico |
+| bits/byte B | 6231673534097902·2^-51 | idéntico |
+| tiempo C5 | 20 s | 107 s |
+
+Resultado: idéntico bit a bit, no solo por debajo de 1e-9. Se compararon
+las 6 métricas exactas, los contadores, los 12 pesos del mezclador, top-1
+y autocompletado.
+
+La diferencia de velocidad (unas 5 veces) viene del backend del kernel
+(código ELE nativo sin asignación de registros, frente a Cranelift) y del
+acceso a memoria por intrínsecos. Optimizar es el hito 17: SSE en exp/ln,
+dos núcleos y registros.

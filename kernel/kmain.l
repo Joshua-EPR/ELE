@@ -33,6 +33,7 @@ take lib.tensor
 take lib.vexp
 take bench.gradientes
 take bench.aprender
+take enca.exp009
 take tiempo.reloj
 
 flow kmain() {
@@ -600,10 +601,23 @@ flow hito15() {
     }
 }
 
-// Hito 16: AdamW, aprendizaje de XOR, círculos y bigramas (ver bench/aprender.l).
-flow hito16() {
+// Línea base opcional (PAUSADA, no se llama): AdamW, XOR/círculos y bigramas.
+flow lineaBaseAdamW() {
     when aprenderTodo() {
         kprintln(cadena("hito 16 OK"))
+    } otherwise {
+        kprintln(cadena("hito 16 FALLÓ"))
+    }
+}
+
+// Hito 16: ENCA (exp009, configuración C5) reproduce exactamente los números
+// de Windows (ver enca/exp009.l). Necesita enca/ en la partición ELEDATOS.
+flow hito16() {
+    hold r = encaEjecutar()
+    when r == 1 {
+        kprintln(cadena("hito 16 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 16 omitido (sin corpus)"))
     } otherwise {
         kprintln(cadena("hito 16 FALLÓ"))
     }

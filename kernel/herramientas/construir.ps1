@@ -43,7 +43,10 @@ param(
     [switch]$SinHpet,
     # Segundo disco SATA (puerto 1 del AHCI) para el hito 13. "prueba" crea
     # construccion\datos.img con herramientas\crear_disco_prueba.py.
-    [string]$DiscoDatos = ""
+    [string]$DiscoDatos = "",
+    # Carpeta ENCA original: su corpus (18 archivos) se copia al disco de
+    # datos (-DiscoDatos prueba) y a la imagen USB (-Imagen) bajo enca/.
+    [string]$Enca = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -87,7 +90,11 @@ $disco = "format=raw,file=fat:rw:`"$esp`""
 if ($Imagen) {
     $img = Join-Path $salida "ele.img"
     Write-Host "==> creando imagen USB"
-    python (Join-Path $herramientas "crear_imagen.py") $esp $img
+    if ($Enca) {
+        python (Join-Path $herramientas "crear_imagen.py") --enca $Enca $esp $img
+    } else {
+        python (Join-Path $herramientas "crear_imagen.py") $esp $img
+    }
     if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear la imagen" }
     $disco = "format=raw,file=`"$img`""
 }
@@ -105,7 +112,11 @@ if ($Acelerar) { $argumentos += @("-accel", "whpx") }
 if ($DiscoDatos) {
     if ($DiscoDatos -eq "prueba") {
         $DiscoDatos = Join-Path $salida "datos.img"
-        python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256
+        if ($Enca) {
+            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256 --enca $Enca
+        } else {
+            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256
+        }
         if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
     }
     $argumentos += @("-drive", "file=`"$DiscoDatos`",format=raw,if=none,id=datos", "-device", "ide-hd,drive=datos,bus=ide.1")

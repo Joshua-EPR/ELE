@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Disco de prueba para el hito 13 (solo para QEMU).
 
-    python crear_disco_prueba.py <salida.img> [MiB]
+    python crear_disco_prueba.py <salida.img> [MiB] [--enca <carpeta ENCA>]
 
 GPT con tres particiones:
   1  "Datos Windows" (datos Microsoft), llena de 0xAB: no se debe tocar.
   2  "ELEDATOS" (datos Microsoft) en FAT32 con etiqueta ELEDATOS, como la
      preparará el usuario desde Windows: la que el kernel puede escribir.
-     Lleva texto.txt (texto en español de varios MB) para el hito 14.
+     Lleva texto.txt (texto en español de varios MB) para el hito 14 y, con
+     --enca, el corpus de ENCA bajo enca/<ruta> para el hito 16.
   3  "ELE crudo" con el GUID de tipo 7F03465A-8D62-4902-B881-2A624BFA16B6
      (también permitida; el kernel usa la primera que encuentra).
 """
@@ -19,7 +20,7 @@ import uuid
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from crear_imagen import Fat32, escribir_directorio  # noqa: E402
+from crear_imagen import Fat32, escribir_directorio, copiar_enca  # noqa: E402
 
 SECTOR = 512
 ELE = uuid.UUID("7F03465A-8D62-4902-B881-2A624BFA16B6")
@@ -66,12 +67,14 @@ def texto_espanol(bytes_objetivo):
     return ("\n".join(lineas) + "\n").encode("utf-8")
 
 
-def particion_fat32(sectores, oculto):
+def particion_fat32(sectores, oculto, enca=None):
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "texto.txt"), "wb") as f:
             f.write(texto_espanol(3 * 1024 * 1024))
         with open(os.path.join(d, "LEEME.TXT"), "wb") as f:
             f.write(b"Particion de datos del SO en ELE.\r\n")
+        if enca:
+            copiar_enca(enca, d)
         fs = Fat32(sectores)
         raiz = fs.reservar_cadena(b"\0" * SECTOR * 4)
         escribir_directorio(fs, d, raiz, None)
@@ -79,8 +82,14 @@ def particion_fat32(sectores, oculto):
 
 
 def main():
-    destino = sys.argv[1]
-    mib = int(sys.argv[2]) if len(sys.argv) > 2 else 256
+    args = sys.argv[1:]
+    enca = None
+    if "--enca" in args:
+        i = args.index("--enca")
+        enca = args[i + 1]
+        del args[i:i + 2]
+    destino = args[0]
+    mib = int(args[1]) if len(args) > 1 else 256
     total = mib * 1024 * 1024 // SECTOR
     p1 = (2048, 2048 + 32 * 2048 - 1)                     # 32 MiB
     p2 = (p1[1] + 1, p1[1] + 128 * 2048)                  # 128 MiB FAT32
@@ -110,7 +119,7 @@ def main():
         f.seek(p1[0] * SECTOR)
         f.write(b"\xAB" * ((p1[1] - p1[0] + 1) * SECTOR))
         f.seek(p2[0] * SECTOR)
-        f.write(particion_fat32(p2[1] - p2[0] + 1, p2[0]))
+        f.write(particion_fat32(p2[1] - p2[0] + 1, p2[0], enca))
         f.seek((total - 33) * SECTOR)
         f.write(bytes(entradas) + cabecera(total - 1, 1, total - 33))
     print("disco de prueba: %s (%d MiB; FAT32 ELEDATOS en %d-%d; ELE crudo desde %d)"

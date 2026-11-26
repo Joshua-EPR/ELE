@@ -8,6 +8,10 @@ Disco GPT con una sola partición de sistema EFI (FAT32) que contiene el
 boot/limine/limine.conf). Sin dependencias: GPT, FAT32 y nombres largos
 (VFAT) se escriben aquí a mano.
 
+Con `--enca <carpeta ENCA>` copia antes al árbol los 18 archivos del corpus
+de ENCA bajo enca/<ruta relativa> (los lee el hito 16), verificando tamaño y
+CRC32. `--solo-enca <carpeta ENCA> <esp_dir>` solo hace esa copia.
+
 Para grabarla en un USB (borra todo el USB): Rufus en modo "DD" o, en
 Linux, `dd if=ele.img of=/dev/sdX bs=4M conv=fsync`. En el equipo:
 arranque UEFI con Secure Boot desactivado.
@@ -27,6 +31,43 @@ HORA = 12 << 11
 
 def crc32(datos):
     return zlib.crc32(datos) & 0xFFFFFFFF
+
+
+# Corpus de ENCA del hito 16: (ruta relativa, bytes, CRC32), en orden de uso.
+CORPUS_ENCA = [
+    ("src/math/rng.l", 1110, 0x2AE43F83),
+    ("src/math/math_utils.l", 2744, 0x47EA08A1),
+    ("src/core/microcolumn.l", 4044, 0x3043F965),
+    ("src/core/plasticity.l", 1637, 0x0BB5D870),
+    ("src/memory/hippocampus.l", 2147, 0x289715D9),
+    ("src/symbol/parser_utf8.l", 4409, 0x77292B7D),
+    ("experiments/enca_exp001_xor.l", 18700, 0x5B71077B),
+    ("experiments/enca_exp002_hipocampo.l", 22481, 0xF802A1CB),
+    ("experiments/enca_exp003_continuo.l", 29034, 0x57895625),
+    ("experiments/enca_exp004_cognitivo.l", 18835, 0x91D93A52),
+    ("experiments/enca_exp005_escalas.l", 19920, 0x0DE085C7),
+    ("experiments/enca_exp006_final.l", 13309, 0x85E144A7),
+    ("experiments/enca_exp007_lenguaje.l", 15347, 0x8D0994F6),
+    ("tests/test_math.l", 899, 0xEED0A3C4),
+    ("tests/test_core.l", 773, 0x95F60129),
+    ("tests/test_memory_symbol.l", 848, 0x40181782),
+    ("src/memory/memoria_secuencial.l", 6428, 0xF6F435F4),
+    ("src/core/corteza_bytes.l", 9353, 0xC7B19A9D),
+]
+
+
+def copiar_enca(origen, destino):
+    """Copia (bytes idénticos) el corpus de ENCA a <destino>/enca/<ruta>."""
+    for ruta, tam, crc in CORPUS_ENCA:
+        datos = open(os.path.join(origen, *ruta.split("/")), "rb").read()
+        if len(datos) != tam or crc32(datos) != crc:
+            raise SystemExit("corpus ENCA distinto del esperado: %s (%d B, CRC32 %08X)"
+                             % (ruta, len(datos), crc32(datos)))
+        salida = os.path.join(destino, "enca", *ruta.split("/"))
+        os.makedirs(os.path.dirname(salida), exist_ok=True)
+        with open(salida, "wb") as f:
+            f.write(datos)
+    print("corpus ENCA: %d archivos copiados a %s" % (len(CORPUS_ENCA), os.path.join(destino, "enca")))
 
 
 # ---------------------------------------------------------------- FAT32 ----
@@ -201,8 +242,19 @@ def gpt(total, particion_inicio, particion_fin, disco, unico):
 
 
 def main():
-    origen, destino = sys.argv[1], sys.argv[2]
-    mib = int(sys.argv[3]) if len(sys.argv) > 3 else 64
+    args = sys.argv[1:]
+    enca = None
+    if args and args[0] == "--solo-enca":
+        copiar_enca(args[1], args[2])
+        return
+    if "--enca" in args:
+        i = args.index("--enca")
+        enca = args[i + 1]
+        del args[i:i + 2]
+    origen, destino = args[0], args[1]
+    mib = int(args[2]) if len(args) > 2 else 64
+    if enca:
+        copiar_enca(enca, origen)
     total = mib * 1024 * 1024 // SECTOR
     fin = total - 34
     sectores = fin - INICIO_PARTICION + 1
