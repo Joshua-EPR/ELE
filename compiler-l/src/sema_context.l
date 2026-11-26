@@ -338,7 +338,9 @@ expose flow semaResolveAstType(ctx: edit SemaContext, source: view Text, tree: v
                     when semaRejectLinearElem(edit ctx, elem, at.start, at.end) { give 7 }
                     give semTypeMakeList(edit ctx.types, elem)
                 }
-                when tree.extra[at.c] == 1 && symbolNameEqualsText(source, at.a, at.b, option_name) {
+                // `T?` is parsed as a nameless one-argument type (span 0..0).
+                hold is_sugar = at.a == 0 && at.b == 0
+                when tree.extra[at.c] == 1 && (is_sugar || symbolNameEqualsText(source, at.a, at.b, option_name)) {
                     hold elem = semaResolveAstType(edit ctx, source, tree, tree.extra[at.c + 1])
                     when semaRejectLinearElem(edit ctx, elem, at.start, at.end) { give 7 }
                     give semTypeMakeOption(edit ctx.types, elem)

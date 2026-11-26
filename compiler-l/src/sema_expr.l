@@ -190,6 +190,21 @@ expose flow semaExprMode(ctx: edit SemaContext, source: view Text, tree: view As
     give ty
 }
 
+// A scrutinee that cannot be copied (Text, or a choice that owns heap data
+// reached through a reference or a field) is examined in place: tests read
+// its place and never copy or consume it. Payload bindings then need an
+// owned scrutinee and are reported as unsupported (lirMatchArmBind).
+expose flow semaScrutInPlace(ctx: view SemaContext, scrut_t: Int, scrut_place: Int, owned_scrut: Bool) => Bool {
+    when scrut_place < 0 { give false }
+    when scrut_t == 5 { give true }
+    when !owned_scrut || scrut_t < 0 || scrut_t >= ctx.types.types.length { give false }
+    choose ctx.types.types[scrut_t].kind {
+        SemTypeKind.Enum : {}
+        _ : { give false }
+    }
+    give ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref
+}
+
 // Lower a value-producing choose using the same coverage, arm tests and
 // payload binding as the statement form. Each arm assigns one shared result
 // slot, while flow ownership remains branch-local until the join.
@@ -203,7 +218,7 @@ flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree
     change scrut_path = ctx.expression_path
     hold owned_scrut = semaNeedsDrop(edit ctx, source, tree, scrut_t)
     hold scrut_place = ctx.lir.place
-    hold text_in_place = scrut_t == 5 && scrut_place >= 0
+    hold text_in_place = semaScrutInPlace(ctx, scrut_t, scrut_place, owned_scrut)
     when owned_scrut && scrut_place >= 0 && !text_in_place {
         when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
             lirMarkUnsupported(edit ctx.lir, expr.start)
@@ -230,7 +245,7 @@ flow semaChooseExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree
                         when variant.payload_count > 1 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         when variant.payload_count == 1 {
                             hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
-                            when ty != 1 && ty != 2 && ty != 4 { lirMarkUnsupported(edit ctx.lir, expr.start) }
+                            when ty != 1 && ty != 2 && ty != 4 && ty != 5 { lirMarkUnsupported(edit ctx.lir, expr.start) }
                         }
                     }
                 }
@@ -946,6 +961,7 @@ flow semaExtensionStaticCall(ctx: edit SemaContext, source: view Text, tree: vie
     when sym_id < 0 { give -1 }
     choose ctx.symbols.symbols[sym_id].kind {
         SymbolKind.Struct : {}
+        SymbolKind.Enum : {}
         _ : { give -1 }
     }
     hold owner_type = ctx.symbols.symbols[sym_id].type_id
@@ -999,6 +1015,7 @@ flow semaExtensionInstanceCall(ctx: edit SemaContext, source: view Text, tree: v
     when owner_t < 0 || owner_t >= ctx.types.types.length { give -1 }
     choose ctx.types.types[owner_t].kind {
         SemTypeKind.Struct : {}
+        SemTypeKind.Enum : {}
         _ : { give -1 }
     }
     change method_id = semaExtensionFind(edit ctx, source, tree, owner_t, expr.b, expr.c, 0)

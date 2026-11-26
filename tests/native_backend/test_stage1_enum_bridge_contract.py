@@ -27,7 +27,9 @@ class Stage1EnumBridgeContract(unittest.TestCase):
         front = src('compiler-l/src/stmt_lower.l')
         writer = src('compiler-l/src/lir_write.l')
         self.assertIn('LIR_VARIANT, enum_id, v, LIR_NONE', front)
-        self.assertIn('LIR_DISC, scrut_place, 0, 0', front)
+        # The tag is always read with `disc` on the scrutinee place (or the
+        # in-place reference to it), never forged from an Int.
+        self.assertRegex(front, r'LIR_DISC, scrut_place(_ref)?, 0, 0')
         self.assertIn('i variant v{dst} e{inst.a} {inst.b} 0', writer)
         self.assertIn('i disc v{dst} {place}', writer)
 

@@ -1,0 +1,2 @@
+option_sugar_payload_mismatch.l:2:5: error[L0003]
+discrepancia de tipos en 'let': esperado 'Option<Text>', recibido 'Option<Int>'

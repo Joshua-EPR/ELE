@@ -83,7 +83,8 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
                 } otherwise {
                     choose ctx.types.types[owner_t].kind {
                         SemTypeKind.Struct : {}
-                        _ : { semaAddError(edit ctx, "L0003", "extend requiere un shape", decl.start, decl.end) }
+                        SemTypeKind.Enum : {}
+                        _ : { semaAddError(edit ctx, "L0003", "extend requiere un shape o choice", decl.start, decl.end) }
                     }
                 }
             }

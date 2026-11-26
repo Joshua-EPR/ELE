@@ -1,0 +1,2 @@
+choice_exclusive_immutable.l:14:11: error[L0001]
+no se puede prestar mutablemente una variable inmutable
