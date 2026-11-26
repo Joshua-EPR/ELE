@@ -626,3 +626,28 @@ expose flow semaConstNamed(ctx: edit SemaContext, source: view Text, tree: view 
         _ : { give false }
     }
 }
+
+// LIR constant operand of `expr_id` when it is a constant Int expression
+// (literals, `fixed` names and their operators, as in `fixed`); LIR_NONE
+// otherwise, leaving no diagnostic behind. Static storage intrinsics
+// (reservar, datos64) need their arguments folded this way.
+expose flow semaConstTryInt(ctx: edit SemaContext, source: view Text, tree: view AstTree, expr_id: Int) => Int {
+    hold errors_before = ctx.errors.length
+    hold saved_leaf = ctx.const_leaf
+    hold saved_reason = ctx.const_reason
+    ctx.const_leaf = -1
+    ctx.const_reason = 0
+    hold ty = semaConstType(edit ctx, source, tree, expr_id)
+    hold leaf = ctx.const_leaf
+    ctx.const_leaf = saved_leaf
+    ctx.const_reason = saved_reason
+    change folded = semaConstFailed()
+    when ty == 1 && leaf < 0 && ctx.errors.length == errors_before {
+        folded = semaConstFold(edit ctx, source, tree, expr_id)
+    }
+    during ctx.errors.length > errors_before {
+        hold dropped = ctx.errors@pop()
+    }
+    when folded.state != SEMA_CONST_READY || folded.kind != LIR_CONST_INT { give LIR_NONE }
+    give lirConst(edit ctx.lir, LIR_CONST_INT, folded.value, 0, 0)
+}

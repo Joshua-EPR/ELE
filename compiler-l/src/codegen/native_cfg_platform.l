@@ -82,8 +82,8 @@ flow cfgPlatformCode(source: view Text, word: view NativeWord) => Int {
     give cfgIntrinsicCode(source, word)
 }
 
-// Kernel intrinsics (codes 31..48, lir_build.l): one inline instruction
-// each, no runtime routine, every argument a `val` Int.
+// Kernel intrinsics (codes 31..72, lir_build.l): inline code, no runtime
+// routine, every argument a `val` Int.
 flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "hlt") { give 31 }
     when nativeEquals(source, word, "cli") { give 32 }
@@ -103,23 +103,73 @@ flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "st16") { give 46 }
     when nativeEquals(source, word, "st32") { give 47 }
     when nativeEquals(source, word, "st64") { give 48 }
+    when nativeEquals(source, word, "reservar") { give 49 }
+    when nativeEquals(source, word, "datos64") { give 50 }
+    when nativeEquals(source, word, "cadena") { give 51 }
+    when nativeEquals(source, word, "cpuid") { give 52 }
+    when nativeEquals(source, word, "rdtsc") { give 53 }
+    when nativeEquals(source, word, "rdmsr") { give 54 }
+    when nativeEquals(source, word, "wrmsr") { give 55 }
+    when nativeEquals(source, word, "rdcr0") { give 56 }
+    when nativeEquals(source, word, "rdcr2") { give 57 }
+    when nativeEquals(source, word, "rdcr3") { give 58 }
+    when nativeEquals(source, word, "rdcr4") { give 59 }
+    when nativeEquals(source, word, "wrcr0") { give 60 }
+    when nativeEquals(source, word, "wrcr3") { give 61 }
+    when nativeEquals(source, word, "wrcr4") { give 62 }
+    when nativeEquals(source, word, "lgdt") { give 63 }
+    when nativeEquals(source, word, "lidt") { give 64 }
+    when nativeEquals(source, word, "ltr") { give 65 }
+    when nativeEquals(source, word, "reloadseg") { give 66 }
+    when nativeEquals(source, word, "invlpg") { give 67 }
+    when nativeEquals(source, word, "fxsave") { give 68 }
+    when nativeEquals(source, word, "fxrstor") { give 69 }
+    when nativeEquals(source, word, "wbinvd") { give 70 }
+    when nativeEquals(source, word, "isrstub") { give 71 }
+    when nativeEquals(source, word, "rdflags") { give 72 }
+    when nativeEquals(source, word, "int3") { give 73 }
+    when nativeEquals(source, word, "xzero") { give 74 }
+    when nativeEquals(source, word, "xload") { give 75 }
+    when nativeEquals(source, word, "xstore") { give 76 }
+    when nativeEquals(source, word, "xbcast") { give 77 }
+    when nativeEquals(source, word, "xmov") { give 78 }
+    when nativeEquals(source, word, "xmul") { give 79 }
+    when nativeEquals(source, word, "xadd") { give 80 }
     give -1
 }
 
 expose flow cfgIsIntrinsic(op: Int) => Bool {
-    give op >= 31 && op <= 48
+    give op >= 31 && op <= 80
 }
 
+// -1: 1..256 arguments (datos64, cadena).
 flow cfgIntrinsicArity(op: Int) => Int {
     when op <= 34 { give 0 }
     when op <= 37 { give 1 }
     when op <= 40 { give 2 }
     when op <= 44 { give 1 }
-    give 2
+    when op <= 49 { give 2 }
+    when op <= 51 { give -1 }
+    when op == 52 { give 3 }
+    when op == 53 { give 0 }
+    when op == 54 { give 1 }
+    when op == 55 { give 2 }
+    when op <= 59 { give 0 }
+    when op <= 65 { give 1 }
+    when op == 66 { give 2 }
+    when op <= 69 { give 1 }
+    when op == 70 { give 0 }
+    when op == 71 { give 1 }
+    when op == 74 { give 1 }
+    when op >= 75 { give 2 }
+    give 0
 }
 
 flow cfgIntrinsicHasResult(op: Int) => Bool {
-    give (op >= 35 && op <= 37) || (op >= 41 && op <= 44)
+    when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
+    when op >= 49 && op <= 51 { give true }
+    when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
+    give op == 71 || op == 72
 }
 
 // Operand width in bytes of in/out (35..40) and ld/st (41..48).
@@ -130,8 +180,16 @@ flow cfgIntrinsicWidth(op: Int) => Int {
     give 8
 }
 
+// Intrinsics that take their first argument in RAX and their second one
+// in RCX (memory access and most CPU forms).
+flow cfgIntrinsicRaxRcx(op: Int) => Bool {
+    give (op >= 41 && op <= 48) || (op >= 53 && op <= 73)
+}
+
 flow cfgCheckIntrinsic(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
-    when inst.argc != cfgIntrinsicArity(inst.op) { give 130 }
+    hold arity = cfgIntrinsicArity(inst.op)
+    when arity >= 0 && inst.argc != arity { give 130 }
+    when arity < 0 && (inst.argc < 1 || inst.argc > 256) { give 130 }
     each i among 0..inst.argc {
         when !cfgPlatformArgOk(p, f, inst.arg_first + i, false, false) { give 131 }
     }
@@ -141,17 +199,128 @@ flow cfgCheckIntrinsic(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     give 0
 }
 
-// in/out: port in RDX (DX), value in RAX (AL/AX/EAX). ld/st: address in
-// RAX, value in RCX. Every access is emitted exactly once, in program
-// order: the backend keeps no value in a register across instructions.
-flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst) {
+// Appends the 8 little-endian bytes of `value` (any Int).
+flow cfgPushWord(out: edit List of[Int], value: Int) {
+    change x = value
+    each i among 0..8 {
+        change b = x % 256
+        when b < 0 { b += 256 }
+        out@push(b)
+        x = (x - b) / 256
+    }
+}
+
+// RAX = address of a static block (kind 0 .rodata, 1 .data, 2 .bss at
+// `offset`), patched once the image layout is known (cfgBuildFor).
+flow cfgStaticAddress(code: edit X64Code, fix: edit CfgFix, kind: Int, offset: Int) {
+    x64MovImm64(edit code, 0, 0)
+    fix.static_at@push(code.bytes.length - 8)
+    fix.static_kind@push(kind)
+    fix.static_off@push(offset)
+}
+
+// Static storage intrinsics (49 reservar, 50 datos64, 51 cadena): every
+// argument must be a constant (error 78 otherwise).
+flow cfgEmitStatic(code: edit X64Code, p: view CfgProgram, inst: view CfgInst, fix: edit CfgFix) {
+    hold first = inst.arg_first
+    each i among 0..inst.argc {
+        when p.call_args[first + i].is_var { fix.static_error = 78 }
+    }
+    when fix.static_error != 0 { give }
+    when inst.op == 49 {
+        hold bytes = p.call_args[first].value
+        hold align = p.call_args[first + 1].value
+        change power = 1
+        during power < align && power < 4096 { power = power * 2 }
+        when bytes < 1 || bytes > 1073741824 || align < 1 || align > 4096 || power != align {
+            fix.static_error = 78
+            give
+        }
+        hold offset = (fix.static_bss + align - 1) / align * align
+        fix.static_bss = offset + bytes
+        cfgStaticAddress(edit code, edit fix, 2, offset)
+    } otherwise when inst.op == 50 {
+        hold offset = fix.static_data.length
+        each i among 0..inst.argc { cfgPushWord(edit fix.static_data, p.call_args[first + i].value) }
+        cfgStaticAddress(edit code, edit fix, 1, offset)
+    } otherwise {
+        during fix.static_rodata.length % 8 != 0 { fix.static_rodata@push(0) }
+        hold offset = fix.static_rodata.length
+        hold length = p.call_args[first].value
+        when length < 0 || (length + 7) / 8 != inst.argc - 1 {
+            fix.static_error = 78
+            give
+        }
+        cfgPushWord(edit fix.static_rodata, length)
+        change bytes: List of[Int] = List[]
+        each i among 1..inst.argc { cfgPushWord(edit bytes, p.call_args[first + i].value) }
+        each i among 0..length { fix.static_rodata@push(bytes[i]) }
+        cfgStaticAddress(edit code, edit fix, 0, offset)
+    }
+}
+
+// XMM register number of argument `k`: a constant 6..15, else error 80.
+flow cfgXmmArg(p: view CfgProgram, k: Int, fix: edit CfgFix) => Int {
+    hold a = view p.call_args[k]
+    when a.is_var || a.value < 6 || a.value > 15 {
+        fix.static_error = 80
+        give 6
+    }
+    give a.value
+}
+
+// Packed single SSE intrinsics (74..80); memory operands in RAX.
+flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
+    hold first = inst.arg_first
+    hold op = inst.op
+    when op == 74 {
+        hold r = cfgXmmArg(p, first, edit fix)
+        x64SsePacked(edit code, 87, r, r)
+        give
+    }
+    when op == 75 || op == 77 {
+        hold r = cfgXmmArg(p, first, edit fix)
+        hold address = view p.call_args[first + 1]
+        cfgLoadOperand(edit code, p, f, view address, 0)
+        when op == 75 { x64SseMemory(edit code, false, 16, r) } otherwise {
+            x64SseMemory(edit code, true, 16, r)
+            x64Shufps0(edit code, r)
+        }
+        give
+    }
+    when op == 76 {
+        hold address = view p.call_args[first]
+        cfgLoadOperand(edit code, p, f, view address, 0)
+        hold r = cfgXmmArg(p, first + 1, edit fix)
+        x64SseMemory(edit code, false, 17, r)
+        give
+    }
+    hold d = cfgXmmArg(p, first, edit fix)
+    hold s = cfgXmmArg(p, first + 1, edit fix)
+    when op == 78 { x64SsePacked(edit code, 40, d, s) }
+    when op == 79 { x64SsePacked(edit code, 89, d, s) }
+    when op == 80 { x64SsePacked(edit code, 88, d, s) }
+}
+
+// Every access is emitted exactly once, in program order: the backend
+// keeps no value in a register across instructions.
+flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
     hold first = inst.arg_first
     hold op = inst.op
     hold width = cfgIntrinsicWidth(op)
+    when cfgIntrinsicRaxRcx(op) && inst.argc >= 1 {
+        hold a0 = view p.call_args[first]
+        cfgLoadOperand(edit code, p, f, view a0, 0)
+        when inst.argc >= 2 {
+            hold a1 = view p.call_args[first + 1]
+            cfgLoadOperand(edit code, p, f, view a1, 1)
+        }
+    }
     when op == 31 { x64Hlt(edit code) }
     when op == 32 { x64Cli(edit code) }
     when op == 33 { x64Sti(edit code) }
     when op == 34 { x64Pause(edit code) }
+    // in/out: port in RDX (DX), value in RAX.
     when op >= 35 && op <= 37 {
         hold port = view p.call_args[first]
         cfgLoadOperand(edit code, p, f, view port, 2)
@@ -164,18 +333,40 @@ flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view
         cfgLoadOperand(edit code, p, f, view value, 0)
         x64OutDx(edit code, width)
     }
-    when op >= 41 && op <= 44 {
-        hold address = view p.call_args[first]
-        cfgLoadOperand(edit code, p, f, view address, 0)
-        x64LoadRaxWidth(edit code, width)
+    when op >= 41 && op <= 44 { x64LoadRaxWidth(edit code, width) }
+    when op >= 45 && op <= 48 { x64StoreRcxWidth(edit code, width) }
+    when op >= 49 && op <= 51 { cfgEmitStatic(edit code, p, inst, edit fix) }
+    when op == 52 {
+        hold leaf = view p.call_args[first]
+        hold sub = view p.call_args[first + 1]
+        hold out = view p.call_args[first + 2]
+        cfgLoadOperand(edit code, p, f, view out, 8)
+        cfgLoadOperand(edit code, p, f, view sub, 1)
+        cfgLoadOperand(edit code, p, f, view leaf, 0)
+        x64CpuidToR8(edit code)
     }
-    when op >= 45 {
-        hold address = view p.call_args[first]
-        cfgLoadOperand(edit code, p, f, view address, 0)
-        hold value = view p.call_args[first + 1]
-        cfgLoadOperand(edit code, p, f, view value, 1)
-        x64StoreRcxWidth(edit code, width)
+    when op == 53 { x64Rdtsc(edit code) }
+    when op == 54 { x64Rdmsr(edit code) }
+    when op == 55 { x64Wrmsr(edit code) }
+    when op >= 56 && op <= 59 { x64ReadCr(edit code, op - 56) }
+    when op >= 60 && op <= 62 { x64WriteCr(edit code, op - 60) }
+    when op == 63 { x64DescriptorOp(edit code, 2) }
+    when op == 64 { x64DescriptorOp(edit code, 3) }
+    when op == 65 { x64Ltr(edit code) }
+    when op == 66 { x64ReloadSegments(edit code) }
+    when op == 67 { x64DescriptorOp(edit code, 7) }
+    when op == 68 { x64Fxsave(edit code, false) }
+    when op == 69 { x64Fxsave(edit code, true) }
+    when op == 70 { x64Wbinvd(edit code) }
+    when op == 71 {
+        // RAX = vector * 12 + address of the stub table (cfgBuildFor).
+        x64MovImm64(edit code, 1, 0)
+        fix.isr_at@push(code.bytes.length - 8)
+        x64IsrStubAddress(edit code)
     }
+    when op == 72 { x64ReadFlags(edit code) }
+    when op == 73 { x64Int3(edit code) }
+    when op >= 74 { cfgEmitSse(edit code, p, f, inst, edit fix) }
     when cfgIntrinsicHasResult(op) {
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     }
@@ -248,7 +439,9 @@ expose flow cfgReadPlatform(p: edit CfgProgram, f: Int, source: view Text, reade
     hold name = nativeWord(source, edit reader)
     inst.op = cfgPlatformCode(source, view name)
     inst.argc = nativeNumber(source, edit reader)
-    when reader.error != 0 || inst.op < 0 || inst.argc < 0 || inst.argc > 6 {
+    change max_args = 6
+    when inst.op == 50 || inst.op == 51 { max_args = 256 }
+    when reader.error != 0 || inst.op < 0 || inst.argc < 0 || inst.argc > max_args {
         p.error = 130
         give
     }
@@ -371,7 +564,7 @@ flow cfgPlatformArgAddress(code: edit X64Code, p: view CfgProgram, f: Int, k: In
 // before them survive.
 expose flow cfgEmitPlatform(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
     when cfgIsIntrinsic(inst.op) {
-        cfgEmitIntrinsic(edit code, p, f, inst)
+        cfgEmitIntrinsic(edit code, p, f, inst, edit fix)
         give
     }
     hold first = inst.arg_first

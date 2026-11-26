@@ -80,7 +80,8 @@ expose flow lirVerifyPlatform(v: edit LirVerifier, l: view LirFn, types: view Ty
     }
     when lirIsIntrinsicOp(op) {
         // Kernel intrinsics: `val` Int arguments; Int or Unit result.
-        when count != lirIntrinsicArity(op) || first < 0 || first > l.operands.length || count > l.operands.length - first { give 4 }
+        hold arity = lirIntrinsicArity(op)
+        when (arity >= 0 && count != arity) || (arity < 0 && (count < 1 || count > 256)) || first < 0 || first > l.operands.length || count > l.operands.length - first { give 4 }
         change want = 6
         when lirIntrinsicHasResult(op) { want = 1 }
         when l.vars[dst].ty != want { give 3 }

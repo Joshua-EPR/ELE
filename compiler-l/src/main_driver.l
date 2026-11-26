@@ -472,6 +472,22 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
                     printError("error[BACKEND]: --target kernel no tiene runtime: print, Text propio, List, choice con datos propios y E/S del sistema no están disponibles (código 75)")
                     give 3
                 }
+                when code == 77 {
+                    printError("error[BACKEND]: reservar, datos64, cadena y stubInterrupcion solo existen con --target kernel (código 77)")
+                    give 3
+                }
+                when code == 78 {
+                    printError("error[BACKEND]: reservar, datos64 y cadena requieren argumentos constantes; reservar(bytes > 0, alineación potencia de 2 hasta 4096) (código 78)")
+                    give 3
+                }
+                when code == 79 {
+                    printError("error[BACKEND]: stubInterrupcion requiere una flow 'kinterrupcion(marco: Int)' (código 79)")
+                    give 3
+                }
+                when code == 80 {
+                    printError("error[BACKEND]: los intrínsecos xmm* requieren registros XMM constantes de 6 a 15 (código 80)")
+                    give 3
+                }
                 when code == 50 {
                     printError("error[BACKEND]: la flow de entrada '{entry}' debe no tener parámetros y devolver Int o nada (código 50)")
                     give 3

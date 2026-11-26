@@ -19,6 +19,8 @@ take sema_builtin_union
 take lir_builtin_union
 take sema_match_coverage
 take sema_try
+take sema_const
+take lir_emit
 
 // Fields omitted from a constructor take their declared default. The default
 // was checked as a constant when the shape was declared
@@ -594,13 +596,63 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
             when intrinsic >= 0 {
                 hold name_text = semaIntrinsicName(intrinsic)
                 hold arity = lirIntrinsicArity(intrinsic)
-                when arg_count != arity {
-                    semaAddError(edit ctx, "L0004", "'{name_text}' requiere {arity} argumentos Int", expr.start, expr.end)
+                when intrinsic == 51 {
+                    // cadena("literal"): the decoded bytes become constant
+                    // words (byte count first) of a .rodata record.
+                    change literal_ok = arg_count == 1
+                    change lit_start = 0
+                    change lit_end = 0
+                    when literal_ok {
+                        hold lit = view tree.expressions[tree.extra[first_arg]]
+                        choose lit.kind {
+                            AstExprKind.TextLit : {
+                                lit_start = lit.start
+                                lit_end = lit.end
+                                when lit_end - lit_start < 2 || source@byteAt(lit_start) != 34 { literal_ok = false }
+                            }
+                            _ : { literal_ok = false }
+                        }
+                    }
+                    when !literal_ok {
+                        semaAddError(edit ctx, "L0004", "'cadena' requiere un literal de texto sin interpolación", expr.start, expr.end)
+                        give 7
+                    }
+                    hold bytes = lirDecode(source, lit_start + 1, lit_end - 1)
+                    when bytes.length > 2040 {
+                        semaAddError(edit ctx, "L0004", "'cadena' admite como máximo 2040 bytes", expr.start, expr.end)
+                        give 7
+                    }
+                    change words: List of[Int] = List[]
+                    hold count_const = lirConst(edit ctx.lir, LIR_CONST_INT, bytes.length, 0, 0)
+                    words@push(lirArg(edit ctx.lir, false, count_const, false))
+                    change at = 0
+                    during at < bytes.length {
+                        hold packed = semaPackWord(view bytes, at)
+                        hold word_const = lirConst(edit ctx.lir, LIR_CONST_INT, packed, 0, 0)
+                        words@push(lirArg(edit ctx.lir, false, word_const, false))
+                        at += 8
+                    }
+                    semaPlatformEmit(edit ctx, intrinsic, view words, 1, true)
+                    give 1
+                }
+                when (arity >= 0 && arg_count != arity) || (arity < 0 && (arg_count < 1 || arg_count > 256)) {
+                    change wanted = "{arity}"
+                    when arity < 0 { wanted = "de 1 a 256" }
+                    semaAddError(edit ctx, "L0004", "'{name_text}' requiere {wanted} argumentos Int", expr.start, expr.end)
                     give 7
                 }
                 change intrinsic_args: List of[Int] = List[]
                 change intrinsic_ok = true
                 each k among 0..arg_count {
+                    // reservar / datos64: fold constant expressions (e.g. `-1`,
+                    // `TAMANO * 2`) into constant operands.
+                    when intrinsic == 49 || intrinsic == 50 {
+                        hold folded = semaConstTryInt(edit ctx, source, tree, tree.extra[first_arg + k])
+                        when folded != LIR_NONE {
+                            intrinsic_args@push(lirArg(edit ctx.lir, false, folded, false))
+                            proceed
+                        }
+                    }
                     hold arg_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + k], ACCESS_MOVE)
                     hold operand = lirTakeOperand(edit ctx, arg_t)
                     when arg_t != 1 { intrinsic_ok = false }
