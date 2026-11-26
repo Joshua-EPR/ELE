@@ -52,6 +52,33 @@ Qué puede ser distinto del QEMU:
 - La cifra del hito 9 es la que interesa: el 3865U no tiene turbo, así que
   los FLOP por ciclo de TSC son FLOP por ciclo de núcleo.
 
+## Partición de datos (hitos 13 en adelante)
+
+El kernel solo escribe en el disco dentro de UNA partición marcada para él;
+cualquier otro intento es un pánico. Dos formas de marcarla:
+
+- **Recomendada (se puede usar desde Windows):** partición de datos normal,
+  formateada en FAT32 con la etiqueta de volumen `ELEDATOS`. En Windows,
+  como administrador:
+
+  ```
+  diskpart
+  list volume
+  select volume C          (el volume de Windows, para hacerle sitio)
+  shrink desired=4096      (4 GiB)
+  create partition primary size=4096
+  format fs=fat32 quick label=ELEDATOS
+  assign
+  exit
+  ```
+
+- **Cruda:** GUID de tipo `7F03465A-8D62-4902-B881-2A624BFA16B6`
+  (`set id=...` en diskpart). Windows no la monta.
+
+En QEMU, `construir.ps1 -DiscoDatos prueba` crea un disco de prueba con
+una partición "de Windows" que no se debe tocar, una FAT32 `ELEDATOS` con
+`texto.txt` y una cruda.
+
 ## Estructura
 
 | Carpeta | Contenido |
@@ -60,7 +87,8 @@ Qué puede ser distinto del QEMU:
 | `arranque/` | interfaz `arranque*` implementada con el protocolo Limine |
 | `cpu/` | GDT+TSS, IDT, `kinterrupcion`, CPUID/SSE/FXSAVE, SMP |
 | `mem/` | marcos físicos (mapa de bits), paginación propia, montón |
-| `dispositivos/` | COM1, framebuffer, PIC, ACPI, LAPIC/IOAPIC, teclado PS/2 es-LA |
+| `dispositivos/` | COM1, framebuffer, PIC, ACPI, LAPIC/IOAPIC, teclado PS/2 es-LA, PCI, AHCI |
+| `almacenamiento/` | GPT y escritura protegida |
 | `tiempo/` | HPET, reloj de referencia (HPET o temporizador PM) y temporizador del sistema |
 | `lib/` | consola (`kprint`) y fuente 8x16 generada |
 | `bench/` | SGEMM con SSE empaquetado |

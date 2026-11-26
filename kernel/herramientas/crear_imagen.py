@@ -66,7 +66,7 @@ class Fat32:
         self.siguiente += cuantos
         return primero
 
-    def imagen(self, oculto):
+    def imagen(self, oculto, etiqueta=b"ELE KERNEL "):
         b = bytearray(self.sectores * SECTOR)
         arranque = bytearray(SECTOR)
         arranque[0:3] = b"\xEB\x58\x90"
@@ -75,7 +75,7 @@ class Fat32:
                          0, 0, 0xF8, 0, 32, 64, oculto, self.sectores)
         struct.pack_into("<IHHIHH", arranque, 36, self.fat_sectores, 0, 0, 2, 1, 6)
         struct.pack_into("<BBBI", arranque, 64, 0x80, 0, 0x29, 0x454C4501)
-        arranque[71:82] = b"ELE KERNEL "
+        arranque[71:82] = etiqueta
         arranque[82:90] = b"FAT32   "
         arranque[510:512] = b"\x55\xAA"
         info = bytearray(SECTOR)

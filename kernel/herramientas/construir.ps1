@@ -40,7 +40,10 @@ param(
     # arranca QEMU desde esa imagen en vez del directorio.
     [switch]$Imagen,
     # Sin HPET en la máquina virtual (como algunos equipos reales).
-    [switch]$SinHpet
+    [switch]$SinHpet,
+    # Segundo disco SATA (puerto 1 del AHCI) para el hito 13. "prueba" crea
+    # construccion\datos.img con herramientas\crear_disco_prueba.py.
+    [string]$DiscoDatos = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,6 +102,14 @@ $argumentos = @(
     "-no-reboot", "-no-shutdown"
 )
 if ($Acelerar) { $argumentos += @("-accel", "whpx") }
+if ($DiscoDatos) {
+    if ($DiscoDatos -eq "prueba") {
+        $DiscoDatos = Join-Path $salida "datos.img"
+        python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256
+        if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
+    }
+    $argumentos += @("-drive", "file=`"$DiscoDatos`",format=raw,if=none,id=datos", "-device", "ide-hd,drive=datos,bus=ide.1")
+}
 if ($SinHpet) { $argumentos[1] = "q35,hpet=off" }
 $qemuExe = Join-Path $Qemu "qemu-system-x86_64.exe"
 

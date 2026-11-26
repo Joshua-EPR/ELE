@@ -23,6 +23,10 @@ take tiempo.temporizador
 take cpu.smp
 take bench.sgemm
 take dispositivos.pci
+take dispositivos.ahci
+take almacenamiento.disco
+take lib.crc32
+take tiempo.reloj
 
 flow kmain() {
     // Antes que nada: copia propia de las respuestas de Limine.
@@ -68,6 +72,7 @@ flow kmain() {
     hito8()
     hito9()
     hito12()
+    hito13()
     hito7()
 
     during true {
@@ -322,4 +327,121 @@ flow hito12() {
     pciHabilitarDma(leer64(ent))
     kprintln(cadena("bus mastering activado en el controlador de disco"))
     kprintln(cadena("hito 12 OK"))
+}
+
+// Generador xorshift64 para el patrón de prueba del disco.
+flow siguienteAleatorio(x: Int) => Int {
+    change y = x ^ (x << 13)
+    y = y ^ (y >> 7)
+    give y ^ (y << 17)
+}
+
+// Hito 13: AHCI, GPT, lectura secuencial y escritura protegida.
+flow hito13() {
+    hold discos = ahciIniciar()
+    kprint(cadena("AHCI versión "))
+    kprintHex(ahciVersion())
+    kprint(cadena(": "))
+    kprintEntero(discos)
+    kprintln(cadena(" disco(s)"))
+    when discos == 0 {
+        kprintln(cadena("hito 13 FALLÓ: ningún disco SATA"))
+        give
+    }
+    change elegido = -1
+    each d among 0..discos {
+        kprint(cadena("disco "))
+        kprintEntero(d)
+        kprint(cadena(" (puerto "))
+        kprintEntero(ahciPuerto(d))
+        kprint(cadena("): "))
+        kprintEntero(ahciSectores(d) / 2048)
+        kprintln(cadena(" MiB"))
+        when discoAbrir(d, true) {
+            when discoHayPermitida() && elegido < 0 { elegido = d }
+        } otherwise {
+            kprintln(cadena("  sin GPT válida"))
+        }
+    }
+
+    // Lectura secuencial: 64 MiB (o el disco entero si es menor) desde el
+    // LBA 2048 del disco 0, de 256 KiB en 256 KiB.
+    change disco_medida = elegido
+    when disco_medida < 0 { disco_medida = 0 }
+    hold reabierto = discoAbrir(disco_medida, false)
+    hold buf = montonReservar(262144)
+    change sectores = 131072
+    when ahciSectores(discoActual()) - 2048 < sectores { sectores = ahciSectores(discoActual()) - 2048 }
+    hold t0 = relojNanosegundos()
+    change leido = 0
+    change lectura_bien = true
+    during leido + 512 <= sectores && lectura_bien {
+        lectura_bien = discoLeer(2048 + leido, 512, buf)
+        leido += 512
+    }
+    hold ns = relojNanosegundos() - t0
+    kprint(cadena("lectura secuencial: "))
+    kprintEntero(leido / 2048)
+    kprint(cadena(" MiB en "))
+    kprintEntero(ns / 1000000)
+    kprint(cadena(" ms = "))
+    when ns > 0 { kprintEntero(leido * 512 * 1000 / ns) }
+    kprintln(cadena(" MB/s"))
+
+    when elegido < 0 {
+        kprintln(cadena("sin partición marcada para ELE: el disco queda en SOLO LECTURA"))
+        kprintln(cadena("hito 13 incompleto: crear una partición FAT32 con etiqueta ELEDATOS (ver kernel/README.md)"))
+        give
+    }
+    kprint(cadena("partición ELE: LBA "))
+    kprintEntero(discoPermitidoPrimero())
+    kprint(cadena(" - "))
+    kprintEntero(discoPermitidoUltimo())
+    kprintByte(10)
+    // Comprobación de la regla (sin escribir): fuera se rechaza.
+    when discoEscrituraPermitida(0, 1) || discoEscrituraPermitida(discoPermitidoPrimero() - 1, 2) {
+        kprintln(cadena("hito 13 FALLÓ: la regla de escritura deja pasar el LBA 0"))
+        give
+    }
+    kprintln(cadena("regla: escritura fuera de la partición rechazada (LBA 0 y frontera)"))
+    hold habilitada = discoHabilitarEscritura()
+
+    // Prueba no destructiva: los 64 últimos sectores de la partición se
+    // guardan, se escribe un patrón, se verifica con CRC32 y se restauran.
+    hold n = 64
+    hold lba = discoPermitidoUltimo() - n + 1
+    hold bytes = n * 512
+    hold original = montonReservar(bytes)
+    hold patron = montonReservar(bytes)
+    hold lectura = montonReservar(bytes)
+    change bien = discoLeer(lba, n, original)
+    hold crc_original = crc32(original, bytes)
+    change x = 0x9E3779B97F4A7C15
+    change i = 0
+    during i < bytes {
+        x = siguienteAleatorio(x)
+        escribir64(patron + i, x)
+        i += 8
+    }
+    hold crc_patron = crc32(patron, bytes)
+    bien = bien && discoEscribir(lba, n, patron) && discoLeer(lba, n, lectura)
+    hold crc_leido = crc32(lectura, bytes)
+    bien = bien && discoEscribir(lba, n, original) && discoLeer(lba, n, lectura)
+    hold crc_restaurado = crc32(lectura, bytes)
+    kprint(cadena("escritura de prueba (LBA "))
+    kprintEntero(lba)
+    kprint(cadena(", 32 KiB): patrón CRC32 "))
+    kprintHex(crc_patron)
+    kprint(cadena(", leído "))
+    kprintHex(crc_leido)
+    kprint(cadena("; original "))
+    kprintHex(crc_original)
+    kprint(cadena(", restaurado "))
+    kprintHex(crc_restaurado)
+    kprintByte(10)
+    when bien && crc_patron == crc_leido && crc_original == crc_restaurado {
+        kprintln(cadena("hito 13 OK"))
+    } otherwise {
+        kprintln(cadena("hito 13 FALLÓ"))
+    }
 }
