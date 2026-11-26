@@ -438,3 +438,71 @@ expose flow semaPlatformEmit(ctx: edit SemaContext, op: Int, args: view List of[
         lirSetVal(edit ctx, emitted)
     }
 }
+
+// Kernel intrinsic named by the callee span, or -1. nucleo.cpu: hlt cli
+// sti pause in8/16/32 out8/16/32; nucleo.mem: leer8/16/32/64 and
+// escribir8/16/32/64. `cpu` / `mem` say which modules the current module
+// took; a name of a module not taken is an ordinary (user) flow name.
+expose flow semaIntrinsicCode(source: view Text, start: Int, end: Int, cpu: Bool, mem: Bool) => Int {
+    when cpu {
+        hold n_hlt = "hlt"
+        hold n_cli = "cli"
+        hold n_sti = "sti"
+        hold n_pause = "pause"
+        hold n_in8 = "in8"
+        hold n_in16 = "in16"
+        hold n_in32 = "in32"
+        hold n_out8 = "out8"
+        hold n_out16 = "out16"
+        hold n_out32 = "out32"
+        when symbolNameEqualsText(source, start, end, n_hlt) { give 31 }
+        when symbolNameEqualsText(source, start, end, n_cli) { give 32 }
+        when symbolNameEqualsText(source, start, end, n_sti) { give 33 }
+        when symbolNameEqualsText(source, start, end, n_pause) { give 34 }
+        when symbolNameEqualsText(source, start, end, n_in8) { give 35 }
+        when symbolNameEqualsText(source, start, end, n_in16) { give 36 }
+        when symbolNameEqualsText(source, start, end, n_in32) { give 37 }
+        when symbolNameEqualsText(source, start, end, n_out8) { give 38 }
+        when symbolNameEqualsText(source, start, end, n_out16) { give 39 }
+        when symbolNameEqualsText(source, start, end, n_out32) { give 40 }
+    }
+    when mem {
+        hold n_ld8 = "leer8"
+        hold n_ld16 = "leer16"
+        hold n_ld32 = "leer32"
+        hold n_ld64 = "leer64"
+        hold n_st8 = "escribir8"
+        hold n_st16 = "escribir16"
+        hold n_st32 = "escribir32"
+        hold n_st64 = "escribir64"
+        when symbolNameEqualsText(source, start, end, n_ld8) { give 41 }
+        when symbolNameEqualsText(source, start, end, n_ld16) { give 42 }
+        when symbolNameEqualsText(source, start, end, n_ld32) { give 43 }
+        when symbolNameEqualsText(source, start, end, n_ld64) { give 44 }
+        when symbolNameEqualsText(source, start, end, n_st8) { give 45 }
+        when symbolNameEqualsText(source, start, end, n_st16) { give 46 }
+        when symbolNameEqualsText(source, start, end, n_st32) { give 47 }
+        when symbolNameEqualsText(source, start, end, n_st64) { give 48 }
+    }
+    give -1
+}
+
+// Source name of an intrinsic code, for diagnostics.
+expose flow semaIntrinsicName(op: Int) => Text {
+    when op == 41 { give "leer8" }
+    when op == 42 { give "leer16" }
+    when op == 43 { give "leer32" }
+    when op == 44 { give "leer64" }
+    when op == 45 { give "escribir8" }
+    when op == 46 { give "escribir16" }
+    when op == 47 { give "escribir32" }
+    when op == 48 { give "escribir64" }
+    give lirIntrinsicName(op)
+}
+
+expose flow semaModuleIn(modules: view List of[Int], owner: Int) => Bool {
+    each i among 0..modules.length {
+        when modules[i] == owner { give true }
+    }
+    give false
+}

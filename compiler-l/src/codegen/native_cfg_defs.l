@@ -172,6 +172,11 @@ expose shape CfgProgram {
     ref_field: List of[Int]
     ref_sub: List of[Int]
     ref_mut: List of[Int]
+    // Name bytes of each function, back to back (`--target kernel` writes
+    // them to .symtab): function f is name_bytes[name_start[f]..+name_length[f]).
+    name_bytes: List of[Int]
+    name_start: List of[Int]
+    name_length: List of[Int]
 }
 
 expose flow cfgEmptyOperand() => NativeOperand {
@@ -179,7 +184,7 @@ expose flow cfgEmptyOperand() => NativeOperand {
 }
 
 expose flow cfgEmpty() => CfgProgram {
-    give CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], call_ext: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[], decl_structs: 0, decl_enums: 0, decl_lists: 0, list_elem: List[], ext_first: List[], ext_count: List[], proj_kind: List[], proj_value: List[], ref_root: List[], ref_field: List[], ref_sub: List[], ref_mut: List[])
+    give CfgProgram(error: 0, main: -1, functions: List[], types_bool: List[], types_code: List[], slot_start: List[], slot_count: List[], structs: List[], fields: List[], enums: List[], variants: List[], blocks: List[], insts: List[], struct_args: List[], call_args: List[], call_ref: List[], call_field: List[], call_sub: List[], call_ext: List[], var_ref: List[], text_start: List[], text_length: List[], text_bytes: List[], decl_structs: 0, decl_enums: 0, decl_lists: 0, list_elem: List[], ext_first: List[], ext_count: List[], proj_kind: List[], proj_value: List[], ref_root: List[], ref_field: List[], ref_sub: List[], ref_mut: List[], name_bytes: List[], name_start: List[], name_length: List[])
 }
 
 // Index of the list type `ty`, or -1 when it is not a list.

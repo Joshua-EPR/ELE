@@ -683,3 +683,94 @@ expose flow x64SaturatingFloatToInt(code: edit X64Code) {
     x64PatchHere(edit code, not_positive)
     x64PatchHere(edit code, done_max)
 }
+
+// ---- Privileged and port instructions (kernel intrinsics) ----------------
+
+// HLT (F4).
+expose flow x64Hlt(code: edit X64Code) { x64Put(edit code, 244) }
+// CLI (FA).
+expose flow x64Cli(code: edit X64Code) { x64Put(edit code, 250) }
+// STI (FB).
+expose flow x64Sti(code: edit X64Code) { x64Put(edit code, 251) }
+// PAUSE (F3 90).
+expose flow x64Pause(code: edit X64Code) {
+    x64Put(edit code, 243)
+    x64Put(edit code, 144)
+}
+
+// CLI; HLT; JMP back to the HLT (FA F4 EB FD): stops this CPU for good;
+// an NMI resumes into the HLT again.
+expose flow x64HaltForever(code: edit X64Code) {
+    x64Put(edit code, 250)
+    x64Put(edit code, 244)
+    x64Put(edit code, 235)
+    x64Put(edit code, 253)
+}
+
+// RAX = zero-extended IN from port DX: XOR EAX,EAX (31 C0), then
+// IN AL,DX (EC), IN AX,DX (66 ED) or IN EAX,DX (ED).
+expose flow x64InDx(code: edit X64Code, width: Int) {
+    x64Put(edit code, 49)
+    x64Put(edit code, 192)
+    when width == 1 {
+        x64Put(edit code, 236)
+    } otherwise {
+        when width == 2 { x64Put(edit code, 102) }
+        x64Put(edit code, 237)
+    }
+}
+
+// OUT DX,AL (EE), OUT DX,AX (66 EF) or OUT DX,EAX (EF).
+expose flow x64OutDx(code: edit X64Code, width: Int) {
+    when width == 1 {
+        x64Put(edit code, 238)
+    } otherwise {
+        when width == 2 { x64Put(edit code, 102) }
+        x64Put(edit code, 239)
+    }
+}
+
+// RAX = zero-extended [RAX]: MOVZX RAX,BYTE (48 0F B6 00), MOVZX RAX,WORD
+// (48 0F B7 00), MOV EAX,[RAX] (8B 00) or MOV RAX,[RAX] (48 8B 00).
+expose flow x64LoadRaxWidth(code: edit X64Code, width: Int) {
+    when width == 1 || width == 2 {
+        x64Put(edit code, 72)
+        x64Put(edit code, 15)
+        when width == 1 { x64Put(edit code, 182) } otherwise { x64Put(edit code, 183) }
+        x64Put(edit code, 0)
+        give
+    }
+    when width == 8 { x64Put(edit code, 72) }
+    x64Put(edit code, 139)
+    x64Put(edit code, 0)
+}
+
+// [RAX] = low bytes of RCX: MOV [RAX],CL (88 08), MOV [RAX],CX (66 89 08),
+// MOV [RAX],ECX (89 08) or MOV [RAX],RCX (48 89 08).
+expose flow x64StoreRcxWidth(code: edit X64Code, width: Int) {
+    when width == 1 {
+        x64Put(edit code, 136)
+        x64Put(edit code, 8)
+        give
+    }
+    when width == 2 { x64Put(edit code, 102) }
+    when width == 8 { x64Put(edit code, 72) }
+    x64Put(edit code, 137)
+    x64Put(edit code, 8)
+}
+
+// Like x64PatchAbsolute64, for any 64-bit address including the negative
+// Int of a higher-half one (0xFFFFFFFF80000000 = -2147483648).
+expose flow x64PatchAddress64(code: edit X64Code, at: Int, value: Int) {
+    when at < 0 || at + 8 > code.bytes.length {
+        code.error = 4
+        give
+    }
+    change n = value
+    each i among 0..8 {
+        change b = n % 256
+        when b < 0 { b += 256 }
+        code.bytes[at + i] = b
+        n = (n - b) / 256
+    }
+}

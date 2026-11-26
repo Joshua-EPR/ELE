@@ -240,3 +240,33 @@ flow main() {
 ```
 
 Circular imports are statically detected and rejected with an explicit error diagnostic.
+
+### Kernel Intrinsics and `--target kernel`
+
+`take nucleo.cpu` and `take nucleo.mem` are not files: they enable, inside the
+module that takes them, flows that the compiler lowers to one inline
+instruction each. Every argument is an `Int`.
+
+| Module | Flow | Instruction | Result |
+|---|---|---|---|
+| `nucleo.cpu` | `hlt()`, `cli()`, `sti()`, `pause()` | `HLT`, `CLI`, `STI`, `PAUSE` | — |
+| `nucleo.cpu` | `in8/in16/in32(puerto)` | `IN AL/AX/EAX, DX` | `Int`, zero-extended |
+| `nucleo.cpu` | `out8/out16/out32(puerto, valor)` | `OUT DX, AL/AX/EAX` | — |
+| `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
+| `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
+
+Each access is emitted exactly once and in program order (the backend keeps
+no value in a register across instructions), so memory-mapped I/O needs no
+`volatile` marker. A module that does not take these modules can still define
+flows with the same names.
+
+`ele build kmain.l --target kernel -o kernel.elf` writes a freestanding
+ELF64 `ET_EXEC` image for the top 2 GiB (`.text` at `0xFFFFFFFF80001000`,
+R+X; Text literals in a separate read-only `.rodata`), with a `.symtab` that
+names every flow. The entry stub calls the entry flow (`kmain`, or
+`--entry <flow>`, with no parameters) and stops the CPU (`CLI; HLT`) if it
+returns. There is no runtime: `print`, owned `Text` (including a Text
+literal bound to a variable), `List` and platform I/O are rejected (backend
+code 75). A failed run-time check (overflow, index, inactive variant) stops
+the CPU with the status (125/126/127) in `RDI` and the packed source position
+in `RAX`.

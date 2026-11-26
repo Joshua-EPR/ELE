@@ -111,6 +111,12 @@ expose shape SemaContext {
     lir_func_index: List of[Int]
     lir_struct_index: List of[Int]
     lir_main: Int
+    // Name of the entry flow (`main`, or `--entry` of the driver).
+    entry_name: Text
+    // Modules that `take nucleo.cpu` / `take nucleo.mem`: only their flows
+    // see the kernel intrinsics (lirIsIntrinsicOp).
+    nucleo_cpu: List of[Int]
+    nucleo_mem: List of[Int]
     lir_insts: Int
     lir_blocks: Int
     lir_failed: Int
@@ -188,6 +194,9 @@ expose flow semaContextNew() => SemaContext {
         lir_func_index: List[],
         lir_struct_index: List[],
         lir_main: -1,
+        entry_name: "main",
+        nucleo_cpu: List[],
+        nucleo_mem: List[],
         lir_insts: 0,
         lir_blocks: 0,
         lir_failed: 0,

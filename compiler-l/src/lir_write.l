@@ -187,6 +187,7 @@ flow lirInstText(l: view LirFn, source: view Text, lm: view LirModule, id: Int) 
         when op_code == 28 { op_name = "clipboardwrite" }
         when op_code == 29 { op_name = "clipboardread" }
         when op_code == 30 { op_name = "textfrombytes" }
+        when op_code >= 31 { op_name = lirIntrinsicName(op_code) }
         change out ="i platform v{dst} {op_name} {count}"
         each i among 0..count {
             hold item = l.operands[first + i]
