@@ -139,6 +139,28 @@ flow multiplicar(ap: Int, bp: Int, c: Int, n: Int) {
     }
 }
 
+// Núcleos que ejecutan `multiplicar` (el hito 11 lo reparte en 2).
+fixed NUCLEOS = 1
+fixed NUCLEOS_CHIP = 2
+
+flow imprimirCentesimas(valor: Int) {
+    kprintEntero(valor / 100)
+    kprintByte(44)
+    kprintByte(48 + (valor / 10) % 10)
+    kprintByte(48 + valor % 10)
+}
+
+flow imprimirRendimiento(titulo: Int, flops: Int, ciclos: Int) {
+    hold por_ciclo = flops * 100 / ciclos
+    kprint(titulo)
+    imprimirCentesimas(por_ciclo / NUCLEOS)
+    kprint(cadena(" FLOP/ciclo por núcleo ("))
+    kprintEntero(por_ciclo / NUCLEOS * 100 / 800)
+    kprint(cadena(" % del pico del núcleo), "))
+    kprintEntero(por_ciclo * 100 / (800 * NUCLEOS_CHIP))
+    kprintln(cadena(" % del pico del chip (16 FLOP/ciclo)"))
+}
+
 // Ejecuta el banco de pruebas con matrices n x n (n múltiplo de 16).
 // Devuelve true si el resultado es exacto.
 expose flow sgemmBanco(n: Int) => Bool {
@@ -187,26 +209,13 @@ expose flow sgemmBanco(n: Int) => Bool {
     kprintEntero(ns / 1000)
     kprint(cadena(" us, "))
     kprintEntero(flops * 1000 / ns)
-    kprint(cadena(" MFLOPS, "))
-    // FLOP por ciclo de TSC (x100). El pico SSE de un núcleo Skylake/Kaby
-    // Lake es 8 (un MULPS y un ADDPS de 4 floats por ciclo).
-    hold por_ciclo = flops * 100 / ciclos
-    kprintEntero(por_ciclo / 100)
-    kprintByte(44)
-    kprintByte(48 + (por_ciclo / 10) % 10)
-    kprintByte(48 + por_ciclo % 10)
-    kprint(cadena(" FLOP/ciclo = "))
-    kprintEntero(por_ciclo * 100 / 800)
-    kprintln(cadena(" % del pico SSE (8 FLOP/ciclo), empaquetado incluido"))
-    hold nucleo = flops * 100 / ciclos_nucleo
-    kprint(cadena("  solo el micronúcleo: "))
-    kprintEntero(nucleo / 100)
-    kprintByte(44)
-    kprintByte(48 + (nucleo / 10) % 10)
-    kprintByte(48 + nucleo % 10)
-    kprint(cadena(" FLOP/ciclo = "))
-    kprintEntero(nucleo * 100 / 800)
-    kprintln(cadena(" % del pico"))
+    kprint(cadena(" MFLOPS en "))
+    kprintEntero(NUCLEOS)
+    kprintln(cadena(" núcleo"))
+    // FLOP por ciclo de TSC (x100). Pico SSE: 8 por núcleo (un MULPS y un
+    // ADDPS de 4 floats por ciclo), 16 para el chip de 2 núcleos.
+    imprimirRendimiento(cadena("  total con empaquetado: "), flops, ciclos)
+    imprimirRendimiento(cadena("  solo el micronúcleo:   "), flops, ciclos_nucleo)
     montonLiberar(bp)
     montonLiberar(ap)
     montonLiberar(c)

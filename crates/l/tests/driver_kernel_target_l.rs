@@ -399,3 +399,20 @@ flow kmain() {\n\
         assert!(err.contains("código 80"), "{why}: {err}");
     }
 }
+
+#[test]
+fn kernel_reads_the_stack_pointer() {
+    let dir = work("rsp");
+    let source = "take nucleo.cpu\ntake nucleo.mem\n\nflow kmain() {\n    escribir64(reservar(8, 8), leerRsp())\n}\n";
+    let (out, image) = build(&dir, source, &[]);
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // MOV RAX,RSP.
+    assert!(contains(
+        &fs::read(&image).unwrap()[0x1000..],
+        &[0x48, 0x89, 0xE0]
+    ));
+}

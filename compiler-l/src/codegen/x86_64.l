@@ -943,6 +943,13 @@ expose flow x64BroadcastFromRax(code: edit X64Code, xmm: Int, disp: Int) {
     x64Shufps0(edit code, xmm)
 }
 
+// MOV RAX,RSP (48 89 E0).
+expose flow x64ReadRsp(code: edit X64Code) {
+    x64Put(edit code, 72)
+    x64Put(edit code, 137)
+    x64Put(edit code, 224)
+}
+
 // INT3 (CC).
 expose flow x64Int3(code: edit X64Code) { x64Put(edit code, 204) }
 

@@ -24,6 +24,8 @@ take cpu.smp
 take bench.sgemm
 
 flow kmain() {
+    // Antes que nada: copia propia de las respuestas de Limine.
+    arranqueCopiar()
     consolaIniciar()
     kprintln(cadena("ELE kernel OK"))
 
@@ -78,11 +80,25 @@ flow hito4() {
         kprintln(cadena("hito 4 FALLÓ: sin mapa de memoria"))
         give
     }
-    kprint(cadena("memoria: "))
-    kprintEntero(memFisicaLibres() * MARCO / 1048576)
-    kprint(cadena(" MiB libres de "))
-    kprintEntero(memFisicaTotales() * MARCO / 1048576)
-    kprintln(cadena(" MiB"))
+    hold mib = 1048576
+    kprint(cadena("RAM: "))
+    kprintEntero(memFisicaTotalBytes() / mib)
+    kprint(cadena(" MiB (usable "))
+    kprintEntero(memBytesDeTipo(MEMORIA_USABLE) / mib)
+    kprint(cadena(", del cargador "))
+    kprintEntero(memBytesDeTipo(MEMORIA_CARGADOR_RECUPERABLE) / mib)
+    kprint(cadena(", kernel "))
+    kprintEntero(memBytesDeTipo(MEMORIA_KERNEL) / 1024)
+    kprintln(cadena(" KiB)"))
+    kprint(cadena("  no RAM: reservada "))
+    kprintEntero(memBytesDeTipo(MEMORIA_RESERVADA) / mib)
+    kprint(cadena(" MiB, ACPI "))
+    kprintEntero((memBytesDeTipo(MEMORIA_ACPI_RECUPERABLE) + memBytesDeTipo(MEMORIA_ACPI_NVS)) / 1024)
+    kprint(cadena(" KiB, framebuffer "))
+    kprintEntero(memBytesDeTipo(MEMORIA_FRAMEBUFFER) / 1024)
+    kprint(cadena(" KiB, defectuosa "))
+    kprintEntero(memBytesDeTipo(MEMORIA_DEFECTUOSA) / 1024)
+    kprintln(cadena(" KiB"))
     when !pagIniciar() {
         kprintln(cadena("hito 4 FALLÓ: no se pudo construir el PML4"))
         give
@@ -90,6 +106,15 @@ flow hito4() {
     kprint(cadena("paginación propia activa, CR3 = "))
     kprintHex(leerCr3())
     kprintByte(10)
+    hold libres_antes = memFisicaLibres() * MARCO
+    hold recuperados = memFisicaRecuperarCargador(leerRsp())
+    kprint(cadena("libres: "))
+    kprintEntero(libres_antes / mib)
+    kprint(cadena(" MiB; tras recuperar la memoria del cargador ("))
+    kprintEntero(recuperados / mib)
+    kprint(cadena(" MiB): "))
+    kprintEntero(memFisicaLibres() * MARCO / mib)
+    kprintln(cadena(" MiB"))
 
     montonIniciar()
     hold a = montonReservar(100)

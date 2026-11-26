@@ -24,7 +24,21 @@ expose flow memHhdm() => Int { give leer64(estado()) }
 expose flow memVirtual(fisica: Int) => Int { give fisica + leer64(estado()) }
 
 expose flow memFisicaLibres() => Int { give leer64(estado() + 24) }
-expose flow memFisicaTotales() => Int { give leer64(estado() + 16) }
+// Bytes del mapa de Limine de un tipo (MEMORIA_*).
+expose flow memBytesDeTipo(tipo: Int) => Int {
+    change total = 0
+    each i among 0..arranqueMemoriaCantidad() {
+        hold ent = arranqueMemoriaEntrada(i)
+        when leer64(ent + 16) == tipo { total += leer64(ent + 8) }
+    }
+    give total
+}
+
+// RAM que gestiona el kernel: usable + recuperable del cargador + kernel.
+// Lo reservado, ACPI, el framebuffer y los MMIO no son RAM disponible.
+expose flow memFisicaTotalBytes() => Int {
+    give memBytesDeTipo(MEMORIA_USABLE) + memBytesDeTipo(MEMORIA_CARGADOR_RECUPERABLE) + memBytesDeTipo(MEMORIA_KERNEL)
+}
 
 flow mapa() => Int { give memVirtual(leer64(estado() + 8)) }
 
@@ -56,11 +70,13 @@ expose flow memFisicaIniciar() => Bool {
     when hhdm == -1 || n == 0 { give false }
     escribir64(e, hhdm)
 
-    // Final de la memoria usable más alta -> número de marcos.
+    // Final de la memoria gestionable más alta (usable o recuperable del
+    // cargador, que se libera después) -> número de marcos.
     change fin = 0
     each i among 0..n {
         hold ent = arranqueMemoriaEntrada(i)
-        when leer64(ent + 16) == MEMORIA_USABLE && leer64(ent) + leer64(ent + 8) > fin {
+        hold tipo = leer64(ent + 16)
+        when (tipo == MEMORIA_USABLE || tipo == MEMORIA_CARGADOR_RECUPERABLE) && leer64(ent) + leer64(ent + 8) > fin {
             fin = leer64(ent) + leer64(ent + 8)
         }
     }
@@ -147,4 +163,30 @@ expose flow memFisicaReservarBajo() => Int {
         }
     }
     give 0
+}
+
+// Libera la memoria "recuperable del cargador" una vez copiadas las
+// respuestas de Limine (arranqueCopiar) y cargado el PML4 propio. Se
+// conservan los marcos a menos de 64 KiB de la pila de arranque (la pila
+// del BSP sigue allí). Devuelve los bytes liberados.
+expose flow memFisicaRecuperarCargador(pila: Int) => Int {
+    hold pila_fisica = pila - memHhdm()
+    hold guarda_inicio = (pila_fisica - 65536) / MARCO
+    hold guarda_fin = (pila_fisica + 65536) / MARCO
+    change liberados = 0
+    each i among 0..arranqueMemoriaCantidad() {
+        hold ent = arranqueMemoriaEntrada(i)
+        when leer64(ent + 16) == MEMORIA_CARGADOR_RECUPERABLE {
+            hold primero = (leer64(ent) + MARCO - 1) / MARCO
+            hold ultimo = (leer64(ent) + leer64(ent + 8)) / MARCO
+            each f among primero..ultimo {
+                when (f < guarda_inicio || f > guarda_fin) && f < leer64(estado() + 16) && ocupado(f) {
+                    marcar(f, false)
+                    liberados += MARCO
+                }
+            }
+        }
+    }
+    escribir64(estado() + 32, 0)
+    give liberados
 }

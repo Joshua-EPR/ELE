@@ -244,3 +244,40 @@ Salida en pantalla (foto del 2026-11-26):
 Sin turbo en el 3865U, el ciclo de TSC es el ciclo de núcleo: el 59 % es
 real. Supera el 50 % pedido para el hito 9. La Fase 1 queda completa en
 hardware real.
+
+# Fase 2
+
+## 2026-11-26 — Hito 10: correcciones de la Fase 1
+
+Plan: contar como RAM solo usable + recuperable del cargador + kernel;
+copiar las respuestas de Limine a memoria del kernel y liberar la memoria
+recuperable del cargador; informar SGEMM por núcleo y contra el pico del
+chip.
+
+- `arranqueCopiar()` (arranque/limine.l) copia, como primera acción de
+  kmain, la revisión, el HHDM, la RSDP, las direcciones del kernel, el
+  framebuffer y hasta 256 entradas del mapa de memoria. Desde ahí ninguna
+  flow `arranque*` toca memoria de Limine.
+- `memFisicaTotalBytes()` = usable + recuperable del cargador + kernel. El
+  informe muestra aparte lo reservado, ACPI, framebuffer y defectuoso. El
+  "5368 MiB" de la Fase 1 era el final de la RAM más alta (incluía el
+  agujero PCI de 32 bits).
+- `memFisicaRecuperarCargador(leerRsp())`: libera los marcos recuperables
+  del cargador, tras el PML4 propio y la copia de Limine. Conserva los que
+  están a menos de 64 KiB de la pila de arranque del BSP, que sigue en uso.
+- Compilador: intrínseco `leerRsp()` (MOV RAX,RSP), para esa guarda.
+- SGEMM informa los núcleos usados (1), los FLOP/ciclo por núcleo y el % del
+  pico del chip (16 FLOP/ciclo con 2 núcleos). Confirmado: el SGEMM de la
+  Fase 1 corría en un solo núcleo (los AP se quedan en HLT).
+
+QEMU (q35, 4 GiB, WHPX): `RAM: 4089 MiB (usable 4047, del cargador 41,
+kernel 176 KiB)`, `no RAM: reservada 259 MiB, ACPI 2160 KiB, framebuffer
+4000 KiB`; `libres: 4047 MiB; tras recuperar ... (41 MiB): 4089 MiB`. Los
+hitos 2-9 y 7 pasan.
+
+Nota de medición: esta tarde el anfitrión estaba muy cargado (Chrome, CPU
+al 80-100 %) y WHPX daba unas 10 veces menos rendimiento en SGEMM que por
+la mañana. Con el kernel de `main` sin cambios ocurría lo mismo, así que
+es el anfitrión, no una regresión. En TCG con esa carga, el hito 6 midió
+733 ms (falla la tolerancia de 400-700 ms): la emulación pierde precisión
+de tiempo. Las cifras que cuentan son las de la laptop.
