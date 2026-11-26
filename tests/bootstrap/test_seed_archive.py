@@ -25,12 +25,15 @@ class SeedArchiveTests(unittest.TestCase):
                 self.assertEqual(len(seed), record["seed_size"])
 
     def test_manifest_source_hashes_match_lf_and_windows_checkouts(self):
-        # The seed was built from the driver source at the pinned revision,
-        # not from the current tree: the driver keeps evolving after the pin.
+        # The seed was built from the driver source as it was then, not from
+        # the current tree: the driver keeps evolving after the pin. That
+        # source is the git blob `driver_source_git_blob` (the run's head
+        # commit itself is not on any branch, but its blob is in main's
+        # history).
         provenance = self.manifest["provenance"]
-        revision = provenance["workflow_run_head"]
+        blob = provenance["driver_source_git_blob"]
         shown = subprocess.run(
-            ["git", "show", f"{revision}:{provenance['driver_source']}"],
+            ["git", "cat-file", "blob", blob],
             cwd=ROOT,
             capture_output=True,
             check=False,
@@ -38,7 +41,7 @@ class SeedArchiveTests(unittest.TestCase):
         self.assertEqual(
             shown.returncode,
             0,
-            f"pinned revision {revision} is not in this checkout "
+            f"driver source blob {blob} is not in this checkout "
             "(CI needs fetch-depth: 0): "
             + shown.stderr.decode("utf-8", "replace"),
         )
