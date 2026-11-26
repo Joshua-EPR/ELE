@@ -1,0 +1,2 @@
+bitwise_not_bool.l:2:14: error[L0003]
+operador '~' requiere operando de tipo Int

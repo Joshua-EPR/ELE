@@ -92,6 +92,12 @@ flow lexHexValue(b: Int) => Int {
     give 0
 }
 
+// A digit of a `0x` (radix byte 120) or `0b` (98) literal.
+flow lexRadixDigit(b: Int, radix: Int) => Bool {
+    when radix == 98 { give b == 48 || b == 49 }
+    give lexDigit(b) || (b >= 65 && b <= 70) || (b >= 97 && b <= 102)
+}
+
 flow lexSymbolWidth(b: Int, next: Int, third: Int) => Int {
     // ..=, .., ->, =>, ??, &&, || and compound arithmetic/comparison.
     when b == 46 && next == 46 {
@@ -101,12 +107,19 @@ flow lexSymbolWidth(b: Int, next: Int, third: Int) => Int {
     when (next == 62 && (b == 45 || b == 61)) || (b == next && (b == 63 || b == 38 || b == 124)) {
         give 2
     }
+    // The wrapping operators +%, -% and *%. Shifts stay two `<`/`>` tokens
+    // (legacy `List<Option<Int>>` closes two generics); the parser joins
+    // an adjacent pair (parserShiftPair).
+    when next == 37 && (b == 42 || b == 43 || b == 45) {
+        give 2
+    }
     when next == 61 {
         when b == 33 || b == 37 || b == 42 || b == 43 || b == 45 || b == 47 || (b >= 60 && b <= 62) {
             give 2
         }
     }
-    when b == 33 || b == 37 || b == 38 || (b >= 40 && b <= 47) || (b >= 58 && b <= 64) || b == 91 || b == 93 || b == 123 || b == 125 {
+    // `|`, `^` and `~` are the bitwise or, xor and not operators.
+    when b == 33 || b == 37 || b == 38 || (b >= 40 && b <= 47) || (b >= 58 && b <= 64) || b == 91 || b == 93 || b == 94 || b == 123 || b == 124 || b == 125 || b == 126 {
         give 1
     }
     give 0
@@ -287,6 +300,18 @@ flow lexScan(source: view Text, start_offset: Int, end: Int, interpolation: Int,
                 offset += 1
             }
             tokens@push(LexToken(kind: LexKind.Word, start: start, end: offset))
+            proceed
+        }
+        // Hexadecimal `0x` and binary `0b` Int literals, with `_` separators.
+        // The parser checks the digits and the 64-bit width.
+        when b == 48 && (next == 120 || next == 98) && offset + 1 < end && lexRadixDigit(source@byteAt(offset + 1), next) {
+            offset += 1
+            during offset < end {
+                hold current = source@byteAt(offset)
+                when !lexRadixDigit(current, next) && current != 95 { leave }
+                offset += 1
+            }
+            tokens@push(LexToken(kind: LexKind.Integer, start: start, end: offset))
             proceed
         }
         when lexDigit(b) {

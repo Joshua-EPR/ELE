@@ -143,9 +143,38 @@ expose flow lirWrite(ctx: edit SemaContext, place: Int, operand: Int) {
 }
 
 // Binary operator encoded by the source bytes of an operator token.
+// Operator classes of a binary operator spelled at start..end. They are
+// told apart by bytes and length: `<` is a comparison and `<<` a shift;
+// `&` is bitwise and `&&` logical.
+expose flow lirIsComparisonOp(source: view Text, start: Int, end: Int) => Bool {
+    hold b0 = source@byteAt(start)
+    when b0 == 61 || b0 == 33 { give true }
+    when b0 == 60 || b0 == 62 {
+        give end - start == 1 || source@byteAt(start + 1) == 61
+    }
+    give false
+}
+
+expose flow lirIsLogicalOp(source: view Text, start: Int, end: Int) => Bool {
+    when end - start != 2 { give false }
+    hold b0 = source@byteAt(start)
+    give (b0 == 38 || b0 == 124) && source@byteAt(start + 1) == b0
+}
+
 expose flow lirBinaryOp(source: view Text, start: Int, end: Int) => Int {
     hold b0 = source@byteAt(start)
     hold two = end - start >= 2
+    change b1 = 0
+    when two { b1 = source@byteAt(start + 1) }
+    // Wrapping +% -% *% and shifts << >> before their one-byte prefixes.
+    when b1 == 37 && b0 == 43 { give LIR_WADD }
+    when b1 == 37 && b0 == 45 { give LIR_WSUB }
+    when b1 == 37 && b0 == 42 { give LIR_WMUL }
+    when b1 == 60 && b0 == 60 { give LIR_SHL }
+    when b1 == 62 && b0 == 62 { give LIR_SHR }
+    when b0 == 38 { give LIR_BAND }
+    when b0 == 124 { give LIR_BOR }
+    when b0 == 94 { give LIR_BXOR }
     when b0 == 43 { give LIR_ADD }
     when b0 == 45 { give LIR_SUB }
     when b0 == 42 { give LIR_MUL }

@@ -156,12 +156,24 @@ expose fixed LIR_LT = 7
 expose fixed LIR_LE = 8
 expose fixed LIR_GT = 9
 expose fixed LIR_GE = 10
+// Bitwise and wrapping Int operators (driver only; Stage 0 has none).
+// Shifts trap when the count is outside 0..63; the others never trap.
+expose fixed LIR_BAND = 11
+expose fixed LIR_BOR = 12
+expose fixed LIR_BXOR = 13
+expose fixed LIR_SHL = 14
+expose fixed LIR_SHR = 15
+expose fixed LIR_WADD = 16
+expose fixed LIR_WSUB = 17
+expose fixed LIR_WMUL = 18
 expose fixed LIR_NEG = 0
 expose fixed LIR_NOT = 1
 // Explicit conversions Float(Int) and Int(Float): Int(x) truncates toward
 // zero and saturates, NaN gives 0 (Stage 0 `fcvt_to_sint_sat`).
 expose fixed LIR_ITOF = 2
 expose fixed LIR_FTOI = 3
+// Bitwise not of an Int (`~x`).
+expose fixed LIR_BNOT = 4
 
 expose shape LirVar {
     ty: Int

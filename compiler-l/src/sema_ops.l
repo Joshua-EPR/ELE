@@ -111,7 +111,7 @@ expose flow semaBinaryFinish(ctx: edit SemaContext, source: view Text, tree: vie
     hold op_len = expr.d - expr.c
     when op_len > 0 && expr.c >= 0 && expr.d <= source.byteLength {
         hold b0 = source@byteAt(expr.c)
-        when b0 == 61 || b0 == 33 || b0 == 60 || b0 == 62 {
+        when lirIsComparisonOp(source, expr.c, expr.d) {
             hold lt = view ctx.types.types[lhs_t]
             hold comparable = semTypeIsNumeric(lt.kind) || (lhs_t == 4 && (b0 == 61 || b0 == 33))
             when !comparable || !semTypeEquals(view ctx.types, lhs_t, rhs_t) {
@@ -125,7 +125,7 @@ expose flow semaBinaryFinish(ctx: edit SemaContext, source: view Text, tree: vie
             lirSetVal(edit ctx, emitted)
             give 4
         }
-        when b0 == 38 || b0 == 124 {
+        when lirIsLogicalOp(source, expr.c, expr.d) {
             when !semTypeEquals(view ctx.types, lhs_t, 4) || !semTypeEquals(view ctx.types, rhs_t, 4) {
                 semaAddError(edit ctx, "L0003", "operador lógico requiere operandos de tipo Bool", expr.start, expr.end)
                 give 7
@@ -133,6 +133,10 @@ expose flow semaBinaryFinish(ctx: edit SemaContext, source: view Text, tree: vie
             lirSetVal(edit ctx, rhs)
             give 4
         }
+    }
+    when lirBinaryOp(source, expr.c, expr.d) >= LIR_BAND && !semTypeEquals(view ctx.types, lhs_t, 1) {
+        semaAddError(edit ctx, "L0003", "operador de bits o envolvente requiere operandos de tipo Int", expr.start, expr.end)
+        give 7
     }
     hold lt = view ctx.types.types[lhs_t]
     when !semTypeIsNumeric(lt.kind) {
@@ -168,6 +172,15 @@ expose flow semaUnaryFinish(ctx: edit SemaContext, source: view Text, tree: view
             hold emitted = lirNew(edit ctx, 4, false, LIR_UNARY, LIR_NOT, operand, 0)
             lirSetVal(edit ctx, emitted)
             give 4
+        }
+        when b0 == 126 {
+            when !semTypeEquals(view ctx.types, sub_t, 1) {
+                semaAddError(edit ctx, "L0003", "operador '~' requiere operando de tipo Int", expr.start, expr.end)
+                give 7
+            }
+            hold emitted = lirNew(edit ctx, 1, false, LIR_UNARY, LIR_BNOT, operand, 0)
+            lirSetVal(edit ctx, emitted)
+            give 1
         }
         hold ty = view ctx.types.types[sub_t]
         when b0 == 45 && semTypeIsNumeric(ty.kind) {

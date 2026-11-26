@@ -85,7 +85,9 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
         }
         when cursor.pos >= tokens.length { leave }
         hold tok = view tokens[cursor.pos]
-        hold prec = parserGetBinaryPrecedence(source, tok)
+        hold shift_pair = parserShiftPair(source, tokens, cursor.pos)
+        change prec = parserGetBinaryPrecedence(source, tok)
+        when shift_pair { prec = 9 }
         when prec < min_prec || prec == 0 {
             leave
         }
@@ -96,7 +98,9 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
                 AstExprKind.Binary : {
                     hold op_start = left_expr.c
                     hold b = source@byteAt(op_start)
-                    when b == 60 || b == 62 {
+                    // `<<` and `>>` are shifts, not comparisons.
+                    hold shift = left_expr.d - op_start == 2 && source@byteAt(op_start + 1) == b
+                    when (b == 60 || b == 62) && !shift {
                         astAddError(edit tree, ParseProblem.ChainedComparisonsProhibited, "", tok.start, tok.end)
                         give -1
                     }
@@ -106,9 +110,13 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
         }
 
         hold op_start = tok.start
-        hold op_end = tok.end
+        change op_end = tok.end
         hold is_null_coalesce = (prec == 1)
         cursor.pos += 1
+        when shift_pair {
+            op_end = tokens[cursor.pos].end
+            cursor.pos += 1
+        }
         parserSkipNewlines(edit cursor, tokens)
 
         hold next_min = selectInt(is_null_coalesce, prec, prec + 1)
@@ -175,6 +183,15 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
 
     choose tokenKindValue(view tok.kind) {
         LexKind.Integer : {
+            when parserIsRadixLiteral(source, tok.start, tok.end) {
+                hold radix = parserParseRadixInt(source, tok.start, tok.end)
+                cursor.pos += 1
+                when !radix.ok {
+                    astAddError(edit tree, ParseProblem.UnexpectedToken, "literal entero de más de 64 bits", tok.start, tok.end)
+                    give -1
+                }
+                give astAddExpr(edit tree, AstExprKind.IntLit, tok.start, tok.end, radix.value, 0, 0, 0)
+            }
             when parserIsFloatLiteral(source, tok.start, tok.end) {
                 hold bits = floatLiteralBits(source, tok.start, tok.end)
                 cursor.pos += 1
@@ -261,19 +278,19 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
             hold is_edit = parserTakeWord(source, edit cursor, tokens, "edit")
             when is_view || is_edit {
                 parserSkipNewlines(edit cursor, tokens)
-                hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)
                 give astAddExpr(edit tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, tok.end, 0)
             }
             when parserTakeWord(source, edit cursor, tokens, "await") {
                 parserSkipNewlines(edit cursor, tokens)
-                hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)
                 give astAddExpr(edit tree, AstExprKind.Await, tok.start, end_pos, operand, 0, 0, 0)
             }
             when parserTakeWord(source, edit cursor, tokens, "spawn") {
                 parserSkipNewlines(edit cursor, tokens)
-                hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)
                 give astAddExpr(edit tree, AstExprKind.Spawn, tok.start, end_pos, operand, 0, 0, 0)
             }
@@ -399,6 +416,13 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
                 hold first_elem = astAppendExtras(edit tree, children, false)
                 give astAddExpr(edit tree, AstExprKind.ArrayLit, tok.start, end_pos, first_elem, children.length, 0, 0)
             }
+            when parserTakeSymbol(source, edit cursor, tokens, "~") {
+                // Bitwise not of an Int.
+                parserSkipNewlines(edit cursor, tokens)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
+                hold end_pos = astExprEnd(view tree, operand, tok.end)
+                give astAddExpr(edit tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, tok.end, 0)
+            }
             when parserTakeSymbol(source, edit cursor, tokens, "-") || parserTakeSymbol(source, edit cursor, tokens, "!") {
                 // The magnitude of Int.MIN does not fit an Int. It is only
                 // valid directly under `-`, where the pair is the literal
@@ -417,14 +441,14 @@ flow parsePrimaryExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
                     }
                 }
                 parserSkipNewlines(edit cursor, tokens)
-                hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)
                 give astAddExpr(edit tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, tok.end, 0)
             }
             when parserTakeSymbol(source, edit cursor, tokens, "&") {
                 parserSkipNewlines(edit cursor, tokens)
                 hold is_mut = parserTakeWord(source, edit cursor, tokens, "mut")
-                hold operand = parseExpr(edit tree, source, edit cursor, tokens, 8, parens, depth + 1)
+                hold operand = parseExpr(edit tree, source, edit cursor, tokens, PARSER_PREC_UNARY, parens, depth + 1)
                 hold end_pos = astExprEnd(view tree, operand, tok.end)
                 hold op_end = selectInt(is_mut, tok.start + 4, tok.end)
                 give astAddExpr(edit tree, AstExprKind.Unary, tok.start, end_pos, operand, tok.start, op_end, 0)

@@ -113,6 +113,8 @@ flow cfgEmitInstruction(code: edit X64Code, p: view CfgProgram, f: Int, inst: vi
         } otherwise when inst.op == 3 {
             x64MulReg(edit code, 0, 1)
             fix.overflow_at@push(x64OverflowPlaceholder(edit code))
+        } otherwise when inst.op >= 12 {
+            cfgEmitBitwise(edit code, edit fix, inst.op)
         } otherwise when inst.op >= 10 {
             cfgEmitDivRem(edit code, edit fix, inst.op)
         } otherwise {
