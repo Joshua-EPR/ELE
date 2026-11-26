@@ -35,7 +35,12 @@ param(
     [string]$Teclas = "",
     # Virtualización por hardware (Windows Hypervisor Platform) en vez de
     # emulación TCG: necesaria para medir rendimiento (hito 9).
-    [switch]$Acelerar
+    [switch]$Acelerar,
+    # Crea construccion\ele.img (GPT + FAT32, para grabar en un USB) y
+    # arranca QEMU desde esa imagen en vez del directorio.
+    [switch]$Imagen,
+    # Sin HPET en la máquina virtual (como algunos equipos reales).
+    [switch]$SinHpet
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,16 +80,26 @@ Copy-Item (Join-Path $herramientas "limine\BOOTX64.EFI") (Join-Path $esp "EFI\BO
 Copy-Item (Join-Path $herramientas "limine.conf") (Join-Path $esp "boot\limine\limine.conf")
 Copy-Item $elf (Join-Path $esp "boot\kernel.elf")
 
+$disco = "format=raw,file=fat:rw:`"$esp`""
+if ($Imagen) {
+    $img = Join-Path $salida "ele.img"
+    Write-Host "==> creando imagen USB"
+    python (Join-Path $herramientas "crear_imagen.py") $esp $img
+    if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear la imagen" }
+    $disco = "format=raw,file=`"$img`""
+}
+
 # 3. QEMU. Celeron 3865U: SSE hasta SSE4.2, sin AVX ni FMA.
 $cpu = "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt"
 $firmware = Join-Path $Qemu "share\edk2-x86_64-code.fd"
 $argumentos = @(
     "-M", "q35", "-cpu", $cpu, "-smp", "$Cpus", "-m", $Memoria,
     "-drive", "if=pflash,format=raw,readonly=on,file=`"$firmware`"",
-    "-drive", "format=raw,file=fat:rw:`"$esp`"",
+    "-drive", $disco,
     "-no-reboot", "-no-shutdown"
 )
 if ($Acelerar) { $argumentos += @("-accel", "whpx") }
+if ($SinHpet) { $argumentos[1] = "q35,hpet=off" }
 $qemuExe = Join-Path $Qemu "qemu-system-x86_64.exe"
 
 if (-not $Prueba) {

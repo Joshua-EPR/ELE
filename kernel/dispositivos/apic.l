@@ -4,7 +4,7 @@ take nucleo.cpu
 take nucleo.mem
 take mem.paginacion
 take dispositivos.acpi
-take tiempo.hpet
+take tiempo.reloj
 
 expose fixed VECTOR_TEMPORIZADOR = 64
 expose fixed VECTOR_TECLADO = 65
@@ -51,14 +51,14 @@ expose flow lapicIniciar() {
     lapicEscribir(LAPIC_ESPURIO, 0x100 | VECTOR_ESPURIO)
 }
 
-// Mide con el HPET cuántas cuentas del temporizador (divisor 16) y cuántos
+// Mide con el reloj de referencia (HPET o temporizador PM) cuántas cuentas del temporizador (divisor 16) y cuántos
 // ciclos de TSC hay en 10 ms.
 expose flow lapicCalibrar() {
     lapicEscribir(LAPIC_DIVISOR, 3)
     lapicEscribir(LAPIC_LVT_TEMPORIZADOR, 0x10000 | VECTOR_TEMPORIZADOR)
     lapicEscribir(LAPIC_CUENTA_INICIAL, 0xFFFFFFFF)
     hold tsc0 = rdtsc()
-    hpetEsperar(10000)
+    relojEsperar(10000)
     hold restantes = lapicLeer(LAPIC_CUENTA_ACTUAL)
     hold tsc1 = rdtsc()
     lapicEscribir(LAPIC_CUENTA_INICIAL, 0)

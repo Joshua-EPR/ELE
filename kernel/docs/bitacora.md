@@ -204,3 +204,19 @@ fijo a 2,72 GHz. En ciclos reales de núcleo serían ~4,8 FLOP/ciclo, ~60 %:
 sigue por encima del 50 % pedido. El Celeron 3865U no tiene turbo
 (1,8 GHz), así que allí ciclo de TSC y ciclo de núcleo coinciden. Falta
 medirlo en esa máquina.
+
+## 2026-11-26 — Preparación para el equipo real (rama `feat/kernel-usb-image`)
+
+PR #189 fusionado.
+
+- `herramientas/crear_imagen.py`: imagen de disco GPT con una partición EFI
+  FAT32 (nombres largos VFAT incluidos), escrita a mano en Python sin
+  dependencias. `construir.ps1 -Imagen` la crea y arranca QEMU desde ella.
+  `fsck.fat -n` sobre la partición: sin problemas. `sgdisk -v`: sin
+  problemas. Los nueve hitos pasan arrancando desde la imagen.
+- `tiempo/reloj.l`: reloj de referencia. Usa el HPET y, si no hay, el
+  temporizador PM de ACPI (FADT: PM_TMR_BLK y TMR_VAL_EXT). Lo usan la
+  calibración del LAPIC y el arranque SMP. Con `construir.ps1 -SinHpet`
+  (q35,hpet=off): 500 ms del temporizador = 503 ms del temporizador PM.
+- README: pasos para grabar el USB y arrancar en el 3865U (UEFI, Secure Boot
+  desactivado) y qué puede cambiar respecto a QEMU.
