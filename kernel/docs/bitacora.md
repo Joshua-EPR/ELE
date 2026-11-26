@@ -418,3 +418,37 @@ Comparado con la Fase 1 (256, 1 núcleo, 29 % del chip), el chip completo
 rinde ahora más del doble. Lo más débil son las formas planas del
 transformer (M = 64): 49-53 %. El bloque de 96 filas queda a medio llenar y
 el empaquetado de B pesa más. Se puede mejorar cuando lleguen los tensores.
+
+## 2026-11-26 — Hito 12: PCI Express
+
+Plan: base ECAM desde la tabla MCFG; recorrer todos los buses; mostrar
+fabricante, dispositivo, clase y BAR; identificar el controlador de disco;
+bus mastering y MSI.
+
+- `acpi.l` lee la MCFG (segmento 0: base, primer y último bus).
+- `dispositivos/pci.l`: configuración por ECAM, mapeada sin caché página a
+  página. Enumeración bus/disp/fn (las multifunción por el bit 7 del tipo
+  de cabecera), hasta 128 funciones. Los BAR se miden con el sondeo
+  estándar (decodificación apagada, escribir ~0, restaurar), incluidos los
+  de 64 bits. Capacidades: MSI, MSI-X y PCIe.
+- `pciHabilitarDma` (memoria + bus master). `pciConfigurarMsi` (dirección
+  0xFEE00000 | destino, dato = vector) queda escrita, pero sin activar: un
+  vector sin manejador dejaría el LAPIC con el bit de servicio ocupado y
+  bloquearía el temporizador y el teclado. Se activa con el driver de disco.
+- Si el disco aparece como RAID (Intel RST) o IDE, el kernel se detiene con
+  un aviso, como pide el plan.
+- Paginación: `siguiente` ya no confunde una página de 2 MiB con una
+  tabla. Si la zona ya está cubierta por el HHDM, pagMapear4k falla
+  limpiamente y el acceso usa esa página.
+
+QEMU (q35):
+```
+PCI: ECAM en 0xE0000000, buses 0-255, 6 funciones:
+  00:00.0 8086:29c0 060000 puente anfitrión
+  00:01.0 1234:1111 030000 pantalla BAR0m=0080000000/16384K BAR2m=0081085000/4K
+  00:02.0 8086:10d3 020000 red BAR0m=... MSI MSI-X
+  00:1f.0 8086:2918 060100 puente ISA/LPC
+  00:1f.2 8086:2922 010601 SATA AHCI BAR4e=0000006040/32 BAR5m=0081084000/4K MSI
+  00:1f.3 8086:2930 0c0500 SMBus BAR4e=0000006000/64
+disco: AHCI en el bdf 0xFA (00:1f.2), con MSI
+```

@@ -13,8 +13,9 @@ take mem.paginacion
 // +40 HPET física, +48 número de CPU (LAPIC habilitados),
 // +56.. tabla de ISO: GSI de cada IRQ ISA 0..15 (16 palabras),
 // +184.. banderas de cada ISO (16 palabras), +312.. ids LAPIC (64),
-// +832 puerto del temporizador PM, +840 1 si ese contador es de 32 bits.
-flow estado() => Int { give reservar(848, 8) }
+// +832 puerto del temporizador PM, +840 1 si ese contador es de 32 bits,
+// +848 base física de ECAM (MCFG, segmento 0), +856 primer bus, +864 último.
+flow estado() => Int { give reservar(872, 8) }
 
 expose flow acpiLapicFisica() => Int { give leer64(estado() + 16) }
 expose flow acpiIoapicFisica() => Int { give leer64(estado() + 24) }
@@ -24,6 +25,9 @@ expose flow acpiCpus() => Int { give leer64(estado() + 48) }
 expose flow acpiPuertoPm() => Int { give leer64(estado() + 832) }
 expose flow acpiPm32Bits() => Bool { give leer64(estado() + 840) == 1 }
 expose flow acpiIdLapic(i: Int) => Int { give leer64(estado() + 312 + i * 8) }
+expose flow acpiEcamFisica() => Int { give leer64(estado() + 848) }
+expose flow acpiPrimerBus() => Int { give leer64(estado() + 856) }
+expose flow acpiUltimoBus() => Int { give leer64(estado() + 864) }
 
 // GSI de la IRQ ISA `irq` y sus banderas MPS (polaridad / disparo).
 expose flow acpiGsiDeIrq(irq: Int) => Int { give leer64(estado() + 56 + irq * 8) }
@@ -120,6 +124,22 @@ expose flow acpiIniciar() => Bool {
         hold t = tabla(fadt)
         escribir64(e + 832, leer32(t + 76))
         escribir64(e + 840, (leer32(t + 112) >> 8) & 1)
+    }
+    // MCFG: entradas de 16 bytes desde +44 (base u64, segmento u16, bus
+    // inicial u8, bus final u8). Solo el segmento 0.
+    escribir64(e + 848, 0)
+    hold mcfg = buscar(77, 67, 70, 71)    // "MCFG"
+    when mcfg != 0 {
+        hold t = tabla(mcfg)
+        hold entradas = (leer32(t + 4) - 44) / 16
+        each i among 0..entradas {
+            hold ent = t + 44 + i * 16
+            when leer16(ent + 8) == 0 && leer64(e + 848) == 0 {
+                escribir64(e + 848, leer64(ent))
+                escribir64(e + 856, leer8(ent + 10))
+                escribir64(e + 864, leer8(ent + 11))
+            }
+        }
     }
     give leer64(e + 24) != 0
 }

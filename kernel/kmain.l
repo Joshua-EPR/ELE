@@ -22,6 +22,7 @@ take tiempo.reloj
 take tiempo.temporizador
 take cpu.smp
 take bench.sgemm
+take dispositivos.pci
 
 flow kmain() {
     // Antes que nada: copia propia de las respuestas de Limine.
@@ -66,6 +67,7 @@ flow kmain() {
     hito6()
     hito8()
     hito9()
+    hito12()
     hito7()
 
     during true {
@@ -276,4 +278,48 @@ flow hito9() {
     } otherwise {
         kprintln(cadena("hito 11 FALLÓ"))
     }
+}
+
+// Hito 12: PCI Express por ECAM.
+flow hito12() {
+    when !pciEnumerar() {
+        kprintln(cadena("hito 12 FALLÓ: ACPI no tiene tabla MCFG"))
+        give
+    }
+    kprint(cadena("PCI: ECAM en "))
+    kprintHex(acpiEcamFisica())
+    kprint(cadena(", buses "))
+    kprintEntero(acpiPrimerBus())
+    kprint(cadena("-"))
+    kprintEntero(acpiUltimoBus())
+    kprint(cadena(", "))
+    kprintEntero(pciCantidad())
+    kprintln(cadena(" funciones:"))
+    pciImprimir()
+    hold i = pciDisco()
+    when i < 0 {
+        kprintln(cadena("disco: no se encontró controlador AHCI ni NVMe"))
+        kprintln(cadena("hito 12 FALLÓ"))
+        give
+    }
+    hold ent = pciEntrada(i)
+    hold tipo = pciTipoDisco(leer64(ent + 16))
+    kprint(cadena("disco: "))
+    when tipo == DISCO_AHCI { kprint(cadena("AHCI")) }
+    when tipo == DISCO_NVME { kprint(cadena("NVMe")) }
+    when tipo == DISCO_RAID { kprint(cadena("RAID")) }
+    when tipo == DISCO_IDE { kprint(cadena("IDE heredado")) }
+    kprint(cadena(" en el bdf "))
+    kprintHex(leer64(ent))
+    when pciCapacidad(leer64(ent), 0x05) != 0 { kprint(cadena(", con MSI")) }
+    kprintByte(10)
+    when tipo == DISCO_RAID || tipo == DISCO_IDE {
+        kprintln(cadena("*** DETENIDO: el disco no está en modo AHCI/NVMe (¿RAID / Intel RST?)."))
+        kprintln(cadena("*** Cambiar a AHCI en el firmware antes del hito 13."))
+        kprintln(cadena("hito 12 OK (sin driver de disco posible)"))
+        give
+    }
+    pciHabilitarDma(leer64(ent))
+    kprintln(cadena("bus mastering activado en el controlador de disco"))
+    kprintln(cadena("hito 12 OK"))
 }
