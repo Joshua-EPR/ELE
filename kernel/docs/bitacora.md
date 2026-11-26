@@ -220,3 +220,27 @@ PR #189 fusionado.
   (q35,hpet=off): 500 ms del temporizador = 503 ms del temporizador PM.
 - README: pasos para grabar el USB y arrancar en el 3865U (UEFI, Secure Boot
   desactivado) y qué puede cambiar respecto a QEMU.
+
+## 2026-11-26 — Fase 1 en el equipo real: Celeron 3865U ✅
+
+PR #190 fusionado. Imagen `ele.img` grabada con Rufus (modo DD) y arrancada
+por UEFI, con Secure Boot desactivado. El primer intento falló con
+"Selected boot device failed": el firmware había elegido el arranque
+heredado (Legacy/CSM) del USB. Eligiendo la entrada UEFI arrancó.
+
+Salida en pantalla (foto del 2026-11-26):
+
+| Hito | Resultado en el 3865U |
+|---|---|
+| 1-2 | `ELE kernel OK`; framebuffer 1366x768x32; tildes y ñ correctas |
+| 3 | GDT+TSS, IDT, #BP atendido y reanudado |
+| 4 | 3649 MiB libres de 5368 MiB; PML4 propio (CR3 0x32000); montón OK |
+| 5 | GenuineIntel, Intel Celeron CPU 3865U @ 1.80GHz; SSE..SSE4.2+, POPCNT+; AVX-, AVX2-, FMA-; XSAVE presente y sin usar; MXCSR 0x1F80 |
+| 6 | HPET de 24 MHz (23999999 Hz); TSC 1801 MHz; LAPIC 1501 cuentas/ms; 500 ms = 500 ms |
+| 8 | 1 de 1 procesadores secundarios en línea (2 núcleos, sin HT) |
+| 9 | SGEMM 256x256: 3911 us, 8577 MFLOPS, **4,76 FLOP/ciclo = 59 % del pico SSE** con empaquetado; micronúcleo 5,44 FLOP/ciclo = 68 % |
+| 7 | teclado interno PS/2 es-LA: `Hola`, `que tal?`, `¡?`, `¿?` |
+
+Sin turbo en el 3865U, el ciclo de TSC es el ciclo de núcleo: el 59 % es
+real. Supera el 50 % pedido para el hito 9. La Fase 1 queda completa en
+hardware real.
