@@ -218,7 +218,11 @@ flow trapEmitStubs(code: edit X64Code, sites: view List of[Int], spans: view Lis
 expose flow trapEmitAll(code: edit X64Code, imports: edit Pe64Imports, target: Int, fix: view CfgFix, spans: view TrapSpans) {
     when fix.overflow_at.length + fix.bad_variant_at.length + fix.bad_index_at.length == 0 { give }
     hold reporter = code.bytes.length
-    when target == 2 {
+    when target == 2 && fix.panic_entry >= 0 {
+        // Kernel with `kpanico`: the block cfgBuildFor emitted just before.
+        hold join = x64JumpPlaceholder(edit code)
+        x64PatchRelative(edit code, join, fix.panic_entry)
+    } otherwise when target == 2 {
         // Kernel: no output and nothing to exit to. The CPU stops with
         // RDI = status (125/126/127) and RAX = packed line/column, readable
         // with `info registers` in the QEMU monitor.

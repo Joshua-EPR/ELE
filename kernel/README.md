@@ -17,6 +17,9 @@ capturas. Limine 12.11.1 (`herramientas/limine/BOOTX64.EFI`, licencia BSD-2)
 ya está en el repositorio. La partición EFI es el directorio
 `construccion\esp`, que QEMU monta como disco FAT (vvfat).
 
+Con `-Acelerar`, QEMU usa la virtualización por hardware de Windows (WHPX)
+en lugar de emularlo todo: es lo que hay que usar para medir el hito 9.
+
 Prueba completa de los nueve hitos (4 CPU, teclas inyectadas por el monitor):
 
 ```powershell

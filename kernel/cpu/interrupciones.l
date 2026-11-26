@@ -117,3 +117,21 @@ flow kinterrupcion(marco: Int) {
         give
     }
 }
+
+// El compilador llama a `kpanico` cuando falla una comprobación en tiempo
+// de ejecución (desbordamiento, división por cero, índice, variante).
+// `posicion` = línea * 2^20 + columna en el fuente combinado.
+flow kpanico(codigo: Int, posicion: Int) {
+    cli()
+    kprint(cadena("\n*** pánico del kernel: "))
+    when codigo == 125 { kprint(cadena("desbordamiento entero o división por cero")) }
+    when codigo == 126 { kprint(cadena("acceso a variante inactiva")) }
+    when codigo == 127 { kprint(cadena("índice fuera de rango")) }
+    kprint(cadena(" (línea "))
+    kprintEntero(posicion / 1048576)
+    kprint(cadena(", columna "))
+    kprintEntero(posicion % 1048576)
+    kprintln(cadena(")"))
+    kprintln(cadena("*** sistema detenido"))
+    during true { hlt() }
+}

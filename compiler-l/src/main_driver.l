@@ -485,7 +485,7 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
                     give 3
                 }
                 when code == 80 {
-                    printError("error[BACKEND]: los intrínsecos xmm* requieren registros XMM constantes de 6 a 15 (código 80)")
+                    printError("error[BACKEND]: los intrínsecos xmm* requieren registros XMM constantes de 6 a 15 (xmmMulSumar4: acumuladores acc..acc+3 con acc <= 12 y factor fuera de ellos) y desplazamientos constantes (código 80)")
                     give 3
                 }
                 when code == 50 {

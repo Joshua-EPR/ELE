@@ -260,6 +260,7 @@ argument is an `Int`.
 | `nucleo.cpu` | `fxsave(dir)`, `fxrstor(dir)` | `FXSAVE64` / `FXRSTOR64` | — |
 | `nucleo.cpu` | `stubInterrupcion(vector)` | address of the compiler-generated stub (kernel only) | `Int` |
 | `nucleo.cpu` | `xmmCero(r)`, `xmmCargar(r, dir)`, `xmmGuardar(dir, r)`, `xmmDifundir(r, dir)`, `xmmCopiar(d, s)`, `xmmMultiplicar(d, s)`, `xmmSumar(d, s)` | `XORPS`, `MOVUPS`, `MOVSS`+`SHUFPS`, `MOVAPS`, `MULPS`, `ADDPS` on XMM6..XMM15 | — |
+| `nucleo.cpu` | `xmmDifundirEn(r, dir, desp)`, `xmmMulSumar4(acc, a, dir, desp)` | broadcast of `[dir+desp]`; `acc+j += a * [dir+desp+16j]` for j = 0..3 (`MOVUPS`+`MULPS`+`ADDPS` through XMM0) | — |
 | `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
 | `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
 | `nucleo.mem` | `reservar(bytes, alineacion)` | zeroed `.bss` block (kernel only) | its address |
@@ -300,4 +301,9 @@ run-time check (overflow, index, inactive variant) stops the CPU with the
 status (125/126/127) in `RDI` and the packed source position in `RAX`.
 Backend codes: 77 static storage or stubs outside `--target kernel`,
 78 non-constant `reservar`/`datos64`/`cadena` arguments, 79 `kinterrupcion`
-missing, 80 XMM register outside 6..15.
+missing, 80 XMM register outside 6..15 (for `xmmMulSumar4`, `acc` <= 12 and
+`a` outside `acc..acc+3`) or a non-constant displacement.
+
+If the program defines `kpanico(codigo: Int, posicion: Int)`, a failed
+run-time check in a kernel image calls it (status 125/126/127, position =
+line * 2^20 + column) before stopping the CPU.

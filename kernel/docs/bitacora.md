@@ -170,3 +170,37 @@ Problema encontrado:
   compilador salieron con mojibake (`nÃºmero`) y el corpus PE lo detectó.
   Lo arreglé y desde entonces solo edito con Python o con las herramientas
   de edición.
+
+## 2026-11-26 — Rendimiento de SGEMM y pánico del kernel (rama `feat/kernel-sgemm-panic`)
+
+PR #188 fusionado. La máquina de desarrollo tiene un i5-7300U (Kaby Lake,
+la misma microarquitectura que el Celeron 3865U) y QEMU admite WHPX:
+`construir.ps1 -Acelerar` ejecuta el kernel virtualizado, así que el hito 9
+se mide en hardware real. Con WHPX los nueve hitos pasan igual, y el
+temporizador queda más fino: 500 ms = 501 ms de HPET.
+
+Compilador:
+- `xmmMulSumar4(acc, a, dir, desp)`: `acc+j += a * [dir+desp+16j]`, j = 0..3.
+  Cuatro MOVUPS+MULPS+ADDPS con una sola carga de la dirección.
+- `xmmDifundirEn(r, dir, desp)`: difusión con desplazamiento constante.
+- Los argumentos constantes de los xmm* se pliegan como en `fixed`.
+- `kpanico(codigo, posicion)`: si existe, la llama el compilador cuando
+  falla una comprobación en tiempo de ejecución. El kernel la define en
+  cpu/interrupciones.l e imprime causa, línea y columna.
+
+SGEMM 256x256 f32 con WHPX, medido en ciclos de TSC (2,72 GHz):
+
+| Versión | MFLOPS | FLOP/ciclo TSC |
+|---|---|---|
+| hito 9 original (1 fila x 16, una intrínseca por instrucción) | 1813 (128x128) | 0,67 |
+| 2 x 16 con xmmMulSumar4 | 7974 | 2,92 |
+| + empaquetado de A y B, k desenrollado x4 | 8232 | 3,02 (micronúcleo 6,35) |
+| + empaquetado con copias SSE | 16540–17000 | 6,08–6,24 (micronúcleo 7,1) |
+
+El pico SSE de un núcleo es 8 FLOP/ciclo (un MULPS y un ADDPS de 4 floats
+por ciclo). Medido en ciclos de TSC, el total, con empaquetado, es el
+76–78 % del pico. Ojo: el i5-7300U sube en turbo hasta ~3,5 GHz y el TSC va
+fijo a 2,72 GHz. En ciclos reales de núcleo serían ~4,8 FLOP/ciclo, ~60 %:
+sigue por encima del 50 % pedido. El Celeron 3865U no tiene turbo
+(1,8 GHz), así que allí ciclo de TSC y ciclo de núcleo coinciden. Falta
+medirlo en esa máquina.

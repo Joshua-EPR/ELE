@@ -232,7 +232,7 @@ flow hito8() {
 
 // Hito 9: SGEMM con SSE empaquetado (MULPS/ADDPS, acumuladores en XMM).
 flow hito9() {
-    when sgemmBanco(128) {
+    when sgemmBanco(256) {
         kprintln(cadena("hito 9 OK"))
     } otherwise {
         kprintln(cadena("hito 9 FALLÓ: resultado incorrecto"))
