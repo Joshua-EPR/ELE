@@ -500,3 +500,44 @@ sigue intacta (todo 0xAB) y `fsck.fat` da la FAT32 por buena.
 
 Error encontrado: un búfer de 256 KiB del montón no empieza en página y
 ocupa 65 páginas. La PRDT pasó de 64 a 72 entradas.
+
+## 2026-11-26 — Hito 14: FAT32 y checkpoints A/B
+
+Plan: FAT32 de lectura (rutas, nombres largos) y escritura simple
+(crear/sobrescribir en la raíz); checkpoints en dos ranuras alternas con
+CRC y prueba de corte.
+
+- `almacenamiento/fat32.l`: montaje desde el sector de arranque. Lectura por
+  rutas con '/'; nombres largos VFAT comparados sin distinguir mayúsculas
+  (ASCII), o 8.3. Lectura de clusters contiguos en una sola orden.
+  Escritura: `fatCrear` (8.3, raíz; reutiliza los clusters si caben, si no
+  libera y reserva) y `fatEscribir` (en el lugar, por sectores). La FAT se
+  escribe en todas sus copias. La pista de libres de FSInfo se marca como
+  desconocida (0xFFFFFFFF) al reservar.
+- `ahciVaciar` (FLUSH CACHE EXT) y `discoVaciar`.
+- `almacenamiento/checkpoint.l`: ranuras CKPT_A.BIN y CKPT_B.BIN de
+  capacidad fija, creadas una sola vez (es la única operación que toca la
+  FAT). Cabecera: magia, versión, paso, bytes, CRC32 de los datos y CRC32
+  de la propia cabecera. Orden: datos, vaciar, cabecera, vaciar. Se
+  escribe siempre la ranura que no tiene el último paso. Al cargar se
+  prueba primero la más reciente; si sus datos no cuadran, la otra.
+
+QEMU, primer arranque (disco de prueba nuevo):
+```
+FAT32 montada: 512 bytes por cluster
+texto.txt: 3145736 bytes en 21 ms, CRC32 0xAD64C905   (anfitrión: 0xad64c905)
+  primera línea: El compilador mide los datos del día con paciencia.
+SALIDA.TXT escrito y leído de vuelta: idéntico
+checkpoint: ninguno válido (primer arranque)
+guardado el paso 1; corte simulado a mitad del paso 2
+recarga inmediata: paso 1
+hito 14 OK
+```
+Segundo arranque con el mismo disco:
+```
+checkpoint recuperado: paso 1 de la ranura A, datos verificados
+guardado el paso 2; corte simulado a mitad del paso 3
+```
+`fsck.fat -n` sobre la partición después de las escrituras: sin errores
+(solo indica que el contador de libres no está inicializado, como se
+pretendía).

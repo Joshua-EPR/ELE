@@ -26,6 +26,8 @@ take dispositivos.pci
 take dispositivos.ahci
 take almacenamiento.disco
 take lib.crc32
+take almacenamiento.fat32
+take almacenamiento.checkpoint
 take tiempo.reloj
 
 flow kmain() {
@@ -73,6 +75,7 @@ flow kmain() {
     hito9()
     hito12()
     hito13()
+    hito14()
     hito7()
 
     during true {
@@ -444,4 +447,117 @@ flow hito13() {
     } otherwise {
         kprintln(cadena("hito 13 FALLÓ"))
     }
+}
+
+// Datos de prueba de un checkpoint: 1 MiB que depende solo del paso.
+flow datosDePaso(paso: Int, dir: Int, bytes: Int) {
+    change x = 0x9E3779B97F4A7C15 ^ (paso * 0x100000001B3)
+    when x == 0 { x = 1 }
+    change i = 0
+    during i < bytes {
+        x = siguienteAleatorio(x)
+        escribir64(dir + i, x)
+        i += 8
+    }
+}
+
+// Hito 14: FAT32 y checkpoints A/B.
+flow hito14() {
+    when !discoHayPermitida() || !fatMontar() {
+        kprintln(cadena("hito 14 FALLÓ: la partición permitida no es FAT32"))
+        give
+    }
+    kprint(cadena("FAT32 montada: "))
+    kprintEntero(fatBytesPorCluster())
+    kprintln(cadena(" bytes por cluster"))
+    change bien = true
+
+    // 1. Archivo de texto creado en Windows.
+    when fatAbrir(cadena("texto.txt")) {
+        hold tam = fatTamanoArchivo()
+        hold buf = montonReservar(tam + 65536)
+        hold t0 = relojNanosegundos()
+        hold leidos = fatLeer(0, tam, buf)
+        hold ns = relojNanosegundos() - t0
+        kprint(cadena("texto.txt: "))
+        kprintEntero(leidos)
+        kprint(cadena(" bytes en "))
+        kprintEntero(ns / 1000000)
+        kprint(cadena(" ms, CRC32 "))
+        kprintHex(crc32(buf, leidos))
+        kprintByte(10)
+        kprint(cadena("  primera línea: "))
+        change i = 0
+        during i < leidos && i < 100 && leer8(buf + i) != 10 {
+            kprintByte(leer8(buf + i))
+            i += 1
+        }
+        kprintByte(10)
+        when leidos != tam { bien = false }
+        montonLiberar(buf)
+    } otherwise {
+        kprintln(cadena("texto.txt: no está en la partición (cópielo desde Windows)"))
+    }
+
+    // 2. Escritura simple de un archivo nuevo, leído de vuelta.
+    hold contenido = cadena("Archivo escrito por el kernel ELE: hola, ñandú.\n")
+    hold n = leer64(contenido)
+    hold salida = montonReservar(512)
+    each k among 0..64 { escribir64(salida + k * 8, 0) }
+    each k among 0..n { escribir8(salida + k, leer8(contenido + 8 + k)) }
+    change escrito = fatCrear(cadena("SALIDA  TXT"), cadena("SALIDA.TXT"), n)
+    escrito = escrito && fatEscribir(0, 512, salida) && discoVaciar()
+    hold relectura = montonReservar(fatBytesPorCluster())
+    escrito = escrito && fatAbrir(cadena("salida.txt")) && fatLeer(0, n, relectura) == n
+    escrito = escrito && crc32(relectura, n) == crc32(salida, n)
+    when escrito {
+        kprintln(cadena("SALIDA.TXT escrito y leído de vuelta: idéntico"))
+    } otherwise {
+        kprintln(cadena("SALIDA.TXT: FALLÓ"))
+        bien = false
+    }
+
+    // 3. Checkpoints A/B con corte simulado.
+    hold capacidad = 1048576
+    hold datos = montonReservar(capacidad)
+    hold esperado = montonReservar(capacidad)
+    when !ckptPreparar(capacidad) {
+        kprintln(cadena("checkpoints: no se pudieron crear las ranuras"))
+        kprintln(cadena("hito 14 FALLÓ"))
+        give
+    }
+    hold paso = ckptCargar(datos)
+    change base = 0
+    when paso < 0 {
+        kprintln(cadena("checkpoint: ninguno válido (primer arranque)"))
+    } otherwise {
+        datosDePaso(paso, esperado, capacidad)
+        kprint(cadena("checkpoint recuperado: paso "))
+        kprintEntero(paso)
+        kprint(cadena(" de la ranura "))
+        when ckptRanuraCargada() == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
+        when crc32(datos, capacidad) == crc32(esperado, capacidad) {
+            kprintln(cadena(", datos verificados"))
+        } otherwise {
+            kprintln(cadena(", DATOS INCORRECTOS"))
+            bien = false
+        }
+        base = paso
+    }
+    datosDePaso(base + 1, datos, capacidad)
+    hold guardado = ckptGuardar(base + 1, datos, capacidad, false)
+    datosDePaso(base + 2, datos, capacidad)
+    hold cortado = ckptGuardar(base + 2, datos, capacidad, true)
+    kprint(cadena("guardado el paso "))
+    kprintEntero(base + 1)
+    kprint(cadena("; corte simulado a mitad del paso "))
+    kprintEntero(base + 2)
+    kprintByte(10)
+    hold recuperado = ckptCargar(datos)
+    datosDePaso(base + 1, esperado, capacidad)
+    kprint(cadena("recarga inmediata: paso "))
+    kprintEntero(recuperado)
+    kprintln(cadena(" (debe ser el anterior al corte; al reiniciar debe salir el mismo)"))
+    when !guardado || !cortado || recuperado != base + 1 || crc32(datos, capacidad) != crc32(esperado, capacidad) { bien = false }
+    when bien { kprintln(cadena("hito 14 OK")) } otherwise { kprintln(cadena("hito 14 FALLÓ")) }
 }

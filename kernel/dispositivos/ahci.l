@@ -227,3 +227,8 @@ expose flow ahciEscribir(disco: Int, lba: Int, sectores: Int, dir: Int) => Bool 
     when sectores < 1 || sectores > AHCI_MAX_SECTORES { give false }
     give orden(disco, 0x35, lba, sectores, dir, true)
 }
+
+// FLUSH CACHE EXT: el disco escribe en el medio lo que tenga en su caché.
+expose flow ahciVaciar(disco: Int) => Bool {
+    give orden(disco, 0xEA, 0, 0, 0, false)
+}

@@ -186,3 +186,8 @@ expose flow discoEscribir(lba: Int, sectores: Int, dir: Int) => Bool {
     }
     give true
 }
+
+// Asegura que todo lo escrito está en el medio (caché del disco vaciada).
+expose flow discoVaciar() => Bool {
+    give ahciVaciar(discoActual())
+}
