@@ -107,8 +107,10 @@ flow lexSymbolWidth(b: Int, next: Int, third: Int) => Int {
     when (next == 62 && (b == 45 || b == 61)) || (b == next && (b == 63 || b == 38 || b == 124)) {
         give 2
     }
-    // Shifts << and >>, and the wrapping operators +%, -% and *%.
-    when (b == next && (b == 60 || b == 62)) || (next == 37 && (b == 42 || b == 43 || b == 45)) {
+    // The wrapping operators +%, -% and *%. Shifts stay two `<`/`>` tokens
+    // (legacy `List<Option<Int>>` closes two generics); the parser joins
+    // an adjacent pair (parserShiftPair).
+    when next == 37 && (b == 42 || b == 43 || b == 45) {
         give 2
     }
     when next == 61 {

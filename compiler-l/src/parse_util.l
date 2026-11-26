@@ -257,6 +257,24 @@ expose flow parserNeedSymbol(tree: edit AstTree, source: view Text, cursor: edit
 // * / % *% 11. Prefix operators bind tighter: PARSER_PREC_UNARY.
 expose fixed PARSER_PREC_UNARY = 12
 
+// `<<` / `>>`: two one-byte `<` or `>` tokens with nothing between them.
+expose flow parserShiftPair(source: view Text, tokens: view List of[LexToken], pos: Int) => Bool {
+    when pos + 1 >= tokens.length { give false }
+    hold a = view tokens[pos]
+    hold b = view tokens[pos + 1]
+    when a.end - a.start != 1 || b.end - b.start != 1 || b.start != a.end { give false }
+    choose tokenKindValue(view a.kind) {
+        LexKind.Symbol : {}
+        _ : { give false }
+    }
+    choose tokenKindValue(view b.kind) {
+        LexKind.Symbol : {}
+        _ : { give false }
+    }
+    hold c = source@byteAt(a.start)
+    give (c == 60 || c == 62) && source@byteAt(b.start) == c
+}
+
 expose flow parserGetBinaryPrecedence(source: view Text, token: view LexToken) => Int {
     choose tokenKindValue(view token.kind) {
         LexKind.Symbol : {
@@ -278,7 +296,6 @@ expose flow parserGetBinaryPrecedence(source: view Text, token: view LexToken) =
                 when b0 == 38 && b1 == 38 { give 3 }
                 when (b0 == 61 || b0 == 33) && b1 == 61 { give 4 }
                 when (b0 == 60 || b0 == 62) && b1 == 61 { give 5 }
-                when (b0 == 60 || b0 == 62) && b1 == b0 { give 9 }
                 when b1 == 37 && b0 == 42 { give 11 }
                 when b1 == 37 && (b0 == 43 || b0 == 45) { give 10 }
                 give 0

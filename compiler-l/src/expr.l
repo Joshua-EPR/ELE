@@ -85,7 +85,9 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
         }
         when cursor.pos >= tokens.length { leave }
         hold tok = view tokens[cursor.pos]
-        hold prec = parserGetBinaryPrecedence(source, tok)
+        hold shift_pair = parserShiftPair(source, tokens, cursor.pos)
+        change prec = parserGetBinaryPrecedence(source, tok)
+        when shift_pair { prec = 9 }
         when prec < min_prec || prec == 0 {
             leave
         }
@@ -108,9 +110,13 @@ expose flow parseExpr(tree: edit AstTree, source: view Text, cursor: edit TokenC
         }
 
         hold op_start = tok.start
-        hold op_end = tok.end
+        change op_end = tok.end
         hold is_null_coalesce = (prec == 1)
         cursor.pos += 1
+        when shift_pair {
+            op_end = tokens[cursor.pos].end
+            cursor.pos += 1
+        }
         parserSkipNewlines(edit cursor, tokens)
 
         hold next_min = selectInt(is_null_coalesce, prec, prec + 1)
