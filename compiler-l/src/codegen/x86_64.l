@@ -943,6 +943,25 @@ expose flow x64BroadcastFromRax(code: edit X64Code, xmm: Int, disp: Int) {
     x64Shufps0(edit code, xmm)
 }
 
+// acc += factor * [RAX + disp] with MULPS reading memory (micro-fused
+// load; the operand must be 16-byte aligned): MOVAPS XMM0,factor (0F 28);
+// MULPS XMM0,[RAX+disp32] (0F 59 80 disp32); ADDPS acc,XMM0 (0F 58).
+expose flow x64MulAddMemoryFromRax(code: edit X64Code, acc: Int, factor: Int, disp: Int) {
+    x64SsePacked(edit code, 40, 0, factor)
+    x64Put(edit code, 15)
+    x64Put(edit code, 89)
+    x64Put(edit code, 128)
+    x64PutSigned(edit code, disp, 4)
+    x64SsePacked(edit code, 88, acc, 0)
+}
+
+// MOV RAX,RSP (48 89 E0).
+expose flow x64ReadRsp(code: edit X64Code) {
+    x64Put(edit code, 72)
+    x64Put(edit code, 137)
+    x64Put(edit code, 224)
+}
+
 // INT3 (CC).
 expose flow x64Int3(code: edit X64Code) { x64Put(edit code, 204) }
 

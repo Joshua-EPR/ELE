@@ -244,3 +244,177 @@ Salida en pantalla (foto del 2026-11-26):
 Sin turbo en el 3865U, el ciclo de TSC es el ciclo de núcleo: el 59 % es
 real. Supera el 50 % pedido para el hito 9. La Fase 1 queda completa en
 hardware real.
+
+# Fase 2
+
+## 2026-11-26 — Hito 10: correcciones de la Fase 1
+
+Plan: contar como RAM solo usable + recuperable del cargador + kernel;
+copiar las respuestas de Limine a memoria del kernel y liberar la memoria
+recuperable del cargador; informar SGEMM por núcleo y contra el pico del
+chip.
+
+- `arranqueCopiar()` (arranque/limine.l) copia, como primera acción de
+  kmain, la revisión, el HHDM, la RSDP, las direcciones del kernel, el
+  framebuffer y hasta 256 entradas del mapa de memoria. Desde ahí ninguna
+  flow `arranque*` toca memoria de Limine.
+- `memFisicaTotalBytes()` = usable + recuperable del cargador + kernel. El
+  informe muestra aparte lo reservado, ACPI, framebuffer y defectuoso. El
+  "5368 MiB" de la Fase 1 era el final de la RAM más alta (incluía el
+  agujero PCI de 32 bits).
+- `memFisicaRecuperarCargador(leerRsp())`: libera los marcos recuperables
+  del cargador, tras el PML4 propio y la copia de Limine. Conserva los que
+  están a menos de 64 KiB de la pila de arranque del BSP, que sigue en uso.
+- Compilador: intrínseco `leerRsp()` (MOV RAX,RSP), para esa guarda.
+- SGEMM informa los núcleos usados (1), los FLOP/ciclo por núcleo y el % del
+  pico del chip (16 FLOP/ciclo con 2 núcleos). Confirmado: el SGEMM de la
+  Fase 1 corría en un solo núcleo (los AP se quedan en HLT).
+
+QEMU (q35, 4 GiB, WHPX): `RAM: 4089 MiB (usable 4047, del cargador 41,
+kernel 176 KiB)`, `no RAM: reservada 259 MiB, ACPI 2160 KiB, framebuffer
+4000 KiB`; `libres: 4047 MiB; tras recuperar ... (41 MiB): 4089 MiB`. Los
+hitos 2-9 y 7 pasan.
+
+Nota de medición: esta tarde el anfitrión estaba muy cargado (Chrome, CPU
+al 80-100 %) y WHPX daba unas 10 veces menos rendimiento en SGEMM que por
+la mañana. Con el kernel de `main` sin cambios ocurría lo mismo, así que
+es el anfitrión, no una regresión. En TCG con esa carga, el hito 6 midió
+733 ms (falla la tolerancia de 400-700 ms): la emulación pierde precisión
+de tiempo. Las cifras que cuentan son las de la laptop.
+
+### Hito 10 en la laptop
+
+Primera prueba: memoria bien (`RAM: 3802 MiB (usable 3649, del cargador
+152, kernel 176 KiB)`, `no RAM: reservada 380 MiB, ACPI 173464 KiB,
+framebuffer 4128 KiB`, libres 3649 -> 3801 MiB tras recuperar 151 MiB).
+Pero justo después, `montonReservar(100)` devolvió 0 y la escritura en esa
+dirección dio un #PF (CR2 = 0, RIP en `hito4`, confirmado con objdump). No
+se reprodujo en QEMU (3,8 / 4 / 6 GiB).
+
+Se añadió diagnóstico: un marco de prueba reservado y liberado antes del
+montón; si el montón no crece, `hito 4 FALLÓ` con el motivo (sin marco /
+falló el mapeo), los marcos libres y el mapa de memoria completo. Con esa
+imagen la laptop arrancó entera ("ya corre correctamente").
+
+Causa sin confirmar. La única diferencia de comportamiento es el marco de
+prueba: deja la pista de búsqueda del asignador en el primer marco libre
+en vez de en 0. Se mantiene el código tal como se probó en la laptop. El
+diagnóstico se queda: si vuelve a pasar, el informe dirá el motivo.
+
+**Causa encontrada** (segunda foto: `marco de prueba: 0x0000000000000000`).
+En la laptop, Limine marca como "recuperable del cargador" una región que
+empieza en la dirección física 0. `memFisicaRecuperarCargador` liberaba
+también el marco 0, y la primera reserva posterior devolvía la física 0,
+que el asignador usa como "sin memoria". En la primera foto le tocó al
+montón. En la segunda se lo llevó el marco de prueba, así que el montón
+funcionó por casualidad. QEMU marca la memoria baja de otra forma.
+
+Corrección: la recuperación nunca libera el marco 0 y
+`memFisicaReservar` empieza a buscar en el marco 1. Se quita el marco de
+prueba y se mantiene el informe de fallo del montón.
+
+Números de la laptop con el hito 10 (foto 2):
+
+| Medida | Valor |
+|---|---|
+| RAM | 3802 MiB (usable 3649, del cargador 152, kernel 176 KiB) |
+| No RAM | reservada 380 MiB, ACPI 173464 KiB, framebuffer 4128 KiB |
+| Libres | 3649 MiB -> 3801 MiB tras recuperar 151 MiB |
+| Reloj | HPET 24 MHz, TSC 1801 MHz, LAPIC 1500 cuentas/ms; 500 ms = 499 ms |
+| SMP | 1 de 1 AP |
+| SGEMM 256 | 8587 MFLOPS en 1 núcleo; 4,76 FLOP/ciclo por núcleo = 59 % del núcleo, 29 % del chip; micronúcleo 5,45 = 68 % / 34 % |
+
+## 2026-11-26 — Hito 11: SGEMM en 2 núcleos y matrices grandes
+
+Plan: buzón de trabajos para el AP; SGEMM general (transpuestas, acumular)
+en `lib/sgemm.l`; tres variantes del micronúcleo; verificación exacta;
+tabla.
+
+- `cpu/buzon.l`: una línea de caché de 64 bytes por núcleo (secuencia
+  pedida, hecha, código, argumento, barrera). Sin instrucciones atómicas:
+  cada campo tiene un solo escritor y x86 conserva el orden de las
+  escrituras. `cpu/trabajos.l` despacha por código. El AP ya no hace HLT:
+  atiende su buzón con interrupciones desactivadas.
+- `lib/sgemm.l`: C (+)= op(A)·op(B), con op = identidad o transpuesta
+  (las transpuestas solo cambian el empaquetado). N múltiplo de 16; M y K
+  libres (K se rellena con ceros hasta múltiplo de 4).
+- Bloqueo de caché (GotoBLAS): K en tramos de 256, así cada panel de B
+  (16 KB) vive en L1. Filas en bloques de 96, con A empaquetada (96 KB) en
+  L2. Para cada panel se recorren todos los bloques de filas. Sin esto, con
+  N = 2048 cada bloque de filas releía los 16 MB de B: 3,3 F/c.
+- Reparto: por tramo de K, cada núcleo empaqueta la mitad de los paneles,
+  barrera, calcula su tramo de filas (múltiplo de 6) y barrera de nuevo.
+  Las filas de C son líneas de caché enteras: no hay false sharing. Los
+  búferes de A son por núcleo y van alineados a 64 bytes.
+- Compilador: `xmmMulSumar4M` (MULPS con operando en memoria). Los
+  intrínsecos xmm* aceptan XMM1..XMM15 (XMM0 es el temporal).
+- Verificación: valores múltiplos de 1/8, así las sumas f32 son exactas.
+  Se compara contra el producto ingenuo en enteros, en las filas 0, M/3,
+  2M/3 y M-1, y se informa el error relativo máximo: 0 ppm en todos los
+  casos.
+
+Errores encontrados:
+1. El montón se corrompía. `bufer()` alineaba con `(x + 63) / 64 * 64`,
+   pero las direcciones del montón (0xFFFFC000...) son Int negativos y la
+   división redondea hacia cero, o sea hacia arriba: la dirección alineada
+   se pasaba del margen y pisaba la cabecera del bloque siguiente. Se
+   arregló con `& ~63`. `montonVerificar()` queda como comprobación. Regla:
+   nunca alinear direcciones de la mitad alta con división.
+2. Las listas literales (`List[...]`) no existen con `--target kernel`
+   (necesitan montón de usuario): código 75.
+
+QEMU WHPX (i5-7300U, 2 vCPU, anfitrión con ~25 % de carga). F/c = FLOP por
+ciclo de TSC; el pico es 8 por núcleo y 16 el chip:
+
+| Variante (512, 1 núcleo) | F/c |
+|---|---|
+| a) 2x16 MOVUPS+MULPS | 4,73 |
+| b) 2x16 MULPS con memoria | 5,03 |
+| c) 3x16 MULPS con memoria | **5,65** (elegida) |
+
+| Caso | 1 núcleo F/c | 2 núcleos F/c/núcleo | speedup | % chip | error |
+|---|---|---|---|---|---|
+| 256 A·B | 4,14 | 5,79 | 2,79 | 72 | 0 |
+| 256 Aᵀ·B | 6,10 | 3,31 | 1,08 | 41 | 0 |
+| 256 A·Bᵀ | 3,74 | 5,35 | 2,85 | 66 | 0 |
+| 256 C+=A·B | 3,30 | 5,77 | 3,49 | 72 | 0 |
+| 64x256 · 256x1024 | 4,59 | 4,20 | 1,82 | 52 | 0 |
+| 64x1024 · 1024x256 | 5,39 | 4,83 | 1,79 | 60 | 0 |
+| 64x256 · 256x768 | 5,66 | 5,12 | 1,80 | 64 | 0 |
+| 512 | 5,40 | 4,77 | 1,76 | **59** | 0 |
+| 1024 | 5,49 | 4,78 | 1,74 | **59** | 0 |
+| 2048 | 5,37 | 5,01 | 1,86 | **62** | 0 |
+
+Speedups por encima de 2 y las caídas en casos pequeños son ruido de WHPX:
+el anfitrión reparte los vCPU con otros procesos y tiene turbo. Las cifras
+buenas saldrán de la laptop. En TCG la prueba omite 1024 y 2048 y pasa
+igual (hito 11 OK).
+
+### Hito 11 en la laptop (Celeron 3865U, 2 núcleos, 1,8 GHz sin turbo) ✅
+
+Con esta imagen también queda confirmado el arreglo del marco 0 (hito 10):
+montón bien, 3649 -> 3801 MiB libres.
+
+Variantes (512, 1 núcleo): a) 4,74 · b) 4,85 · **c) 5,10** FLOP/ciclo
+(elegida c).
+
+| Caso | 1 núcleo MFLOPS | F/c | 2 núcleos MFLOPS | F/c/núcleo | speedup | % chip | error |
+|---|---|---|---|---|---|---|---|
+| 256 A·B | 8504 | 4,72 | 16636 | 4,61 | 1,95 | 57 | 0 ppm |
+| 256 Aᵀ·B | 8407 | 4,66 | 16465 | 4,57 | 1,95 | 57 | 0 ppm |
+| 256 A·Bᵀ | 7450 | 4,13 | 14670 | 4,07 | 1,96 | 50 | 0 ppm |
+| 256 C+=A·B | 8430 | 4,68 | 16527 | 4,58 | 1,96 | 57 | 0 ppm |
+| 64x256 · 256x1024 | 7990 | 4,43 | 15467 | 4,29 | 1,93 | 53 | 0 ppm |
+| 64x1024 · 1024x256 | 7636 | 4,23 | 14265 | 3,96 | 1,86 | 49 | 0 ppm |
+| 64x256 · 256x768 | 8316 | 4,61 | 15375 | 4,26 | 1,84 | 53 | 0 ppm |
+| **512** | 9060 | 5,03 | 17966 | 4,98 | 1,98 | **62** | 0 ppm |
+| **1024** | 9421 | 5,23 | 18651 | 5,17 | 1,97 | **64** | 0 ppm |
+| **2048** | 9654 | 5,36 | 19065 | 5,29 | 1,97 | **66** | 0 ppm |
+
+Criterio de aceptación cumplido: exacto en todos los casos y por encima del
+50 % del pico del chip completo (16 FLOP/ciclo) con N >= 512 (62-66 %). La
+escala de 1 a 2 núcleos es casi lineal (x1,95-1,98) en hardware real.
+Comparado con la Fase 1 (256, 1 núcleo, 29 % del chip), el chip completo
+rinde ahora más del doble. Lo más débil son las formas planas del
+transformer (M = 64): 49-53 %. El bloque de 96 filas queda a medio llenar y
+el empaquetado de B pesa más. Se puede mejorar cuando lleguen los tensores.

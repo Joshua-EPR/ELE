@@ -18,14 +18,20 @@ fixed CRECIMIENTO = 65536
 fixed MINIMO = 32
 
 // Estado: +0 fin de la región mapeada, +8 primer bloque libre (0 = ninguno),
-// +16 bytes en uso.
-flow estado() => Int { give reservar(24, 8) }
+// +16 bytes en uso, +24 motivo del último fallo al crecer (0 ninguno,
+// 1 sin marco físico, 2 pagMapear4k falló), +32 marco del fallo.
+flow estado() => Int { give reservar(40, 8) }
+
+expose flow montonUltimoFallo() => Int { give leer64(estado() + 24) }
+expose flow montonMarcoDelFallo() => Int { give leer64(estado() + 32) }
 
 expose flow montonIniciar() {
     hold e = estado()
     escribir64(e, BASE)
     escribir64(e + 8, 0)
     escribir64(e + 16, 0)
+    escribir64(e + 24, 0)
+    escribir64(e + 32, 0)
 }
 
 expose flow montonEnUso() => Int { give leer64(estado() + 16) }
@@ -62,8 +68,15 @@ flow crecer(bytes: Int) => Bool {
     change d = 0
     during d < total {
         hold marco = memFisicaReservar()
-        when marco == 0 { give false }
-        when !pagMapear4k(inicio + d, marco, PAG_ESCRITURA) { give false }
+        when marco == 0 {
+            escribir64(e + 24, 1)
+            give false
+        }
+        when !pagMapear4k(inicio + d, marco, PAG_ESCRITURA) {
+            escribir64(e + 24, 2)
+            escribir64(e + 32, marco)
+            give false
+        }
         d += MARCO
     }
     escribir64(e, inicio + total)
@@ -112,4 +125,24 @@ expose flow montonLiberar(dir: Int) {
     hold e = estado()
     escribir64(e + 16, leer64(e + 16) - leer64(b))
     insertarLibre(b)
+}
+
+// Comprobación de la lista libre: cada bloque dentro de la región mapeada,
+// en orden y sin solaparse. Devuelve 0 si está bien, o el número del primer
+// bloque defectuoso (1 = el primero).
+expose flow montonVerificar() => Int {
+    hold e = estado()
+    hold fin = leer64(e)
+    change b = leer64(e + 8)
+    change previo_fin = BASE
+    change n = 1
+    during b != 0 {
+        when b < previo_fin || b >= fin { give n }
+        hold tam = leer64(b)
+        when tam < MINIMO || tam % 16 != 0 || b + tam > fin { give n }
+        previo_fin = b + tam
+        b = leer64(b + 8)
+        n += 1
+    }
+    give 0
 }

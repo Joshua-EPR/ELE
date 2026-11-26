@@ -137,11 +137,13 @@ flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "xadd") { give 80 }
     when nativeEquals(source, word, "xmuladd4") { give 81 }
     when nativeEquals(source, word, "xbcastd") { give 82 }
+    when nativeEquals(source, word, "rdrsp") { give 83 }
+    when nativeEquals(source, word, "xmuladd4m") { give 84 }
     give -1
 }
 
 expose flow cfgIsIntrinsic(op: Int) => Bool {
-    give op >= 31 && op <= 82
+    give op >= 31 && op <= 84
 }
 
 // -1: 1..256 arguments (datos64, cadena).
@@ -165,6 +167,8 @@ flow cfgIntrinsicArity(op: Int) => Int {
     when op == 74 { give 1 }
     when op == 81 { give 4 }
     when op == 82 { give 3 }
+    when op == 83 { give 0 }
+    when op == 84 { give 4 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -173,7 +177,7 @@ flow cfgIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72
+    give op == 71 || op == 72 || op == 83
 }
 
 // Operand width in bytes of in/out (35..40) and ld/st (41..48).
@@ -263,12 +267,13 @@ flow cfgEmitStatic(code: edit X64Code, p: view CfgProgram, inst: view CfgInst, f
     }
 }
 
-// XMM register number of argument `k`: a constant 6..15, else error 80.
+// XMM register number of argument `k`: a constant 1..15 (XMM0 is the
+// scratch of these forms), else error 80.
 flow cfgXmmArg(p: view CfgProgram, k: Int, fix: edit CfgFix) => Int {
     hold a = view p.call_args[k]
-    when a.is_var || a.value < 6 || a.value > 15 {
+    when a.is_var || a.value < 1 || a.value > 15 {
         fix.static_error = 80
-        give 6
+        give 1
     }
     give a.value
 }
@@ -309,7 +314,7 @@ flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgIn
         x64SseMemory(edit code, false, 17, r)
         give
     }
-    when op == 81 {
+    when op == 81 || op == 84 {
         // Four accumulators acc..acc+3 (acc <= 12), a factor outside them.
         hold acc = cfgXmmArg(p, first, edit fix)
         hold factor = cfgXmmArg(p, first + 1, edit fix)
@@ -317,7 +322,13 @@ flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgIn
         hold address = view p.call_args[first + 2]
         hold disp = cfgDispArg(p, first + 3, edit fix)
         cfgLoadOperand(edit code, p, f, view address, 0)
-        each j among 0..4 { x64MulAddFromRax(edit code, acc + j, factor, disp + 16 * j) }
+        each j among 0..4 {
+            when op == 81 {
+                x64MulAddFromRax(edit code, acc + j, factor, disp + 16 * j)
+            } otherwise {
+                x64MulAddMemoryFromRax(edit code, acc + j, factor, disp + 16 * j)
+            }
+        }
         give
     }
     when op == 82 {
@@ -399,7 +410,8 @@ flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view
     }
     when op == 72 { x64ReadFlags(edit code) }
     when op == 73 { x64Int3(edit code) }
-    when op >= 74 { cfgEmitSse(edit code, p, f, inst, edit fix) }
+    when (op >= 74 && op <= 82) || op == 84 { cfgEmitSse(edit code, p, f, inst, edit fix) }
+    when op == 83 { x64ReadRsp(edit code) }
     when cfgIntrinsicHasResult(op) {
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)
     }

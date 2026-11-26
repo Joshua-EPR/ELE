@@ -24,6 +24,8 @@ take cpu.caracteristicas
 take dispositivos.acpi
 take dispositivos.apic
 take tiempo.reloj
+take cpu.buzon
+take cpu.trabajos
 
 expose fixed VECTOR_ENTRADA_AP = 240
 fixed TAMANO_PILA_AP = 16384
@@ -153,7 +155,8 @@ flow escribirTrampolin(base: Int) {
 }
 
 // Llamada desde kinterrupcion (vector 240) en la pila del AP: tablas del
-// kernel, SSE y LAPIC; luego avisa al BSP y se detiene.
+// kernel, SSE y LAPIC; luego avisa al BSP y atiende su buzón para siempre
+// (cpu/buzon.l, cpu/trabajos.l), con interrupciones desactivadas.
 expose flow smpEntradaAp() {
     gdtCargarEnAp()
     idtCargarEnAp()
@@ -161,10 +164,12 @@ expose flow smpEntradaAp() {
     lapicIniciar()
     hold e = estado()
     escribir64(e + 24, lapicId())
-    escribir64(e + 16, leer64(e + 16) + 1)
+    hold indice = leer64(e + 16) + 1
+    escribir64(e + 16, indice)
     during true {
-        cli()
-        hlt()
+        hold b = buzonEsperarTrabajo(indice)
+        trabajoEjecutar(leer64(b + 16), leer64(b + 24), indice)
+        buzonTerminar(indice)
     }
 }
 
@@ -201,5 +206,6 @@ expose flow smpIniciar() => Int {
             }
         }
     }
+    buzonFijarNucleos(leer64(e + 16) + 1)
     give leer64(e + 16)
 }
