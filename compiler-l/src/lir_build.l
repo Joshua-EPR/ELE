@@ -118,8 +118,9 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //   81 xmmMulSumar4 (acc, a, dir, desp): acc+j += a * [dir + desp + 16j],
 //      j = 0..3 (desp constant)
 //   82 xmmDifundirEn (r, dir, desp): [dir + desp] to the four lanes of r
+//   83 leerRsp -> Int (stack pointer)
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 82
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 83
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
@@ -146,6 +147,7 @@ expose flow lirIntrinsicArity(op: Int) => Int {
     when op == 74 { give 1 }
     when op == 81 { give 4 }
     when op == 82 { give 3 }
+    when op == 83 { give 0 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -154,7 +156,7 @@ expose flow lirIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72
+    give op == 71 || op == 72 || op == 83
 }
 
 // LIR text name of an intrinsic code (the native backend parses it back).
@@ -210,7 +212,8 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 79 { give "xmul" }
     when op == 80 { give "xadd" }
     when op == 81 { give "xmuladd4" }
-    give "xbcastd"
+    when op == 82 { give "xbcastd" }
+    give "rdrsp"
 }
 
 // ---- Linear resource operation table ------------------------------------

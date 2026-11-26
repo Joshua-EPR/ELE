@@ -244,3 +244,82 @@ Salida en pantalla (foto del 2026-11-26):
 Sin turbo en el 3865U, el ciclo de TSC es el ciclo de núcleo: el 59 % es
 real. Supera el 50 % pedido para el hito 9. La Fase 1 queda completa en
 hardware real.
+
+# Fase 2
+
+## 2026-11-26 — Hito 10: correcciones de la Fase 1
+
+Plan: contar como RAM solo usable + recuperable del cargador + kernel;
+copiar las respuestas de Limine a memoria del kernel y liberar la memoria
+recuperable del cargador; informar SGEMM por núcleo y contra el pico del
+chip.
+
+- `arranqueCopiar()` (arranque/limine.l) copia, como primera acción de
+  kmain, la revisión, el HHDM, la RSDP, las direcciones del kernel, el
+  framebuffer y hasta 256 entradas del mapa de memoria. Desde ahí ninguna
+  flow `arranque*` toca memoria de Limine.
+- `memFisicaTotalBytes()` = usable + recuperable del cargador + kernel. El
+  informe muestra aparte lo reservado, ACPI, framebuffer y defectuoso. El
+  "5368 MiB" de la Fase 1 era el final de la RAM más alta (incluía el
+  agujero PCI de 32 bits).
+- `memFisicaRecuperarCargador(leerRsp())`: libera los marcos recuperables
+  del cargador, tras el PML4 propio y la copia de Limine. Conserva los que
+  están a menos de 64 KiB de la pila de arranque del BSP, que sigue en uso.
+- Compilador: intrínseco `leerRsp()` (MOV RAX,RSP), para esa guarda.
+- SGEMM informa los núcleos usados (1), los FLOP/ciclo por núcleo y el % del
+  pico del chip (16 FLOP/ciclo con 2 núcleos). Confirmado: el SGEMM de la
+  Fase 1 corría en un solo núcleo (los AP se quedan en HLT).
+
+QEMU (q35, 4 GiB, WHPX): `RAM: 4089 MiB (usable 4047, del cargador 41,
+kernel 176 KiB)`, `no RAM: reservada 259 MiB, ACPI 2160 KiB, framebuffer
+4000 KiB`; `libres: 4047 MiB; tras recuperar ... (41 MiB): 4089 MiB`. Los
+hitos 2-9 y 7 pasan.
+
+Nota de medición: esta tarde el anfitrión estaba muy cargado (Chrome, CPU
+al 80-100 %) y WHPX daba unas 10 veces menos rendimiento en SGEMM que por
+la mañana. Con el kernel de `main` sin cambios ocurría lo mismo, así que
+es el anfitrión, no una regresión. En TCG con esa carga, el hito 6 midió
+733 ms (falla la tolerancia de 400-700 ms): la emulación pierde precisión
+de tiempo. Las cifras que cuentan son las de la laptop.
+
+### Hito 10 en la laptop
+
+Primera prueba: memoria bien (`RAM: 3802 MiB (usable 3649, del cargador
+152, kernel 176 KiB)`, `no RAM: reservada 380 MiB, ACPI 173464 KiB,
+framebuffer 4128 KiB`, libres 3649 -> 3801 MiB tras recuperar 151 MiB).
+Pero justo después, `montonReservar(100)` devolvió 0 y la escritura en esa
+dirección dio un #PF (CR2 = 0, RIP en `hito4`, confirmado con objdump). No
+se reprodujo en QEMU (3,8 / 4 / 6 GiB).
+
+Se añadió diagnóstico: un marco de prueba reservado y liberado antes del
+montón; si el montón no crece, `hito 4 FALLÓ` con el motivo (sin marco /
+falló el mapeo), los marcos libres y el mapa de memoria completo. Con esa
+imagen la laptop arrancó entera ("ya corre correctamente").
+
+Causa sin confirmar. La única diferencia de comportamiento es el marco de
+prueba: deja la pista de búsqueda del asignador en el primer marco libre
+en vez de en 0. Se mantiene el código tal como se probó en la laptop. El
+diagnóstico se queda: si vuelve a pasar, el informe dirá el motivo.
+
+**Causa encontrada** (segunda foto: `marco de prueba: 0x0000000000000000`).
+En la laptop, Limine marca como "recuperable del cargador" una región que
+empieza en la dirección física 0. `memFisicaRecuperarCargador` liberaba
+también el marco 0, y la primera reserva posterior devolvía la física 0,
+que el asignador usa como "sin memoria". En la primera foto le tocó al
+montón. En la segunda se lo llevó el marco de prueba, así que el montón
+funcionó por casualidad. QEMU marca la memoria baja de otra forma.
+
+Corrección: la recuperación nunca libera el marco 0 y
+`memFisicaReservar` empieza a buscar en el marco 1. Se quita el marco de
+prueba y se mantiene el informe de fallo del montón.
+
+Números de la laptop con el hito 10 (foto 2):
+
+| Medida | Valor |
+|---|---|
+| RAM | 3802 MiB (usable 3649, del cargador 152, kernel 176 KiB) |
+| No RAM | reservada 380 MiB, ACPI 173464 KiB, framebuffer 4128 KiB |
+| Libres | 3649 MiB -> 3801 MiB tras recuperar 151 MiB |
+| Reloj | HPET 24 MHz, TSC 1801 MHz, LAPIC 1500 cuentas/ms; 500 ms = 499 ms |
+| SMP | 1 de 1 AP |
+| SGEMM 256 | 8587 MFLOPS en 1 núcleo; 4,76 FLOP/ciclo por núcleo = 59 % del núcleo, 29 % del chip; micronúcleo 5,45 = 68 % / 34 % |

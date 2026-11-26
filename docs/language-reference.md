@@ -254,7 +254,7 @@ argument is an `Int`.
 | `nucleo.cpu` | `out8/out16/out32(puerto, valor)` | `OUT DX, AL/AX/EAX` | — |
 | `nucleo.cpu` | `cpuid(hoja, subhoja, dir)` | `CPUID`; EAX EBX ECX EDX as four u32 at `dir` | — |
 | `nucleo.cpu` | `rdtsc()`, `rdmsr(msr)`, `wrmsr(msr, valor)` | `RDTSC`, `RDMSR`, `WRMSR` | `Int` / — |
-| `nucleo.cpu` | `leerCr0/2/3/4()`, `escribirCr0/3/4(valor)`, `leerRflags()` | `MOV r, CRn` / `MOV CRn, r` / `PUSHFQ` | `Int` / — |
+| `nucleo.cpu` | `leerCr0/2/3/4()`, `escribirCr0/3/4(valor)`, `leerRflags()`, `leerRsp()` | `MOV r, CRn` / `MOV CRn, r` / `PUSHFQ` / `MOV RAX, RSP` | `Int` / — |
 | `nucleo.cpu` | `lgdt(dir)`, `lidt(dir)`, `ltr(selector)`, `invlpg(dir)` | one instruction | — |
 | `nucleo.cpu` | `recargarSegmentos(codigo, datos)` | DS/ES/SS/FS/GS = `datos`, far return to CS = `codigo` | — |
 | `nucleo.cpu` | `fxsave(dir)`, `fxrstor(dir)` | `FXSAVE64` / `FXRSTOR64` | — |
