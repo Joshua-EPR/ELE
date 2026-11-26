@@ -564,3 +564,37 @@ es un HDD de 500 GB con Linux en todo el disco, sin Windows. Para los hitos
 13 y 14 hace falta crear la partición FAT32 `ELEDATOS`, reduciendo la
 partición 3 desde un USB de GParted. Lo decide el usuario. Se añadieron
 nombres para los tipos de arranque BIOS, swap y LVM de Linux.
+
+### Hitos 13 y 14 en la laptop, con la partición ELEDATOS ✅
+
+El usuario creó la partición en el Ubuntu Server de la laptop, sin USB de
+GParted y sin tocar ningún ext4. El grupo LVM tenía 63,76 GiB libres al
+final del volumen físico:
+`pvresize --setphysicalvolumesize 447G /dev/sda3`,
+`parted resizepart 3 943216639`, `parted mkpart ELEDATOS fat32 943216640
+976771071` y `mkfs.vfat -F 32 -n ELEDATOS /dev/sda4` (16 GiB, clústeres de
+8 KiB, bandera msftdata). `/` y `/srv/postgres` quedaron intactos.
+
+Primer arranque:
+```
+       4  datos Microsoft  943216640 - 976771071  16384 MiB  ELEDATOS
+lectura secuencial: 64 MiB en 599 ms = 111 MB/s
+partición ELE: LBA 943216640 - 976771071
+regla: escritura fuera de la partición rechazada (LBA 0 y frontera)
+escritura de prueba (LBA 976771008, 32 KiB): patrón 0x22AD1964, leído 0x22AD1964;
+original 0x011FFCA6, restaurado 0x011FFCA6
+hito 13 OK
+FAT32 montada: 8192 bytes por cluster
+SALIDA.TXT escrito y leído de vuelta: idéntico
+guardado el paso 1; corte simulado a mitad del paso 2
+hito 14 OK
+```
+Segundo arranque: `checkpoint recuperado: paso 1 de la ranura A, datos
+verificados`.
+
+El texto.txt de la laptop resultó ser una página HTML de 913 bytes: el
+servidor de Gutenberg bloqueó la descarga por curl. El kernel lo leyó bien,
+pero queda pendiente copiar un texto real de varios MB. La lectura de
+varios MB con clústeres de 8 KiB se comprobó en QEMU, con una FAT32 creada
+por mkfs.vfat -s 16 y un texto de 5 MiB: 5242914 bytes en 16 ms, CRC32
+0xBEB090E9, igual que en el anfitrión.
