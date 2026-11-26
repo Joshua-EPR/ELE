@@ -663,3 +663,50 @@ Pendiente y anotado:
   coste de cada intrínseco sin asignación de registros. Paralelizar y
   vectorizar el resto se decide en el hito 17, con el perfil real de
   dónde se va el tiempo, como pide el plan.
+
+## Hito 16 — AdamW y primer aprendizaje (2026-11-26)
+
+Escrito por un agente redactor (Sonnet) con encargo cerrado; revisado y
+verificado en QEMU por el líder.
+
+Kernel:
+- `lib/optim.l`: AdamW sobre una lista de tensores parámetro. Estado m, v
+  por parámetro; corrección de sesgo con 1 - beta^t; decaimiento de pesos
+  desacoplado (`p·(1 - lr·decay)`) con bandera por parámetro (no se aplica a
+  sesgos ni ganancias); warmup lineal y luego coseno hasta lr_min; recorte
+  por norma L2 global (suma en Float, orden fijo). `optPaso` devuelve la
+  norma antes del recorte; `optUltimoLr` el lr usado.
+- `lib/matf64.l`: `cosF` (reducción a [-pi, pi] y seno de Taylor de x/2),
+  `fmtEntero`, `fmtDecimal` y `kprintDecimal` (coma decimal).
+- `bench/aprender.l`:
+  - XOR con MLP 2-16-2 (Linear, GELU, Linear, entropía cruzada).
+  - Dos círculos concéntricos (PCG, 256 + 256 puntos) con MLP 2-32-2.
+  - Bigramas por bytes sobre `texto.txt` de la FAT32: tabla 256x256
+    (embedding), lotes de 256 pares, 1500 pasos, lr 0,1 sin decay.
+    Partición 90/10. La entropía H de bigramas sale de los conteos, y
+    también la pérdida exacta de entrenamiento del modelo.
+  - Si no hay texto.txt (o es < 4 KiB), la prueba se da por omitida.
+  - Log en pantalla y en `ENTRENA.LOG`: paso, pérdida, lr, norma, ms por
+    paso, pares por segundo. Se escribe por sectores con fatEscribir y al
+    final se ajusta el tamaño con fatCrear y discoVaciar.
+
+QEMU (WHPX, 2 CPU), salida resumida:
+```
+XOR: pérdida 0,00005, aciertos 4/4                (600 pasos, 0,084 ms/paso)
+círculos: entrenamiento 256/256, prueba 256/256   (800 pasos, ~10 ms/paso)
+-- Bigramas por bytes: texto 3145736 bytes, entrenamiento 2831157, validación 314579
+   pares distintos 184, H(entrenamiento) = 1,8805 nats, H(validación) = 1,8790 nats
+paso 0 pérdida exacta de entrenamiento 5,5452
+paso 1500 ...                                     (~55 ms/paso, ~4600 pares/s)
+bigramas: H = 1,8805 nats, pérdida de entrenamiento 1,8839 (exceso 0,0035),
+          pérdida de validación 1,8827 (H validación 1,8790)
+hito 16 OK
+```
+El texto del disco de prueba es sintético, con un vocabulario pequeño (solo
+184 pares distintos), así que H es baja. La prueba de verdad es el
+texto.txt del portátil.
+
+Pendiente y anotado:
+- El paso de bigramas (~55 ms) está dominado por lo escalar: AdamW sobre
+  65536 parámetros y entropía cruzada elemento a elemento en Float.
+  Vectorizar o paralelizar eso entra en el perfilado del hito 17.

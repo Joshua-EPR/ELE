@@ -32,6 +32,7 @@ take lib.aleatorio
 take lib.tensor
 take lib.vexp
 take bench.gradientes
+take bench.aprender
 take tiempo.reloj
 
 flow kmain() {
@@ -81,6 +82,7 @@ flow kmain() {
     hito13()
     hito14()
     hito15()
+    hito16()
     hito7()
 
     during true {
@@ -595,5 +597,14 @@ flow hito15() {
         kprintln(cadena("hito 15 OK"))
     } otherwise {
         kprintln(cadena("hito 15 FALLÓ"))
+    }
+}
+
+// Hito 16: AdamW, aprendizaje de XOR, círculos y bigramas (ver bench/aprender.l).
+flow hito16() {
+    when aprenderTodo() {
+        kprintln(cadena("hito 16 OK"))
+    } otherwise {
+        kprintln(cadena("hito 16 FALLÓ"))
     }
 }

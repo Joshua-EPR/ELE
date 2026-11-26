@@ -14,6 +14,7 @@ fixed LN2_ALTO = 0.6931471803691238
 fixed LN2_BAJO = 0.00000000019082149292705877
 fixed INV_LN2 = 1.4426950408889634
 fixed RAIZ2 = 1.4142135623730951
+fixed DOS_PI = 6.283185307179586
 
 expose flow absF(x: Float) => Float {
     when x < 0.0 { give 0.0 - x }
@@ -87,6 +88,100 @@ expose flow tanhF(x: Float) => Float {
 expose flow raizF64(x: Float) => Float {
     when x <= 0.0 { give 0.0 }
     give raizF(x)
+}
+
+// cos(x) = 1 - 2 sin²(x/2): x se reduce a [-pi, pi] y sin(y) (|y| <= pi/2)
+// sale de su serie de Taylor hasta y^23.
+expose flow cosF(x: Float) => Float {
+    hold kf = x / DOS_PI
+    change k = 0
+    when kf >= 0.0 { k = Int(kf + 0.5) } otherwise { k = Int(kf - 0.5) }
+    hold y = (x - Float(k) * DOS_PI) / 2.0
+    hold y2 = y * y
+    change termino = y
+    change suma = y
+    each n among 1..12 {
+        termino = 0.0 - termino * y2 / (Float(2 * n) * Float(2 * n + 1))
+        suma = suma + termino
+    }
+    give 1.0 - 2.0 * suma * suma
+}
+
+// Escribe un entero con signo en decimal en `buf`; devuelve los bytes escritos.
+expose flow fmtEntero(valor: Int, buf: Int) => Int {
+    change n = valor
+    change pos = 0
+    when n < 0 {
+        escribir8(buf, 45)
+        pos = 1
+        n = 0 - n
+    }
+    when n == 0 {
+        escribir8(buf + pos, 48)
+        give pos + 1
+    }
+    hold digitos = reservar(24, 8)
+    change cuantos = 0
+    during n != 0 {
+        escribir8(digitos + cuantos, 48 + n % 10)
+        n = n / 10
+        cuantos += 1
+    }
+    during cuantos > 0 {
+        cuantos -= 1
+        escribir8(buf + pos, leer8(digitos + cuantos))
+        pos += 1
+    }
+    give pos
+}
+
+// Escribe x en decimal fijo con `decimales` cifras (coma decimal) en `buf`;
+// devuelve los bytes escritos (a lo sumo 32).
+expose flow fmtDecimal(x: Float, decimales: Int, buf: Int) => Int {
+    when x != x {
+        escribir8(buf, 110)
+        escribir8(buf + 1, 97)
+        escribir8(buf + 2, 110)
+        give 3
+    }
+    change v = x
+    hold negativo = v < 0.0
+    when negativo { v = 0.0 - v }
+    change escala = 1
+    each i among 0..decimales { escala = escala * 10 }
+    hold escalado = v * Float(escala)
+    when escalado > 1000000000000000000.0 {
+        escribir8(buf, 105)
+        escribir8(buf + 1, 110)
+        escribir8(buf + 2, 102)
+        give 3
+    }
+    hold r = Int(escalado + 0.5)
+    change pos = 0
+    when negativo && r != 0 {
+        escribir8(buf, 45)
+        pos = 1
+    }
+    pos += fmtEntero(r / escala, buf + pos)
+    when decimales > 0 {
+        escribir8(buf + pos, 44)
+        pos += 1
+        hold fraccion = r % escala
+        change divisor = escala / 10
+        during divisor > 0 {
+            escribir8(buf + pos, 48 + (fraccion / divisor) % 10)
+            pos += 1
+            divisor = divisor / 10
+        }
+    }
+    give pos
+}
+
+// Imprime x en decimal fijo: -1,2346.
+expose flow kprintDecimal(x: Float, decimales: Int) {
+    hold buf = reservar(48, 8)
+    hold n = fmtDecimal(x, decimales, buf)
+    each i among 0..n { kprintByte(leer8(buf + i)) }
 }
 
 // Imprime x en notación científica con `cifras` decimales: -1,2345e-07.
