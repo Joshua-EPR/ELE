@@ -435,3 +435,49 @@ fn kernel_memory_operand_multiply_add() {
         ]
     ));
 }
+
+#[test]
+fn kernel_float_bridge_and_more_sse_forms() {
+    let dir = work("float_bridge");
+    let source = "take nucleo.cpu\n\
+take nucleo.mem\n\
+\n\
+flow kmain() {\n\
+    hold p = reservar(64, 16)\n\
+    hold x = leerF32(p)\n\
+    escribirF32(p + 4, raizF(x) * 2.0)\n\
+    hold b = bitsDeFloat(x)\n\
+    escribir64(p + 8, b)\n\
+    hold y = floatDeBits(b)\n\
+    escribirF32(p + 16, y)\n\
+    xmmRestar(1, 2)\n\
+    xmmDividir(3, 4)\n\
+    xmmComparar(5, 6, 1)\n\
+    xmmBarajar(7, 7, 0x1B)\n\
+    xmmSumarEnteros(9, 10)\n\
+    xmmDesplazarIzq(11, 23)\n\
+    xmmCargarEscalar(12, p)\n\
+    xmmGuardarEscalar(p, 12)\n\
+}\n";
+    let (out, image) = build(&dir, source, &[]);
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = &fs::read(&image).unwrap()[0x1000..];
+    for seq in [
+        &[0xF3, 0x0F, 0x10, 0x00, 0xF3, 0x0F, 0x5A, 0xC0][..], // MOVSS XMM0,[RAX]; CVTSS2SD
+        &[0xF2, 0x0F, 0x5A, 0xC0, 0xF3, 0x0F, 0x11, 0x00],     // CVTSD2SS; MOVSS [RAX],XMM0
+        &[0xF2, 0x0F, 0x51, 0xC0],                             // SQRTSD XMM0,XMM0
+        &[0x0F, 0x5C, 0xCA],                                   // SUBPS XMM1,XMM2
+        &[0x0F, 0x5E, 0xDC],                                   // DIVPS XMM3,XMM4
+        &[0x0F, 0xC2, 0xEE, 0x01],                             // CMPPS XMM5,XMM6,1
+        &[0x0F, 0xC6, 0xFF, 0x1B],                             // SHUFPS XMM7,XMM7,0x1B
+        &[0x66, 0x45, 0x0F, 0xFE, 0xCA],                       // PADDD XMM9,XMM10
+        &[0x66, 0x41, 0x0F, 0x72, 0xF3, 23],                   // PSLLD XMM11,23
+        &[0xF3, 0x44, 0x0F, 0x10, 0x20],                       // MOVSS XMM12,[RAX]
+    ] {
+        assert!(contains(text, seq), "missing {seq:02x?}");
+    }
+}

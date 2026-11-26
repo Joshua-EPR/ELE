@@ -261,6 +261,10 @@ argument is an `Int`.
 | `nucleo.cpu` | `stubInterrupcion(vector)` | address of the compiler-generated stub (kernel only) | `Int` |
 | `nucleo.cpu` | `xmmCero(r)`, `xmmCargar(r, dir)`, `xmmGuardar(dir, r)`, `xmmDifundir(r, dir)`, `xmmCopiar(d, s)`, `xmmMultiplicar(d, s)`, `xmmSumar(d, s)` | `XORPS`, `MOVUPS`, `MOVSS`+`SHUFPS`, `MOVAPS`, `MULPS`, `ADDPS` on XMM1..XMM15 | — |
 | `nucleo.cpu` | `xmmDifundirEn(r, dir, desp)`, `xmmMulSumar4(acc, a, dir, desp)`, `xmmMulSumar4M(acc, a, dir, desp)` (MULPS from memory, 16-byte aligned) | broadcast of `[dir+desp]`; `acc+j += a * [dir+desp+16j]` for j = 0..3 (`MOVUPS`+`MULPS`+`ADDPS` through XMM0) | — |
+| `nucleo.cpu` | `xmmRestar`, `xmmDividir`, `xmmMaximo`, `xmmMinimo`, `xmmRaiz`, `xmmY`, `xmmYNo`, `xmmO`, `xmmOExclusivo`, `xmmAEnteros`, `xmmTruncarAEnteros`, `xmmAFlotantes`, `xmmSumarEnteros`, `xmmRestarEnteros` `(d, s)`; `xmmDesplazarIzq/Der(r, n)`; `xmmComparar(d, s, predicado)`; `xmmBarajar(d, s, imm)` | `SUBPS`, `DIVPS`, `MAXPS`, `MINPS`, `SQRTPS`, `ANDPS`, `ANDNPS`, `ORPS`, `XORPS`, `CVTPS2DQ`, `CVTTPS2DQ`, `CVTDQ2PS`, `PADDD`, `PSUBD`, `PSLLD`/`PSRLD`, `CMPPS`, `SHUFPS` | — |
+| `nucleo.cpu` | `xmmCargarEscalar(r, dir)`, `xmmGuardarEscalar(dir, r)` | `MOVSS` | — |
+| `nucleo.cpu` | `bitsDeFloat(x: Float)`, `floatDeBits(n)`, `raizF(x: Float)` | bit copy / `SQRTSD` | `Int` / `Float` / `Float` |
+| `nucleo.mem` | `leerF32(dir)`, `escribirF32(dir, x: Float)` | `MOVSS` + `CVTSS2SD` / `CVTSD2SS` + `MOVSS` | `Float` / — |
 | `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
 | `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
 | `nucleo.mem` | `reservar(bytes, alineacion)` | zeroed `.bss` block (kernel only) | its address |

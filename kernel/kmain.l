@@ -28,6 +28,10 @@ take almacenamiento.disco
 take lib.crc32
 take almacenamiento.fat32
 take almacenamiento.checkpoint
+take lib.aleatorio
+take lib.tensor
+take lib.vexp
+take bench.gradientes
 take tiempo.reloj
 
 flow kmain() {
@@ -76,6 +80,7 @@ flow kmain() {
     hito12()
     hito13()
     hito14()
+    hito15()
     hito7()
 
     during true {
@@ -564,4 +569,31 @@ flow hito14() {
     kprintln(cadena(" (debe ser el anterior al corte; al reiniciar debe salir el mismo)"))
     when !guardado || !cortado || recuperado != base + 1 || crc32(datos, capacidad) != crc32(esperado, capacidad) { bien = false }
     when bien { kprintln(cadena("hito 14 OK")) } otherwise { kprintln(cadena("hito 14 FALLÓ")) }
+}
+
+// Hito 15: tensores, aleatorio determinista, exp/tanh SSE y gradientes.
+flow hito15() {
+    hold g = reservar(16, 8)
+    pcgSembrar(g, 42, 54)
+    kprint(cadena("PCG32 (semilla 42, secuencia 54): "))
+    each i among 0..4 {
+        kprintHex(pcgSiguiente(g))
+        kprintByte(32)
+    }
+    kprintByte(10)
+    hold t = tNuevo(64, 256, F32, true)
+    kprint(cadena("tensor 64x256 f32: datos en "))
+    kprintHex(tDatos(t))
+    kprint(cadena(" (alineado a 64: "))
+    when tDatos(t) & 63 == 0 { kprint(cadena("sí")) } otherwise { kprint(cadena("NO")) }
+    kprint(cadena("), arena usada "))
+    kprintEntero(arenaUsada() / 1024)
+    kprintln(cadena(" KiB"))
+    hold vec = vexpMedir(2097152)
+    hold grad = gradientesVerificar()
+    when vec && grad && tDatos(t) & 63 == 0 {
+        kprintln(cadena("hito 15 OK"))
+    } otherwise {
+        kprintln(cadena("hito 15 FALLÓ"))
+    }
 }

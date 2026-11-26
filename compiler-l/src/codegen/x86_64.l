@@ -955,6 +955,62 @@ expose flow x64MulAddMemoryFromRax(code: edit X64Code, acc: Int, factor: Int, di
     x64SsePacked(edit code, 88, acc, 0)
 }
 
+expose flow x64PutByte(code: edit X64Code, value: Int) { x64Put(edit code, value) }
+
+// Register-register SSE form with an optional mandatory prefix (0 none,
+// 0x66, 0xF3, 0xF2) before the REX byte: [pfx] [REX] 0F opcode /r.
+expose flow x64SsePrefixed(code: edit X64Code, prefix: Int, opcode: Int, dst: Int, src: Int) {
+    when prefix != 0 { x64Put(edit code, prefix) }
+    x64SsePacked(edit code, opcode, dst, src)
+}
+
+// PSLLD / PSRLD xmm, imm8: 66 [REX.B] 0F 72 /ext ib.
+expose flow x64SseShiftImm(code: edit X64Code, ext: Int, xmm: Int, count: Int) {
+    x64Put(edit code, 102)
+    when xmm >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 15)
+    x64Put(edit code, 114)
+    x64Put(edit code, 192 + ext * 8 + xmm % 8)
+    x64Put(edit code, count)
+}
+
+// Float (f64 bits in RAX / RCX) <-> f32 memory and scalar sqrt, through
+// XMM0:
+//   85 RAX = f64(movss [RAX])   86 movss [RAX] = f32(RCX bits)
+//   87, 88 bit copies (nothing to do)   89 RAX = sqrt(RAX)
+expose flow x64FloatBridge(code: edit X64Code, op: Int) {
+    when op == 85 {
+        x64Put(edit code, 243)
+        x64Put(edit code, 15)
+        x64Put(edit code, 16)
+        x64Put(edit code, 0)
+        x64Put(edit code, 243)
+        x64Put(edit code, 15)
+        x64Put(edit code, 90)
+        x64Put(edit code, 192)
+        x64MovqFromXmm(edit code, 0, 0)
+    }
+    when op == 86 {
+        x64MovqToXmm(edit code, 0, 1)
+        x64Put(edit code, 242)
+        x64Put(edit code, 15)
+        x64Put(edit code, 90)
+        x64Put(edit code, 192)
+        x64Put(edit code, 243)
+        x64Put(edit code, 15)
+        x64Put(edit code, 17)
+        x64Put(edit code, 0)
+    }
+    when op == 89 {
+        x64MovqToXmm(edit code, 0, 0)
+        x64Put(edit code, 242)
+        x64Put(edit code, 15)
+        x64Put(edit code, 81)
+        x64Put(edit code, 192)
+        x64MovqFromXmm(edit code, 0, 0)
+    }
+}
+
 // MOV RAX,RSP (48 89 E0).
 expose flow x64ReadRsp(code: edit X64Code) {
     x64Put(edit code, 72)

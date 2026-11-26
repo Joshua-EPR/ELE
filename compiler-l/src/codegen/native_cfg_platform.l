@@ -139,11 +139,36 @@ flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "xbcastd") { give 82 }
     when nativeEquals(source, word, "rdrsp") { give 83 }
     when nativeEquals(source, word, "xmuladd4m") { give 84 }
+    when nativeEquals(source, word, "leerf32") { give 85 }
+    when nativeEquals(source, word, "escf32") { give 86 }
+    when nativeEquals(source, word, "bitsf") { give 87 }
+    when nativeEquals(source, word, "fbits") { give 88 }
+    when nativeEquals(source, word, "sqrtf") { give 89 }
+    when nativeEquals(source, word, "xsub") { give 90 }
+    when nativeEquals(source, word, "xdiv") { give 91 }
+    when nativeEquals(source, word, "xmax") { give 92 }
+    when nativeEquals(source, word, "xmin") { give 93 }
+    when nativeEquals(source, word, "xsqrt") { give 94 }
+    when nativeEquals(source, word, "xand") { give 95 }
+    when nativeEquals(source, word, "xandn") { give 96 }
+    when nativeEquals(source, word, "xor") { give 97 }
+    when nativeEquals(source, word, "xxor") { give 98 }
+    when nativeEquals(source, word, "xcvtdq") { give 99 }
+    when nativeEquals(source, word, "xcvtps") { give 100 }
+    when nativeEquals(source, word, "xpaddd") { give 101 }
+    when nativeEquals(source, word, "xpsubd") { give 102 }
+    when nativeEquals(source, word, "xpslld") { give 103 }
+    when nativeEquals(source, word, "xcmp") { give 104 }
+    when nativeEquals(source, word, "xshuf") { give 105 }
+    when nativeEquals(source, word, "xlds") { give 106 }
+    when nativeEquals(source, word, "xsts") { give 107 }
+    when nativeEquals(source, word, "xcvttdq") { give 108 }
+    when nativeEquals(source, word, "xpsrld") { give 109 }
     give -1
 }
 
 expose flow cfgIsIntrinsic(op: Int) => Bool {
-    give op >= 31 && op <= 84
+    give op >= 31 && op <= 109
 }
 
 // -1: 1..256 arguments (datos64, cadena).
@@ -169,6 +194,9 @@ flow cfgIntrinsicArity(op: Int) => Int {
     when op == 82 { give 3 }
     when op == 83 { give 0 }
     when op == 84 { give 4 }
+    when op == 85 || op == 87 || op == 88 || op == 89 { give 1 }
+    when op == 104 || op == 105 { give 3 }
+    when op >= 86 { give 2 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -177,8 +205,13 @@ flow cfgIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72 || op == 83
+    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89
 }
+
+// Float result (85, 88, 89) and Float argument `i` (86 arg 1, 87, 89).
+flow cfgIntrinsicFloatResult(op: Int) => Bool { give op == 85 || op == 88 || op == 89 }
+flow cfgIntrinsicFloatArg(op: Int, i: Int) => Bool { give (op == 86 && i == 1) || op == 87 || op == 89 }
+
 
 // Operand width in bytes of in/out (35..40) and ld/st (41..48).
 flow cfgIntrinsicWidth(op: Int) => Int {
@@ -191,7 +224,7 @@ flow cfgIntrinsicWidth(op: Int) => Int {
 // Intrinsics that take their first argument in RAX and their second one
 // in RCX (memory access and most CPU forms).
 flow cfgIntrinsicRaxRcx(op: Int) => Bool {
-    give (op >= 41 && op <= 48) || (op >= 53 && op <= 73)
+    give (op >= 41 && op <= 48) || (op >= 53 && op <= 73) || (op >= 85 && op <= 89)
 }
 
 flow cfgCheckIntrinsic(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
@@ -199,9 +232,15 @@ flow cfgCheckIntrinsic(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
     when arity >= 0 && inst.argc != arity { give 130 }
     when arity < 0 && (inst.argc < 1 || inst.argc > 256) { give 130 }
     each i among 0..inst.argc {
-        when !cfgPlatformArgOk(p, f, inst.arg_first + i, false, false) { give 131 }
+        when cfgIntrinsicFloatArg(inst.op, i) {
+            when p.call_ref[inst.arg_first + i] != -1 || cfgPlatformArgType(p, f, inst.arg_first + i) != cfgFloatType() { give 131 }
+        } otherwise when !cfgPlatformArgOk(p, f, inst.arg_first + i, false, false) { give 131 }
     }
     hold dest = p.types_code[p.functions[f].first_var + inst.dst]
+    when cfgIntrinsicFloatResult(inst.op) {
+        when dest != cfgFloatType() { give 132 }
+        give 0
+    }
     when cfgIntrinsicHasResult(inst.op) && dest != 0 { give 132 }
     when !cfgIntrinsicHasResult(inst.op) && dest != cfgUnitType() { give 132 }
     give 0
@@ -339,8 +378,73 @@ flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgIn
         x64BroadcastFromRax(edit code, r, disp)
         give
     }
+    when op == 106 || op == 107 {
+        // movss con [dir]: (r, dir) o (dir, r).
+        change r = 0
+        change a = first
+        when op == 106 {
+            r = cfgXmmArg(p, first, edit fix)
+            a = first + 1
+        } otherwise {
+            r = cfgXmmArg(p, first + 1, edit fix)
+        }
+        hold address = view p.call_args[a]
+        cfgLoadOperand(edit code, p, f, view address, 0)
+        when op == 106 { x64SseMemory(edit code, true, 16, r) } otherwise { x64SseMemory(edit code, true, 17, r) }
+        give
+    }
+    when op == 103 || op == 109 {
+        hold r = cfgXmmArg(p, first, edit fix)
+        hold n = cfgDispArg(p, first + 1, edit fix)
+        when n < 0 || n > 31 { fix.static_error = 80 }
+        change ext = 6
+        when op == 109 { ext = 2 }
+        x64SseShiftImm(edit code, ext, r, n)
+        give
+    }
     hold d = cfgXmmArg(p, first, edit fix)
     hold s = cfgXmmArg(p, first + 1, edit fix)
+    when op == 104 || op == 105 {
+        hold imm = cfgDispArg(p, first + 2, edit fix)
+        when imm < 0 || imm > 255 || (op == 104 && imm > 7) { fix.static_error = 80 }
+        change opcode = 194
+        when op == 105 { opcode = 198 }
+        x64SsePacked(edit code, opcode, d, s)
+        x64PutByte(edit code, imm)
+        give
+    }
+    when op >= 90 && op <= 102 || op == 108 {
+        // [prefijo, opcode] de cada forma registro-registro.
+        change prefijo = 0
+        change opcode = 92
+        when op == 91 { opcode = 94 }
+        when op == 92 { opcode = 95 }
+        when op == 93 { opcode = 93 }
+        when op == 94 { opcode = 81 }
+        when op == 95 { opcode = 84 }
+        when op == 96 { opcode = 85 }
+        when op == 97 { opcode = 86 }
+        when op == 98 { opcode = 87 }
+        when op == 99 {
+            prefijo = 102
+            opcode = 91
+        }
+        when op == 100 { opcode = 91 }
+        when op == 101 {
+            prefijo = 102
+            opcode = 254
+        }
+        when op == 102 {
+            prefijo = 102
+            opcode = 250
+        }
+        when op == 108 {
+            prefijo = 243
+            opcode = 91
+        }
+        x64SsePrefixed(edit code, prefijo, opcode, d, s)
+        give
+    }
     when op == 78 { x64SsePacked(edit code, 40, d, s) }
     when op == 79 { x64SsePacked(edit code, 89, d, s) }
     when op == 80 { x64SsePacked(edit code, 88, d, s) }
@@ -410,7 +514,8 @@ flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view
     }
     when op == 72 { x64ReadFlags(edit code) }
     when op == 73 { x64Int3(edit code) }
-    when (op >= 74 && op <= 82) || op == 84 { cfgEmitSse(edit code, p, f, inst, edit fix) }
+    when (op >= 74 && op <= 82) || op == 84 || op >= 90 { cfgEmitSse(edit code, p, f, inst, edit fix) }
+    when op >= 85 && op <= 89 { x64FloatBridge(edit code, op) }
     when op == 83 { x64ReadRsp(edit code) }
     when cfgIntrinsicHasResult(op) {
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)

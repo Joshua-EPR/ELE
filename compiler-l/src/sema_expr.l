@@ -646,7 +646,7 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 each k among 0..arg_count {
                     // reservar / datos64 / xmm*: fold constant expressions (e.g.
                     // `-1`, `TAMANO * 2`) into constant operands.
-                    when intrinsic == 49 || intrinsic == 50 || intrinsic >= 74 {
+                    when intrinsic == 49 || intrinsic == 50 || (intrinsic >= 74 && intrinsic <= 84) || intrinsic >= 90 {
                         hold folded = semaConstTryInt(edit ctx, source, tree, tree.extra[first_arg + k])
                         when folded != LIR_NONE {
                             intrinsic_args@push(lirArg(edit ctx.lir, false, folded, false))
@@ -655,16 +655,17 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                     }
                     hold arg_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + k], ACCESS_MOVE)
                     hold operand = lirTakeOperand(edit ctx, arg_t)
-                    when arg_t != 1 { intrinsic_ok = false }
+                    when arg_t != lirIntrinsicArgType(intrinsic, k) { intrinsic_ok = false }
                     intrinsic_args@push(lirArg(edit ctx.lir, false, operand, false))
                 }
                 when !intrinsic_ok {
-                    semaAddError(edit ctx, "L0004", "'{name_text}' requiere argumentos de tipo Int", expr.start, expr.end)
+                    semaAddError(edit ctx, "L0004", "'{name_text}': tipo de argumento incorrecto (Int o Float según el intrínseco)", expr.start, expr.end)
                     give 7
                 }
                 when lirIntrinsicHasResult(intrinsic) {
-                    semaPlatformEmit(edit ctx, intrinsic, view intrinsic_args, 1, true)
-                    give 1
+                    hold resultado = lirIntrinsicResultType(intrinsic)
+                    semaPlatformEmit(edit ctx, intrinsic, view intrinsic_args, resultado, true)
+                    give resultado
                 }
                 semaPlatformEmit(edit ctx, intrinsic, view intrinsic_args, 6, false)
                 give 6

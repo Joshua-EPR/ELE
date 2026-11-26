@@ -122,8 +122,16 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //   83 leerRsp -> Int (stack pointer)
 //   84 xmmMulSumar4M (acc, a, dir, desp): like 81 with MULPS reading memory
 //      ([dir+desp] 16-byte aligned)
+// Float (f64) bridge: 85 leerF32 (dir) -> Float, 86 escribirF32 (dir, Float),
+//   87 bitsDeFloat (Float) -> Int, 88 floatDeBits (Int) -> Float,
+//   89 raizF (Float) -> Float.
+// More packed single SSE (constant registers 1..15): 90 sub, 91 div, 92 max,
+//   93 min, 94 sqrt, 95 and, 96 andn, 97 or, 98 xor, 99 cvtps2dq,
+//   100 cvtdq2ps, 101 paddd, 102 psubd, 103 pslld (r, n), 104 cmpps (d, s,
+//   predicado), 105 shufps (d, s, imm), 106 movss r <- [dir],
+//   107 movss [dir] <- r, 108 cvttps2dq, 109 psrld (r, n).
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 84
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 109
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
@@ -152,6 +160,9 @@ expose flow lirIntrinsicArity(op: Int) => Int {
     when op == 82 { give 3 }
     when op == 83 { give 0 }
     when op == 84 { give 4 }
+    when op == 85 || op == 87 || op == 88 || op == 89 { give 1 }
+    when op == 104 || op == 105 { give 3 }
+    when op >= 86 { give 2 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -160,7 +171,20 @@ expose flow lirIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72 || op == 83
+    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89
+}
+
+// Type of the result (1 Int, 2 Float, 6 Unit) and of argument `i` (1 Int,
+// 2 Float) of an intrinsic.
+expose flow lirIntrinsicResultType(op: Int) => Int {
+    when op == 85 || op == 88 || op == 89 { give 2 }
+    when lirIntrinsicHasResult(op) { give 1 }
+    give 6
+}
+
+expose flow lirIntrinsicArgType(op: Int, i: Int) => Int {
+    when (op == 86 && i == 1) || op == 87 || op == 89 { give 2 }
+    give 1
 }
 
 // LIR text name of an intrinsic code (the native backend parses it back).
@@ -218,7 +242,32 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 81 { give "xmuladd4" }
     when op == 82 { give "xbcastd" }
     when op == 83 { give "rdrsp" }
-    give "xmuladd4m"
+    when op == 84 { give "xmuladd4m" }
+    when op == 85 { give "leerf32" }
+    when op == 86 { give "escf32" }
+    when op == 87 { give "bitsf" }
+    when op == 88 { give "fbits" }
+    when op == 89 { give "sqrtf" }
+    when op == 90 { give "xsub" }
+    when op == 91 { give "xdiv" }
+    when op == 92 { give "xmax" }
+    when op == 93 { give "xmin" }
+    when op == 94 { give "xsqrt" }
+    when op == 95 { give "xand" }
+    when op == 96 { give "xandn" }
+    when op == 97 { give "xor" }
+    when op == 98 { give "xxor" }
+    when op == 99 { give "xcvtdq" }
+    when op == 100 { give "xcvtps" }
+    when op == 101 { give "xpaddd" }
+    when op == 102 { give "xpsubd" }
+    when op == 103 { give "xpslld" }
+    when op == 104 { give "xcmp" }
+    when op == 105 { give "xshuf" }
+    when op == 106 { give "xlds" }
+    when op == 107 { give "xsts" }
+    when op == 108 { give "xcvttdq" }
+    give "xpsrld"
 }
 
 // ---- Linear resource operation table ------------------------------------
