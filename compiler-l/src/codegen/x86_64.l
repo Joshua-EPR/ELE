@@ -774,3 +774,228 @@ expose flow x64PatchAddress64(code: edit X64Code, at: Int, value: Int) {
         n = (n - b) / 256
     }
 }
+
+// ---- System instructions (kernel intrinsics, part 2) ---------------------
+
+flow x64Bytes2(code: edit X64Code, a: Int, b: Int) {
+    x64Put(edit code, a)
+    x64Put(edit code, b)
+}
+
+flow x64Bytes3(code: edit X64Code, a: Int, b: Int, c: Int) {
+    x64Put(edit code, a)
+    x64Put(edit code, b)
+    x64Put(edit code, c)
+}
+
+flow x64Bytes4(code: edit X64Code, a: Int, b: Int, c: Int, d: Int) {
+    x64Bytes2(edit code, a, b)
+    x64Bytes2(edit code, c, d)
+}
+
+// RAX = RDX:EAX: SHL RDX,32 (48 C1 E2 20); MOV EAX,EAX (89 C0); OR RAX,RDX
+// (48 09 D0).
+flow x64JoinEdxEax(code: edit X64Code) {
+    x64Bytes4(edit code, 72, 193, 226, 32)
+    x64Bytes2(edit code, 137, 192)
+    x64Bytes3(edit code, 72, 9, 208)
+}
+
+// CPUID with EAX = leaf, ECX = subleaf; R8 = output address. RBX is saved
+// around it (PUSH RBX 53 / POP RBX 5B). Stores EAX, EBX, ECX, EDX as four
+// u32: MOV [R8],EAX (41 89 00), [R8+4],EBX (41 89 58 04),
+// [R8+8],ECX (41 89 48 08), [R8+12],EDX (41 89 50 0C).
+expose flow x64CpuidToR8(code: edit X64Code) {
+    x64Put(edit code, 83)
+    x64Bytes2(edit code, 15, 162)
+    x64Bytes3(edit code, 65, 137, 0)
+    x64Bytes4(edit code, 65, 137, 88, 4)
+    x64Bytes4(edit code, 65, 137, 72, 8)
+    x64Bytes4(edit code, 65, 137, 80, 12)
+    x64Put(edit code, 91)
+}
+
+// RDTSC (0F 31), RAX = 64-bit counter.
+expose flow x64Rdtsc(code: edit X64Code) {
+    x64Bytes2(edit code, 15, 49)
+    x64JoinEdxEax(edit code)
+}
+
+// RAX = MSR[RAX]: MOV RCX,RAX (48 89 C1); RDMSR (0F 32).
+expose flow x64Rdmsr(code: edit X64Code) {
+    x64Bytes3(edit code, 72, 137, 193)
+    x64Bytes2(edit code, 15, 50)
+    x64JoinEdxEax(edit code)
+}
+
+// MSR[RAX] = RCX: MOV RDX,RCX (48 89 CA); MOV RCX,RAX (48 89 C1);
+// MOV RAX,RDX (48 89 D0); SHR RDX,32 (48 C1 EA 20); WRMSR (0F 30).
+expose flow x64Wrmsr(code: edit X64Code) {
+    x64Bytes3(edit code, 72, 137, 202)
+    x64Bytes3(edit code, 72, 137, 193)
+    x64Bytes3(edit code, 72, 137, 208)
+    x64Bytes4(edit code, 72, 193, 234, 32)
+    x64Bytes2(edit code, 15, 48)
+}
+
+// Control register number of index 0..3 of leerCr0/2/3/4 (RAX = CRn:
+// 0F 20 /r with mod 11, reg = n, rm = RAX).
+flow x64CrNumber(index: Int) => Int {
+    when index == 0 { give 0 }
+    when index == 1 { give 2 }
+    when index == 2 { give 3 }
+    give 4
+}
+
+expose flow x64ReadCr(code: edit X64Code, index: Int) {
+    x64Bytes3(edit code, 15, 32, 192 + 8 * x64CrNumber(index))
+}
+
+// CRn = RAX for escribirCr0/3/4 (index 0, 1, 2): 0F 22 /r.
+expose flow x64WriteCr(code: edit X64Code, index: Int) {
+    change n = 0
+    when index == 1 { n = 3 }
+    when index == 2 { n = 4 }
+    x64Bytes3(edit code, 15, 34, 192 + 8 * n)
+}
+
+// 0F 01 /n with [RAX]: /2 LGDT, /3 LIDT, /7 INVLPG.
+expose flow x64DescriptorOp(code: edit X64Code, reg: Int) {
+    x64Bytes3(edit code, 15, 1, 8 * reg)
+}
+
+// LTR AX (0F 00 D8).
+expose flow x64Ltr(code: edit X64Code) {
+    x64Bytes3(edit code, 15, 0, 216)
+}
+
+// FXSAVE64 [RAX] (48 0F AE 00) or FXRSTOR64 [RAX] (48 0F AE 08).
+expose flow x64Fxsave(code: edit X64Code, restore: Bool) {
+    change modrm = 0
+    when restore { modrm = 8 }
+    x64Bytes4(edit code, 72, 15, 174, modrm)
+}
+
+// WBINVD (0F 09).
+expose flow x64Wbinvd(code: edit X64Code) {
+    x64Bytes2(edit code, 15, 9)
+}
+
+// REX prefix for SSE forms with ModRM.reg = `reg` and ModRM.rm = `rm`,
+// only when one of them is XMM8..XMM15.
+flow x64SseRex(code: edit X64Code, reg: Int, rm: Int) {
+    change rex = 64
+    when reg >= 8 { rex += 4 }
+    when rm >= 8 { rex += 1 }
+    when rex != 64 { x64Put(edit code, rex) }
+}
+
+// Register-register packed single: 0F <opcode> /r with mod 11 (MOVAPS 28,
+// ADDPS 58, MULPS 59, XORPS 57).
+expose flow x64SsePacked(code: edit X64Code, opcode: Int, dst: Int, src: Int) {
+    x64SseRex(edit code, dst, src)
+    x64Put(edit code, 15)
+    x64Put(edit code, opcode)
+    x64Put(edit code, 192 + (dst % 8) * 8 + src % 8)
+}
+
+// [RAX] form: MOVUPS xmm,[RAX] (0F 10), MOVUPS [RAX],xmm (0F 11), or with
+// `scalar` MOVSS xmm,[RAX] (F3 0F 10).
+expose flow x64SseMemory(code: edit X64Code, scalar: Bool, opcode: Int, xmm: Int) {
+    when scalar { x64Put(edit code, 243) }
+    x64SseRex(edit code, xmm, 0)
+    x64Put(edit code, 15)
+    x64Put(edit code, opcode)
+    x64Put(edit code, (xmm % 8) * 8)
+}
+
+// SHUFPS xmm,xmm,0 (0F C6 /r 00): lane 0 to all four lanes.
+expose flow x64Shufps0(code: edit X64Code, xmm: Int) {
+    x64SseRex(edit code, xmm, xmm)
+    x64Put(edit code, 15)
+    x64Put(edit code, 198)
+    x64Put(edit code, 192 + (xmm % 8) * 9)
+    x64Put(edit code, 0)
+}
+
+// INT3 (CC).
+expose flow x64Int3(code: edit X64Code) { x64Put(edit code, 204) }
+
+// PUSHFQ; POP RAX (9C 58).
+expose flow x64ReadFlags(code: edit X64Code) {
+    x64Bytes2(edit code, 156, 88)
+}
+
+// After LGDT: DS=ES=SS=FS=GS=CX (8E D9, 8E C1, 8E D1, 8E E1, 8E E9), then
+// a far return to CS=AX: PUSH RAX (50); LEA RDX,[RIP+3] (48 8D 15 03 00 00
+// 00); PUSH RDX (52); RETFQ (48 CB).
+expose flow x64ReloadSegments(code: edit X64Code) {
+    x64Bytes2(edit code, 142, 217)
+    x64Bytes2(edit code, 142, 193)
+    x64Bytes2(edit code, 142, 209)
+    x64Bytes2(edit code, 142, 225)
+    x64Bytes2(edit code, 142, 233)
+    x64Put(edit code, 80)
+    x64Bytes3(edit code, 72, 141, 21)
+    x64Bytes4(edit code, 3, 0, 0, 0)
+    x64Put(edit code, 82)
+    x64Bytes2(edit code, 72, 203)
+}
+
+// RAX = RAX * 12 + RCX: IMUL RAX,RAX,12 (48 6B C0 0C); ADD RAX,RCX
+// (48 01 C8).
+expose flow x64IsrStubAddress(code: edit X64Code) {
+    x64Bytes4(edit code, 72, 107, 192, 12)
+    x64Bytes3(edit code, 72, 1, 200)
+}
+
+// Whether the CPU pushes an error code for exception `vector`.
+flow x64VectorHasError(vector: Int) => Bool {
+    give vector == 8 || (vector >= 10 && vector <= 14) || vector == 17 || vector == 21 || vector == 29 || vector == 30
+}
+
+// 256 interrupt stubs of 12 bytes each (stub v at table + 12 * v): a zero
+// error code where the CPU pushes none (6A 00, else 66 90), PUSH vector
+// (68 imm32), JMP to the common entry (E9 rel32). Returns the common
+// entry's JMP placeholders' target: the caller emits it next.
+expose flow x64EmitIsrStubs(code: edit X64Code) => List of[Int] {
+    change jumps: List of[Int] = List[]
+    each v among 0..256 {
+        when x64VectorHasError(v) {
+            x64Bytes2(edit code, 102, 144)
+        } otherwise {
+            x64Bytes2(edit code, 106, 0)
+        }
+        x64Put(edit code, 104)
+        x64PutSigned(edit code, v, 4)
+        jumps@push(x64JumpPlaceholder(edit code))
+    }
+    give jumps
+}
+
+// Common interrupt entry: CLD; push the 15 general registers (RAX first,
+// R15 last); push RSP (the frame address) as the only argument of the
+// handler flow; CALL it (placeholder returned); drop the argument; pop the
+// registers; drop vector and error code; IRETQ. Frame layout (offsets in
+// the address the handler receives): 0 R15 .. 56 R8, 64 RDI, 72 RSI,
+// 80 RBP, 88 RBX, 96 RDX, 104 RCX, 112 RAX, 120 vector, 128 error code,
+// 136 RIP, 144 CS, 152 RFLAGS, 160 RSP, 168 SS.
+expose flow x64EmitIsrCommon(code: edit X64Code) => Int {
+    x64Put(edit code, 252)
+    hold order: List of[Int] = List[0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    each i among 0..15 { x64PushReg(edit code, order[i]) }
+    x64Bytes3(edit code, 72, 137, 224)
+    x64PushReg(edit code, 0)
+    hold call = x64CallPlaceholder(edit code)
+    x64Bytes4(edit code, 72, 131, 196, 8)
+    each i among 0..15 { x64PopReg(edit code, order[14 - i]) }
+    x64Bytes4(edit code, 72, 131, 196, 16)
+    x64Bytes2(edit code, 72, 207)
+    give call
+}
+
+// POP r64 (58+r, REX.B for R8..R15).
+expose flow x64PopReg(code: edit X64Code, reg: Int) {
+    when reg >= 8 { x64Put(edit code, 65) }
+    x64Put(edit code, 88 + reg % 8)
+}

@@ -439,55 +439,23 @@ expose flow semaPlatformEmit(ctx: edit SemaContext, op: Int, args: view List of[
     }
 }
 
-// Kernel intrinsic named by the callee span, or -1. nucleo.cpu: hlt cli
-// sti pause in8/16/32 out8/16/32; nucleo.mem: leer8/16/32/64 and
-// escribir8/16/32/64. `cpu` / `mem` say which modules the current module
-// took; a name of a module not taken is an ordinary (user) flow name.
+// Kernel intrinsic named by the callee span, or -1. `cpu` / `mem` say which
+// of nucleo.cpu / nucleo.mem the current module took; a name of a module
+// not taken is an ordinary (user) flow name.
 expose flow semaIntrinsicCode(source: view Text, start: Int, end: Int, cpu: Bool, mem: Bool) => Int {
-    when cpu {
-        hold n_hlt = "hlt"
-        hold n_cli = "cli"
-        hold n_sti = "sti"
-        hold n_pause = "pause"
-        hold n_in8 = "in8"
-        hold n_in16 = "in16"
-        hold n_in32 = "in32"
-        hold n_out8 = "out8"
-        hold n_out16 = "out16"
-        hold n_out32 = "out32"
-        when symbolNameEqualsText(source, start, end, n_hlt) { give 31 }
-        when symbolNameEqualsText(source, start, end, n_cli) { give 32 }
-        when symbolNameEqualsText(source, start, end, n_sti) { give 33 }
-        when symbolNameEqualsText(source, start, end, n_pause) { give 34 }
-        when symbolNameEqualsText(source, start, end, n_in8) { give 35 }
-        when symbolNameEqualsText(source, start, end, n_in16) { give 36 }
-        when symbolNameEqualsText(source, start, end, n_in32) { give 37 }
-        when symbolNameEqualsText(source, start, end, n_out8) { give 38 }
-        when symbolNameEqualsText(source, start, end, n_out16) { give 39 }
-        when symbolNameEqualsText(source, start, end, n_out32) { give 40 }
-    }
-    when mem {
-        hold n_ld8 = "leer8"
-        hold n_ld16 = "leer16"
-        hold n_ld32 = "leer32"
-        hold n_ld64 = "leer64"
-        hold n_st8 = "escribir8"
-        hold n_st16 = "escribir16"
-        hold n_st32 = "escribir32"
-        hold n_st64 = "escribir64"
-        when symbolNameEqualsText(source, start, end, n_ld8) { give 41 }
-        when symbolNameEqualsText(source, start, end, n_ld16) { give 42 }
-        when symbolNameEqualsText(source, start, end, n_ld32) { give 43 }
-        when symbolNameEqualsText(source, start, end, n_ld64) { give 44 }
-        when symbolNameEqualsText(source, start, end, n_st8) { give 45 }
-        when symbolNameEqualsText(source, start, end, n_st16) { give 46 }
-        when symbolNameEqualsText(source, start, end, n_st32) { give 47 }
-        when symbolNameEqualsText(source, start, end, n_st64) { give 48 }
+    change first = 31
+    change last = 80
+    each op among first..(last + 1) {
+        hold in_mem = (op >= 41 && op <= 51)
+        when (in_mem && mem) || (!in_mem && cpu) {
+            hold name = semaIntrinsicName(op)
+            when symbolNameEqualsText(source, start, end, name) { give op }
+        }
     }
     give -1
 }
 
-// Source name of an intrinsic code, for diagnostics.
+// Source name of an intrinsic code.
 expose flow semaIntrinsicName(op: Int) => Text {
     when op == 41 { give "leer8" }
     when op == 42 { give "leer16" }
@@ -497,7 +465,44 @@ expose flow semaIntrinsicName(op: Int) => Text {
     when op == 46 { give "escribir16" }
     when op == 47 { give "escribir32" }
     when op == 48 { give "escribir64" }
+    when op == 56 { give "leerCr0" }
+    when op == 57 { give "leerCr2" }
+    when op == 58 { give "leerCr3" }
+    when op == 59 { give "leerCr4" }
+    when op == 60 { give "escribirCr0" }
+    when op == 61 { give "escribirCr3" }
+    when op == 62 { give "escribirCr4" }
+    when op == 66 { give "recargarSegmentos" }
+    when op == 71 { give "stubInterrupcion" }
+    when op == 72 { give "leerRflags" }
+    when op == 74 { give "xmmCero" }
+    when op == 75 { give "xmmCargar" }
+    when op == 76 { give "xmmGuardar" }
+    when op == 77 { give "xmmDifundir" }
+    when op == 78 { give "xmmCopiar" }
+    when op == 79 { give "xmmMultiplicar" }
+    when op == 80 { give "xmmSumar" }
     give lirIntrinsicName(op)
+}
+
+// Little-endian word of bytes[at..at+8) (missing bytes are 0), as the
+// signed Int with the same 64-bit pattern.
+expose flow semaPackWord(bytes: view List of[Int], at: Int) => Int {
+    change value = 0
+    change scale = 1
+    each i among 0..7 {
+        when at + i < bytes.length { value += bytes[at + i] * scale }
+        scale = scale * 256
+    }
+    when at + 7 < bytes.length {
+        hold top = bytes[at + 7]
+        when top >= 128 {
+            value += (top - 256) * scale
+        } otherwise {
+            value += top * scale
+        }
+    }
+    give value
 }
 
 expose flow semaModuleIn(modules: view List of[Int], owner: Int) => Bool {

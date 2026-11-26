@@ -244,29 +244,60 @@ Circular imports are statically detected and rejected with an explicit error dia
 ### Kernel Intrinsics and `--target kernel`
 
 `take nucleo.cpu` and `take nucleo.mem` are not files: they enable, inside the
-module that takes them, flows that the compiler lowers to one inline
-instruction each. Every argument is an `Int`.
+module that takes them, flows that the compiler lowers to inline code. Every
+argument is an `Int`.
 
-| Module | Flow | Instruction | Result |
+| Module | Flow | Code | Result |
 |---|---|---|---|
-| `nucleo.cpu` | `hlt()`, `cli()`, `sti()`, `pause()` | `HLT`, `CLI`, `STI`, `PAUSE` | — |
+| `nucleo.cpu` | `hlt()`, `cli()`, `sti()`, `pause()`, `int3()`, `wbinvd()` | one instruction | — |
 | `nucleo.cpu` | `in8/in16/in32(puerto)` | `IN AL/AX/EAX, DX` | `Int`, zero-extended |
 | `nucleo.cpu` | `out8/out16/out32(puerto, valor)` | `OUT DX, AL/AX/EAX` | — |
+| `nucleo.cpu` | `cpuid(hoja, subhoja, dir)` | `CPUID`; EAX EBX ECX EDX as four u32 at `dir` | — |
+| `nucleo.cpu` | `rdtsc()`, `rdmsr(msr)`, `wrmsr(msr, valor)` | `RDTSC`, `RDMSR`, `WRMSR` | `Int` / — |
+| `nucleo.cpu` | `leerCr0/2/3/4()`, `escribirCr0/3/4(valor)`, `leerRflags()` | `MOV r, CRn` / `MOV CRn, r` / `PUSHFQ` | `Int` / — |
+| `nucleo.cpu` | `lgdt(dir)`, `lidt(dir)`, `ltr(selector)`, `invlpg(dir)` | one instruction | — |
+| `nucleo.cpu` | `recargarSegmentos(codigo, datos)` | DS/ES/SS/FS/GS = `datos`, far return to CS = `codigo` | — |
+| `nucleo.cpu` | `fxsave(dir)`, `fxrstor(dir)` | `FXSAVE64` / `FXRSTOR64` | — |
+| `nucleo.cpu` | `stubInterrupcion(vector)` | address of the compiler-generated stub (kernel only) | `Int` |
+| `nucleo.cpu` | `xmmCero(r)`, `xmmCargar(r, dir)`, `xmmGuardar(dir, r)`, `xmmDifundir(r, dir)`, `xmmCopiar(d, s)`, `xmmMultiplicar(d, s)`, `xmmSumar(d, s)` | `XORPS`, `MOVUPS`, `MOVSS`+`SHUFPS`, `MOVAPS`, `MULPS`, `ADDPS` on XMM6..XMM15 | — |
 | `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
 | `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
+| `nucleo.mem` | `reservar(bytes, alineacion)` | zeroed `.bss` block (kernel only) | its address |
+| `nucleo.mem` | `datos64(w0, w1, ...)` | initialized `.data` words, up to 256 (kernel only) | its address |
+| `nucleo.mem` | `cadena("texto")` | `.rodata` record `[bytes: u64][UTF-8 bytes]` (kernel only) | its address |
 
 Each access is emitted exactly once and in program order (the backend keeps
 no value in a register across instructions), so memory-mapped I/O needs no
 `volatile` marker. A module that does not take these modules can still define
 flows with the same names.
 
+Static storage is per call site: `flow peticion() => Int { give datos64(...) }`
+returns the same address on every call. The arguments of `reservar` and
+`datos64` must be constant expressions (literals, `fixed` names and their
+operators); `cadena` takes a literal without interpolation. The XMM
+intrinsics take constant register numbers 6..15 (Float code uses XMM0..XMM5)
+and keep their values across statements, so a loop can hold accumulators in
+XMM registers.
+
+`stubInterrupcion(v)` returns the address of one of 256 generated stubs. Each
+stub pushes a zero error code when the CPU pushes none, then the vector and
+the 15 general registers, and calls `kinterrupcion(marco: Int)`. On return
+it restores the registers and executes `IRETQ`. The frame holds R15..R8 at
+0..56, RDI 64, RSI 72, RBP 80, RBX 88, RDX 96, RCX 104, RAX 112, vector 120,
+error code 128, RIP 136, CS 144, RFLAGS 152, RSP 160 and SS 168. The program
+must define `kinterrupcion`.
+
 `ele build kmain.l --target kernel -o kernel.elf` writes a freestanding
-ELF64 `ET_EXEC` image for the top 2 GiB (`.text` at `0xFFFFFFFF80001000`,
-R+X; Text literals in a separate read-only `.rodata`), with a `.symtab` that
-names every flow. The entry stub calls the entry flow (`kmain`, or
-`--entry <flow>`, with no parameters) and stops the CPU (`CLI; HLT`) if it
-returns. There is no runtime: `print`, owned `Text` (including a Text
-literal bound to a variable), `List` and platform I/O are rejected (backend
-code 75). A failed run-time check (overflow, index, inactive variant) stops
-the CPU with the status (125/126/127) in `RDI` and the packed source position
-in `RAX`.
+ELF64 `ET_EXEC` image for the top 2 GiB. `.text` (R+X) starts at
+`0xFFFFFFFF80001000`. `.rodata` (R), `.data` and `.bss` (R+W) each start on
+their own page, and a `.symtab` names every flow. The entry stub calls the
+entry flow (`kmain`, or `--entry <flow>`, with no parameters) and stops the
+CPU (`CLI; HLT`) if it returns.
+
+There is no runtime: `print`, owned `Text` (including a Text literal bound to
+a variable), `List` and platform I/O are rejected (backend code 75). A failed
+run-time check (overflow, index, inactive variant) stops the CPU with the
+status (125/126/127) in `RDI` and the packed source position in `RAX`.
+Backend codes: 77 static storage or stubs outside `--target kernel`,
+78 non-constant `reservar`/`datos64`/`cadena` arguments, 79 `kinterrupcion`
+missing, 80 XMM register outside 6..15.

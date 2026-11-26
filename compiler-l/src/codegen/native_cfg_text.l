@@ -129,6 +129,19 @@ expose shape CfgFix {
     bad_index_at: List of[Int]
     text_at: List of[Int]
     text_id: List of[Int]
+    // Static storage of the kernel intrinsics (native_cfg_platform): the
+    // MOV imm64 sites, their block kind (0 .rodata, 1 .data, 2 .bss) and
+    // offset; the .rodata records and .data bytes, the .bss size, and the
+    // first rejection (78).
+    static_at: List of[Int]
+    static_kind: List of[Int]
+    static_off: List of[Int]
+    static_rodata: List of[Int]
+    static_data: List of[Int]
+    static_bss: Int
+    static_error: Int
+    // MOV imm64 sites that receive the interrupt stub table address.
+    isr_at: List of[Int]
 }
 
 expose flow cfgCall(code: edit X64Code, fix: edit CfgFix, target: Int) {

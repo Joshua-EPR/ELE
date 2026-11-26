@@ -414,6 +414,20 @@ flow cfgUsesClipboard(p: view CfgProgram) => Bool {
     give false
 }
 
+// Index of the function named `name` (decoded LIR names), or -1.
+flow cfgFindFunction(p: view CfgProgram, name: view Text) => Int {
+    each f among 0..p.name_start.length {
+        when p.name_length[f] == name.byteLength {
+            change same = true
+            each i among 0..name.byteLength {
+                when p.name_bytes[p.name_start[f] + i] != name@byteAt(i) { same = false }
+            }
+            when same { give f }
+        }
+    }
+    give -1
+}
+
 expose flow cfgBuild(p: view CfgProgram) => CfgImage {
     give cfgBuildFor(p, 0)
 }
@@ -434,7 +448,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change code = x64New()
     change func_at: List of[Int] = List[]
     change block_at: List of[Int] = List[]
-    change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[])
+    change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[], static_at: List[], static_kind: List[], static_off: List[], static_rodata: List[], static_data: List[], static_bss: 0, static_error: 0, isr_at: List[])
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
     when target < 0 || target > 2 {
@@ -559,6 +573,33 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         give result
     }
     hold functions_end = code.bytes.length
+    when fix.static_error != 0 {
+        result.error = fix.static_error
+        give result
+    }
+    // Static storage and interrupt stubs exist only in kernel images (77).
+    when target != 2 && (fix.static_at.length > 0 || fix.isr_at.length > 0) {
+        result.error = 77
+        give result
+    }
+    // Interrupt stubs: emitted when stubInterrupcion is used; the common
+    // entry calls the flow `kinterrupcion(marco: Int)` (79 if missing).
+    change isr_table = -1
+    when fix.isr_at.length > 0 {
+        hold handler_name = "kinterrupcion"
+        hold handler = cfgFindFunction(p, view handler_name)
+        when handler < 0 || p.functions[handler].params != 1 || p.functions[handler].result_type >= 2 {
+            result.error = 79
+            give result
+        }
+        isr_table = code.bytes.length
+        hold jumps = x64EmitIsrStubs(edit code)
+        hold common = code.bytes.length
+        each i among 0..jumps.length { x64PatchRelative(edit code, jumps[i], common) }
+        hold handler_call = x64EmitIsrCommon(edit code)
+        fix.call_at@push(handler_call)
+        fix.call_to@push(handler)
+    }
     trapTag(edit spans, view fix, 0)
     trapEmitAll(edit code, edit imports, target, view fix, view spans)
     // A runtime routine this target lacks: a safety net, since win64_heap
@@ -620,6 +661,21 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         each i among 0..fix.text_at.length {
             x64PatchAddress64(edit code, fix.text_at[i], rodata_address + literal_at[fix.text_id[i]])
         }
+        // cadena records follow the literals, 8-aligned.
+        during rodata.length % 8 != 0 { rodata@push(0) }
+        hold records_at = rodata.length
+        each i among 0..fix.static_rodata.length { rodata@push(fix.static_rodata[i]) }
+        hold data_address = elf64KernelDataAddress(text_length, rodata.length)
+        hold bss_address = elf64KernelBssAddress(text_length, rodata.length, fix.static_data.length)
+        each i among 0..fix.static_at.length {
+            change base = rodata_address + records_at
+            when fix.static_kind[i] == 1 { base = data_address }
+            when fix.static_kind[i] == 2 { base = bss_address }
+            x64PatchAddress64(edit code, fix.static_at[i], base + fix.static_off[i])
+        }
+        each i among 0..fix.isr_at.length {
+            x64PatchAddress64(edit code, fix.isr_at[i], elf64KernelTextAddress() + isr_table)
+        }
         when code.error != 0 {
             result.error = 71
             give result
@@ -631,7 +687,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
             when f + 1 < func_at.length { end = func_at[f + 1] }
             sym_size@push(end - func_at[f])
         }
-        result.image = elf64KernelImage(view code.bytes, view rodata, view p.name_bytes, view p.name_start, view p.name_length, view func_at, view sym_size)
+        result.image = elf64KernelImage(view code.bytes, view rodata, view fix.static_data, fix.static_bss, view p.name_bytes, view p.name_start, view p.name_length, view func_at, view sym_size)
         when result.image.length == 0 { result.error = 72 }
         give result
     }

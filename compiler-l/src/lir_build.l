@@ -88,31 +88,68 @@ expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
 expose fixed LIR_PLATFORM_CLIPBOARD_WRITE = 28
 expose fixed LIR_PLATFORM_CLIPBOARD_READ = 29
 expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
-// Kernel intrinsics (`take nucleo.cpu`, `take nucleo.mem`): each one is a
-// single inline instruction, never a runtime routine. Every argument is a
-// `val` Int; the result is Int or Unit (lirIntrinsicHasResult).
+// Kernel intrinsics (`take nucleo.cpu`, `take nucleo.mem`): each one is
+// inline code, never a runtime routine. Every argument is a `val` Int; the
+// result is Int or Unit (lirIntrinsicHasResult).
 //   31 hlt  32 cli  33 sti  34 pause                       -> Unit
 //   35 in8  36 in16  37 in32  (puerto)                     -> Int
 //   38 out8 39 out16 40 out32 (puerto, valor)              -> Unit
 //   41 ld8  42 ld16  43 ld32  44 ld64  (dir)               -> Int, zero-extended
 //   45 st8  46 st16  47 st32  48 st64  (dir, valor)        -> Unit, truncated
+// Static storage (`--target kernel` only; constant arguments):
+//   49 reservar (bytes, alineacion) -> Int, zeroed .bss
+//   50 datos64 (w0, w1, ...)        -> Int, initialized .data, 8-aligned
+//   51 cadena: (bytes, w0, ...) of a Text literal -> Int, .rodata record
+//      [bytes: u64][UTF-8 bytes], 8-aligned
+// CPU:
+//   52 cpuid (hoja, subhoja, dir): EAX EBX ECX EDX as four u32 at dir
+//   53 rdtsc -> Int   54 rdmsr (msr) -> Int   55 wrmsr (msr, valor)
+//   56..59 leerCr0/2/3/4 -> Int   60..62 escribirCr0/3/4 (valor)
+//   63 lgdt (dir)  64 lidt (dir)  65 ltr (selector)
+//   66 recargarSegmentos (codigo, datos): far return to CS, DS=ES=SS=FS=GS
+//   67 invlpg (dir)  68 fxsave (dir)  69 fxrstor (dir)  70 wbinvd
+//   71 stubInterrupcion (vector) -> Int  (`--target kernel` only)
+//   72 leerRflags -> Int   73 int3 (breakpoint #BP, returns)
+// Packed single SSE on XMM6..XMM15 (Float code uses XMM0..XMM5); the
+// register arguments must be constants:
+//   74 xmmCero (r)   75 xmmCargar (r, dir)   76 xmmGuardar (dir, r)
+//   77 xmmDifundir (r, dir)   78 xmmCopiar (d, s)
+//   79 xmmMultiplicar (d, s)  80 xmmSumar (d, s)
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 48
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 80
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
 }
 
+// -1: variable, 1..256 arguments (datos64, cadena).
 expose flow lirIntrinsicArity(op: Int) => Int {
     when op <= 34 { give 0 }
     when op <= 37 { give 1 }
     when op <= 40 { give 2 }
     when op <= 44 { give 1 }
-    give 2
+    when op <= 49 { give 2 }
+    when op <= 51 { give -1 }
+    when op == 52 { give 3 }
+    when op == 53 { give 0 }
+    when op == 54 { give 1 }
+    when op == 55 { give 2 }
+    when op <= 59 { give 0 }
+    when op <= 65 { give 1 }
+    when op == 66 { give 2 }
+    when op <= 69 { give 1 }
+    when op == 70 { give 0 }
+    when op == 71 { give 1 }
+    when op == 74 { give 1 }
+    when op >= 75 { give 2 }
+    give 0
 }
 
 expose flow lirIntrinsicHasResult(op: Int) => Bool {
-    give (op >= 35 && op <= 37) || (op >= 41 && op <= 44)
+    when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
+    when op >= 49 && op <= 51 { give true }
+    when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
+    give op == 71 || op == 72
 }
 
 // LIR text name of an intrinsic code (the native backend parses it back).
@@ -134,7 +171,39 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 45 { give "st8" }
     when op == 46 { give "st16" }
     when op == 47 { give "st32" }
-    give "st64"
+    when op == 48 { give "st64" }
+    when op == 49 { give "reservar" }
+    when op == 50 { give "datos64" }
+    when op == 51 { give "cadena" }
+    when op == 52 { give "cpuid" }
+    when op == 53 { give "rdtsc" }
+    when op == 54 { give "rdmsr" }
+    when op == 55 { give "wrmsr" }
+    when op == 56 { give "rdcr0" }
+    when op == 57 { give "rdcr2" }
+    when op == 58 { give "rdcr3" }
+    when op == 59 { give "rdcr4" }
+    when op == 60 { give "wrcr0" }
+    when op == 61 { give "wrcr3" }
+    when op == 62 { give "wrcr4" }
+    when op == 63 { give "lgdt" }
+    when op == 64 { give "lidt" }
+    when op == 65 { give "ltr" }
+    when op == 66 { give "reloadseg" }
+    when op == 67 { give "invlpg" }
+    when op == 68 { give "fxsave" }
+    when op == 69 { give "fxrstor" }
+    when op == 70 { give "wbinvd" }
+    when op == 71 { give "isrstub" }
+    when op == 72 { give "rdflags" }
+    when op == 73 { give "int3" }
+    when op == 74 { give "xzero" }
+    when op == 75 { give "xload" }
+    when op == 76 { give "xstore" }
+    when op == 77 { give "xbcast" }
+    when op == 78 { give "xmov" }
+    when op == 79 { give "xmul" }
+    give "xadd"
 }
 
 // ---- Linear resource operation table ------------------------------------
