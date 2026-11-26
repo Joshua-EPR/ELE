@@ -1,0 +1,2 @@
+extend_unknown_type.l:1:8: error[L0001]
+tipo desconocido

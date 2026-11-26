@@ -34,7 +34,7 @@ flow semaCheckMatch(ctx: edit SemaContext, source: view Text, tree: view AstTree
     hold scrut_place = ctx.lir.place
     // A Text scrutinee is only read (length and bytes) by literal tests, so
     // a borrowed or projected place is examined in place, never copied.
-    hold text_in_place = scrut_t == 5 && scrut_place >= 0
+    hold text_in_place = semaScrutInPlace(ctx, scrut_t, scrut_place, owned_scrut)
     when owned_scrut && scrut_place >= 0 && !text_in_place {
         when ctx.lir.places[scrut_place].parent >= 0 || ctx.lir.vars[ctx.lir.places[scrut_place].root].is_ref {
             lirMarkUnsupported(edit ctx.lir, expr.start)

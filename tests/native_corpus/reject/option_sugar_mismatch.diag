@@ -1,0 +1,2 @@
+option_sugar_mismatch.l:2:5: error[L0003]
+tipo de retorno incompatible: esperado 'Option<Text>', recibido 'Int'

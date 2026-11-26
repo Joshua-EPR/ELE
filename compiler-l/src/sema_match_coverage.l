@@ -145,8 +145,21 @@ flow semaBuiltinBinderIsName(source: view Text, start: Int, end: Int) => Bool {
     give true
 }
 
+// `Some(30)`: an Int literal inside a payload pattern. It tests the payload
+// and never covers the variant on its own.
+expose flow semaBuiltinLiteralPayload(source: view Text, start: Int, end: Int) => Bool {
+    change i = start
+    when i < end && source@byteAt(i) == 45 { i += 1 }
+    when i >= end { give false }
+    each k among i..end {
+        hold b = source@byteAt(k)
+        when b < 48 || b > 57 { give false }
+    }
+    give true
+}
+
 expose flow semaBuiltinMatchCovered(source: view Text, tree: view AstTree, expr: view AstExpr, result_type: Bool) => Bool {
-    when expr.c != 2 { give false }
+    when expr.c < 2 { give false }
     // Stage 0 requires a variable/field at a &Text parameter. Keep these
     // patterns as reusable Text bindings rather than temporary literals.
     hold ok_name = "Ok("
@@ -180,6 +193,8 @@ expose flow semaBuiltinMatchCovered(source: view Text, tree: view AstTree, expr:
         when variant < 0 { give false }
         when bind_start >= 0 {
             when source@byteAt(end - 1) != 41 { give false }
+            hold literal = !result_type && variant == 1 && semaBuiltinLiteralPayload(source, bind_start, end - 1)
+            when literal { proceed }
             when !semaBuiltinBinderIsName(source, bind_start, end - 1) { give false }
         }
         when variant == 0 {

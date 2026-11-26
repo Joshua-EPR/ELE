@@ -224,6 +224,28 @@ expose flow lirMatchArmTest(ctx: edit SemaContext, source: view Text, tree: view
         } otherwise when is_result && (p_end - p_start > 5) && source@byteAt(p_start) == 69 && source@byteAt(p_start + 1) == 114 && source@byteAt(p_start + 2) == 114 && source@byteAt(p_start + 3) == 40 {
             disc = 1
         }
+        when disc == 1 && is_option && semaBuiltinLiteralPayload(source, p_start + 5, p_end - 1) {
+            // `Some(30)`: test the tag, then compare the payload.
+            when elem_t != 1 {
+                lirMarkUnsupported(edit ctx.lir, p_start)
+                flowLink(edit ctx.flow, arm_body, next_test)
+                give false
+            }
+            hold lit_place = lirPlaceVar(edit ctx.lir, scrut_var)
+            hold lit_tag = lirNew(edit ctx, 1, false, LIR_DISC, lit_place, 0, 0)
+            hold lit_one = lirConst(edit ctx.lir, LIR_CONST_INT, 1, 0, 0)
+            hold lit_is_some = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, lit_tag, lit_one)
+            hold lit_check = flowBlock(edit ctx.flow)
+            lirBranchOn(edit ctx, lit_is_some, lit_check, next_test)
+            ctx.flow.current = lit_check
+            hold lit_enum = lirBuiltinEnumIndex(view ctx.lir_module, scrut_t)
+            when lit_enum < 0 { lirMarkUnsupported(edit ctx.lir, p_start) }
+            hold lit_value = lirNew(edit ctx, 1, false, LIR_PAYLOAD, lit_place, lit_enum, 1)
+            hold lit_const = lirConst(edit ctx.lir, LIR_CONST_INT, semaPrimPatternInt(source, p_start + 5, p_end - 1), 0, 0)
+            hold lit_same = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, lit_value, lit_const)
+            lirBranchOn(edit ctx, lit_same, arm_body, next_test)
+            give false
+        }
         when disc >= 0 {
             when is_last {
                 // Final named arm is unconditional only after strict coverage
@@ -267,8 +289,9 @@ expose flow lirMatchArmTest(ctx: edit SemaContext, source: view Text, tree: view
         when variant_idx >= 0 {
             hold variant = view tree.variants[decl.c + variant_idx]
             when variant.payload_count > 1 { lirMarkUnsupported(edit ctx.lir, p_start) }
-            hold scrut_place = lirPlaceVar(edit ctx.lir, scrut_var)
-            hold disc_var = lirNew(edit ctx, 1, false, LIR_DISC, scrut_place, 0, 0)
+            change scrut_place_ref = scrut_place
+            when scrut_place_ref < 0 { scrut_place_ref = lirPlaceVar(edit ctx.lir, scrut_var) }
+            hold disc_var = lirNew(edit ctx, 1, false, LIR_DISC, scrut_place_ref, 0, 0)
             hold disc_const = lirConst(edit ctx.lir, LIR_CONST_INT, variant_idx, 0, 0)
             hold cond = lirNew(edit ctx, 4, false, LIR_BINARY, LIR_EQ, disc_var, disc_const)
             ctx.lir.val = cond
@@ -298,12 +321,14 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
     // of nominal enums. Never bind before testing the active tag.
     hold st = view ctx.types.types[scrut_t]
     change builtin = false
+    change is_opt_bind = false
     change which = -1
     change start = -1
     change payload_ty = -1
     choose st.kind {
         SemTypeKind.Option : {
             builtin = true
+            is_opt_bind = true
             when p_end - p_start > 6 && source@byteAt(p_start) == 83 && source@byteAt(p_start + 4) == 40 {
                 which = 1
                 start = p_start + 5
@@ -329,6 +354,8 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
         hold finish = p_end - 1
         when source@byteAt(finish) != 41 { lirMarkUnsupported(edit ctx.lir, p_start); give }
         when finish == start + 1 && source@byteAt(start) == 95 { give }
+        // A literal payload pattern was fully tested by lirMatchArmTest.
+        when is_opt_bind && semaBuiltinLiteralPayload(source, start, finish) { give }
         // Copyability and drop glue are different properties: Int/Bool copy,
         // but even a drop-free nominal shape/choice MOVES when bound by value.
         // The whole scrutinee is consumed; a second use (or move out of a
@@ -415,6 +442,16 @@ expose flow lirMatchArmBind(ctx: edit SemaContext, source: view Text, tree: view
         hold ty = semaResolveAstType(edit ctx, source, tree, tree.extra[variant.first_payload_index])
         when ty != 1 && ty != 2 && ty != 4 && ty != 5 {
             lirMarkUnsupported(edit ctx.lir, p_start)
+            give
+        }
+        // An in-place scrutinee (reached through a reference or a field)
+        // cannot give up its payload: declare the binder so the rest of the
+        // arm is checked, and report the arm as unsupported (L0016).
+        when scrut_var < 0 {
+            lirMarkUnsupported(edit ctx.lir, p_start)
+            hold held_sym = symbolAdd(edit ctx.symbols, SymbolKind.Var, binding_start, binding_end, ty, ctx.scopes.current_scope, false, false, -1, binding_start, binding_end)
+            scopeAddSymbol(edit ctx.scopes, held_sym)
+            semaInitPath(edit ctx, held_sym, binding_start, binding_end)
             give
         }
         // Text is an owned payload. Extracting it consumes the tagged value,

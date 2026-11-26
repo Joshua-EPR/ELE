@@ -1,0 +1,2 @@
+choice_method_arity.l:14:11: error[L0004]
+número incorrecto de argumentos en llamada
