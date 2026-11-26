@@ -30,7 +30,8 @@ class EnumPayloadBridgeContract(unittest.TestCase):
         # stmt_lower would create a circular dependency.
         self.assertIn('flow semaEnumVariantCall(', front)
         self.assertIn('when argc != variant.payload_count', front)
-        self.assertIn('when expected != 1 && expected != 4', front)
+        # Payloads are limited to Int (1), Float (2), Bool (4) and Text (5).
+        self.assertIn('when expected != 1 && expected != 2 && expected != 4 && expected != 5', front)
         self.assertIn('LIR_VARIANT, enum_id, v, payload', front)
         self.assertNotIn('semaExprMode(', lower)
 

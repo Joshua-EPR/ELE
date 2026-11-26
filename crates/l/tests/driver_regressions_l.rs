@@ -314,6 +314,32 @@ fn lexer_errors_name_their_module_and_position() {
 }
 
 #[test]
+fn failed_fixed_constant_is_not_reported_as_an_internal_error() {
+    // A `fixed` whose value is not a constant used to be followed by
+    // `error[ICE]: ... LIR inválida (regla 1, bloque 0)` for every flow that
+    // used it: the recovered LIR was verified after the user's error.
+    let dir = work("fixed_error_no_ice");
+    for (name, source) in [
+        (
+            "int.l",
+            "fixed A: Int = 1\nfixed SUM: Int = A + foo()\n\nflow main() {\n    print(SUM)\n}\n",
+        ),
+        (
+            "float.l",
+            "fixed HALF: Float = 0.5\nfixed SUM: Float = HALF + 1.0\n\nflow main() {\n    print(SUM)\n}\n",
+        ),
+    ] {
+        fs::write(dir.join(name), source).unwrap();
+        let (out, image) = build(&dir, Path::new(name), "pe", "never.exe");
+        let err = stderr(&out);
+        assert_eq!(out.status.code(), Some(1), "{name}: {err}");
+        assert!(err.contains("error[L0016]"), "{name}: {err}");
+        assert!(!err.contains("ICE"), "{name}: {err}");
+        assert!(!image.exists(), "{name} produced an image");
+    }
+}
+
+#[test]
 fn invalid_utf8_is_still_reported_as_invalid_utf8() {
     let dir = work("lexer_invalid_utf8");
     for (name, bytes) in [
