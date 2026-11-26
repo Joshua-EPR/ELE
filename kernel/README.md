@@ -1,5 +1,8 @@
 # Kernel ELE — Fase 1
 
+**Estado:** los nueve hitos pasan en QEMU y en el Celeron 3865U real
+(SGEMM al 59 % del pico SSE; ver `docs/bitacora.md`).
+
 Kernel x86-64 escrito en ELE (sin C ni ensamblador aparte) para el Celeron
 3865U: SSE hasta SSE4.2, nunca AVX/FMA. Arranca con Limine por UEFI y se
 prueba en QEMU desde Windows.
@@ -35,7 +38,9 @@ Prueba completa de los nueve hitos (4 CPU, teclas inyectadas por el monitor):
 1. Grabar `kernel\construccion\ele.img` en un USB **en modo imagen/DD**
    (Rufus: "Escribir en modo Imagen DD"). Se borra todo el USB.
 2. En el firmware del equipo: arranque UEFI, **Secure Boot desactivado**,
-   y arrancar desde el USB (F12/F9/Esc según el fabricante).
+   y arrancar desde el USB (F12/F9/Esc según el fabricante) eligiendo la
+   entrada **UEFI** del USB. "Selected boot device failed" (HP) significa
+   que se eligió la entrada heredada (Legacy/CSM).
 3. Los resultados salen en pantalla. Sin puerto serie físico, la salida
    serie simplemente se pierde.
 
