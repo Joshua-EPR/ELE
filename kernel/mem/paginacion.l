@@ -28,6 +28,8 @@ expose flow pagPml4() => Int { give leer64(estado()) }
 flow siguiente(tabla: Int, indice: Int) => Int {
     hold e = memVirtual(tabla) + indice * 8
     hold v = leer64(e)
+    // Una página grande (2 MiB) ya cubre esta zona: no hay tabla debajo.
+    when v & PAG_PRESENTE != 0 && v & PAG_GRANDE != 0 { give 0 }
     when v & PAG_PRESENTE != 0 { give v & MASCARA_DIRECCION }
     hold nueva = memFisicaReservar()
     when nueva == 0 { give 0 }
@@ -70,7 +72,8 @@ flow mapear2m(virtual: Int, fisica: Int, banderas: Int) => Bool {
 expose flow pagMapearDispositivo(fisica: Int) => Int {
     hold base = fisica & (~0xFFF)
     hold v = memVirtual(base)
-    pagMapear4k(v, base, PAG_ESCRITURA | PAG_SIN_CACHE)
+    // Si una página grande del HHDM ya la cubre, se usa tal cual.
+    hold mapeada = pagMapear4k(v, base, PAG_ESCRITURA | PAG_SIN_CACHE)
     give memVirtual(fisica)
 }
 
