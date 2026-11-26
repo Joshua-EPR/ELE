@@ -541,3 +541,26 @@ guardado el paso 2; corte simulado a mitad del paso 3
 `fsck.fat -n` sobre la partición después de las escrituras: sin errores
 (solo indica que el contador de libres no está inicializado, como se
 pretendía).
+
+### Hitos 12-14 en la laptop
+
+```
+PCI: ECAM en 0xE0000000, buses 0-255, 17 funciones
+  00:17.0 8086:9d03 010601 SATA AHCI ... BAR5m=0xd1333000/2K MSI
+  02:00.0 10ec:8168 020000 red (Ethernet Realtek)
+  03:00.0 168c:003e 028000 red (Wi-Fi Qualcomm Atheros) MSI MSI-X
+  00:14.0 8086:9d2f 0c0330 USB xHCI ...
+disco: AHCI en 00:17.0, con MSI                        -> hito 12 OK
+AHCI versión 0x10301: 1 disco: 476940 MiB (puerto 0)
+  GPT: 1 2048-4095 (1 MiB, arranque BIOS de GRUB)
+       2 4096-4198399 (2 GiB, Linux)
+       3 4198400-976771071 (474889 MiB, Linux)
+lectura secuencial: 64 MiB en 588 ms = 114 MB/s    (disco duro)
+sin partición marcada para ELE: SOLO LECTURA
+```
+
+El controlador está en modo AHCI, así que no hay que detenerse. El disco
+es un HDD de 500 GB con Linux en todo el disco, sin Windows. Para los hitos
+13 y 14 hace falta crear la partición FAT32 `ELEDATOS`, reduciendo la
+partición 3 desde un USB de GParted. Lo decide el usuario. Se añadieron
+nombres para los tipos de arranque BIOS, swap y LVM de Linux.

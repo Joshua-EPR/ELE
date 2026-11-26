@@ -72,6 +72,13 @@ cualquier otro intento es un pánico. Dos formas de marcarla:
   exit
   ```
 
+- **Desde Linux** (la laptop de pruebas tiene Linux en todo el disco):
+  hay que hacer sitio reduciendo una partición ext4, lo que solo se puede
+  hacer con ella desmontada, desde un USB de GParted Live. Con el espacio
+  libre: crear una partición de 4-8 GiB y formatearla con
+  `sudo mkfs.vfat -F 32 -n ELEDATOS /dev/sdaN`. **Copia de seguridad
+  antes**: redimensionar particiones puede perder datos.
+
 - **Cruda:** GUID de tipo `7F03465A-8D62-4902-B881-2A624BFA16B6`
   (`set id=...` en diskpart). Windows no la monta.
 

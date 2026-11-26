@@ -463,7 +463,11 @@ flow datosDePaso(paso: Int, dir: Int, bytes: Int) {
 
 // Hito 14: FAT32 y checkpoints A/B.
 flow hito14() {
-    when !discoHayPermitida() || !fatMontar() {
+    when !discoHayPermitida() {
+        kprintln(cadena("hito 14 pendiente: no hay partición ELEDATOS en el disco"))
+        give
+    }
+    when !fatMontar() {
         kprintln(cadena("hito 14 FALLÓ: la partición permitida no es FAT32"))
         give
     }
