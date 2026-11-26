@@ -115,8 +115,11 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //   74 xmmCero (r)   75 xmmCargar (r, dir)   76 xmmGuardar (dir, r)
 //   77 xmmDifundir (r, dir)   78 xmmCopiar (d, s)
 //   79 xmmMultiplicar (d, s)  80 xmmSumar (d, s)
+//   81 xmmMulSumar4 (acc, a, dir, desp): acc+j += a * [dir + desp + 16j],
+//      j = 0..3 (desp constant)
+//   82 xmmDifundirEn (r, dir, desp): [dir + desp] to the four lanes of r
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 80
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 82
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
@@ -141,6 +144,8 @@ expose flow lirIntrinsicArity(op: Int) => Int {
     when op == 70 { give 0 }
     when op == 71 { give 1 }
     when op == 74 { give 1 }
+    when op == 81 { give 4 }
+    when op == 82 { give 3 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -203,7 +208,9 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 77 { give "xbcast" }
     when op == 78 { give "xmov" }
     when op == 79 { give "xmul" }
-    give "xadd"
+    when op == 80 { give "xadd" }
+    when op == 81 { give "xmuladd4" }
+    give "xbcastd"
 }
 
 // ---- Linear resource operation table ------------------------------------

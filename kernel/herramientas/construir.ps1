@@ -32,7 +32,10 @@ param(
     # Con -Prueba: cuando la serie muestre -EsperarAntes, se teclean estas
     # teclas (nombres de `sendkey` de QEMU separados por espacios).
     [string]$EsperarAntes = "",
-    [string]$Teclas = ""
+    [string]$Teclas = "",
+    # Virtualización por hardware (Windows Hypervisor Platform) en vez de
+    # emulación TCG: necesaria para medir rendimiento (hito 9).
+    [switch]$Acelerar
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,6 +84,7 @@ $argumentos = @(
     "-drive", "format=raw,file=fat:rw:`"$esp`"",
     "-no-reboot", "-no-shutdown"
 )
+if ($Acelerar) { $argumentos += @("-accel", "whpx") }
 $qemuExe = Join-Path $Qemu "qemu-system-x86_64.exe"
 
 if (-not $Prueba) {

@@ -142,6 +142,9 @@ expose shape CfgFix {
     static_error: Int
     // MOV imm64 sites that receive the interrupt stub table address.
     isr_at: List of[Int]
+    // Kernel images: code offset of the block that calls
+    // `kpanico(codigo, posicion)` on a failed run-time check, or -1.
+    panic_entry: Int
 }
 
 expose flow cfgCall(code: edit X64Code, fix: edit CfgFix, target: Int) {

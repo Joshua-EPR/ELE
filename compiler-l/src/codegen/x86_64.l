@@ -918,6 +918,31 @@ expose flow x64Shufps0(code: edit X64Code, xmm: Int) {
     x64Put(edit code, 0)
 }
 
+// acc += factor * [RAX + disp] through XMM0: MOVUPS XMM0,[RAX+disp32]
+// (0F 10 80 disp32); MULPS XMM0,factor (0F 59 /r); ADDPS acc,XMM0
+// (0F 58 /r). XMM0 holds no value between statements (Float keeps its
+// values in stack slots), so using it here is safe.
+expose flow x64MulAddFromRax(code: edit X64Code, acc: Int, factor: Int, disp: Int) {
+    x64Put(edit code, 15)
+    x64Put(edit code, 16)
+    x64Put(edit code, 128)
+    x64PutSigned(edit code, disp, 4)
+    x64SsePacked(edit code, 89, 0, factor)
+    x64SsePacked(edit code, 88, acc, 0)
+}
+
+// xmm = [RAX + disp] in all four lanes: MOVSS xmm,[RAX+disp32]
+// (F3 0F 10 /r, mod 10) then SHUFPS xmm,xmm,0.
+expose flow x64BroadcastFromRax(code: edit X64Code, xmm: Int, disp: Int) {
+    x64Put(edit code, 243)
+    x64SseRex(edit code, xmm, 0)
+    x64Put(edit code, 15)
+    x64Put(edit code, 16)
+    x64Put(edit code, 128 + (xmm % 8) * 8)
+    x64PutSigned(edit code, disp, 4)
+    x64Shufps0(edit code, xmm)
+}
+
 // INT3 (CC).
 expose flow x64Int3(code: edit X64Code) { x64Put(edit code, 204) }
 

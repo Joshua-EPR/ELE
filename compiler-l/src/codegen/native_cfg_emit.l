@@ -448,7 +448,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change code = x64New()
     change func_at: List of[Int] = List[]
     change block_at: List of[Int] = List[]
-    change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[], static_at: List[], static_kind: List[], static_off: List[], static_rodata: List[], static_data: List[], static_bss: 0, static_error: 0, isr_at: List[])
+    change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[], static_at: List[], static_kind: List[], static_off: List[], static_rodata: List[], static_data: List[], static_bss: 0, static_error: 0, isr_at: List[], panic_entry: -1)
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
     when target < 0 || target > 2 {
@@ -601,6 +601,20 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         fix.call_to@push(handler)
     }
     trapTag(edit spans, view fix, 0)
+    // Kernel: a failed run-time check calls `kpanico(codigo: Int,
+    // posicion: Int)` when the program defines it (posicion = línea *
+    // 2^20 + columna), then stops the CPU.
+    when target == 2 && fix.overflow_at.length + fix.bad_variant_at.length + fix.bad_index_at.length > 0 {
+        hold panic_name = "kpanico"
+        hold panic = cfgFindFunction(p, view panic_name)
+        when panic >= 0 && p.functions[panic].params == 2 && p.functions[panic].result_type < 2 {
+            fix.panic_entry = code.bytes.length
+            x64PushReg(edit code, 0)
+            x64PushReg(edit code, 7)
+            cfgCall(edit code, edit fix, panic)
+            x64HaltForever(edit code)
+        }
+    }
     trapEmitAll(edit code, edit imports, target, view fix, view spans)
     // A runtime routine this target lacks: a safety net, since win64_heap
     // provides every entry of native_rt and native_rt_list.

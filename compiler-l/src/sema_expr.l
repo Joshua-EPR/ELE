@@ -644,9 +644,9 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 change intrinsic_args: List of[Int] = List[]
                 change intrinsic_ok = true
                 each k among 0..arg_count {
-                    // reservar / datos64: fold constant expressions (e.g. `-1`,
-                    // `TAMANO * 2`) into constant operands.
-                    when intrinsic == 49 || intrinsic == 50 {
+                    // reservar / datos64 / xmm*: fold constant expressions (e.g.
+                    // `-1`, `TAMANO * 2`) into constant operands.
+                    when intrinsic == 49 || intrinsic == 50 || intrinsic >= 74 {
                         hold folded = semaConstTryInt(edit ctx, source, tree, tree.extra[first_arg + k])
                         when folded != LIR_NONE {
                             intrinsic_args@push(lirArg(edit ctx.lir, false, folded, false))

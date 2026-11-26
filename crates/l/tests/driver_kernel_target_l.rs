@@ -345,3 +345,57 @@ fn kernel_static_intrinsics_are_checked() {
     assert_eq!(out.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&out.stderr).contains("código 77"));
 }
+
+#[test]
+fn kernel_fused_sse_forms_and_panic_hook() {
+    let dir = work("fused");
+    let source = "take nucleo.cpu\n\
+take nucleo.mem\n\
+\n\
+fixed PASO = 64\n\
+\n\
+flow kpanico(codigo: Int, posicion: Int) {\n\
+    hlt()\n\
+}\n\
+\n\
+flow kmain() {\n\
+    hold p = reservar(256, 16)\n\
+    xmmDifundirEn(10, p, 4 * 2)\n\
+    xmmMulSumar4(12, 10, p, PASO)\n\
+    hold x = leer64(p) + 1\n\
+}\n";
+    let (out, image) = build(&dir, source, &[]);
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let b = fs::read(&image).unwrap();
+    let text = &b[0x1000..];
+    // MOVSS XMM10,[RAX+8]; SHUFPS XMM10,XMM10,0.
+    assert!(contains(text, &[0xF3, 0x44, 0x0F, 0x10, 0x90, 8, 0, 0, 0]));
+    assert!(contains(text, &[0x45, 0x0F, 0xC6, 0xD2, 0x00]));
+    // Fourth step of xmmMulSumar4: MOVUPS XMM0,[RAX+64+48]; MULPS XMM0,XMM10;
+    // ADDPS XMM15,XMM0.
+    assert!(contains(
+        text,
+        &[
+            0x0F, 0x10, 0x80, 112, 0, 0, 0, 0x41, 0x0F, 0x59, 0xC2, 0x44, 0x0F, 0x58, 0xF8
+        ]
+    ));
+    // Failed checks reach kpanico(status, position): PUSH RAX; PUSH RDI; CALL.
+    assert!(contains(text, &[0x50, 0x57, 0xE8]));
+
+    for (bad, why) in [
+        ("xmmMulSumar4(13, 6, p, 0)", "acc + 3 > 15"),
+        ("xmmMulSumar4(6, 8, p, 0)", "factor inside the accumulators"),
+        ("xmmDifundirEn(10, p, p)", "non-constant displacement"),
+    ] {
+        let src = format!(
+            "take nucleo.cpu\ntake nucleo.mem\n\nflow kmain() {{\n    hold p = reservar(64, 16)\n    {bad}\n}}\n"
+        );
+        let (out, _) = build(&dir, &src, &[]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("código 80"), "{why}: {err}");
+    }
+}

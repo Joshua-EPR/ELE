@@ -135,11 +135,13 @@ flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "xmov") { give 78 }
     when nativeEquals(source, word, "xmul") { give 79 }
     when nativeEquals(source, word, "xadd") { give 80 }
+    when nativeEquals(source, word, "xmuladd4") { give 81 }
+    when nativeEquals(source, word, "xbcastd") { give 82 }
     give -1
 }
 
 expose flow cfgIsIntrinsic(op: Int) => Bool {
-    give op >= 31 && op <= 80
+    give op >= 31 && op <= 82
 }
 
 // -1: 1..256 arguments (datos64, cadena).
@@ -161,6 +163,8 @@ flow cfgIntrinsicArity(op: Int) => Int {
     when op == 70 { give 0 }
     when op == 71 { give 1 }
     when op == 74 { give 1 }
+    when op == 81 { give 4 }
+    when op == 82 { give 3 }
     when op >= 75 { give 2 }
     give 0
 }
@@ -269,7 +273,17 @@ flow cfgXmmArg(p: view CfgProgram, k: Int, fix: edit CfgFix) => Int {
     give a.value
 }
 
-// Packed single SSE intrinsics (74..80); memory operands in RAX.
+// Constant displacement argument `k` (a signed 32-bit value), else error 80.
+flow cfgDispArg(p: view CfgProgram, k: Int, fix: edit CfgFix) => Int {
+    hold a = view p.call_args[k]
+    when a.is_var || a.value < -2147483648 || a.value > 2147483583 {
+        fix.static_error = 80
+        give 0
+    }
+    give a.value
+}
+
+// Packed single SSE intrinsics (74..82); memory operands in RAX.
 flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgInst, fix: edit CfgFix) {
     hold first = inst.arg_first
     hold op = inst.op
@@ -293,6 +307,25 @@ flow cfgEmitSse(code: edit X64Code, p: view CfgProgram, f: Int, inst: view CfgIn
         cfgLoadOperand(edit code, p, f, view address, 0)
         hold r = cfgXmmArg(p, first + 1, edit fix)
         x64SseMemory(edit code, false, 17, r)
+        give
+    }
+    when op == 81 {
+        // Four accumulators acc..acc+3 (acc <= 12), a factor outside them.
+        hold acc = cfgXmmArg(p, first, edit fix)
+        hold factor = cfgXmmArg(p, first + 1, edit fix)
+        when acc > 12 || (factor >= acc && factor <= acc + 3) { fix.static_error = 80 }
+        hold address = view p.call_args[first + 2]
+        hold disp = cfgDispArg(p, first + 3, edit fix)
+        cfgLoadOperand(edit code, p, f, view address, 0)
+        each j among 0..4 { x64MulAddFromRax(edit code, acc + j, factor, disp + 16 * j) }
+        give
+    }
+    when op == 82 {
+        hold r = cfgXmmArg(p, first, edit fix)
+        hold address = view p.call_args[first + 1]
+        hold disp = cfgDispArg(p, first + 2, edit fix)
+        cfgLoadOperand(edit code, p, f, view address, 0)
+        x64BroadcastFromRax(edit code, r, disp)
         give
     }
     hold d = cfgXmmArg(p, first, edit fix)
