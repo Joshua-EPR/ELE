@@ -777,3 +777,26 @@ La diferencia de velocidad (unas 5 veces) viene del backend del kernel
 (código ELE nativo sin asignación de registros, frente a Cranelift) y del
 acceso a memoria por intrínsecos. Optimizar es el hito 17: SSE en exp/ln,
 dos núcleos y registros.
+
+Portátil (Celeron 3865U, 1,8 GHz). El corpus se copió del ESP del USB a
+sda4 desde Ubuntu.
+```
+corpus ENCA verificado (18 archivos: tamaño y CRC32)
+PRUEBA A ... exacto: mezcla 5886232681853270 * 2^-52 ... top-1=811 por mil
+PRUEBA B ... exacto: mezcla 6231673534097902 * 2^-51 ... top-1=637 por mil
+entrenamiento: 125061 B; vigilia 56640 ms = 2207 B/s; sueño (2 pasadas) 85762 ms = 2916 B/s; total 142403 ms = 878 B/s de corpus
+inferencia (evaluación sin autocompletado): 46957 B en 20318 ms = 2311 B/s; autocompletado 2001 ms
+RAM reservada por ENCA: 72086706 B (68 MiB); tiempo total ENCA 167 s
+ENCA C5: idéntico a Windows
+hito 16 OK
+```
+
+| | Windows (Cranelift) | QEMU WHPX | portátil |
+|---|---|---|---|
+| bits/byte A y B | referencia | idéntico | idéntico |
+| entrenamiento (B/s de corpus) | — | 1342 | 878 |
+| inferencia (B/s) | — | 3838 | 2311 |
+| tiempo total C5 | 20 s | 107 s | 167 s |
+
+Línea base para el hito 17: 878 B/s de entrenamiento y 2311 B/s de
+inferencia en el portátil.
