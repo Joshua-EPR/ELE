@@ -3,6 +3,7 @@ take native_cfg_types
 take native_cfg_verify
 take x86_64
 take elf64
+take elf64_kernel
 take pe64
 take win64_rt
 take win64_heap
@@ -349,14 +350,16 @@ flow cfgNeedsRuntime(p: view CfgProgram) => Bool {
     when cfgNeedsGlue(p) { give true }
     each i among 0..p.insts.length {
         // The platform runtime allocates and releases through native_rt.
-        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 || p.insts[i].kind == 24 { give true }
+        when (p.insts[i].kind >= 10 && p.insts[i].kind <= 13) || p.insts[i].kind == 17 { give true }
+        when p.insts[i].kind == 24 && !cfgIsIntrinsic(p.insts[i].op) { give true }
     }
     give false
 }
 
-flow cfgUsesKind(p: view CfgProgram, kind: Int) => Bool {
+// Platform calls served by a runtime routine (not the inline intrinsics).
+flow cfgUsesPlatformRuntime(p: view CfgProgram) => Bool {
     each i among 0..p.insts.length {
-        when p.insts[i].kind == kind { give true }
+        when p.insts[i].kind == 24 && !cfgIsIntrinsic(p.insts[i].op) { give true }
     }
     give false
 }
@@ -434,13 +437,20 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
     change fix = CfgFix(call_at: List[], call_to: List[], jump_at: List[], jump_to: List[], overflow_at: List[], bad_variant_at: List[], bad_index_at: List[], text_at: List[], text_id: List[])
     each f among 0..p.functions.length { func_at@push(-1) }
     each b among 0..p.blocks.length { block_at@push(-1) }
-    when target != 0 && target != 1 {
+    when target < 0 || target > 2 {
         result.error = 73
+        give result
+    }
+    // Target 2 (`--target kernel`) has no runtime: nothing that allocates,
+    // prints or calls the system (75). cfgParse already requires an entry
+    // flow without parameters (50).
+    when target == 2 && (cfgNeedsRuntime(p) || cfgNeedsGlue(p) || cfgUsesFloatText(p)) {
+        result.error = 75
         give result
     }
     // Platform builtins (native_cfg_platform): native_rt_platform on Linux
     // ELF64, win64_rt_platform (KERNEL32 only) on Windows PE32+.
-    hold platform = cfgUsesKind(p, 24)
+    hold platform = cfgUsesPlatformRuntime(p)
     change imports = pe64NewImports()
     // Immediates holding the address of the ELF read-write data page.
     change data_at: List of[Int] = List[]
@@ -450,6 +460,11 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         hold main_call = w64EmitEntry(edit code, edit imports)
         fix.call_at@push(main_call)
         fix.call_to@push(p.main)
+    } otherwise when target == 2 {
+        // Kernel entry point: the bootloader jumps here with a valid stack;
+        // if the entry flow returns, this CPU stops (CLI; HLT forever).
+        cfgCall(edit code, edit fix, p.main)
+        x64HaltForever(edit code)
     } otherwise {
         when platform {
             // Keep the initial stack pointer (argc, argv) in the first word
@@ -543,6 +558,7 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         result.error = 70
         give result
     }
+    hold functions_end = code.bytes.length
     trapTag(edit spans, view fix, 0)
     trapEmitAll(edit code, edit imports, target, view fix, view spans)
     // A runtime routine this target lacks: a safety net, since win64_heap
@@ -581,13 +597,43 @@ expose flow cfgBuildFor(p: view CfgProgram, target: Int) => CfgImage {
         x64PatchRelative(edit code, fix.jump_at[i], block_at[fix.jump_to[i]])
     }
     // Text literals follow the code inside the same read-only segment, one
-    // copy per occurrence in the LIR.
+    // copy per occurrence in the LIR. The kernel image keeps them apart in
+    // .rodata (readable, never executable).
     change literal_at: List of[Int] = List[]
+    change rodata: List of[Int] = List[]
+    hold text_length = code.bytes.length
     each t among 0..p.text_start.length {
-        literal_at@push(code.bytes.length)
-        each i among 0..p.text_length[t] {
-            code.bytes@push(p.text_bytes[p.text_start[t] + i])
+        when target == 2 {
+            literal_at@push(rodata.length)
+            each i among 0..p.text_length[t] {
+                rodata@push(p.text_bytes[p.text_start[t] + i])
+            }
+        } otherwise {
+            literal_at@push(code.bytes.length)
+            each i among 0..p.text_length[t] {
+                code.bytes@push(p.text_bytes[p.text_start[t] + i])
+            }
         }
+    }
+    when target == 2 {
+        hold rodata_address = elf64KernelRodataAddress(text_length)
+        each i among 0..fix.text_at.length {
+            x64PatchAddress64(edit code, fix.text_at[i], rodata_address + literal_at[fix.text_id[i]])
+        }
+        when code.error != 0 {
+            result.error = 71
+            give result
+        }
+        // One .symtab entry per flow, sized up to the next flow.
+        change sym_size: List of[Int] = List[]
+        each f among 0..func_at.length {
+            change end = functions_end
+            when f + 1 < func_at.length { end = func_at[f + 1] }
+            sym_size@push(end - func_at[f])
+        }
+        result.image = elf64KernelImage(view code.bytes, view rodata, view p.name_bytes, view p.name_start, view p.name_length, view func_at, view sym_size)
+        when result.image.length == 0 { result.error = 72 }
+        give result
     }
     change code_address = elf64CodeAddress()
     when target == 1 { code_address = pe64CodeAddress() }

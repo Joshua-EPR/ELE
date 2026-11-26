@@ -79,10 +79,41 @@ flow cfgReadBlock(p: edit CfgProgram, source: view Text, reader: edit NativeRead
     }
 }
 
+// Decodes a LIR name `<length>:<byte>,<byte>,...` (cfgEncodedName) into
+// p.name_bytes; a malformed name records no bytes (cfgReadFunction rejects
+// it anyway).
+flow cfgRecordName(p: edit CfgProgram, source: view Text, name: view NativeWord) {
+    p.name_start@push(p.name_bytes.length)
+    change pos = name.start
+    during pos < name.end && source@byteAt(pos) != 58 { pos += 1 }
+    pos += 1
+    change count = 0
+    change number = 0
+    change digits = 0
+    during pos <= name.end {
+        change b = 44
+        when pos < name.end { b = source@byteAt(pos) }
+        when b == 44 {
+            when digits > 0 && number <= 255 {
+                p.name_bytes@push(number)
+                count += 1
+            }
+            number = 0
+            digits = 0
+        } otherwise when b >= 48 && b <= 57 && digits < 3 {
+            number = number * 10 + b - 48
+            digits += 1
+        }
+        pos += 1
+    }
+    p.name_length@push(count)
+}
+
 flow cfgReadFunction(p: edit CfgProgram, source: view Text, reader: edit NativeReader, f: Int) {
     nativeExpect(source, edit reader, "func")
     hold id = nativeId(source, edit reader, 102)
     hold name = nativeWord(source, edit reader)
+    cfgRecordName(edit p, source, view name)
     nativeExpect(source, edit reader, "params")
     hold params = nativeNumber(source, edit reader)
     nativeExpect(source, edit reader, "result")

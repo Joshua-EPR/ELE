@@ -88,6 +88,54 @@ expose fixed LIR_PLATFORM_WINDOW_TEXT_BYTES = 27
 expose fixed LIR_PLATFORM_CLIPBOARD_WRITE = 28
 expose fixed LIR_PLATFORM_CLIPBOARD_READ = 29
 expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
+// Kernel intrinsics (`take nucleo.cpu`, `take nucleo.mem`): each one is a
+// single inline instruction, never a runtime routine. Every argument is a
+// `val` Int; the result is Int or Unit (lirIntrinsicHasResult).
+//   31 hlt  32 cli  33 sti  34 pause                       -> Unit
+//   35 in8  36 in16  37 in32  (puerto)                     -> Int
+//   38 out8 39 out16 40 out32 (puerto, valor)              -> Unit
+//   41 ld8  42 ld16  43 ld32  44 ld64  (dir)               -> Int, zero-extended
+//   45 st8  46 st16  47 st32  48 st64  (dir, valor)        -> Unit, truncated
+expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 48
+
+expose flow lirIsIntrinsicOp(op: Int) => Bool {
+    give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
+}
+
+expose flow lirIntrinsicArity(op: Int) => Int {
+    when op <= 34 { give 0 }
+    when op <= 37 { give 1 }
+    when op <= 40 { give 2 }
+    when op <= 44 { give 1 }
+    give 2
+}
+
+expose flow lirIntrinsicHasResult(op: Int) => Bool {
+    give (op >= 35 && op <= 37) || (op >= 41 && op <= 44)
+}
+
+// LIR text name of an intrinsic code (the native backend parses it back).
+expose flow lirIntrinsicName(op: Int) => Text {
+    when op == 31 { give "hlt" }
+    when op == 32 { give "cli" }
+    when op == 33 { give "sti" }
+    when op == 34 { give "pause" }
+    when op == 35 { give "in8" }
+    when op == 36 { give "in16" }
+    when op == 37 { give "in32" }
+    when op == 38 { give "out8" }
+    when op == 39 { give "out16" }
+    when op == 40 { give "out32" }
+    when op == 41 { give "ld8" }
+    when op == 42 { give "ld16" }
+    when op == 43 { give "ld32" }
+    when op == 44 { give "ld64" }
+    when op == 45 { give "st8" }
+    when op == 46 { give "st16" }
+    when op == 47 { give "st32" }
+    give "st64"
+}
 
 // ---- Linear resource operation table ------------------------------------
 // Each resource family is a small table shared by sema (argument checking

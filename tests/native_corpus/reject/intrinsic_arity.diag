@@ -1,0 +1,2 @@
+intrinsic_arity.l:4:5: error[L0004]
+'out8' requiere 2 argumentos Int

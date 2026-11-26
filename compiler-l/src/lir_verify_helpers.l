@@ -78,6 +78,21 @@ expose flow lirVerifyPlatform(v: edit LirVerifier, l: view LirFn, types: view Ty
     when lirIsResourceOp(op) {
         give lirVerifyResourcePlatform(edit v, l, types, lm, op, first, count, dst, check)
     }
+    when lirIsIntrinsicOp(op) {
+        // Kernel intrinsics: `val` Int arguments; Int or Unit result.
+        when count != lirIntrinsicArity(op) || first < 0 || first > l.operands.length || count > l.operands.length - first { give 4 }
+        change want = 6
+        when lirIntrinsicHasResult(op) { want = 1 }
+        when l.vars[dst].ty != want { give 3 }
+        each i among 0..count {
+            hold arg = l.operands[first + i]
+            when arg < 0 || arg >= l.args.length { give 1 }
+            when l.args[arg].by_ref { give 4 }
+            when lirArgType(l, types, lm, arg) != 1 { give 3 }
+            when !lirArgDefined(edit v, l, arg, check) { give 5 }
+        }
+        give 0
+    }
     change arity = -1
     when op == LIR_PLATFORM_ARG_COUNT || op == LIR_PLATFORM_READ_EVENT { arity = 0 }
     when op == LIR_PLATFORM_ARG || op == LIR_PLATFORM_PRINT_ERROR || op == LIR_PLATFORM_CONSOLE_MODE || op == LIR_PLATFORM_WRITE_CONSOLE { arity = 1 }

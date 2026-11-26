@@ -587,6 +587,36 @@ flow semaInferExpr(ctx: edit SemaContext, source: view Text, tree: view AstTree,
                 ctx.expected_union_type = contextual
                 give semaBuiltinUnionValue(edit ctx, arg_t, payload, builtin_variant, expr.start, expr.end)
             }
+            // Kernel intrinsics of `take nucleo.cpu` / `take nucleo.mem`.
+            hold takes_cpu = semaModuleIn(view ctx.nucleo_cpu, ctx.current_module)
+            hold takes_mem = semaModuleIn(view ctx.nucleo_mem, ctx.current_module)
+            hold intrinsic = semaIntrinsicCode(source, name_start, name_end, takes_cpu, takes_mem)
+            when intrinsic >= 0 {
+                hold name_text = semaIntrinsicName(intrinsic)
+                hold arity = lirIntrinsicArity(intrinsic)
+                when arg_count != arity {
+                    semaAddError(edit ctx, "L0004", "'{name_text}' requiere {arity} argumentos Int", expr.start, expr.end)
+                    give 7
+                }
+                change intrinsic_args: List of[Int] = List[]
+                change intrinsic_ok = true
+                each k among 0..arg_count {
+                    hold arg_t = semaExprMode(edit ctx, source, tree, tree.extra[first_arg + k], ACCESS_MOVE)
+                    hold operand = lirTakeOperand(edit ctx, arg_t)
+                    when arg_t != 1 { intrinsic_ok = false }
+                    intrinsic_args@push(lirArg(edit ctx.lir, false, operand, false))
+                }
+                when !intrinsic_ok {
+                    semaAddError(edit ctx, "L0004", "'{name_text}' requiere argumentos de tipo Int", expr.start, expr.end)
+                    give 7
+                }
+                when lirIntrinsicHasResult(intrinsic) {
+                    semaPlatformEmit(edit ctx, intrinsic, view intrinsic_args, 1, true)
+                    give 1
+                }
+                semaPlatformEmit(edit ctx, intrinsic, view intrinsic_args, 6, false)
+                give 6
+            }
             hold name_print_err = "printError"
             when symbolNameEqualsText(source, name_start, name_end, name_print_err) && arg_count == 1 {
                 hold mark = ctx.pending_temps.length

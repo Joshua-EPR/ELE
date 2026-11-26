@@ -5,6 +5,7 @@
 archivo	fase_maxima
 ast.l	lir
 codegen/elf64.l	lir
+codegen/elf64_kernel.l	lir
 codegen/lir_subset.l	lir
 codegen/lir_tokens.l	lir
 codegen/native_cfg_arith.l	lir

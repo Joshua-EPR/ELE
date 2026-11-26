@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -24,8 +25,27 @@ class SeedArchiveTests(unittest.TestCase):
                 self.assertEqual(len(seed), record["seed_size"])
 
     def test_manifest_source_hashes_match_lf_and_windows_checkouts(self):
+        # The seed was built from the driver source as it was then, not from
+        # the current tree: the driver keeps evolving after the pin. That
+        # source is the git blob `driver_source_git_blob` (the run's head
+        # commit itself is not on any branch, but its blob is in main's
+        # history).
         provenance = self.manifest["provenance"]
-        source = (ROOT / provenance["driver_source"]).read_bytes()
+        blob = provenance["driver_source_git_blob"]
+        shown = subprocess.run(
+            ["git", "cat-file", "blob", blob],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            shown.returncode,
+            0,
+            f"driver source blob {blob} is not in this checkout "
+            "(CI needs fetch-depth: 0): "
+            + shown.stderr.decode("utf-8", "replace"),
+        )
+        source = shown.stdout
         lf_source = source.replace(b"\r\n", b"\n")
         crlf_source = lf_source.replace(b"\n", b"\r\n")
         self.assertEqual(

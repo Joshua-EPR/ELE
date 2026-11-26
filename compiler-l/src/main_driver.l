@@ -327,6 +327,8 @@ flow printHelp() {
     print("  --lib <raiz>              Busca imports ausentes bajo esta raiz (ej.: --lib . para std/)")
     print("  --pe64                    Equivalente a --target pe")
     print("  --elf64                   Equivalente a --target elf")
+    print("  --target kernel           ELF64 x86-64 freestanding en la mitad alta (0xFFFFFFFF80000000), sin runtime")
+    print("  --entry <flow>            Flow de entrada (por defecto 'main'; 'kmain' con --target kernel)")
     print("")
     print("Opciones generales:")
     print("  --help, -h                Muestra este mensaje de ayuda")
@@ -399,7 +401,7 @@ flow assembleLir(headers: view List of[Text], functions: view List of[Text]) => 
     give "{s3}{s2}{s1}{s0}end\n"
 }
 
-flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root: Text) => Int {
+flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root: Text, entry: Text) => Int {
     choose loadProgramWithLibRoot(view source_path, view lib_root) {
         Ok(prog): {
             // Safety check: output path cannot overwrite any source module in the project
@@ -438,6 +440,7 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
 
             change semaCtx = semaContextNew()
             semaCtx.emit_lir = true
+            semaCtx.entry_name = "{entry}"
             semaSetDeclModules(edit semaCtx, view prog.decl_module)
             semaSetModuleAccess(edit semaCtx, view prog.module_access, prog.module_count)
             semaAnalyze(edit semaCtx, source, view prog.tree)
@@ -446,6 +449,11 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
                     hold err = view semaCtx.errors[i]
                     reportSemaError(view prog.module_paths, view prog.module_starts, source, err)
                 }
+                give 1
+            }
+
+            when semaCtx.lir_main < 0 {
+                printError("error[CLI]: no existe la flow de entrada '{entry}'")
                 give 1
             }
 
@@ -460,6 +468,14 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
             hold compiled = cfgCompileFor(view lir_text, target)
             when compiled.error != 0 {
                 hold code = compiled.error
+                when code == 75 {
+                    printError("error[BACKEND]: --target kernel no tiene runtime: print, Text propio, List, choice con datos propios y E/S del sistema no están disponibles (código 75)")
+                    give 3
+                }
+                when code == 50 {
+                    printError("error[BACKEND]: la flow de entrada '{entry}' debe no tener parámetros y devolver Int o nada (código 50)")
+                    give 3
+                }
                 printError("error[BACKEND]: compilación ELE-LIR rechazada por el backend nativo (código {code})")
                 give 3
             }
@@ -469,6 +485,8 @@ flow compileProgram(source_path: Text, output_path: Text, target: Int, lib_root:
             when status != 0 {
                 when target == 1 {
                     printError("error[IO]: fallo al escribir ejecutable PE64 en {output_path} (código {status})")
+                } otherwise when target == 2 {
+                    printError("error[IO]: fallo al escribir la imagen del kernel en {output_path} (código {status})")
                 } otherwise {
                     printError("error[IO]: fallo al escribir ejecutable ELF64 en {output_path} (código {status})")
                 }
@@ -532,6 +550,7 @@ flow main() => Int {
     change output_file = ""
     change library_root = ""
     change target = -1
+    change entry_name = ""
     change skip_next = false
 
     hold opt_pe64 = "--pe64"
@@ -540,6 +559,8 @@ flow main() => Int {
     hold opt_output = "--output"
     hold opt_o = "-o"
     hold opt_lib = "--lib"
+    hold opt_entry = "--entry"
+    hold val_kernel = "kernel"
     hold val_pe = "pe"
     hold val_pe64 = "pe64"
     hold val_elf = "elf"
@@ -576,10 +597,28 @@ flow main() => Int {
                         } otherwise {
                             when textMatches(view next_val, view val_elf) || textMatches(view next_val, view val_elf64) {
                                 target = 0
+                            } otherwise when textMatches(view next_val, view val_kernel) {
+                                target = 2
                             } otherwise {
-                                printError("error[CLI]: target desconocido '{next_val}'. Use 'elf' o 'pe'.")
+                                printError("error[CLI]: target desconocido '{next_val}'. Use 'elf', 'pe' o 'kernel'.")
                                 give 2
                             }
+                        }
+                        skip_next = true
+                    } otherwise when textMatches(view cur_arg, view opt_entry) {
+                        when i + 1 >= count {
+                            printError("error[CLI]: --entry requiere el nombre de una flow")
+                            give 2
+                        }
+                        choose processArg(i + 1) {
+                            Ok(v): {
+                                when v.byteLength == 0 || v@byteAt(0) == 45 {
+                                    printError("error[CLI]: --entry requiere el nombre de una flow, no otra opcion")
+                                    give 2
+                                }
+                                entry_name = v
+                            }
+                            Err(code): { give 6 }
                         }
                         skip_next = true
                     } otherwise {
@@ -677,7 +716,12 @@ flow main() => Int {
         give 2
     }
 
+    when entry_name.byteLength == 0 {
+        entry_name = "main"
+        when target == 2 { entry_name = "kmain" }
+    }
+
     // compileProgram verifies the loaded main source and every imported
     // module against the destination after readText establishes they exist.
-    give compileProgram(source_file, output_file, target, library_root)
+    give compileProgram(source_file, output_file, target, library_root, entry_name)
 }

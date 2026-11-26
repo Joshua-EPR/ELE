@@ -101,6 +101,12 @@ flow semaCollectDeclarations(ctx: edit SemaContext, source: view Text, tree: vie
             }
             AstDeclKind.Import : {
                 // Local module imports and std.io.print are recognized in Stage 1.
+                // nucleo.cpu / nucleo.mem are not files: they enable the
+                // kernel intrinsics inside the module that takes them.
+                hold nucleo_cpu = "nucleo.cpu"
+                hold nucleo_mem = "nucleo.mem"
+                when symbolNameEqualsText(source, decl.a, decl.b, nucleo_cpu) { ctx.nucleo_cpu@push(ctx.current_module) }
+                when symbolNameEqualsText(source, decl.a, decl.b, nucleo_mem) { ctx.nucleo_mem@push(ctx.current_module) }
             }
         }
     }

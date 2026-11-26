@@ -180,12 +180,15 @@ flow loadModuleRecursive(
                     // Once an import fails, do not load any subsequent import.
                     change import_error = 0
                     hold std_io = "std.io.print"
+                    // Kernel intrinsic modules: recognized by sema, no file.
+                    hold nucleo_cpu = "nucleo.cpu"
+                    hold nucleo_mem = "nucleo.mem"
                     each d among 0..temp_tree.declarations.length {
                         when import_error == 0 {
                             hold decl = view temp_tree.declarations[d]
                             choose decl.kind {
                                 AstDeclKind.Import : {
-                                    when !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) {
+                                    when !symbolNameEqualsText(mod_source, decl.a, decl.b, std_io) && !symbolNameEqualsText(mod_source, decl.a, decl.b, nucleo_cpu) && !symbolNameEqualsText(mod_source, decl.a, decl.b, nucleo_mem) {
                                         hold imp_name = pathSubstring(mod_source, decl.a, decl.b)
                                         hold relative_file = importRelativePath(view imp_name)
                                         change dep_path = "{own_dir}/{relative_file}"

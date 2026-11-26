@@ -218,7 +218,14 @@ flow trapEmitStubs(code: edit X64Code, sites: view List of[Int], spans: view Lis
 expose flow trapEmitAll(code: edit X64Code, imports: edit Pe64Imports, target: Int, fix: view CfgFix, spans: view TrapSpans) {
     when fix.overflow_at.length + fix.bad_variant_at.length + fix.bad_index_at.length == 0 { give }
     hold reporter = code.bytes.length
-    trapEmitReporter(edit code, edit imports, target)
+    when target == 2 {
+        // Kernel: no output and nothing to exit to. The CPU stops with
+        // RDI = status (125/126/127) and RAX = packed line/column, readable
+        // with `info registers` in the QEMU monitor.
+        x64HaltForever(edit code)
+    } otherwise {
+        trapEmitReporter(edit code, edit imports, target)
+    }
     when fix.overflow_at.length > 0 {
         hold message = ": overflow entero o división/resto por cero\n"
         hold entry = trapEmitKind(edit code, reporter, view message, 125)

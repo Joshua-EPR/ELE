@@ -32,8 +32,7 @@ expose flow semaLirSetup(ctx: edit SemaContext, source: view Text, tree: view As
         choose decl.kind {
             AstDeclKind.Function : {
                 ctx.lir_func_index[d] = functions
-                hold main_name = "main"
-                when !astIsMethod(tree, d) && symbolNameEqualsText(source, decl.a, decl.b, main_name) { ctx.lir_main = functions }
+                when !astIsMethod(tree, d) && symbolNameEqualsText(source, decl.a, decl.b, ctx.entry_name) { ctx.lir_main = functions }
                 functions += 1
             }
             AstDeclKind.Struct : {

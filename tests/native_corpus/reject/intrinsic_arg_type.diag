@@ -1,0 +1,2 @@
+intrinsic_arg_type.l:4:14: error[L0004]
+'leer8' requiere argumentos de tipo Int
