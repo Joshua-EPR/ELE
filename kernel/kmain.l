@@ -84,6 +84,7 @@ flow kmain() {
     hito14()
     hito15()
     hito16()
+    hito17()
     hito7()
 
     during true {
@@ -610,10 +611,22 @@ flow lineaBaseAdamW() {
     }
 }
 
+// Hito 17: ENCA en modo rápido (f32 + SSE + 2 núcleos) frente al exacto.
+flow hito17() {
+    hold r = encaHito17()
+    when r == 1 {
+        kprintln(cadena("hito 17 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 17 omitido (sin corpus)"))
+    } otherwise {
+        kprintln(cadena("hito 17 FALLÓ"))
+    }
+}
+
 // Hito 16: ENCA (exp009, configuración C5) reproduce exactamente los números
 // de Windows (ver enca/exp009.l). Necesita enca/ en la partición ELEDATOS.
 flow hito16() {
-    hold r = encaEjecutar()
+    hold r = encaEjecutar(0)
     when r == 1 {
         kprintln(cadena("hito 16 OK"))
     } otherwise when r == 2 {

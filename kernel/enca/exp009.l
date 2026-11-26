@@ -15,6 +15,9 @@ take almacenamiento.disco
 take almacenamiento.fat32
 take enca.matematica
 take enca.modelo
+take enca.perfil
+take enca.rapido
+take cpu.buzon
 
 fixed ARCHIVOS = 18
 fixed ENTRENAMIENTO = 11
@@ -88,6 +91,16 @@ flow corpusCrc(i: Int) => Int {
 // (dirección, 18 entradas).
 flow tablaTextos() => Int { give reservar(160, 8) }
 flow textoDe(i: Int) => Int { give leer64(tablaTextos() + 8 + i * 8) }
+
+// Resultados de cada modo (0 exacto, 1 rápido), 192 bytes por modo, para que
+// el hito 17 compare:
+//  +0 mezcla A  +8 hipocampo A  +16 corteza A  +24 top-1 A (por mil)
+//  +32 mezcla B +40 hipocampo B +48 corteza B  +56 top-1 B
+//  +64 ciclos vigilia  +72 ciclos sueño  +80 bytes de entrenamiento
+//  +88 ciclos de inferencia  +96 bytes de evaluación  +104 ciclos de autocompletado
+//  +112 ciclos totales de la ejecución  +120 aciertos A  +128 aciertos B  +136 1 si hubo ejecución
+flow resultados() => Int { give reservar(384, 8) }
+expose flow encaResultado(modo: Int) => Int { give resultados() + modo * 192 }
 
 // ---- impresión ----------------------------------------------------------------
 
@@ -186,7 +199,7 @@ flow pesoEsperado(i: Int) => Int {
 }
 
 // ---- informe de una prueba (A = 0, B = 1) ---------------------------------------
-flow informar(m: Int, etiqueta: Int, prueba: Int) {
+flow informar(m: Int, etiqueta: Int, prueba: Int, modo: Int) {
     change bytes = leer64(m + 80)
     when bytes < 1 { bytes = 1 }
     hold n = intToFloat(bytes)
@@ -196,6 +209,12 @@ flow informar(m: Int, etiqueta: Int, prueba: Int) {
     hold top = porMil(leer64(m + 112), leer64(m + 80))
     hold acept = leer64(m + 144)
     hold resto = leer64(m + 136)
+    hold res = encaResultado(modo) + prueba * 32
+    ef(res, bm)
+    ef(res + 8, bh)
+    ef(res + 16, bc)
+    escribir64(res + 24, top)
+    escribir64(encaResultado(modo) + 120 + prueba * 8, leer64(m + 144))
     kprint(etiqueta)
     kprint(cadena(": bits/byte mezcla="))
     imprimirF(bm)
@@ -222,6 +241,7 @@ flow informar(m: Int, etiqueta: Int, prueba: Int) {
     kprint(cadena("/"))
     kprintEntero(leer64(m + 120))
     kprintByte(10)
+    when modo == 1 { give }
     when prueba == 0 {
         compararExacto(cadena("A mezcla"), bm, 5886232681853270, -52)
         compararExacto(cadena("A hipocampo"), bh, 7119176556848176, -52)
@@ -294,16 +314,26 @@ flow cargarCorpus() => Int {
 
 // ---- ejecución ---------------------------------------------------------------------
 // Devuelve 1 si reproduce Windows, 0 si no, 2 si el corpus no está.
-expose flow encaEjecutar() => Int {
-    kprintln(cadena("ENCA exp009 C5: hipocampo de 65536 ranuras por orden, mezcla geométrica, sueño intercalado x2"))
-    hold estadoCorpus = cargarCorpus()
-    when estadoCorpus == 1 { give 2 }
-    when estadoCorpus == 2 { give 0 }
-    kprintln(cadena("corpus ENCA verificado (18 archivos: tamaño y CRC32)"))
+// modo 0 = exacto (compara con Windows); 1 = rápido (solo informa). El corpus
+// se carga y verifica una sola vez (la segunda ejecución lo reutiliza).
+expose flow encaEjecutar(modo: Int) => Int {
+    when modo == 0 {
+        kprintln(cadena("ENCA exp009 C5: hipocampo de 65536 ranuras por orden, mezcla geométrica, sueño intercalado x2"))
+    } otherwise {
+        kprintln(cadena("ENCA exp009 C5 en modo rápido (f32 + SSE + núcleo 1 en la corteza), mismo corpus"))
+    }
+    when leer64(tablaTextos() + 152) == 0 {
+        hold estadoCorpus = cargarCorpus()
+        when estadoCorpus == 1 { give 2 }
+        when estadoCorpus == 2 { give 0 }
+        escribir64(tablaTextos() + 152, 1)
+        kprintln(cadena("corpus ENCA verificado (18 archivos: tamaño y CRC32)"))
+    }
     hold cpm = tscCiclosPorMs()
     hold tInicio = rdtsc()
 
-    hold m = modeloCrear(65536)
+    perfilReiniciar()
+    hold m = modeloCrear(65536, modo)
     when m == 0 {
         kprintln(cadena("ENCA: sin memoria para el modelo"))
         give 0
@@ -368,12 +398,14 @@ expose flow encaEjecutar() => Int {
         kprint(cadena("]"))
     }
     kprintByte(10)
-    comparar(cadena("actualizaciones"), actualizaciones, 180397)
-    comparar(cadena("vigilia cerradas"), leer64(m + 64), 92407)
-    comparar(cadena("consolidaciones"), leer64(m + 72), 147743)
-    comparar(cadena("sobrescrituras"), leer64(mem + 80), 10799)
-    comparar(cadena("memoria hipocampo"), memBytesReservados(mem), 70782976)
-    each i among 0..12 { comparar(cadena("peso geometrico"), escala15(lf(pesos + i * 8)), pesoEsperado(i)) }
+    when modo == 0 {
+        comparar(cadena("actualizaciones"), actualizaciones, 180397)
+        comparar(cadena("vigilia cerradas"), leer64(m + 64), 92407)
+        comparar(cadena("consolidaciones"), leer64(m + 72), 147743)
+        comparar(cadena("sobrescrituras"), leer64(mem + 80), 10799)
+        comparar(cadena("memoria hipocampo"), memBytesReservados(mem), 70782976)
+        each i among 0..12 { comparar(cadena("peso geometrico"), escala15(lf(pesos + i * 8)), pesoEsperado(i)) }
+    }
 
     // Pruebas A y B.
     hold tE0 = rdtsc()
@@ -389,7 +421,7 @@ expose flow encaEjecutar() => Int {
         modeloEvaluar(m, textoDe(i), corpusTam(i))
         bytesA += corpusTam(i)
     }
-    informar(m, cadena("PRUEBA A (dominio ENCA)"), 0)
+    informar(m, cadena("PRUEBA A (dominio ENCA)"), 0, modo)
     hold ciclosAutoA = leer64(m + 208)
     hold tE1 = rdtsc()
 
@@ -405,7 +437,7 @@ expose flow encaEjecutar() => Int {
         modeloEvaluar(m, textoDe(i), corpusTam(i))
         bytesB += corpusTam(i)
     }
-    informar(m, cadena("PRUEBA B (código nuevo de la Fase 8)"), 1)
+    informar(m, cadena("PRUEBA B (código nuevo de la Fase 8)"), 1, modo)
     hold ciclosAutoB = leer64(m + 208)
     hold tE2 = rdtsc()
     hold tFin = rdtsc()
@@ -440,6 +472,10 @@ expose flow encaEjecutar() => Int {
     kprint(cadena(" B/s; autocompletado "))
     imprimirMs(cAuto)
     kprintln(cadena(" ms"))
+    perfilImprimir(0, cadena("vigilia"), cVigilia)
+    perfilImprimir(1, cadena("sueño"), cSueno)
+    perfilImprimir(2, cadena("evaluación"), cInferencia)
+    perfilImprimir(3, cadena("autocompletado"), cAuto)
     kprint(cadena("RAM reservada por ENCA: "))
     kprintEntero(ncaBytesReservados())
     kprint(cadena(" B ("))
@@ -448,6 +484,21 @@ expose flow encaEjecutar() => Int {
     kprintEntero((tFin - tInicio) / cpm / 1000)
     kprintln(cadena(" s"))
 
+    hold r = encaResultado(modo)
+    escribir64(r + 64, cVigilia)
+    escribir64(r + 72, cSueno)
+    escribir64(r + 80, bytesEntrenamiento)
+    escribir64(r + 88, cInferencia)
+    escribir64(r + 96, bytesEval)
+    escribir64(r + 104, cAuto)
+    escribir64(r + 112, tFin - tInicio)
+    escribir64(r + 136, 1)
+    when modo == 1 {
+        kprintln(cadena("ENCA C5 rápido: terminado"))
+        give 1
+    }
+    // El hipocampo exacto (70 MB) ya no hace falta: se devuelve al montón.
+    memLiberar(mem)
     when leer64(tablaTextos()) == 0 {
         kprintln(cadena("ENCA C5: idéntico a Windows"))
         give 1
@@ -455,5 +506,115 @@ expose flow encaEjecutar() => Int {
     kprint(cadena("ENCA C5: DIFERENTE de Windows ("))
     kprintEntero(leer64(tablaTextos()))
     kprintln(cadena(" diferencias)"))
+    give 0
+}
+
+// ---- hito 17: modo rápido frente al exacto ------------------------------------
+
+flow velocidad(bytes: Int, ciclos: Int) => Int {
+    when ciclos < 1 { give 0 }
+    give bytes * tscCiclosPorMs() * 1000 / ciclos
+}
+
+// veces * 100 = a / b.
+flow veces100(a: Int, b: Int) => Int {
+    when b < 1 { give 0 }
+    give a * 100 / b
+}
+
+flow imprimirVeces(v100: Int) {
+    kprintEntero(v100 / 100)
+    kprintByte(46)
+    when v100 % 100 < 10 { kprintByte(48) }
+    kprintEntero(v100 % 100)
+    kprint(cadena("x"))
+}
+
+flow filaVelocidad(nombre: Int, exacto: Int, rapido: Int) {
+    kprint(cadena("  "))
+    kprint(nombre)
+    kprint(cadena(" exacto "))
+    kprintEntero(exacto)
+    kprint(cadena(" B/s, rápido "))
+    kprintEntero(rapido)
+    kprint(cadena(" B/s, aceleración "))
+    imprimirVeces(veces100(rapido, exacto))
+    kprintByte(10)
+}
+
+// 1 = hito 17 correcto, 0 = falló, 2 = omitido (sin corpus / sin ejecución exacta).
+expose flow encaHito17() => Int {
+    hold ex = encaResultado(0)
+    when leer64(ex + 136) == 0 { give 2 }
+    kprint(cadena("ENCA rápido: núcleos en línea (BSP incluido): "))
+    kprintEntero(buzonNucleos())
+    kprintByte(10)
+    hold vlnOk = vlnMedir(1048576)
+    hold r = encaEjecutar(1)
+    when r != 1 { give 0 }
+    hold ra = encaResultado(1)
+    hold dA = lf(ra) - lf(ex)
+    hold dB = lf(ra + 32) - lf(ex + 32)
+    kprintln(cadena("---- rápido frente a exacto ----"))
+    kprint(cadena("delta bits/byte (rápido - exacto) PRUEBA A: mezcla "))
+    imprimirF(dA)
+    kprint(cadena(" hipocampo "))
+    imprimirF(lf(ra + 8) - lf(ex + 8))
+    kprint(cadena(" corteza "))
+    imprimirF(lf(ra + 16) - lf(ex + 16))
+    kprintByte(10)
+    kprint(cadena("delta bits/byte (rápido - exacto) PRUEBA B: mezcla "))
+    imprimirF(dB)
+    kprint(cadena(" hipocampo "))
+    imprimirF(lf(ra + 40) - lf(ex + 40))
+    kprint(cadena(" corteza "))
+    imprimirF(lf(ra + 48) - lf(ex + 48))
+    kprintByte(10)
+    kprint(cadena("top-1 (por mil) A: exacto "))
+    kprintEntero(leer64(ex + 24))
+    kprint(cadena(", rápido "))
+    kprintEntero(leer64(ra + 24))
+    kprint(cadena("; B: exacto "))
+    kprintEntero(leer64(ex + 56))
+    kprint(cadena(", rápido "))
+    kprintEntero(leer64(ra + 56))
+    kprintByte(10)
+    kprint(cadena("autocompletado, caracteres aceptados A: exacto "))
+    kprintEntero(leer64(ex + 120))
+    kprint(cadena(", rápido "))
+    kprintEntero(leer64(ra + 120))
+    kprint(cadena("; B: exacto "))
+    kprintEntero(leer64(ex + 128))
+    kprint(cadena(", rápido "))
+    kprintEntero(leer64(ra + 128))
+    kprintByte(10)
+    hold bytesE = leer64(ex + 80)
+    hold bytesV = leer64(ex + 96)
+    hold vigE = velocidad(bytesE, leer64(ex + 64))
+    hold vigR = velocidad(bytesE, leer64(ra + 64))
+    hold sueE = velocidad(bytesE * 2, leer64(ex + 72))
+    hold sueR = velocidad(bytesE * 2, leer64(ra + 72))
+    hold entE = velocidad(bytesE, leer64(ex + 64) + leer64(ex + 72))
+    hold entR = velocidad(bytesE, leer64(ra + 64) + leer64(ra + 72))
+    hold infE = velocidad(bytesV, leer64(ex + 88))
+    hold infR = velocidad(bytesV, leer64(ra + 88))
+    kprintln(cadena("velocidad (bytes de corpus por segundo):"))
+    filaVelocidad(cadena("vigilia      "), vigE, vigR)
+    filaVelocidad(cadena("sueño        "), sueE, sueR)
+    filaVelocidad(cadena("entrenamiento"), entE, entR)
+    filaVelocidad(cadena("inferencia   "), infE, infR)
+    hold tE = leer64(ex + 112)
+    hold tR = leer64(ra + 112)
+    kprint(cadena("  tiempo total ENCA: exacto "))
+    kprintEntero(tE / tscCiclosPorMs())
+    kprint(cadena(" ms, rápido "))
+    kprintEntero(tR / tscCiclosPorMs())
+    kprint(cadena(" ms, aceleración "))
+    imprimirVeces(veces100(tE, tR))
+    kprintByte(10)
+    hold limite = 0.001
+    hold bien = absF(dA) < limite && absF(dB) < limite && tR < tE && vlnOk
+    when bien { give 1 }
+    kprintln(cadena("hito 17: criterio no cumplido (|delta| < 0,001 en A y B, rápido más veloz que exacto, vln dentro de tolerancia)"))
     give 0
 }

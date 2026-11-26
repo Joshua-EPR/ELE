@@ -22,8 +22,11 @@ flow k() => Int {
     give datos64(0x42B0C0A5, 0xC2B0C0A5, 0x3FB8AA3B, 0x3F318000, 0xB95E8083, 0x39506967, 0x3AB743CE, 0x3C088908, 0x3D2AA9C1, 0x3E2AAAAA, 0x3F000000, 0x3F800000, 0x40000000, 0x41900000, 0x3E088889, 0xBEAAAAAB, 0x3D800000, 0x7F, 0x7FFFFFFF, 0x80000000)
 }
 
+// Tabla de constantes de vexp/vtanh (para código que usa expRegistro).
+expose flow vexpConstantes() => Int { give k() }
+
 // exp de los 4 floats de XMM1; deja el resultado en XMM8 (usa 2..9).
-flow expRegistro(c: Int) {
+expose flow expRegistro(c: Int) {
     xmmDifundirEn(2, c, 0)
     xmmMinimo(1, 2)
     xmmDifundirEn(2, c, 8)

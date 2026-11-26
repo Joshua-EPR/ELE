@@ -115,4 +115,19 @@ expose flow ncaReservar(bytes: Int) => Int {
     give p
 }
 
+// Reserva alineada a 64 bytes (para SSE y líneas de caché); 0 si no hay memoria.
+expose flow ncaReservarAlineado(bytes: Int) => Int {
+    hold p = ncaReservar(bytes + 64)
+    when p == 0 { give 0 }
+    give (p + 63) & (~63)
+}
+
+// Libera un bloque pedido con ncaReservar (`bytes` = lo pedido).
+expose flow ncaLiberar(p: Int, bytes: Int) {
+    when p != 0 {
+        montonLiberar(p)
+        escribir64(contadorReservas(), leer64(contadorReservas()) - bytes)
+    }
+}
+
 expose flow ncaBytesReservados() => Int { give leer64(contadorReservas()) }

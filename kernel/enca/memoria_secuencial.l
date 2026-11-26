@@ -10,15 +10,17 @@
 //   +40 cuentas (Float, igual que simbolos) +48 totales (Float)   +56 distintos (Float)
 //   +64 totalUnigrama (Float)   +72 ordenUsado   +80 sobrescrituras   +88 desalojos
 //   +96 unigrama[256] (Float)   +2144 distribucion[256] (Float)   (fin: +4192)
+// Modo rápido (solo con modo = 1): +4192 unigramaF (f32, 256, espejo del
+//   unigrama)  +4200 distF (f32, 256)  +4208 zona de niveles (5 x 32 bytes)
 
 take nucleo.cpu
 take nucleo.mem
 take enca.matematica
 
-expose flow memCrear(numOrdenes: Int, slots: Int, ancho: Int) => Int {
+expose flow memCrear(numOrdenes: Int, slots: Int, ancho: Int, modo: Int) => Int {
     hold totalSlots = numOrdenes * slots
     hold totalEntradas = totalSlots * ancho
-    hold m = ncaReservar(4192)
+    hold m = ncaReservar(4192 + 16 + 5 * 32)
     hold etiquetas = ncaReservar(totalSlots * 8)
     hold totales = ncaReservar(totalSlots * 8)
     hold distintos = ncaReservar(totalSlots * 8)
@@ -50,6 +52,19 @@ expose flow memCrear(numOrdenes: Int, slots: Int, ancho: Int) => Int {
         escribir64(m + 96 + c * 8, 0)
         escribir64(m + 2144 + c * 8, 0)
     }
+    escribir64(m + 4192, 0)
+    escribir64(m + 4200, 0)
+    when modo == 1 {
+        hold unigramaF = ncaReservarAlineado(1024)
+        hold distF = ncaReservarAlineado(1024)
+        when unigramaF == 0 || distF == 0 { give 0 }
+        each c among 0..128 {
+            escribir64(unigramaF + c * 8, 0)
+            escribir64(distF + c * 8, 0)
+        }
+        escribir64(m + 4192, unigramaF)
+        escribir64(m + 4200, distF)
+    }
     give m
 }
 
@@ -78,8 +93,11 @@ expose flow memPredecir(m: Int, hashes: Int) {
             hold distintos = floatDeBits(leer64(distintosD + slot * 8))
             hold escala = distintos / (total + distintos)
             hold inverso = 1.0 / (total + distintos)
-            each c among 0..256 {
-                escribir64(dist + c * 8, bitsDeFloat(floatDeBits(leer64(dist + c * 8)) * escala))
+            change p = dist
+            hold fin = dist + 2048
+            during p < fin {
+                escribir64(p, bitsDeFloat(floatDeBits(leer64(p)) * escala))
+                p += 8
             }
             hold base = slot * ancho
             each e among 0..ancho {
@@ -105,6 +123,8 @@ expose flow memAprender(m: Int, hashes: Int, byte: Int) {
     hold distintosD = leer64(m + 56)
     hold unigrama = m + 96
     escribir64(unigrama + byte * 8, bitsDeFloat(floatDeBits(leer64(unigrama + byte * 8)) + 1.0))
+    hold unigramaF = leer64(m + 4192)
+    when unigramaF != 0 { escribirF32(unigramaF + byte * 4, floatDeBits(leer64(unigrama + byte * 8))) }
     escribir64(m + 64, bitsDeFloat(floatDeBits(leer64(m + 64)) + 1.0))
     each nivel among 0..numOrdenes {
         hold hash = leer64(hashes + nivel * 8)
@@ -155,4 +175,20 @@ expose flow memAprender(m: Int, hashes: Int, byte: Int) {
 expose flow memBytesReservados(m: Int) => Int {
     hold totalSlots = leer64(m) * leer64(m + 8)
     give (totalSlots * 3 + totalSlots * leer64(m + 16) * 2 + 512) * 8
+}
+
+// Devuelve al montón las cinco tablas grandes del hipocampo (modo exacto).
+expose flow memLiberar(m: Int) {
+    hold totalSlots = leer64(m) * leer64(m + 8)
+    hold totalEntradas = totalSlots * leer64(m + 16)
+    ncaLiberar(leer64(m + 24), totalSlots * 8)
+    ncaLiberar(leer64(m + 48), totalSlots * 8)
+    ncaLiberar(leer64(m + 56), totalSlots * 8)
+    ncaLiberar(leer64(m + 32), totalEntradas * 8)
+    ncaLiberar(leer64(m + 40), totalEntradas * 8)
+    escribir64(m + 24, 0)
+    escribir64(m + 32, 0)
+    escribir64(m + 40, 0)
+    escribir64(m + 48, 0)
+    escribir64(m + 56, 0)
 }

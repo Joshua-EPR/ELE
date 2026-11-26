@@ -800,3 +800,76 @@ hito 16 OK
 
 Línea base para el hito 17: 878 B/s de entrenamiento y 2311 B/s de
 inferencia en el portátil.
+
+## Hito 17a — ENCA optimizada: perfil, modo exacto más rápido y modo rápido (2026-11-26)
+
+Escrito por un agente redactor (Sonnet). Verificado por el líder en QEMU
+con 2 CPU y con 1 CPU.
+
+Perfil (`enca/perfil.l`, rdtsc por componente). Se apaga con la constante
+PERFIL. Antes de optimizar, en vigilia (766k ciclos por byte) dominaban:
+- logits + softmax de la corteza: 31 %
+- predicción del mezclador: 27 % (exp/ln por cada uno de los 256 símbolos)
+- sinapsis + k-WTA: 23 %
+
+Optimizaciones exactas (el hito 16 sigue "idéntico a Windows"):
+- tablas precalculadas de los tres términos del impulso y de 1 - fuga;
+- punteros recorridos con `+%` en los bucles calientes, sin llamadas;
+- pesos recorridos por filas, conservando el orden de suma de cada logit;
+- expFloat y lnRapido en línea, con las mismas operaciones;
+- k-WTA con el corte guardado en un local.
+
+Resultado: el modo exacto pasa de 107 s a 52 s en QEMU (vigilia 766k → 432k
+ciclos por byte).
+
+Modo rápido (indicador en el modelo; `enca/rapido.l`):
+- SSE f32:
+  - Salida de la corteza y softmax con vexp, con tope inferior de x - máx
+    en -16, como expFloat.
+  - El mezclador geométrico, también en f32.
+  - Nuevo `vln` (logf de Cephes con SSE): error absoluto máximo 9,73e-7,
+    relativo 7,82e-8 en el barrido.
+  - Predicción del hipocampo en una pasada densa más los símbolos vistos.
+    El aprendizaje del hipocampo sigue en f64.
+- 2 núcleos:
+  - Los activos de la corteza dependen solo de los bytes, así que el
+    avance (sinapsis + k-WTA, en f64) se reparte entre los dos núcleos.
+  - El núcleo 1 hace un tramo de unidades y el 0 el resto más la
+    predicción; después se fusionan las dos listas ordenadas.
+  - Una sincronización por byte, que cuesta 5–6 % del paso.
+  - Es determinista: mismos bits con 1 y 2 CPU.
+
+QEMU WHPX, 2 CPU:
+```
+delta bits/byte (rápido - exacto) PRUEBA A: mezcla -0.000212265640437 hipocampo 0.000000001317018 corteza -0.004224731283444
+delta bits/byte (rápido - exacto) PRUEBA B: mezcla -0.000410779630853 hipocampo 0.000000004094365 corteza -0.005386310526380
+  vigilia       exacto 6442 B/s, rápido 33444 B/s, aceleración 5.19x
+  sueño         exacto 10598 B/s, rápido 39581 B/s, aceleración 3.73x
+  entrenamiento exacto 2907 B/s, rápido 12433 B/s, aceleración 4.27x
+  inferencia    exacto 6269 B/s, rápido 21642 B/s, aceleración 3.45x
+  tiempo total ENCA: exacto 52514 ms, rápido 13572 ms, aceleración 3.86x
+hito 17 OK
+```
+
+Frente al hito 16 original (107 s), el modo rápido es unas 8 veces más
+rápido.
+
+Con 1 CPU el modo rápido da exactamente los mismos bits:
+- mezcla A: 5885276722394095·2^-52
+- mezcla B: 6230748540601682·2^-51
+
+En ese caso la aceleración es de 2,41x.
+
+En el rápido, top-1 y autocompletado no cambian (811 y 637 por mil;
+3446 y 952 caracteres). El Δ de la corteza sola (-0,004 a -0,005) se debe
+a que vexp es exacta y expFloat (polinomio elevado a 16) se aparta de e^x
+hasta un 5 % en -16.
+
+Memoria: el hipocampo exacto se libera al terminar el hito 16, y el rápido
+reserva el suyo. ENCA ocupa unos 75 MiB por las tablas del impulso.
+
+Pendiente:
+- El avance de la corteza en f64 es el cuello de botella. Repartido entre
+  los dos núcleos no escala perfecto: en total suma 103–113k ciclos frente
+  a 79k con uno solo.
+- 17b: modo interactivo y guardado del estado con los checkpoints A/B.
