@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Disco de prueba para el hito 13 (solo para QEMU).
 
-    python crear_disco_prueba.py <salida.img> [MiB] [--enca <carpeta ENCA>]
+    python crear_disco_prueba.py <salida.img> [MiB]   (256 por defecto; 512 para el hito 17b) [--enca <carpeta ENCA>]
 
 GPT con tres particiones:
   1  "Datos Windows" (datos Microsoft), llena de 0xAB: no se debe tocar.
@@ -92,7 +92,11 @@ def main():
     mib = int(args[1]) if len(args) > 1 else 256
     total = mib * 1024 * 1024 // SECTOR
     p1 = (2048, 2048 + 32 * 2048 - 1)                     # 32 MiB
-    p2 = (p1[1] + 1, p1[1] + 128 * 2048)                  # 128 MiB FAT32
+    # FAT32: 128 MiB en un disco de 256 MiB; con el estado de ENCA (hito 17b,
+    # dos ranuras de ~72 MB) un disco de 512 MiB da 384 MiB de FAT32. Siempre
+    # quedan 32 MiB de "Datos Windows" y ~95 MiB de "ELE crudo".
+    fat_mib = 128 if mib <= 256 else mib - 128
+    p2 = (p1[1] + 1, p1[1] + fat_mib * 2048)
     p3 = (p2[1] + 1, total - 34)
     entradas = bytearray(128 * 128)
     entradas[0:128] = entrada(MSDATOS, p1[0], p1[1], "Datos Windows")

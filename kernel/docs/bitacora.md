@@ -873,3 +873,53 @@ Pendiente:
   los dos núcleos no escala perfecto: en total suma 103–113k ciclos frente
   a 79k con uno solo.
 - 17b: modo interactivo y guardado del estado con los checkpoints A/B.
+
+## Hito 17b — ENCA interactiva y estado en checkpoints A/B (2026-11-26)
+
+- `checkpoint.l` tiene dos juegos de ranuras (CKPT_PRUEBA: CKPT_A/B.BIN del
+  hito 14; CKPT_ENCA: ENCA_A/B.BIN), cada uno con capacidad y cabecera propias.
+  Orden de escritura intacto (datos, vaciar, cabecera, vaciar).
+- `fat32.l`: la FAT se escribe una vez por sector (modo diferido al reservar
+  y liberar cadenas) y `fatEscribir` junta clusters contiguos; sin esto crear
+  dos ranuras de 71 MB con clusters de 512 B tardaba mucho.
+- `enca/estado.l`: formato del estado (cabecera de 256 B con configuración y
+  16 métricas exactas, luego modelo, ventana, hipocampo, corteza, mezclador),
+  71 315 216 bytes. Sin punteros; las tablas derivadas se recalculan.
+- Arranque: si hay ranura válida y compatible se carga, no se entrena, se
+  evalúa A y B y se exige igualdad bit a bit con la cabecera; luego se guarda
+  paso + 1 en la otra ranura. Si no, entrena, evalúa y guarda el paso 1.
+- `enca/interactivo.l` + hito 7: prompt `ENCA> `, prefijo a UTF-8, completado
+  voraz (hasta 200 bytes o `\n`) con el modelo congelado.
+- QEMU WHPX: guardar 1557 ms (45,7 MB/s), cargar 1656-1873 ms (38-43 MB/s),
+  completado ~0,09 ms por byte. Disco de prueba de 512 MiB (FAT32 de 384 MiB).
+
+Verificación del líder en QEMU (WHPX, 2 CPU, disco nuevo y después el mismo
+disco):
+```
+arranque 1: estado ENCA: ninguna ranura válida (ENCA_A.BIN / ENCA_B.BIN): se entrena
+            estado ENCA guardado: paso 1 en la ranura A, 71315216 bytes; ... 1524 ms = 46.7 MB/s
+            hito 17 OK
+arranque 2: estado ENCA: ranura A, paso 1, 71315216 bytes leídos y verificados (CRC32) en 1627 ms = 43.8 MB/s
+            estado recuperado: evaluación idéntica a la guardada
+            estado ENCA guardado: paso 2 en la ranura B, ... 1537 ms = 46.3 MB/s
+            hito 17 OK
+ENCA> hold x = 1; hold a = 1; hold a = 1; hold a = 1; ...
+  [200 bytes generados en 84 ms, 0.420 ms por byte]
+```
+
+Revisión del cambio en fat32.l:
+- Al cambiar de sector, el sector de FAT con cambios se escribe antes de
+  leer el siguiente.
+- `fatEscribir` puede juntar más de 512 sectores en un tramo, pero
+  discoEscribir ya trocea en órdenes de 512 y comprueba la partición sobre
+  todo el rango.
+
+Observaciones:
+- El completado voraz cae enseguida en bucles ("hold a = 1;" repetido). Es
+  lo esperable con argmax en un modelo de contexto corto. Opciones para
+  más adelante: muestreo con temperatura (PCG), penalizar la repetición o
+  búsqueda en haz.
+- El hito 11 a veces sale FALLÓ en QEMU: 2048x2048 queda en 49 % del pico
+  (umbral 50 %), y Aᵀ con 2 núcleos va más lento que con 1 (x0,48). Es la
+  CPU virtual del anfitrión compartida con Windows: el código del SGEMM no
+  cambió, y en el portátil da 62–66 %.

@@ -17,6 +17,8 @@ take enca.matematica
 take enca.modelo
 take enca.perfil
 take enca.rapido
+take enca.estado
+take almacenamiento.checkpoint
 take cpu.buzon
 
 fixed ARCHIVOS = 18
@@ -99,6 +101,7 @@ flow textoDe(i: Int) => Int { give leer64(tablaTextos() + 8 + i * 8) }
 //  +64 ciclos vigilia  +72 ciclos sueño  +80 bytes de entrenamiento
 //  +88 ciclos de inferencia  +96 bytes de evaluación  +104 ciclos de autocompletado
 //  +112 ciclos totales de la ejecución  +120 aciertos A  +128 aciertos B  +136 1 si hubo ejecución
+//  +144 líneas exactas A  +152 B  +160 líneas A  +168 B  +176 restantes A  +184 B
 flow resultados() => Int { give reservar(384, 8) }
 expose flow encaResultado(modo: Int) => Int { give resultados() + modo * 192 }
 
@@ -215,6 +218,9 @@ flow informar(m: Int, etiqueta: Int, prueba: Int, modo: Int) {
     ef(res + 16, bc)
     escribir64(res + 24, top)
     escribir64(encaResultado(modo) + 120 + prueba * 8, leer64(m + 144))
+    escribir64(encaResultado(modo) + 144 + prueba * 8, leer64(m + 128))
+    escribir64(encaResultado(modo) + 160 + prueba * 8, leer64(m + 120))
+    escribir64(encaResultado(modo) + 176 + prueba * 8, leer64(m + 136))
     kprint(etiqueta)
     kprint(cadena(": bits/byte mezcla="))
     imprimirF(bm)
@@ -310,6 +316,55 @@ flow cargarCorpus() => Int {
     }
     when !bien { give 2 }
     give 0
+}
+
+// ---- pruebas A y B (las usan el entrenamiento y la carga del estado) ----------
+// Tiempos y bytes de la última evaluación: +0 tE0 +8 tE1 +16 tE2 +24 ciclos
+// de autocompletado A +32 B +40 bytes A +48 bytes B.
+flow medidasEval() => Int { give reservar(64, 8) }
+
+flow evaluarAB(m: Int, modo: Int) {
+    hold ev = medidasEval()
+    hold tE0 = rdtsc()
+    metricasReiniciar(m)
+    escribir64(m + 208, 0)
+    change bytesA = 0
+    each i among ENTRENAMIENTO..PRUEBA_A {
+        kprint(cadena("evaluando "))
+        kprint(corpusRuta(i))
+        kprint(cadena(" "))
+        kprintEntero(corpusTam(i))
+        kprintln(cadena(" B ..."))
+        modeloEvaluar(m, textoDe(i), corpusTam(i))
+        bytesA += corpusTam(i)
+    }
+    informar(m, cadena("PRUEBA A (dominio ENCA)"), 0, modo)
+    hold ciclosAutoA = leer64(m + 208)
+    hold tE1 = rdtsc()
+
+    metricasReiniciar(m)
+    escribir64(m + 208, 0)
+    change bytesB = 0
+    each i among PRUEBA_A..ARCHIVOS {
+        kprint(cadena("evaluando "))
+        kprint(corpusRuta(i))
+        kprint(cadena(" "))
+        kprintEntero(corpusTam(i))
+        kprintln(cadena(" B ..."))
+        modeloEvaluar(m, textoDe(i), corpusTam(i))
+        bytesB += corpusTam(i)
+    }
+    informar(m, cadena("PRUEBA B (código nuevo de la Fase 8)"), 1, modo)
+    hold ciclosAutoB = leer64(m + 208)
+    hold tE2 = rdtsc()
+    escribir64(ev, tE0)
+    escribir64(ev + 8, tE1)
+    escribir64(ev + 16, tE2)
+    escribir64(ev + 24, ciclosAutoA)
+    escribir64(ev + 32, ciclosAutoB)
+    escribir64(ev + 40, bytesA)
+    escribir64(ev + 48, bytesB)
+
 }
 
 // ---- ejecución ---------------------------------------------------------------------
@@ -408,38 +463,15 @@ expose flow encaEjecutar(modo: Int) => Int {
     }
 
     // Pruebas A y B.
-    hold tE0 = rdtsc()
-    metricasReiniciar(m)
-    escribir64(m + 208, 0)
-    change bytesA = 0
-    each i among ENTRENAMIENTO..PRUEBA_A {
-        kprint(cadena("evaluando "))
-        kprint(corpusRuta(i))
-        kprint(cadena(" "))
-        kprintEntero(corpusTam(i))
-        kprintln(cadena(" B ..."))
-        modeloEvaluar(m, textoDe(i), corpusTam(i))
-        bytesA += corpusTam(i)
-    }
-    informar(m, cadena("PRUEBA A (dominio ENCA)"), 0, modo)
-    hold ciclosAutoA = leer64(m + 208)
-    hold tE1 = rdtsc()
-
-    metricasReiniciar(m)
-    escribir64(m + 208, 0)
-    change bytesB = 0
-    each i among PRUEBA_A..ARCHIVOS {
-        kprint(cadena("evaluando "))
-        kprint(corpusRuta(i))
-        kprint(cadena(" "))
-        kprintEntero(corpusTam(i))
-        kprintln(cadena(" B ..."))
-        modeloEvaluar(m, textoDe(i), corpusTam(i))
-        bytesB += corpusTam(i)
-    }
-    informar(m, cadena("PRUEBA B (código nuevo de la Fase 8)"), 1, modo)
-    hold ciclosAutoB = leer64(m + 208)
-    hold tE2 = rdtsc()
+    evaluarAB(m, modo)
+    hold ev = medidasEval()
+    hold tE0 = leer64(ev)
+    hold tE1 = leer64(ev + 8)
+    hold tE2 = leer64(ev + 16)
+    hold ciclosAutoA = leer64(ev + 24)
+    hold ciclosAutoB = leer64(ev + 32)
+    hold bytesA = leer64(ev + 40)
+    hold bytesB = leer64(ev + 48)
     hold tFin = rdtsc()
 
     // Medidas.
@@ -494,6 +526,7 @@ expose flow encaEjecutar(modo: Int) => Int {
     escribir64(r + 112, tFin - tInicio)
     escribir64(r + 136, 1)
     when modo == 1 {
+        escribir64(vivo(), m)
         kprintln(cadena("ENCA C5 rápido: terminado"))
         give 1
     }
@@ -542,6 +575,193 @@ flow filaVelocidad(nombre: Int, exacto: Int, rapido: Int) {
     kprintByte(10)
 }
 
+// ---- estado de ENCA en checkpoints A/B (hito 17b) -------------------------------
+
+// +0 modelo rápido vivo (entrenado o cargado; lo usa el modo interactivo),
+// +8 paso del último estado válido encontrado en disco (0 si no había).
+flow vivo() => Int { give reservar(32, 8) }
+
+// Modelo rápido en memoria, o 0 si ENCA no está disponible.
+expose flow encaModelo() => Int { give leer64(vivo()) }
+
+flow letraRanura(r: Int) {
+    when r == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
+}
+
+// "N ms = X,Y MB/s" para `bytes` en `ciclos`.
+flow imprimirMsMBs(bytes: Int, ciclos: Int) {
+    hold cpm = tscCiclosPorMs()
+    kprintEntero(ciclos / cpm)
+    kprint(cadena(" ms = "))
+    change d10 = 0
+    when ciclos > 0 { d10 = bytes * cpm * 10 / (ciclos * 1000) }
+    kprintEntero(d10 / 10)
+    kprintByte(46)
+    kprintEntero(d10 % 10)
+    kprint(cadena(" MB/s"))
+}
+
+// Copia a la cabecera del estado (palabras 14..29) las métricas de la
+// última evaluación rápida: por prueba, 3 bits/byte (bits del Float),
+// top-1, aceptados, restantes, líneas exactas, líneas.
+flow metricasAlBufer(buf: Int) {
+    hold r = encaResultado(1)
+    each p among 0..2 {
+        hold b = buf + (ENCA_CAB_METRICAS + p * 8) * 8
+        escribir64(b, leer64(r + p * 32))
+        escribir64(b + 8, leer64(r + p * 32 + 8))
+        escribir64(b + 16, leer64(r + p * 32 + 16))
+        escribir64(b + 24, leer64(r + p * 32 + 24))
+        escribir64(b + 32, leer64(r + 120 + p * 8))
+        escribir64(b + 40, leer64(r + 176 + p * 8))
+        escribir64(b + 48, leer64(r + 144 + p * 8))
+        escribir64(b + 56, leer64(r + 160 + p * 8))
+    }
+}
+
+// Cuántas de las 16 métricas de la evaluación actual difieren de las
+// guardadas en la cabecera (las imprime).
+flow compararMetricas(buf: Int) => Int {
+    hold r = encaResultado(1)
+    change dif = 0
+    each p among 0..2 {
+        each j among 0..8 {
+            change actual = 0
+            when j < 4 { actual = leer64(r + p * 32 + j * 8) }
+            when j == 4 { actual = leer64(r + 120 + p * 8) }
+            when j == 5 { actual = leer64(r + 176 + p * 8) }
+            when j == 6 { actual = leer64(r + 144 + p * 8) }
+            when j == 7 { actual = leer64(r + 160 + p * 8) }
+            hold guardado = leer64(buf + (ENCA_CAB_METRICAS + p * 8 + j) * 8)
+            when actual != guardado {
+                dif += 1
+                kprint(cadena("  métrica "))
+                kprintEntero(p * 8 + j)
+                kprint(cadena(": guardada "))
+                kprintHex(guardado)
+                kprint(cadena(", evaluada "))
+                kprintHex(actual)
+                kprintByte(10)
+            }
+        }
+    }
+    give dif
+}
+
+// Serializa el modelo y lo guarda como `paso` en la ranura que no tiene el
+// último estado válido. `preparar`: crea antes ENCA_A.BIN y ENCA_B.BIN.
+flow guardarEstado(m: Int, buf: Int, paso: Int, preparar: Bool, entrenados: Int) => Bool {
+    hold cpm = tscCiclosPorMs()
+    hold ts0 = rdtsc()
+    hold total = encaSerializar(m, buf, entrenados)
+    hold ts1 = rdtsc()
+    when total == 0 {
+        kprintln(cadena("estado ENCA: la configuración del modelo no es la C5, no se guarda"))
+        give false
+    }
+    metricasAlBufer(buf)
+    when preparar {
+        hold tp0 = rdtsc()
+        when !ckptPreparar(CKPT_ENCA, total) {
+            kprintln(cadena("estado ENCA: no se pudieron crear ENCA_A.BIN y ENCA_B.BIN (¿falta espacio en ELEDATOS?)"))
+            give false
+        }
+        kprint(cadena("estado ENCA: ranuras ENCA_A.BIN y ENCA_B.BIN creadas en "))
+        kprintEntero((rdtsc() - tp0) / cpm)
+        kprintln(cadena(" ms"))
+    }
+    hold t0 = rdtsc()
+    hold bien = ckptGuardar(CKPT_ENCA, paso, buf, total, false)
+    hold t1 = rdtsc()
+    when !bien {
+        kprintln(cadena("estado ENCA: FALLÓ el guardado"))
+        give false
+    }
+    kprint(cadena("estado ENCA guardado: paso "))
+    kprintEntero(paso)
+    kprint(cadena(" en la ranura "))
+    letraRanura(ckptRanuraGuardada(CKPT_ENCA))
+    kprint(cadena(", "))
+    kprintEntero(total)
+    kprint(cadena(" bytes; serializar "))
+    kprintEntero((ts1 - ts0) / cpm)
+    kprint(cadena(" ms; escritura con CRC32 y vaciado "))
+    imprimirMsMBs(total, t1 - t0)
+    kprintByte(10)
+    give true
+}
+
+// Intenta recuperar el estado de ENCA de disco.
+// 0 = no hay estado utilizable (hay que entrenar), 1 = cargado y la
+// evaluación es idéntica a la guardada, 2 = cargado pero falló algo.
+flow encaIntentarCargar() => Int {
+    when !discoHayPermitida() { give 0 }
+    when !fatMontar() { give 0 }
+    hold cap = encaTamEstado()
+    ckptConfigurar(CKPT_ENCA, cap)
+    hold buf = montonReservar(cap + 1024)
+    when buf == 0 {
+        kprintln(cadena("estado ENCA: sin memoria para el búfer del estado"))
+        give 0
+    }
+    hold cpm = tscCiclosPorMs()
+    hold t0 = rdtsc()
+    hold paso = ckptCargar(CKPT_ENCA, buf)
+    hold t1 = rdtsc()
+    when paso < 0 {
+        kprintln(cadena("estado ENCA: ninguna ranura válida (ENCA_A.BIN / ENCA_B.BIN): se entrena"))
+        montonLiberar(buf)
+        give 0
+    }
+    escribir64(vivo() + 8, paso)
+    kprint(cadena("estado ENCA: ranura "))
+    letraRanura(ckptRanuraCargada(CKPT_ENCA))
+    kprint(cadena(", paso "))
+    kprintEntero(paso)
+    kprint(cadena(", "))
+    kprintEntero(leer64(buf + 96))
+    kprint(cadena(" bytes leídos y verificados (CRC32) en "))
+    imprimirMsMBs(leer64(buf + 96), t1 - t0)
+    kprintByte(10)
+    when !encaCabeceraCompatible(buf) {
+        kprintln(cadena("estado ENCA: configuración distinta de la actual: se descarta y se entrena"))
+        montonLiberar(buf)
+        give 0
+    }
+    hold m = modeloCrear(ENCA_RANURAS, 1)
+    when m == 0 {
+        kprintln(cadena("ENCA: sin memoria para el modelo"))
+        montonLiberar(buf)
+        give 2
+    }
+    hold t2 = rdtsc()
+    when !encaDeserializar(m, buf) {
+        kprintln(cadena("estado ENCA: no se pudo copiar el estado al modelo"))
+        montonLiberar(buf)
+        give 2
+    }
+    kprint(cadena("estado copiado al modelo en "))
+    kprintEntero((rdtsc() - t2) / cpm)
+    kprintln(cadena(" ms; no se entrena (la comparación de velocidad de entrenamiento exacto/rápido no aplica)"))
+    escribir64(vivo(), m)
+    perfilReiniciar()
+    evaluarAB(m, 1)
+    hold dif = compararMetricas(buf)
+    when dif != 0 {
+        kprint(cadena("estado recuperado: evaluación DIFERENTE de la guardada ("))
+        kprintEntero(dif)
+        kprintln(cadena(" métricas)"))
+        montonLiberar(buf)
+        give 2
+    }
+    kprintln(cadena("estado recuperado: evaluación idéntica a la guardada"))
+    // Alternancia: el paso siguiente va a la otra ranura.
+    hold guardado = guardarEstado(m, buf, paso + 1, false, leer64(buf + 104))
+    montonLiberar(buf)
+    when !guardado { give 2 }
+    give 1
+}
+
 // 1 = hito 17 correcto, 0 = falló, 2 = omitido (sin corpus / sin ejecución exacta).
 expose flow encaHito17() => Int {
     hold ex = encaResultado(0)
@@ -549,6 +769,11 @@ expose flow encaHito17() => Int {
     kprint(cadena("ENCA rápido: núcleos en línea (BSP incluido): "))
     kprintEntero(buzonNucleos())
     kprintByte(10)
+    // Hito 17b: si hay un estado válido en ENCA_A.BIN / ENCA_B.BIN se carga
+    // en vez de entrenar.
+    hold cargado = encaIntentarCargar()
+    when cargado == 1 { give 1 }
+    when cargado == 2 { give 0 }
     hold vlnOk = vlnMedir(1048576)
     hold r = encaEjecutar(1)
     when r != 1 { give 0 }
@@ -614,7 +839,19 @@ expose flow encaHito17() => Int {
     kprintByte(10)
     hold limite = 0.001
     hold bien = absF(dA) < limite && absF(dB) < limite && tR < tE && vlnOk
-    when bien { give 1 }
+    when bien {
+        // Hito 17b: guarda el estado entrenado (paso 1, o el siguiente al
+        // de un estado incompatible que hubiera en disco).
+        hold buf = montonReservar(encaTamEstado() + 1024)
+        when buf == 0 {
+            kprintln(cadena("estado ENCA: sin memoria para el búfer del estado"))
+            give 0
+        }
+        hold guardado = guardarEstado(encaModelo(), buf, leer64(vivo() + 8) + 1, true, leer64(ra + 80))
+        montonLiberar(buf)
+        when guardado { give 1 }
+        give 0
+    }
     kprintln(cadena("hito 17: criterio no cumplido (|delta| < 0,001 en A y B, rápido más veloz que exacto, vln dentro de tolerancia)"))
     give 0
 }

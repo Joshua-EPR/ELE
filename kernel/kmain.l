@@ -34,6 +34,7 @@ take lib.vexp
 take bench.gradientes
 take bench.aprender
 take enca.exp009
+take enca.interactivo
 take tiempo.reloj
 
 flow kmain() {
@@ -242,14 +243,31 @@ flow hito7() {
     tecladoIniciar()
     ioapicIniciar()
     ioapicDirigirIrq(1, VECTOR_TECLADO, lapicId())
-    kprintln(cadena("hito 7: escriba una línea y pulse Intro"))
+    // Con el modelo de ENCA entrenado o cargado (hito 17) el bucle es el modo
+    // interactivo: se completa en pantalla el prefijo tecleado. Sin él, es
+    // el eco de siempre.
+    hold modelo = encaModelo()
+    when modelo != 0 {
+        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro"))
+        kprint(cadena("ENCA> "))
+    } otherwise {
+        kprintln(cadena("hito 7: escriba una línea y pulse Intro"))
+    }
     hold linea = reservar(4096, 8)
+    hold bytes = reservar(2304, 8)
     change n = 0
     during true {
         hlt()
         change cp = tecladoLeer()
         during cp >= 0 {
-            when cp == TECLA_INTRO {
+            when cp == TECLA_INTRO && modelo != 0 {
+                // El prefijo pasa a bytes UTF-8, como estaría en un archivo.
+                change nb = 0
+                each i among 0..n { nb += utf8Codificar(leer64(linea + i * 8), bytes + nb) }
+                encaCompletar(modelo, bytes, nb)
+                kprint(cadena("ENCA> "))
+                n = 0
+            } otherwise when cp == TECLA_INTRO {
                 kprintByte(10)
                 kprint(cadena("teclado: "))
                 each i among 0..n { kprintCaracter(leer64(linea + i * 8)) }
@@ -534,12 +552,12 @@ flow hito14() {
     hold capacidad = 1048576
     hold datos = montonReservar(capacidad)
     hold esperado = montonReservar(capacidad)
-    when !ckptPreparar(capacidad) {
+    when !ckptPreparar(CKPT_PRUEBA, capacidad) {
         kprintln(cadena("checkpoints: no se pudieron crear las ranuras"))
         kprintln(cadena("hito 14 FALLÓ"))
         give
     }
-    hold paso = ckptCargar(datos)
+    hold paso = ckptCargar(CKPT_PRUEBA, datos)
     change base = 0
     when paso < 0 {
         kprintln(cadena("checkpoint: ninguno válido (primer arranque)"))
@@ -548,7 +566,7 @@ flow hito14() {
         kprint(cadena("checkpoint recuperado: paso "))
         kprintEntero(paso)
         kprint(cadena(" de la ranura "))
-        when ckptRanuraCargada() == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
+        when ckptRanuraCargada(CKPT_PRUEBA) == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
         when crc32(datos, capacidad) == crc32(esperado, capacidad) {
             kprintln(cadena(", datos verificados"))
         } otherwise {
@@ -558,15 +576,15 @@ flow hito14() {
         base = paso
     }
     datosDePaso(base + 1, datos, capacidad)
-    hold guardado = ckptGuardar(base + 1, datos, capacidad, false)
+    hold guardado = ckptGuardar(CKPT_PRUEBA, base + 1, datos, capacidad, false)
     datosDePaso(base + 2, datos, capacidad)
-    hold cortado = ckptGuardar(base + 2, datos, capacidad, true)
+    hold cortado = ckptGuardar(CKPT_PRUEBA, base + 2, datos, capacidad, true)
     kprint(cadena("guardado el paso "))
     kprintEntero(base + 1)
     kprint(cadena("; corte simulado a mitad del paso "))
     kprintEntero(base + 2)
     kprintByte(10)
-    hold recuperado = ckptCargar(datos)
+    hold recuperado = ckptCargar(CKPT_PRUEBA, datos)
     datosDePaso(base + 1, esperado, capacidad)
     kprint(cadena("recarga inmediata: paso "))
     kprintEntero(recuperado)

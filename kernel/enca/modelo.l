@@ -130,7 +130,7 @@ expose flow modeloPredecirMezcla(m: Int) => Int {
     give mejor
 }
 
-flow condicionar(m: Int, byte: Int) {
+expose flow condicionar(m: Int, byte: Int) {
     hold v = leer64(m)
     hold t0 = perfilIni()
     ventanaEmpujar(v, byte)
