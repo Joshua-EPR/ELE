@@ -13,15 +13,20 @@ expose fixed O_SEMILLA: Int = 7      // semilla de la partición
 expose fixed O_PRUEBA: Int = 8       // porcentaje de prueba
 expose fixed O_VALIDA: Int = 9       // porcentaje de validación
 expose fixed O_MAXDOC: Int = 10      // tamaño máximo de un documento
+expose fixed O_DVAL: Int = 11        // % de validación de los diálogos
+expose fixed O_DPRU: Int = 12        // % de prueba de los diálogos
 expose fixed D_CTRL: Int = 16        // por documento: controles quitados
 expose fixed D_FFD: Int = 17         // por documento: U+FFFD
 expose fixed D_CHARS: Int = 18       // por documento: caracteres
 expose fixed D_CR: Int = 19          // por documento: tenía CR
 expose fixed D_BOM: Int = 20         // por documento: tenía BOM
+expose fixed D_NFC: Int = 21         // por documento: composiciones NFC
+expose fixed D_MARC: Int = 22        // por documento: marcas combinantes sin componer
 expose fixed X_TIPO: Int = 24        // tipo del archivo actual (0 TEXTO, 1 DIALOGO)
 expose fixed X_IDH: Int = 25         // hash de la identidad del archivo
 expose fixed X_IDX: Int = 26         // índice del documento dentro del archivo
 expose fixed X_ABORT: Int = 27       // != 0: error fatal
+expose fixed X_JSON: Int = 28        // 1: el archivo actual es JSONL
 expose fixed C_ARCH: Int = 32
 expose fixed C_ILEG: Int = 33
 expose fixed C_CRUDOS: Int = 34
@@ -40,6 +45,16 @@ expose fixed C_EXACTOS: Int = 47
 expose fixed C_CASI: Int = 48
 expose fixed C_FFD: Int = 49
 expose fixed C_ENTRADA: Int = 50     // bytes leídos de los archivos
+expose fixed C_JLEIDAS: Int = 51     // JSONL: líneas no vacías (conversaciones leídas)
+expose fixed C_JCONV: Int = 52       // JSONL: convertidas con al menos un turno
+expose fixed C_JINV: Int = 53        // JSONL: líneas inválidas
+expose fixed C_JVACIAS: Int = 54     // JSONL: válidas pero sin turnos
+expose fixed C_JTU: Int = 55         // JSONL: turnos TÚ
+expose fixed C_JENCA: Int = 56       // JSONL: turnos ENCA
+expose fixed C_JSYS: Int = 57        // JSONL: mensajes system omitidos
+expose fixed C_JARCH: Int = 58       // JSONL: archivos
+expose fixed C_NFC: Int = 59         // composiciones NFC hechas
+expose fixed C_MARC: Int = 60        // marcas combinantes sin componer
 expose fixed S_OFF: Int = 64         // 3: bytes escritos por partición
 expose fixed S_CRC: Int = 67         // 3: CRC32C en curso (sin invertir)
 expose fixed S_DOCS: Int = 72        // 6: documentos [partición*2 + tipo]
@@ -47,7 +62,26 @@ expose fixed S_BYTES: Int = 80       // 6: bytes [partición*2 + tipo]
 expose fixed M_EX: Int = 100         // bytes de la tabla de exactos
 expose fixed M_BAND: Int = 101       // bytes de la tabla de bandas
 expose fixed M_SIG: Int = 102        // bytes reservados para firmas
-expose fixed G_TAM: Int = 128
+// Analizador JSONL: cursor, longitud, error, motivo (1 sintaxis, 2 rol
+// desconocido, 3 forma, 4 línea demasiado larga, 5 UTF-8 inválido), longitud
+// lógica del documento, marca de trabajo, claves vistas, inicio de pasada,
+// contadores temporales de la conversación, ejemplos y registro de inválidas.
+expose fixed J_POS: Int = 104
+expose fixed J_LEN: Int = 105
+expose fixed J_ERR: Int = 106
+expose fixed J_MOTIVO: Int = 107
+expose fixed J_N: Int = 108
+expose fixed J_ALTO: Int = 109
+expose fixed J_VISTAS: Int = 110
+expose fixed J_INI: Int = 111
+expose fixed J_T_TU: Int = 112
+expose fixed J_T_EN: Int = 113
+expose fixed J_T_SY: Int = 114
+expose fixed J_NEJ: Int = 115        // ejemplos guardados (máx. 2)
+expose fixed J_EJ: Int = 116         // 2: nº de documento de entrenamiento
+expose fixed J_NLOG: Int = 118       // entradas del registro de inválidas
+expose fixed J_LOG: Int = 120        // 24: (archivo << 40) | (motivo << 32) | línea
+expose fixed G_TAM: Int = 192
 
 // ---- Ranuras de la lista de trabajo K ----
 expose fixed K_MINS: Int = 0         // 32 casillas de MinHash

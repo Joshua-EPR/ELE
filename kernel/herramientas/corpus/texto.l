@@ -131,9 +131,218 @@ expose flow repararMoji(s: view List of[Int], n: Int, d: edit List of[Int]) => I
     give on
 }
 
+// Composición NFC de letra ASCII + marca combinante (grave, agudo, circunflejo,
+// tilde, diéresis, cedilla): punto de código precompuesto o 0 si no existe.
+// (Tabla generada con unicodedata.normalize('NFC', ...) de Python.)
+flow compuesto(b: Int, mk: Int) => Int {
+    when mk == 0x300 {
+        when b == 65 { give 0xC0 }
+        when b == 69 { give 0xC8 }
+        when b == 73 { give 0xCC }
+        when b == 78 { give 0x1F8 }
+        when b == 79 { give 0xD2 }
+        when b == 85 { give 0xD9 }
+        when b == 87 { give 0x1E80 }
+        when b == 89 { give 0x1EF2 }
+        when b == 97 { give 0xE0 }
+        when b == 101 { give 0xE8 }
+        when b == 105 { give 0xEC }
+        when b == 110 { give 0x1F9 }
+        when b == 111 { give 0xF2 }
+        when b == 117 { give 0xF9 }
+        when b == 119 { give 0x1E81 }
+        when b == 121 { give 0x1EF3 }
+    }
+    when mk == 0x301 {
+        when b == 65 { give 0xC1 }
+        when b == 67 { give 0x106 }
+        when b == 69 { give 0xC9 }
+        when b == 71 { give 0x1F4 }
+        when b == 73 { give 0xCD }
+        when b == 75 { give 0x1E30 }
+        when b == 76 { give 0x139 }
+        when b == 77 { give 0x1E3E }
+        when b == 78 { give 0x143 }
+        when b == 79 { give 0xD3 }
+        when b == 80 { give 0x1E54 }
+        when b == 82 { give 0x154 }
+        when b == 83 { give 0x15A }
+        when b == 85 { give 0xDA }
+        when b == 87 { give 0x1E82 }
+        when b == 89 { give 0xDD }
+        when b == 90 { give 0x179 }
+        when b == 97 { give 0xE1 }
+        when b == 99 { give 0x107 }
+        when b == 101 { give 0xE9 }
+        when b == 103 { give 0x1F5 }
+        when b == 105 { give 0xED }
+        when b == 107 { give 0x1E31 }
+        when b == 108 { give 0x13A }
+        when b == 109 { give 0x1E3F }
+        when b == 110 { give 0x144 }
+        when b == 111 { give 0xF3 }
+        when b == 112 { give 0x1E55 }
+        when b == 114 { give 0x155 }
+        when b == 115 { give 0x15B }
+        when b == 117 { give 0xFA }
+        when b == 119 { give 0x1E83 }
+        when b == 121 { give 0xFD }
+        when b == 122 { give 0x17A }
+    }
+    when mk == 0x302 {
+        when b == 65 { give 0xC2 }
+        when b == 67 { give 0x108 }
+        when b == 69 { give 0xCA }
+        when b == 71 { give 0x11C }
+        when b == 72 { give 0x124 }
+        when b == 73 { give 0xCE }
+        when b == 74 { give 0x134 }
+        when b == 79 { give 0xD4 }
+        when b == 83 { give 0x15C }
+        when b == 85 { give 0xDB }
+        when b == 87 { give 0x174 }
+        when b == 89 { give 0x176 }
+        when b == 90 { give 0x1E90 }
+        when b == 97 { give 0xE2 }
+        when b == 99 { give 0x109 }
+        when b == 101 { give 0xEA }
+        when b == 103 { give 0x11D }
+        when b == 104 { give 0x125 }
+        when b == 105 { give 0xEE }
+        when b == 106 { give 0x135 }
+        when b == 111 { give 0xF4 }
+        when b == 115 { give 0x15D }
+        when b == 117 { give 0xFB }
+        when b == 119 { give 0x175 }
+        when b == 121 { give 0x177 }
+        when b == 122 { give 0x1E91 }
+    }
+    when mk == 0x303 {
+        when b == 65 { give 0xC3 }
+        when b == 69 { give 0x1EBC }
+        when b == 73 { give 0x128 }
+        when b == 78 { give 0xD1 }
+        when b == 79 { give 0xD5 }
+        when b == 85 { give 0x168 }
+        when b == 86 { give 0x1E7C }
+        when b == 89 { give 0x1EF8 }
+        when b == 97 { give 0xE3 }
+        when b == 101 { give 0x1EBD }
+        when b == 105 { give 0x129 }
+        when b == 110 { give 0xF1 }
+        when b == 111 { give 0xF5 }
+        when b == 117 { give 0x169 }
+        when b == 118 { give 0x1E7D }
+        when b == 121 { give 0x1EF9 }
+    }
+    when mk == 0x308 {
+        when b == 65 { give 0xC4 }
+        when b == 69 { give 0xCB }
+        when b == 72 { give 0x1E26 }
+        when b == 73 { give 0xCF }
+        when b == 79 { give 0xD6 }
+        when b == 85 { give 0xDC }
+        when b == 87 { give 0x1E84 }
+        when b == 88 { give 0x1E8C }
+        when b == 89 { give 0x178 }
+        when b == 97 { give 0xE4 }
+        when b == 101 { give 0xEB }
+        when b == 104 { give 0x1E27 }
+        when b == 105 { give 0xEF }
+        when b == 111 { give 0xF6 }
+        when b == 116 { give 0x1E97 }
+        when b == 117 { give 0xFC }
+        when b == 119 { give 0x1E85 }
+        when b == 120 { give 0x1E8D }
+        when b == 121 { give 0xFF }
+    }
+    when mk == 0x327 {
+        when b == 67 { give 0xC7 }
+        when b == 68 { give 0x1E10 }
+        when b == 69 { give 0x228 }
+        when b == 71 { give 0x122 }
+        when b == 72 { give 0x1E28 }
+        when b == 75 { give 0x136 }
+        when b == 76 { give 0x13B }
+        when b == 78 { give 0x145 }
+        when b == 82 { give 0x156 }
+        when b == 83 { give 0x15E }
+        when b == 84 { give 0x162 }
+        when b == 99 { give 0xE7 }
+        when b == 100 { give 0x1E11 }
+        when b == 101 { give 0x229 }
+        when b == 103 { give 0x123 }
+        when b == 104 { give 0x1E29 }
+        when b == 107 { give 0x137 }
+        when b == 108 { give 0x13C }
+        when b == 110 { give 0x146 }
+        when b == 114 { give 0x157 }
+        when b == 115 { give 0x15F }
+        when b == 116 { give 0x163 }
+    }
+    give 0
+}
+
+// Compone en el sitio las secuencias letra + marca (la salida nunca es más
+// larga que la entrada) y cuenta las marcas U+0300..U+036F que quedan.
+flow componerNfc(o: edit List of[Int], n: Int, g: edit List of[Int]) => Int {
+    change r = 0
+    change i = 0
+    change comp = 0
+    change marcas = 0
+    during i < n {
+        hold b = o[i]
+        when b >= 65 && b < 123 && i + 2 < n && o[i + 1] == 0xCC {
+            hold m2 = o[i + 2]
+            change mk = 0
+            when m2 == 0x80 {
+                mk = 0x300
+            } otherwise when m2 == 0x81 {
+                mk = 0x301
+            } otherwise when m2 == 0x82 {
+                mk = 0x302
+            } otherwise when m2 == 0x83 {
+                mk = 0x303
+            } otherwise when m2 == 0x88 {
+                mk = 0x308
+            } otherwise when m2 == 0xA7 {
+                mk = 0x327
+            }
+            when mk != 0 {
+                hold cp = compuesto(b, mk)
+                when cp != 0 {
+                    when cp < 0x800 {
+                        o[r] = 0xC0 | (cp >> 6)
+                        o[r + 1] = 0x80 | (cp & 63)
+                        r += 2
+                    } otherwise {
+                        o[r] = 0xE0 | (cp >> 12)
+                        o[r + 1] = 0x80 | ((cp >> 6) & 63)
+                        o[r + 2] = 0x80 | (cp & 63)
+                        r += 3
+                    }
+                    i += 3
+                    comp += 1
+                    proceed
+                }
+            }
+        }
+        when b == 0xCC || (b == 0xCD && i + 1 < n && o[i + 1] <= 0xAF) {
+            marcas += 1
+        }
+        o[r] = b
+        r += 1
+        i += 1
+    }
+    g[D_NFC] = comp
+    g[D_MARC] = marcas
+    give r
+}
+
 // Limpieza: BOM, CRLF/CR -> LF, controles fuera, tab -> espacio, sin espacios
 // finales, una línea en blanco como máximo, documento recortado y con un \n
-// final. Entrada: UTF-8 válido. Deja en G las medidas D_*.
+// final, letra + marca combinante compuesta a NFC. Entrada: UTF-8 válido.
+// Deja en G las medidas D_*.
 expose flow limpiar(s: view List of[Int], n: Int, o: edit List of[Int], g: edit List of[Int]) => Int {
     // La salida nunca supera n + 1 bytes: se reserva una vez y se escribe directo.
     during o.length < n + 4 {
@@ -241,6 +450,7 @@ expose flow limpiar(s: view List of[Int], n: Int, o: edit List of[Int], g: edit 
         }
         i += largo
     }
+    on = componerNfc(edit o, on, edit g)
     during on > 0 && (o[on - 1] == 10 || o[on - 1] == 32) {
         on -= 1
     }

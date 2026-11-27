@@ -186,6 +186,46 @@ flow extracto(f: view File, off: Int, largo: Int, buf: edit List of[Int], md: ed
     emitirT(edit md, "~~~~\n\n")
 }
 
+// Motivo de una línea JSONL inválida.
+flow emitirMotivo(md: edit List of[Int], m: Int) {
+    when m == 1 {
+        emitirT(edit md, "JSON mal formado")
+    } otherwise when m == 2 {
+        emitirT(edit md, "rol desconocido")
+    } otherwise when m == 3 {
+        emitirT(edit md, "estructura no reconocida")
+    } otherwise when m == 4 {
+        emitirT(edit md, "línea demasiado larga")
+    } otherwise when m == 5 {
+        emitirT(edit md, "UTF-8 inválido")
+    } otherwise {
+        emitirT(edit md, "otro")
+    }
+}
+
+// Conversación convertida completa (hasta 1500 bytes), en bloque de código.
+flow ejemploDialogo(f: view File, off: Int, largo: Int, buf: edit List of[Int], md: edit List of[Int]) {
+    change m = largo
+    when m > 1500 { m = 1500 }
+    when fileSeek(f, off, 0) != off { give }
+    hold got = fileRead(f, buf, m)
+    when got <= 0 { give }
+    change e = got
+    when e < largo {
+        during e > 0 && (buf[e] & 0xC0) == 0x80 {
+            e -= 1
+        }
+    }
+    emitirT(edit md, "~~~~\n")
+    each q among 0..e {
+        md@push(buf[q])
+    }
+    when e > 0 && buf[e - 1] != 10 {
+        md@push(10)
+    }
+    emitirT(edit md, "~~~~\n\n")
+}
+
 expose flow escribirEstadisticas(rutaMd: view Text, rutaE: view Text, meta: view List of[Int], g: view List of[Int], k: edit List of[Int], b: edit List of[Int]) => Int {
     change md: List of[Int] = List[]
     emitirT(edit md, "# Estadísticas del corpus\n\n")
@@ -200,6 +240,8 @@ expose flow escribirEstadisticas(rutaMd: view Text, rutaE: view Text, meta: view
     fila(edit md, "semilla de la partición", g[O_SEMILLA])
     fila(edit md, "% prueba", g[O_PRUEBA])
     fila(edit md, "% validación", g[O_VALIDA])
+    fila(edit md, "% validación de los diálogos", g[O_DVAL])
+    fila(edit md, "% prueba de los diálogos", g[O_DPRU])
     fila(edit md, "tamaño máximo de un documento (bytes)", g[O_MAXDOC])
     fila(edit md, "máximo de documentos conservados", g[O_MAXDOCS])
     emitirT(edit md, "\n## Entrada\n\n| concepto | valor |\n|---|---|\n")
@@ -209,6 +251,30 @@ expose flow escribirEstadisticas(rutaMd: view Text, rutaE: view Text, meta: view
     fila(edit md, "líneas `=====` (separadores de documentos)", g[C_SEPARADORES])
     fila(edit md, "documentos partidos por superar el tamaño máximo", g[C_PARTES])
     fila(edit md, "documentos crudos examinados", g[C_CRUDOS])
+    when g[C_JARCH] > 0 {
+        emitirT(edit md, "\n## Diálogos en JSONL\n\n| concepto | valor |\n|---|---|\n")
+        fila(edit md, "archivos JSONL", g[C_JARCH])
+        fila(edit md, "conversaciones leídas de JSONL (líneas no vacías)", g[C_JLEIDAS])
+        fila(edit md, "conversaciones convertidas (con algún turno)", g[C_JCONV])
+        fila(edit md, "conversaciones válidas sin turnos", g[C_JVACIAS])
+        fila(edit md, "turnos TÚ", g[C_JTU])
+        fila(edit md, "turnos ENCA", g[C_JENCA])
+        fila(edit md, "mensajes system omitidos", g[C_JSYS])
+        fila(edit md, "jsonl inválido (líneas descartadas)", g[C_JINV])
+        when g[J_NLOG] > 0 {
+            emitirT(edit md, "\nLíneas inválidas (las 24 primeras):\n\n")
+            each q among 0..g[J_NLOG] {
+                hold e = g[J_LOG + q]
+                emitirT(edit md, "- archivo JSONL ")
+                emitirN(edit md, e >> 40)
+                emitirT(edit md, ", línea ")
+                emitirN(edit md, e & 0xFFFFFFFF)
+                emitirT(edit md, ": ")
+                emitirMotivo(edit md, (e >> 32) & 255)
+                emitirT(edit md, "\n")
+            }
+        }
+    }
     emitirT(edit md, "\n## Particiones\n\n")
     emitirT(edit md, "| partición | documentos | TEXTO | DIALOGO | bytes | bytes TEXTO | bytes DIALOGO | media (bytes/doc) | CRC32C |\n|---|---|---|---|---|---|---|---|---|\n")
     each p among 0..3 {
@@ -263,6 +329,8 @@ expose flow escribirEstadisticas(rutaMd: view Text, rutaE: view Text, meta: view
     fila(edit md, "documentos con mojibake reparado", g[C_REPAR])
     fila(edit md, "BOM UTF-8 quitados", g[C_BOM])
     fila(edit md, "documentos con CR (CRLF o CR convertidos a LF)", g[C_CR])
+    fila(edit md, "letra + marca combinante compuestas a NFC", g[C_NFC])
+    fila(edit md, "marcas combinantes (U+0300..U+036F) que no se pudieron componer", g[C_MARC])
     fila(edit md, "caracteres de control quitados", g[C_CTRL])
     fila(edit md, "U+FFFD presentes", g[C_FFD])
     emitirT(edit md, "\n## Memoria de las tablas de duplicados\n\n| tabla | bytes |\n|---|---|\n")
@@ -352,6 +420,39 @@ expose flow escribirEstadisticas(rutaMd: view Text, rutaE: view Text, meta: view
             }
         }
         fileClose(fe)
+    }
+    // Dos conversaciones JSONL ya convertidas (de entrenamiento).
+    when g[J_NEJ] > 0 {
+        emitirT(edit md, "\n## Dos conversaciones JSONL convertidas (entrenamiento)\n\n")
+        hold fj = fileOpen(rutaE, 1)
+        when fileStatus(fj) == 0 {
+            each q among 0..g[J_NEJ] {
+                hold objetivo = g[J_EJ + q]
+                change visto = 0
+                change d = 0
+                change off = 0 - 1
+                change largo = 0
+                during d < nm && off < 0 {
+                    when meta[d * 4] == 0 {
+                        when visto == objetivo {
+                            off = meta[d * 4 + 1]
+                            largo = meta[d * 4 + 2]
+                        }
+                        visto += 1
+                    }
+                    d += 1
+                }
+                when off >= 0 {
+                    emitirT(edit md, "Documento ")
+                    emitirN(edit md, objetivo)
+                    emitirT(edit md, " de entrenamiento (DIALOGO, ")
+                    emitirN(edit md, largo)
+                    emitirT(edit md, " bytes):\n\n")
+                    ejemploDialogo(fj, off, largo, edit b, edit md)
+                }
+            }
+        }
+        fileClose(fj)
     }
     give guardarLista(rutaMd, view md, md.length)
 }

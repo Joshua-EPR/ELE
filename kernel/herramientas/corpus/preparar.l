@@ -7,7 +7,9 @@
 // documento en la partición. La carpeta de salida y su subcarpeta
 // prueba_sellada deben existir (las crea preparar.ps1).
 // Opciones (enteros): --min --min-dialogo --basura --letras --similitud
-// --mojibake --semilla --prueba --valida --max-doc --max-docs.
+// --mojibake --semilla --prueba --valida --max-doc --max-docs, y
+// --dialogo-reparto=E,V,P (por defecto 90,5,5; solo diálogos).
+// Los archivos .jsonl (una conversación por línea) los convierte jsonl.l.
 take util
 take proceso
 take salida
@@ -40,8 +42,51 @@ flow valorOpcion(a: view Text, clave: Text) => Int {
     give v
 }
 
+// ¿El argumento empieza por `clave`?
+flow tienePrefijo(a: view Text, clave: Text) => Bool {
+    when a.byteLength < clave.byteLength { give false }
+    each j among 0..clave.byteLength {
+        when a@byteAt(j) != clave@byteAt(j) { give false }
+    }
+    give true
+}
+
+// "--dialogo-reparto=E,V,P": porcentajes de entrenamiento, validación y
+// prueba de los diálogos (suman 100; V y P como máximo 49). -1 si no es esa
+// opción, 0 si se aplicó, 1 si es inválida.
+flow aplicarReparto(a: view Text, g: edit List of[Int]) => Int {
+    when !tienePrefijo(a, "--dialogo-reparto=") { give 0 - 1 }
+    change vals = nuevaLista(3)
+    change campo = 0
+    change digitos = 0
+    change j = 18
+    during j < a.byteLength {
+        hold c = a@byteAt(j)
+        when c == 44 {
+            when digitos == 0 || campo >= 2 { give 1 }
+            campo += 1
+            digitos = 0
+        } otherwise when c >= 48 && c <= 57 {
+            vals[campo] = vals[campo] * 10 + (c - 48)
+            digitos += 1
+            when vals[campo] > 100 { give 1 }
+        } otherwise {
+            give 1
+        }
+        j += 1
+    }
+    when campo != 2 || digitos == 0 { give 1 }
+    when vals[0] + vals[1] + vals[2] != 100 { give 1 }
+    when vals[1] > 49 || vals[2] > 49 { give 1 }
+    g[O_DVAL] = vals[1]
+    g[O_DPRU] = vals[2]
+    give 0
+}
+
 // Aplica una opción; 0 si se reconoció, 1 si no.
 flow aplicarOpcion(a: view Text, g: edit List of[Int]) => Int {
+    hold rep = aplicarReparto(a, edit g)
+    when rep != 0 - 1 { give rep }
     change v = valorOpcion(a, "--min")
     when v != 0 - 1 {
         when v < 0 { give 1 }
@@ -117,6 +162,7 @@ flow ejecutar(lista: view Text, salida: view Text, g: edit List of[Int]) => Int 
     change blk = nuevaLista(1048576)
     change raw = nuevaLista(g[O_MAXDOC] + 65536)
     change dec: List of[Int] = List[]
+    change jd: List of[Int] = List[]
     change nor: List of[Int] = List[]
     change k = nuevaLista(K_TAM)
     iniciarTablas(edit k)
@@ -142,7 +188,7 @@ flow ejecutar(lista: view Text, salida: view Text, g: edit List of[Int]) => Int 
         printError("error: no se pudo crear entrena.bin, valida.bin o prueba_sellada/prueba.bin (¿existe la carpeta?)")
         r = 20
     } otherwise {
-        r = recorrerLista(lista, edit blk, edit raw, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+        r = recorrerLista(lista, edit blk, edit raw, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp, edit jd)
     }
     fileFlush(fe)
     fileFlush(fv)
@@ -187,7 +233,10 @@ flow ejecutar(lista: view Text, salida: view Text, g: edit List of[Int]) => Int 
     print("preparar: valida {docsTotal(view g, 1)} docs {g[S_OFF + 1]} B crc {hexDe(crcFinal(g[S_CRC + 1]))}")
     print("preparar: prueba {docsTotal(view g, 2)} docs {g[S_OFF + 2]} B crc {hexDe(crcFinal(g[S_CRC + 2]))}")
     print("preparar: descartes cortos {g[C_CORTOS] + g[C_CORTOS + 1]} basura {g[C_BASURA]} letras {g[C_LETRAS]} mojibake {g[C_MOJIBAKE]} exactos {g[C_EXACTOS]} casi {g[C_CASI]}")
-    print("preparar: conversiones cp1252 {g[C_CP1252]} mojibake-reparado {g[C_REPAR]} bom {g[C_BOM]} cr {g[C_CR]}")
+    print("preparar: conversiones cp1252 {g[C_CP1252]} mojibake-reparado {g[C_REPAR]} bom {g[C_BOM]} cr {g[C_CR]} nfc {g[C_NFC]} marcas-sin-componer {g[C_MARC]}")
+    when g[C_JARCH] > 0 {
+        print("preparar: jsonl archivos {g[C_JARCH]} conversaciones leidas {g[C_JLEIDAS]} convertidas {g[C_JCONV]} sin-turnos {g[C_JVACIAS]} invalidas {g[C_JINV]} turnos TU {g[C_JTU]} ENCA {g[C_JENCA]} system-omitidos {g[C_JSYS]}")
+    }
     give 0
 }
 
@@ -207,7 +256,7 @@ flow hexDe(v: Int) => Text {
 flow main() => Int {
     hold n = processArgCount()
     when n < 2 {
-        printError("uso: preparar <lista> <carpeta_salida> [--min=N --min-dialogo=N --basura=N --letras=N --similitud=N --mojibake=0|1 --semilla=N --prueba=N --valida=N --max-doc=N --max-docs=N]")
+        printError("uso: preparar <lista> <carpeta_salida> [--min=N --min-dialogo=N --basura=N --letras=N --similitud=N --mojibake=0|1 --semilla=N --prueba=N --valida=N --max-doc=N --max-docs=N --dialogo-reparto=E,V,P]")
         give 2
     }
     change g = nuevaLista(G_TAM)
@@ -222,6 +271,8 @@ flow main() => Int {
     g[O_PRUEBA] = 1
     g[O_VALIDA] = 1
     g[O_MAXDOC] = 4194304
+    g[O_DVAL] = 5
+    g[O_DPRU] = 5
     each i among 2..n {
         choose processArg(i) {
             Ok(a): {

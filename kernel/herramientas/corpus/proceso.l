@@ -3,6 +3,7 @@
 take util
 take texto
 take dedup
+take jsonl
 
 fixed BLOQUE: Int = 1048576
 
@@ -10,14 +11,26 @@ fixed BLOQUE: Int = 1048576
 flow particionDe(g: view List of[Int], idx: Int) => Int {
     hold h = mezclar(g[X_IDH] +% (idx + 1) *% 0x9E3779B97F4A7C15 ^ (g[O_SEMILLA] *% 0xD6E8FEB86659FD93))
     hold r = (h >> 1) % 100
-    when r < g[O_PRUEBA] { give 2 }
-    when r < g[O_PRUEBA] + g[O_VALIDA] { give 1 }
+    // Los diálogos tienen su propio reparto (por defecto 90/5/5).
+    change pr = g[O_PRUEBA]
+    change va = g[O_VALIDA]
+    when g[X_TIPO] == 1 {
+        pr = g[O_DPRU]
+        va = g[O_DVAL]
+    }
+    when r < pr { give 2 }
+    when r < pr + va { give 1 }
     give 0
 }
 
 // Escribe el documento normalizado en su partición y lo anota en `meta`.
 flow emitirDoc(p: Int, nor: view List of[Int], n: Int, k: edit List of[Int], g: edit List of[Int], meta: edit List of[Int], fe: view File, fv: view File, fp: view File) {
     change w = 0
+    // Los dos primeros diálogos JSONL de entrenamiento sirven de ejemplo.
+    when p == 0 && g[X_JSON] == 1 && g[J_NEJ] < 2 {
+        g[J_EJ + g[J_NEJ]] = g[S_DOCS] + g[S_DOCS + 1]
+        g[J_NEJ] = g[J_NEJ] + 1
+    }
     when p == 0 {
         w = fileWrite(fe, nor, n)
     } otherwise when p == 1 {
@@ -100,6 +113,8 @@ flow procesarDoc(raw: view List of[Int], rn: Int, dec: edit List of[Int], nor: e
     g[C_CR] = g[C_CR] + g[D_CR]
     g[C_CTRL] = g[C_CTRL] + g[D_CTRL]
     g[C_FFD] = g[C_FFD] + g[D_FFD]
+    g[C_NFC] = g[C_NFC] + g[D_NFC]
+    g[C_MARC] = g[C_MARC] + g[D_MARC]
     // 3. Basura: proporción de no textuales (controles y U+FFFD).
     when g[D_CHARS] > 0 && (g[D_CTRL] + g[D_FFD]) * 1000 > g[O_BASURA] * g[D_CHARS] {
         g[C_BASURA] = g[C_BASURA] + 1
@@ -240,8 +255,107 @@ flow procesarArchivo(ruta: view Text, blk: edit List of[Int], raw: edit List of[
     give c
 }
 
+// Registra una línea JSONL inválida (los 24 primeros con su línea y motivo).
+flow registrarInvalida(g: edit List of[Int], lineno: Int, motivo: Int) {
+    g[C_JINV] = g[C_JINV] + 1
+    hold q = g[J_NLOG]
+    when q < 24 {
+        g[J_LOG + q] = (g[C_JARCH] << 40) | (motivo << 32) | lineno
+        g[J_NLOG] = q + 1
+    }
+}
+
+// Una línea JSONL completa en raw[0..rn): la convierte y la procesa.
+flow procesarLineaJson(raw: view List of[Int], rn: Int, largo: Bool, lineno: Int, jd: edit List of[Int], dec: edit List of[Int], nor: edit List of[Int], k: edit List of[Int], g: edit List of[Int], ex: edit List of[Int], sigs: edit List of[Int], bandas: edit List of[Int], meta: edit List of[Int], fe: view File, fv: view File, fp: view File) {
+    // Línea en blanco (solo espacios, tab, CR): se ignora sin contarla.
+    change blanca = true
+    when !largo {
+        each q among 0..rn {
+            hold c = raw[q]
+            when c != 32 && c != 9 && c != 13 && c != 10 { blanca = false }
+        }
+    } otherwise {
+        blanca = false
+    }
+    when blanca { give }
+    g[C_JLEIDAS] = g[C_JLEIDAS] + 1
+    when largo {
+        registrarInvalida(edit g, lineno, 4)
+        give
+    }
+    change primera = 0
+    when lineno == 1 { primera = 1 }
+    hold dl = convertirLinea(raw, rn, edit jd, edit g, primera)
+    when dl < 0 {
+        hold mo = g[J_MOTIVO]
+        registrarInvalida(edit g, lineno, mo)
+        give
+    }
+    g[C_JTU] = g[C_JTU] + g[J_T_TU]
+    g[C_JENCA] = g[C_JENCA] + g[J_T_EN]
+    g[C_JSYS] = g[C_JSYS] + g[J_T_SY]
+    when dl == 0 {
+        g[C_JVACIAS] = g[C_JVACIAS] + 1
+        give
+    }
+    g[C_JCONV] = g[C_JCONV] + 1
+    procesarDoc(view jd, dl, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+}
+
+// Archivo JSONL: cada línea (hasta el salto de línea) es una conversación = un documento.
+flow procesarJsonl(ruta: view Text, blk: edit List of[Int], raw: edit List of[Int], dec: edit List of[Int], nor: edit List of[Int], k: edit List of[Int], g: edit List of[Int], ex: edit List of[Int], sigs: edit List of[Int], bandas: edit List of[Int], meta: edit List of[Int], fe: view File, fv: view File, fp: view File, jd: edit List of[Int]) => Int {
+    hold f = fileOpen(ruta, 1)
+    when fileStatus(f) != 0 {
+        hold st = fileStatus(f)
+        fileClose(f)
+        g[C_ILEG] = g[C_ILEG] + 1
+        give st
+    }
+    g[C_ARCH] = g[C_ARCH] + 1
+    g[C_JARCH] = g[C_JARCH] + 1
+    g[X_IDX] = 0
+    change rn = 0
+    change lineno = 0
+    change largo = false
+    change estado = 0
+    hold lim = raw.length - 8
+    during g[X_ABORT] == 0 {
+        hold got = fileRead(f, blk, BLOQUE)
+        when got < 0 {
+            estado = got
+            leave
+        }
+        when got == 0 { leave }
+        g[C_ENTRADA] = g[C_ENTRADA] + got
+        each j among 0..got {
+            hold b = blk[j]
+            when b == 10 {
+                lineno += 1
+                procesarLineaJson(view raw, rn, largo, lineno, edit jd, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+                rn = 0
+                largo = false
+            } otherwise when rn < lim {
+                raw[rn] = b
+                rn += 1
+            } otherwise {
+                largo = true
+            }
+        }
+    }
+    when estado == 0 && g[X_ABORT] == 0 && (rn > 0 || largo) {
+        lineno += 1
+        procesarLineaJson(view raw, rn, largo, lineno, edit jd, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+    }
+    hold c = fileClose(f)
+    when estado != 0 {
+        g[C_ILEG] = g[C_ILEG] + 1
+        give estado
+    }
+    give c
+}
+
 // Recorre la lista de archivos: cada línea "T|D <TAB> ruta <TAB> id".
-expose flow recorrerLista(lista: view Text, blk: edit List of[Int], raw: edit List of[Int], dec: edit List of[Int], nor: edit List of[Int], k: edit List of[Int], g: edit List of[Int], ex: edit List of[Int], sigs: edit List of[Int], bandas: edit List of[Int], meta: edit List of[Int], fe: view File, fv: view File, fp: view File) => Int {
+expose flow recorrerLista(lista: view Text, blk: edit List of[Int], raw: edit List of[Int], dec: edit List of[Int], nor: edit List of[Int], k: edit List of[Int], g: edit List of[Int], ex: edit List of[Int], sigs: edit List of[Int], bandas: edit List of[Int], meta: edit List of[Int], fe: view File, fv: view File, fp: view File, jd: edit List of[Int]) => Int {
     change pb: List of[Int] = List[]
     change i = 0
     hold total = lista.byteLength
@@ -286,9 +400,22 @@ expose flow recorrerLista(lista: view Text, blk: edit List of[Int], raw: edit Li
         g[X_IDH] = mezclar(h)
         g[X_TIPO] = 0
         when tipoB == 68 { g[X_TIPO] = 1 }
+        // ¿La ruta termina en .jsonl (sin distinguir mayúsculas)?
+        g[X_JSON] = 0
+        when t2 - t1 - 1 >= 6 {
+            hold q0 = t2 - 6
+            when lista@byteAt(q0) == 46 && (lista@byteAt(q0 + 1) | 32) == 106 && (lista@byteAt(q0 + 2) | 32) == 115 && (lista@byteAt(q0 + 3) | 32) == 111 && (lista@byteAt(q0 + 4) | 32) == 110 && (lista@byteAt(q0 + 5) | 32) == 108 {
+                g[X_JSON] = 1
+            }
+        }
         choose textFromBytes(pb, np) {
             Ok(rt): {
-                hold st = procesarArchivo(view rt, edit blk, edit raw, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+                change st = 0
+                when g[X_JSON] == 1 {
+                    st = procesarJsonl(view rt, edit blk, edit raw, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp, edit jd)
+                } otherwise {
+                    st = procesarArchivo(view rt, edit blk, edit raw, edit dec, edit nor, edit k, edit g, edit ex, edit sigs, edit bandas, edit meta, fe, fv, fp)
+                }
                 when st != 0 {
                     printError("aviso: no se pudo leer un archivo de la lista")
                 }

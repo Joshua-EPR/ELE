@@ -2037,7 +2037,7 @@ Archivos nuevos, todos en `kernel/herramientas/corpus/` (no se toca el
 compilador ni el kernel): `preparar.l` (programa y opciones), `util.l`
 (CRC32C, hashes, buffers, emisión de texto), `texto.l` (normalización),
 `dedup.l` (duplicados), `proceso.l` (flujo por documento), `salida.l`
-(índices, estadísticas), `preparar.ps1`, `verificar.py`,
+(índices, estadísticas), `jsonl.l` (diálogos en JSONL), `preparar.ps1`, `verificar.py`,
 `referencia_compresion.py`, `evaluacion.md`, `prompts_es.txt`.
 
 ### Uso
@@ -2048,7 +2048,7 @@ compilador ni el kernel): `preparar.l` (programa y opciones), `util.l`
 python -I kernel\herramientas\corpus\verificar.py D:\corpus_f4 --sin-prueba
 ```
 
-El `.ps1` solo recorre carpetas: lista los `*.txt` en orden ordinal (línea
+El `.ps1` solo recorre carpetas: lista los `*.txt` y `*.jsonl` en orden ordinal (línea
 `T|D <TAB> ruta <TAB> id`; D si algún segmento de la ruta, o la carpeta de
 entrada, se llama `dialogos`), crea `Salida` y `Salida\prueba_sellada`,
 compila `preparar.l` con `kernel\compilador\ele.exe` a `Salida\_preparar.exe`
@@ -2191,6 +2191,88 @@ byte) y el resto repartido en una decena de pasadas por byte (UTF-8, mojibake,
 limpieza, letras, hash, CRC, frecuencias). Cada sentencia por byte cuesta
 ~10 ns con este compilador.
 
+### Diálogos en JSONL
+
+`preparar.ps1` lista ahora `*.txt` y `*.jsonl` (mismo orden ordinal; los de una
+carpeta `dialogos` son DIALOGO). Un `.jsonl` (nuevo módulo `jsonl.l`) es una
+conversación por línea. Nada de esto toca el compilador ni el kernel.
+
+- **Analizador JSON mínimo** (en ELE; trabaja sobre la lista de bytes de
+  la línea): objetos, arrays, cadenas con `\" \\ \/ \b \f \n \r \t
+  \uXXXX` (los pares sustitutos pasan a UTF-8 de 4 bytes), números estrictos,
+  `true/false/null`. Una cadena con byte de control sin escapar, un sustituto
+  suelto, `NaN`, una coma final o basura tras el objeto hacen inválida la
+  línea. Profundidad máxima 64. La línea debe ser UTF-8 válido (un BOM al
+  principio del archivo se quita).
+- **Formatos** (por las claves de primer nivel, en este orden de prioridad):
+  `{"messages": [{"role", "content"}]}`, `{"conversations": [{"from",
+  "value"}]}` y pregunta/respuesta (`prompt` > `instruction` > `input` con
+  `response` > `output` > `completion`; hacen falta las dos). Con una clave
+  repetida gana la última, como en `json` de Python. Las demás claves se
+  validan y se saltan.
+- **Roles** (sin distinguir mayúsculas ASCII): `user/human/usuario` -> `TÚ`;
+  `assistant/gpt/bot/model/enca` -> `ENCA`; `system` se omite y se cuenta.
+  Rol desconocido, `role`/`content` ausentes o que no son cadenas, línea rota,
+  estructura no reconocida, UTF-8 inválido o línea más larga que el límite
+  (`--max-doc` + 64 KiB) -> **jsonl inválido**: se descarta la conversación y se
+  anota (archivo, línea y motivo; las 24 primeras en `ESTADISTICAS.md`).
+- **Documento**: un turno por línea, `TÚ: texto` / `ENCA: texto`; dentro del
+  turno los saltos, tabuladores y espacios repetidos pasan a un espacio y se
+  recorta; un turno vacío se omite; sin línea en blanco entre turnos. Una
+  conversación válida sin turnos (solo `system`) se cuenta aparte y no genera
+  documento. Los blancos de línea (vacía o solo espacios) se ignoran sin
+  contarlos. El documento sigue el camino normal: codificación, limpieza,
+  filtros (corto: `--min-dialogo`, 40 bytes), duplicados y reparto.
+- **Reparto de diálogos**: `--dialogo-reparto=E,V,P` (por defecto `90,5,5`,
+  suman 100, V y P como máximo 49). Se aplica a todo documento DIALOGO (también
+  a los `.txt` de `dialogos`); el texto sigue con `--valida`/`--prueba` (98/1/1).
+  Mismo hash determinista, solo cambian los umbrales: con `98,1,1` los diálogos
+  caen donde caían antes.
+- **ESTADISTICAS.md**: sección "Diálogos en JSONL" (conversaciones leídas,
+  convertidas, sin turnos, turnos TÚ y ENCA, system omitidos, inválidas con su
+  registro) y dos conversaciones ya convertidas (las dos primeras de
+  entrenamiento); parámetros `% validación/prueba de los diálogos`.
+- **verificar.py** `--jsonl A.jsonl`: relee con `json` de Python, aplica las
+  mismas reglas y busca cada documento esperado (byte a byte) en la salida;
+  clasifica los ausentes (duplicado exacto, corto, pocas letras, otro) y
+  compara los contadores con `ESTADISTICAS.md`.
+
+Pruebas (todas con `verificar.py` CORRECTO):
+
+| prueba | resultado |
+|---|---|
+| `enca_dialogos.jsonl` del usuario (79 líneas, 17 663 B) | 79 leídas, 79 convertidas, 0 inválidas, 79 TÚ + 79 ENCA; entrena 74, valida 2, prueba 3; 79 de 79 hallados byte a byte |
+| JSONL sintético, 20 líneas (`--dialogo-reparto=60,20,20`) | 18 no vacías: 11 convertidas, 1 sin turnos, 6 inválidas (líneas 6 rota, 9 rol `tool`, 10 sustituto suelto, 11 contenido numérico, 16 sin claves conocidas, 18 `NaN`), 2 system omitidos, 1 duplicado exacto; escapes `\n \" ñ \/`, emoji por par sustituto, `conversations`, prompt/response, `instruction`+`output`, `completion`, claves en otro orden, rol `User`/`BOT`, turno vacío omitido, última línea sin `\n`: coincide con Python |
+| `corpus_prueba` (texto) | `--dialogo-reparto=98,1,1`: entrena B5E2970E y valida 8522C6EE, como antes; con el reparto por defecto el texto es igual (entrena B5E2970E) y solo cambia el diálogo que pasa de valida a prueba |
+| dos ejecuciones | mismos SHA-256 en los 11 archivos (corpus del usuario y sintético) |
+
+### Composición NFC
+
+Los acentos del corpus del usuario (`bodas_de_sangre.txt`, `el_quijote_ii.txt`)
+llegan descompuestos (letra + marca combinante). `texto.l` (`limpiar`) compone
+a NFC después de la limpieza: letra ASCII A-Z/a-z seguida de U+0300 grave,
+U+0301 agudo, U+0302 circunflejo, U+0303 tilde, U+0308 diéresis o U+0327
+cedilla -> carácter precompuesto (tabla de 133 pares generada con
+`unicodedata`; incluye á é í ó ú ý à è ñ ç ü ö â y también ć ń ẽ ĩ...). La
+salida nunca es más larga que la entrada, así que se hace en el sitio. Las
+marcas U+0300..U+036F que no se pueden componer (otra marca, o una letra sin
+forma precompuesta, p. ej. `x` + U+0301) se dejan y se cuentan. `ESTADISTICAS.md`
+(conversiones): "letra + marca combinante compuestas a NFC" y "marcas
+combinantes que no se pudieron componer". `verificar.py --texto A.txt` aplica
+la limpieza de Python y `unicodedata.normalize('NFC')` y busca el resultado en la
+salida; además avisa de los documentos de la salida que no estén en NFC.
+
+Carpeta completa del usuario (`Libros` + `poema` + `dialogos`, 3 archivos,
+1 224 989 B, 0,4-0,6 s): 81 documentos crudos, entrena 76 (1 196 092 B, 74 de
+ellos diálogos), valida 2, prueba 3 (solo diálogos: el texto son 2 documentos y
+el reparto 98/1/1 los deja en entrenamiento, como se esperaba); **22 537
+composiciones NFC** (1145 + 21 392, exactamente las marcas de los dos
+archivos), 0 marcas sin componer. `verificar.py`: los dos documentos de texto
+coinciden byte a byte con limpieza + `unicodedata` NFC de Python, y los 79
+diálogos con la conversión de Python. Límite: no se compone con U+030C (caron)
+ni otras marcas fuera de la lista: `a` + U+030C lo compone Python (`ǎ`) y aquí
+queda descompuesta y contada.
+
 ### Qué falta
 
 - El corpus del usuario (Wikipedia en español, libros de dominio público,
@@ -2205,3 +2287,38 @@ limpieza, letras, hash, CRC, frecuencias). Cada sentencia por byte cuesta
   carpetas ni crear directorios en ELE (los hace el `.ps1`).
 - Con muy pocos documentos la división 98/1/1 deja particiones vacías: sale
   un índice válido con 0 documentos, pero el kernel no lo aceptaría.
+
+### Corpus de la Fase 4 (preparado el 2026-11-27)
+Entrada (C:\Users\Usuario\Desktop\corpus, no se versiona):
+- Wikisource exportado de la caché del corpus español: narrativa 152,2 MB
+  (2196 archivos), teatro 29,3 MB (363), poesía 13,6 MB (2431).
+- Wikipedia: 39,5 MB (21 archivos de 100 artículos).
+- Del usuario: el Quijote II (1,1 MB), Bodas de sangre (69 KB) y 79
+  diálogos en JSONL. Los dos textos del usuario venían con los acentos
+  descompuestos (NFD); se compusieron 22 537 caracteres.
+```
+lista: 5014 archivos, 225,0 MB
+preparar: archivos 5014 (ilegibles 0), bytes leidos 235946577, documentos crudos 16956
+preparar: entrena 16595 docs 230938650 B crc FC22D151
+preparar: valida 175 docs 2245451 B crc B4111DE8
+preparar: prueba 157 docs 1974874 B crc BAC8C715
+preparar: descartes cortos 1 basura 1 letras 0 mojibake 0 exactos 0 casi 27
+preparar: conversiones ... nfc 22537 marcas-sin-componer 46
+preparar: jsonl ... conversaciones leidas 79 convertidas 79 ... turnos TU 79 ENCA 79
+tiempo: 34,10 s; 6,60 MB/s de entrada
+verificar.py: RESULTADO: CORRECTO (0 de 16770 documentos fuera de NFC)
+```
+- Diálogos por partición: 72 en entrenamiento, 6 en validación y 1 en
+  prueba. El reparto por hash con 79 documentos no da exactamente 90/5/5.
+- Caracteres más frecuentes: espacio 16,16 %, e 9,82 %, a 9,40 %,
+  o 6,78 %, s 5,74 %, n 5,15 %, r 5,02 %. La tabla completa está en
+  ESTADISTICAS.md.
+
+Referencias sobre valida.bin (2 245 451 B):
+
+| compresor | bytes | bits/byte |
+|---|---|---|
+| gzip -9 -n (línea de órdenes) | 880 432 | 3,137 |
+| xz -9 (línea de órdenes) | 715 520 | 2,549 |
+
+Python (referencia_compresion.py) da gzip 3,142 y xz 2,549.

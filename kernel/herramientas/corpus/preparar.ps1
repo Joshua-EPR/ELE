@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Prepara el corpus de la Fase 4 (hito 23): lista los *.txt, compila preparar.l
+  Prepara el corpus de la Fase 4 (hito 23): lista los *.txt y *.jsonl, compila preparar.l
   con el compilador autónomo de ELE y lo ejecuta.
 
 .DESCRIPTION
@@ -10,6 +10,8 @@
 
   La carpeta de entrada cuyo camino contiene un segmento "dialogos" (sin
   distinguir mayúsculas) marca sus archivos como DIALOGO; el resto es TEXTO.
+  Un .jsonl es una conversación por línea (formatos messages, conversations o
+  prompt/response); se convierte a turnos "TÚ: ..." / "ENCA: ...".
 
 .EXAMPLE
   .\preparar.ps1 -Entrada D:\corpus\wikipedia,D:\corpus\libros,D:\corpus\dialogos -Salida D:\corpus\salida
@@ -19,6 +21,7 @@
 
   Opciones: --min --min-dialogo --basura(por mil) --letras(%) --similitud(%)
   --mojibake(0|1) --semilla --prueba(%) --valida(%) --max-doc --max-docs
+  --dialogo-reparto=90,5,5 (entrena,valida,prueba de los diálogos)
 #>
 param(
     [Parameter(Mandatory = $true)][string[]]$Entrada,
@@ -45,7 +48,7 @@ foreach ($carpeta in $Entrada) {
     $raiz = (Resolve-Path $carpeta).Path.TrimEnd('\')
     $hoja = Split-Path -Leaf $raiz
     $rels = New-Object System.Collections.Generic.List[string]
-    Get-ChildItem -LiteralPath $raiz -Recurse -File -Filter '*.txt' | ForEach-Object {
+    Get-ChildItem -LiteralPath $raiz -Recurse -File | Where-Object { $_.Extension -ieq '.txt' -or $_.Extension -ieq '.jsonl' } | ForEach-Object {
         $rels.Add($_.FullName.Substring($raiz.Length + 1).Replace('\', '/'))
     }
     $arr = $rels.ToArray()
@@ -59,7 +62,7 @@ foreach ($carpeta in $Entrada) {
         $lineas.Add("$tipo`t$abs`t$hoja/$rel")
     }
 }
-if ($lineas.Count -eq 0) { throw 'no hay archivos .txt en las carpetas de entrada' }
+if ($lineas.Count -eq 0) { throw 'no hay archivos .txt ni .jsonl en las carpetas de entrada' }
 $lista = Join-Path $Salida '_lista.txt'
 [System.IO.File]::WriteAllText($lista, (($lineas -join "`n") + "`n"), $utf8)
 Write-Host ("lista: {0} archivos, {1:N1} MB -> {2}" -f $lineas.Count, ($bytesEntrada / 1MB), $lista)
