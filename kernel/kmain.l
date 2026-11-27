@@ -44,6 +44,13 @@ flow kmain() {
     arranqueCopiar()
     consolaIniciar()
     kprintln(cadena("ELE kernel OK"))
+    // Línea de órdenes de Limine (opciones de arranque, p. ej. enca=nuevo).
+    kprint(cadena("línea de órdenes: "))
+    when leer64(arranqueLinea()) == 0 {
+        kprintln(cadena("(vacía)"))
+    } otherwise {
+        kprintln(arranqueLinea())
+    }
 
     // Hito 2: framebuffer, fuente 8x16 y kprint.
     when !arranqueRevisionAceptada() {

@@ -20,6 +20,7 @@ take enca.rapido
 take enca.estado
 take almacenamiento.checkpoint
 take cpu.buzon
+take arranque.limine
 
 fixed ARCHIVOS = 18
 fixed ENTRENAMIENTO = 11
@@ -771,7 +772,15 @@ expose flow encaHito17() => Int {
     kprintByte(10)
     // Hito 17b: si hay un estado válido en ENCA_A.BIN / ENCA_B.BIN se carga
     // en vez de entrenar.
-    hold cargado = encaIntentarCargar()
+    // Opción de arranque enca=nuevo: se ignoran las ranuras (sin tocarlas),
+    // se entrena desde cero y no se guarda (medición de velocidad).
+    hold nuevo = arranqueOpcionEs(cadena("enca"), cadena("nuevo"))
+    change cargado = 0
+    when nuevo {
+        kprintln(cadena("estado ENCA: opción enca=nuevo, se ignoran ENCA_A.BIN/ENCA_B.BIN (no se tocan)"))
+    } otherwise {
+        cargado = encaIntentarCargar()
+    }
     when cargado == 1 { give 1 }
     when cargado == 2 { give 0 }
     hold vlnOk = vlnMedir(1048576)
@@ -839,6 +848,18 @@ expose flow encaHito17() => Int {
     kprintByte(10)
     hold limite = 0.001
     hold bien = absF(dA) < limite && absF(dB) < limite && tR < tE && vlnOk
+    when bien && nuevo {
+        // Mismos bits que el entrenamiento rápido normal (mezcla A y B).
+        hold igualA = exactoM(lf(ra)) == 5885276722394095 && exactoE(lf(ra)) == -52
+        hold igualB = exactoM(lf(ra + 32)) == 6230748540601682 && exactoE(lf(ra + 32)) == -51
+        when igualA && igualB {
+            kprintln(cadena("enca=nuevo: bits/byte idénticos al entrenamiento rápido normal (A 5885276722394095*2^-52, B 6230748540601682*2^-51)"))
+        } otherwise {
+            kprintln(cadena("enca=nuevo: AVISO bits/byte DISTINTOS de los del entrenamiento rápido normal"))
+        }
+        kprintln(cadena("no se guarda: medición"))
+        give 1
+    }
     when bien {
         // Hito 17b: guarda el estado entrenado (paso 1, o el siguiente al
         // de un estado incompatible que hubiera en disco).
