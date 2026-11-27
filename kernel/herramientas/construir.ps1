@@ -52,6 +52,12 @@ param(
     # compilador de ELE (compiler-l\src) en ele/{entrena,prueba,indice}.bin del
     # disco de datos y de la imagen USB. Ver herramientas\crear_corpus_ele.py.
     [switch]$CorpusEle,
+    # Tercer corpus (enca=hablar): carpeta con entrena.bin, prueba.bin e
+    # indice.bin del corpus en español (corpus_es\completo o corpus_es\desarrollo;
+    # ver crear_corpus_es.py). Se copia a es/ del disco de datos y de la imagen
+    # USB. Con -CorpusEs el disco de prueba pasa a 2 GiB (el estado del hablante
+    # son ~570 MB por ranura) y la imagen USB a 128 MiB.
+    [string]$CorpusEs = "",
     # Línea de órdenes del kernel (opciones "clave=valor") para la entrada
     # por defecto del menú, p. ej. -Opciones "enca=nuevo". Sin ella, igual
     # que antes (la entrada del menú sin opciones).
@@ -116,7 +122,13 @@ if ($Imagen) {
     $extra = @()
     if ($Enca) { $extra += @("--enca", $Enca) }
     if ($CorpusEle) { $extra += @("--ele", $fuenteEle) }
-    python (Join-Path $herramientas "crear_imagen.py") @extra $esp $img
+    $mibImagen = 64
+    if ($CorpusEs) {
+        if (-not (Test-Path (Join-Path $CorpusEs "indice.bin"))) { Fallar "no existe $CorpusEs\indice.bin" }
+        $extra += @("--es", $CorpusEs)
+        $mibImagen = 128
+    }
+    python (Join-Path $herramientas "crear_imagen.py") @extra $esp $img $mibImagen
     if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear la imagen" }
     $disco = "format=raw,file=`"$img`""
 }
@@ -137,7 +149,13 @@ if ($DiscoDatos) {
         $extra = @()
         if ($Enca) { $extra += @("--enca", $Enca) }
         if ($CorpusEle) { $extra += @("--ele", $fuenteEle) }
-        python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512 @extra
+        $mibDatos = 512
+        if ($CorpusEs) {
+            if (-not (Test-Path (Join-Path $CorpusEs "indice.bin"))) { Fallar "no existe $CorpusEs\indice.bin" }
+            $extra += @("--es", $CorpusEs)
+            $mibDatos = 2048
+        }
+        python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos $mibDatos @extra
         if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
     }
     $argumentos += @("-drive", "file=`"$DiscoDatos`",format=raw,if=none,id=datos", "-device", "ide-hd,drive=datos,bus=ide.1")

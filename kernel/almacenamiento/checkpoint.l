@@ -33,12 +33,14 @@ fixed VERSION_ANTIGUA = 1             // CRC32 (solo lectura)
 
 expose fixed CKPT_PRUEBA = 0
 expose fixed CKPT_ENCA = 1
+// Juego 2: HABLA_A.BIN y HABLA_B.BIN, el modelo hablante (español, ~570 MB por ranura).
+expose fixed CKPT_HABLA = 2
 
 // Estado de cada juego (48 bytes): +0 capacidad de datos, +8 cabecera
 // (512 bytes, del montón), +16 ranura de la última carga (0 A, 1 B, -1
 // ninguna), +24 paso cargado, +32 ranura de la última escritura, +40 versión
 // del formato de la última ranura cargada.
-flow estados() => Int { give reservar(96, 8) }
+flow estados() => Int { give reservar(144, 8) }
 flow estado(juego: Int) => Int { give estados() + juego * 48 }
 
 // Medidas de la última operación (64 bytes), en ciclos de TSC:
@@ -116,6 +118,10 @@ expose flow ckptRanuraCargada(juego: Int) => Int { give leer64(estado(juego) + 1
 expose flow ckptPasoCargado(juego: Int) => Int { give leer64(estado(juego) + 24) }
 
 flow abrirRanura(juego: Int, ranura: Int) => Bool {
+    when juego == CKPT_HABLA {
+        when ranura == 0 { give fatAbrir(cadena("HABLA_A.BIN")) }
+        give fatAbrir(cadena("HABLA_B.BIN"))
+    }
     when juego == CKPT_ENCA {
         when ranura == 0 { give fatAbrir(cadena("ENCA_A.BIN")) }
         give fatAbrir(cadena("ENCA_B.BIN"))
@@ -140,7 +146,10 @@ expose flow ckptPreparar(juego: Int, capacidad: Int) => Bool {
     hold bytes = leer64(estado(juego)) + 512
     change a = false
     change b = false
-    when juego == CKPT_ENCA {
+    when juego == CKPT_HABLA {
+        a = fatCrear(cadena("HABLA_A BIN"), cadena("HABLA_A.BIN"), bytes)
+        b = fatCrear(cadena("HABLA_B BIN"), cadena("HABLA_B.BIN"), bytes)
+    } otherwise when juego == CKPT_ENCA {
         a = fatCrear(cadena("ENCA_A  BIN"), cadena("ENCA_A.BIN"), bytes)
         b = fatCrear(cadena("ENCA_B  BIN"), cadena("ENCA_B.BIN"), bytes)
     } otherwise {

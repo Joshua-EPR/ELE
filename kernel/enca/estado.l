@@ -47,7 +47,9 @@ fixed VERSION_ENCA = 2
 fixed VERSION_ENCA_ANTIGUA = 1
 fixed CAB_PALABRAS = 32
 
-// Configuración de ENCA C5 (la que crea modeloCrear).
+// Configuración de ENCA C5 (la que crea modeloCrear). Las ranuras por orden
+// del hipocampo son 65536 (el modelo de código) o las que se fije con
+// encaFijarRanurasEstado (el modelo hablante: 524288); el resto es fijo.
 expose fixed ENCA_RANURAS = 65536
 expose fixed ENCA_ORDENES = 5
 expose fixed ENCA_ANCHO = 12
@@ -63,9 +65,18 @@ expose fixed ENCA_CAB_METRICAS = 14
 expose fixed ENCA_CAB_BYTES = 12
 expose fixed ENCA_CAB_ENTRENADOS = 13
 
+// Ranuras por orden del estado que se serializa o se lee ahora (0 = el valor
+// por defecto, ENCA_RANURAS).
+flow ranurasActuales() => Int { give reservar(8, 8) }
+expose flow encaFijarRanurasEstado(s: Int) { escribir64(ranurasActuales(), s) }
+expose flow encaRanurasEstado() => Int {
+    when leer64(ranurasActuales()) == 0 { give ENCA_RANURAS }
+    give leer64(ranurasActuales())
+}
+
 // Tamaño en bytes del estado de la configuración C5 en la versión `version`.
 flow tamEstadoVersion(version: Int) => Int {
-    hold ts = ENCA_ORDENES * ENCA_RANURAS
+    hold ts = ENCA_ORDENES * encaRanurasEstado()
     hold te = ts * ENCA_ANCHO
     hold modelo = 5
     hold ventana = 2 + ENCA_VENTANA
@@ -204,7 +215,7 @@ expose flow encaSerializar(m: Int, buf: Int, entrenados: Int) => Int {
 expose flow encaCabeceraCompatible(buf: Int) => Bool {
     hold version = leer64(buf + 8)
     when leer64(buf) != MAGIA_ENCA || (version != VERSION_ENCA && version != VERSION_ENCA_ANTIGUA) { give false }
-    when leer64(buf + 16) != ENCA_RANURAS || leer64(buf + 24) != ENCA_ORDENES { give false }
+    when leer64(buf + 16) != encaRanurasEstado() || leer64(buf + 24) != ENCA_ORDENES { give false }
     when leer64(buf + 32) != ENCA_ANCHO || leer64(buf + 40) != ENCA_VENTANA { give false }
     when leer64(buf + 48) != ENCA_N || leer64(buf + 56) != ENCA_K { give false }
     when leer64(buf + 64) != ENCA_SEMILLA || leer64(buf + 72) != 1 { give false }

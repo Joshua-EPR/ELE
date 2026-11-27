@@ -120,3 +120,29 @@ expose flow encaCompletar(m: Int, prefijo: Int, n: Int) {
     }
     kprintln(cadena("]"))
 }
+
+// Accesos para la conversación (enca/hablar.l): mostrar bytes UTF-8 generados,
+// con el salto de línea (10) como salto real, y cerrar un carácter incompleto.
+expose flow encaPantallaReiniciar() {
+    hold d = decodificador()
+    escribir64(d, 0)
+    escribir64(d + 8, 0)
+}
+
+expose flow encaMostrarByte(b: Int) {
+    when b == 10 {
+        hold d = decodificador()
+        when leer64(d + 8) != 0 {
+            kprintByte(63)
+            escribir64(d + 8, 0)
+        }
+        kprintByte(10)
+        give
+    }
+    mostrarByte(b)
+}
+
+expose flow encaPantallaTerminar() {
+    when leer64(decodificador() + 8) != 0 { kprintByte(63) }
+    encaPantallaReiniciar()
+}

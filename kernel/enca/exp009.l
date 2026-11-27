@@ -598,14 +598,47 @@ flow filaVelocidad(nombre: Int, exacto: Int, rapido: Int) {
 // +8 paso del último estado válido encontrado en disco (0 si no había),
 // +16 evaluación silenciosa (1: evaluarAB no imprime), +24 bytes de corpus
 // entrenados del estado vivo (van en la cabecera de los estados que se guarden).
-flow vivo() => Int { give reservar(32, 8) }
+// Modelo hablante (español, enca/espanol.l): +32 el modelo (0 si no hay),
+// +40 perfil activo (0 código, 1 español), +48 bytes entrenados del hablante,
+// +56 ranuras por orden del hablante.
+flow vivo() => Int { give reservar(64, 8) }
 flow evalSilenciosa() => Bool { give leer64(vivo() + 16) == 1 }
 
 // Modelo rápido en memoria, o 0 si ENCA no está disponible.
 expose flow encaModelo() => Int { give leer64(vivo()) }
 
-// Bytes de corpus entrenados del estado vivo (palabra 13 de la cabecera).
-expose flow encaEntrenados() => Int { give leer64(vivo() + 24) }
+// Bytes de corpus entrenados del estado activo (palabra 13 de la cabecera).
+expose flow encaEntrenados() => Int {
+    when leer64(vivo() + 40) == 1 { give leer64(vivo() + 48) }
+    give leer64(vivo() + 24)
+}
+
+// ---- modelo hablante y perfil activo ---------------------------------------
+// Hay dos modelos vivos a la vez: el de código (hito 17, 65536 ranuras) y el
+// hablante (524288). El "perfil" dice cuál usan ENCA>, :guardar y :deshacer:
+// su modelo, su juego de ranuras en disco y las ranuras del formato del estado.
+expose flow encaHablante() => Int { give leer64(vivo() + 32) }
+expose flow encaFijarHablante(m: Int, ranuras: Int, entrenados: Int) {
+    escribir64(vivo() + 32, m)
+    escribir64(vivo() + 56, ranuras)
+    escribir64(vivo() + 48, entrenados)
+}
+expose flow encaPerfil() => Int { give leer64(vivo() + 40) }
+// Fija el perfil activo y las ranuras que entiende estado.l (código: las de
+// siempre; hablante: las suyas).
+expose flow encaFijarPerfil(p: Int) {
+    escribir64(vivo() + 40, p)
+    when p == 1 { encaFijarRanurasEstado(leer64(vivo() + 56)) } otherwise { encaFijarRanurasEstado(0) }
+}
+// Modelo del perfil activo (el del hablante solo si se eligió y existe).
+expose flow encaActivo() => Int {
+    when leer64(vivo() + 40) == 1 && leer64(vivo() + 32) != 0 { give leer64(vivo() + 32) }
+    give leer64(vivo())
+}
+expose flow encaJuego() => Int {
+    when leer64(vivo() + 40) == 1 { give CKPT_HABLA }
+    give CKPT_ENCA
+}
 
 // Evalúa las pruebas A y B congeladas (como el hito 17, con autocompletado)
 // sin imprimir; deja las métricas en encaResultado(1).

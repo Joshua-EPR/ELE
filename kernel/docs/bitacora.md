@@ -1704,3 +1704,260 @@ S=4194304 no cabe (necesita 4324 MiB, libres 3783 MiB)
   (542 MiB). De ahí a 2097152 la RAM se multiplica por 4 y C solo baja de
   1,927 a 1,908. Aprovechar hipocampos más grandes requiere más texto de
   entrenamiento.
+
+## ENCA aprende español (2026-11-27)
+
+Archivos: `enca/espanol.l` (nuevo: corpus, evaluación, entrenamiento, guardar y cargar),
+`enca/hablar.l` (nuevo: arranque, conversación, comandos), `enca/aprender.l`,
+`enca/exp009.l`, `enca/estado.l`, `enca/interactivo.l`, `almacenamiento/checkpoint.l`,
+`kmain.l`, `herramientas/{construir.ps1,crear_imagen.py,crear_disco_prueba.py,limine.conf}`.
+No se tocó el compilador ni el modelo de ENCA (`modelo.l`, `rapido.l`, ...).
+
+### Corpus (paso A, `herramientas/crear_corpus_es.py`; no se versiona)
+- Español: Wikisource (teatro con turnos, narrativa, poesía; dominio público) y Wikipedia en
+  español (CC BY-SA 4.0), volcados de dumps.wikimedia.org del 1/2-nov-2026. Atribución:
+  Wikipedia en español (CC BY-SA 4.0) y Wikisource en español.
+- Mismo formato que el corpus ELE (`entrena.bin`, `prueba.bin`, `indice.bin` con cabecera
+  `ELEIDX01` y CRC32C), en `es/` de la partición de datos. El kernel verifica cabecera, tabla
+  y los dos CRC32C antes de usarlo.
+
+| juego | entrena | documentos | prueba | documentos |
+|---|---:|---:|---:|---:|
+| completo | 30 617 629 B | 2041 | 1 092 883 B | 90 |
+| desarrollo | 2 686 710 B | 182 | 1 092 883 B | 90 |
+
+La prueba es la misma en los dos y por obra nunca se entrena. Referencia sobre `prueba.bin`
+(bits/byte): gzip -9 3,080; xz -9 2,612; xz condicional al entrenamiento completo 2,238 (al de
+desarrollo, 2,407).
+
+
+### Diseño
+- **Herramientas.** `construir.ps1 -CorpusEs <corpus_es\completo|desarrollo>` copia los tres
+  archivos a `es/` de la FAT32 de datos de prueba y del ESP de la imagen USB. Con `-CorpusEs` el
+  disco de prueba pasa de 512 MiB a **2 GiB** (FAT32 de 1,9 GiB; dos ranuras de 540 MiB más los
+  corpus) y la imagen USB de 64 a **128 MiB**. `crear_disco_prueba.py` ya no arma el disco entero en
+  memoria: `Fat32.volcar` escribe solo las zonas usadas en un archivo marcado como disperso en NTFS
+  (crear el disco de 2 GiB con el corpus completo tarda ~5 s). Sin `-CorpusEs` todo queda como antes
+  (512 MiB, 64 MiB).
+- **Opción de arranque `enca=hablar`** (menú "/ELE kernel (ENCA: aprender español)"), tras todos
+  los hitos y antes de ENCA>:
+  1. carga y verifica `es/` (cabecera del índice, tabla de documentos y CRC32C de entrena y prueba);
+     si falta lo dice y el arranque sigue normal;
+  2. crea un modelo RÁPIDO aparte, el "hablante": C5 con **524288 ranuras por orden** (540 MiB; la
+     memoria se comprueba antes: si no caben el modelo, un búfer del mismo tamaño para guardar y el
+     corpus, se baja a la mayor potencia de 2 que quepa y se avisa); el modelo de código del hito 17
+     (65536 ranuras, 70 MiB) sigue vivo al lado;
+  3. entrena documento a documento (vigilia + 2 sueños, como siempre) con una línea de progreso cada
+     ~1 MB (bytes, %, B/s, tiempo transcurrido y restante);
+  4. evalúa la prueba congelada completa (`prueba.bin`, 1,09 MB) y la imprime por fuente
+     (Wikipedia, teatro, narrativa y poesía) y en total, con gzip y xz al lado. El índice no lleva la
+     fuente de cada documento: `espanol.l` lleva una tabla de 90 caracteres derivada fuera del kernel
+     (teatro y Wikipedia suman exactamente 386 095 B y 451 845 B, las cifras de ESTADISTICAS.md;
+     narrativa y poesía van juntas, 254 943 B) que solo se usa si el CRC32C de `prueba.bin` es el
+     esperado;
+  5. guarda el estado en sus propias ranuras `HABLA_A.BIN` / `HABLA_B.BIN` (`checkpoint.l`, juego
+     `CKPT_HABLA`, formato 2 con CRC32C). Es el estado de ENCA de siempre con 524288 en la cabecera:
+     `estado.l` ya no fija las ranuras en una constante, las lleva un valor que cambia con el perfil
+     (`encaFijarRanurasEstado`); 566 763 280 bytes por ranura;
+  6. muestra 10 ejemplos de conversación con prompts fijos.
+  Sin la opción, si hay `HABLA_A/B.BIN` válidas el arranque normal **carga** el hablante (después del
+  hito 17 y de los de disco): lee la ranura más reciente con su CRC32C, copia el estado al modelo e
+  imprime `modelo hablante cargado: ranura X, paso N, 540 MB en T ms (MB/s)`. La prueba completa
+  (1 MB, ~18 s) no se repite en cada arranque; solo las pruebas congeladas pequeñas de abajo (63 KB,
+  ~1 s) contra las métricas de la cabecera. Si no hay ranuras no se imprime nada y no cambia nada.
+  `enca=charla` carga y muestra los ejemplos; `charla=T,k,pen,ventana` cambia su muestreo (se usó
+  para medir).
+- **Pruebas congeladas del hablante.** La prueba completa tarda ~18 s; `:guardar`, `:deshacer` y la
+  comprobación al cargar usan un subconjunto fijo de `prueba.bin`: los primeros 700 B de cada uno de
+  los 90 documentos (63 000 B, ~1 s); los de índice par son la prueba "A" y los impares la "B". Sus
+  métricas van en la cabecera del estado (mismo formato que A y B de ENCA) y así todo el código de
+  `aprender.l` sirve sin cambios: `:guardar` mide el empeoramiento de B contra la última versión
+  guardada (umbral 0,2 bits/byte, como siempre).
+- **Perfiles.** `exp009.l` guarda dos modelos vivos (código y hablante) y un perfil activo (0 o 1)
+  que decide el modelo, el juego de ranuras, las ranuras del formato del estado y el bloque de estado
+  de `aprender.l` (ranura, paso, umbral, referencias). `:aprender`, `:modoaprender` valen para los dos.
+- **Conversación (ENCA>).** Por defecto, con el hablante cargado, ENCA> conversa. En `entrena.bin` un
+  turno de teatro es `NOMBRE:` + salto de línea + el parlamento (versos en líneas) y una línea en
+  blanco entre turnos; así que la línea X del usuario se vuelve `TÚ:\nX\n\n`, el contexto es el
+  historial de turnos + eso + `ENCA:\n` (no `TÚ: X`, que no se parece a nada del corpus), y se genera
+  con el muestreo del hito 18 hasta `\n\n` o 300 bytes. Con `:aprender si` el turno del usuario (no
+  lo que dice ENCA) se aprende antes como documento nuevo con el paso de vigilia del hito 21. El
+  historial guarda los últimos ~1,5 KB (se descartan los turnos más viejos de dos en dos); cada
+  respuesta reinicia el documento del modelo (`iniciarDocumento`) y vuelve a pasar el historial por
+  la corteza (~60 ms), de modo que el estado del modelo entre líneas no es una corriente continua:
+  la continuidad es el historial. Comandos: `:modelo codigo|espanol`, `:charla si|no`, `:nueva`;
+  `:ver` muestra modelo, charla, historial, ranuras por orden y el estado de ranuras y paso del
+  perfil activo; `:guardar`, `:deshacer` y `:umbral` actúan sobre el modelo activo (para el hablante,
+  `HABLA_A/B.BIN` y las pruebas congeladas de arriba).
+
+
+### Muestreo por defecto del español (medido)
+ENCA> y los ejemplos usan el muestreo del hito 18 (penalización de n-gramas con exponente creciente,
+detector de bucles). Para elegir los valores del español se corrió la misma tanda de los 10 prompts
+fijos (300 bytes cada uno, semilla 1) con el hablante de desarrollo (`enca=charla charla=T,k,pen,ventana`)
+y se midió: bucles (`mzTieneBucle`), palabras generadas que existen en el vocabulario del corpus
+(la palabra aparece 3 veces o más en `entrena.bin` completo; mide qué tan "léxico" es el texto) y
+diversidad (palabras distintas / palabras; trigramas de palabras repetidos entre respuestas):
+
+| T | top-k | pen | ventana | bucles | palabras en vocabulario | diversidad | trigramas repetidos |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0,3 | 5 | 1,5 | 256 | 0/10 | 97,0 % | 0,28 | 35 |
+| 0,4 | 8 | 1,5 | 256 | 0/10 | 95,7 % | 0,36 | 18 |
+| 0,5 | 10 | 2 | 128 | 0/10 | 90,7 % | 0,43 | 4 |
+| **0,5** | **10** | **3** | **256** | 0/10 | **91,8 %** | **0,48** | **3** |
+| 0,6 | 15 | 2 | 128 | 0/10 | 86,7 % | 0,50 | 1 |
+| 0,7 | 20 | 1,5 | 256 | 0/10 | 83,2 % | 0,55 | 0 |
+| 0,8 | 30 | 2 | 128 | 0/10 | 78,1 % | 0,57 | 1 |
+
+Con temperatura baja el texto usa más palabras reales pero cae en el mismo molde ("de la ... de los
+...") en todas las respuestas; con temperatura alta varía, pero inventa palabras. Se eligió
+**T 0,5, top-k 10, penalización 3, ventana 256**, sin parar en `\n` (la respuesta termina en
+`\n\n` o a los 300 bytes). Ninguna tanda tuvo bucles. Los valores son del hablante de desarrollo
+(2,7 MB); no se repitió el barrido con el completo.
+
+
+### Resultados: bits/byte sobre `prueba.bin` (1 092 883 B, congelada; QEMU WHPX, 2 CPU, 2 GiB)
+
+| fuente (documentos, bytes) | desarrollo: mezcla | hipocampo | corteza | top-1 ‰ | completo: mezcla | hipocampo | corteza | top-1 ‰ |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Wikipedia (31, 451 845) | 2,5308 | 3,0432 | 3,7309 | 540 | 2,3847 | 2,8194 | 3,5107 | 560 |
+| teatro (28, 386 095) | 2,8682 | 3,4493 | 4,4392 | 453 | 2,6757 | 3,2648 | 4,2221 | 468 |
+| narrativa y poesía (31, 254 943) | 2,6749 | 3,1085 | 3,9148 | 486 | 2,5133 | 2,9873 | 3,6516 | 504 |
+| **total** | **2,6836** | 3,2019 | 4,0240 | 496 | **2,5175** | 3,0159 | 3,7949 | 514 |
+
+| referencia (total, bits/byte) | |
+|---|---:|
+| gzip -9 | 3,080 |
+| xz -9, solo | 2,612 |
+| xz -9 condicional al entrenamiento de desarrollo | 2,407 |
+| xz -9 condicional al entrenamiento completo | 2,238 |
+| ENCA hablante, desarrollo (2,69 MB) | 2,684 |
+| ENCA hablante, completo (30,6 MB) | 2,518 |
+
+ENCA gana a gzip por 0,40 (desarrollo) y 0,56 (completo) bits/byte y, con el corpus completo, a
+xz -9 solo por 0,09; no llega a xz condicional al mismo entrenamiento (2,238; +0,28). Con
+desarrollo no alcanza ni a xz solo. La mezcla mejora al hipocampo solo en 0,5 bits/byte: la
+corteza (3,79) aporta poco por sí sola. Pruebas congeladas pequeñas (63 000 B, para `:guardar`):
+desarrollo A 2,7412 / B 2,7266; completo A 2,5465 / B 2,5771.
+
+### Velocidad y tiempos (QEMU WHPX, 2 CPU)
+| | desarrollo | completo |
+|---|---:|---:|
+| entrenar | 2 min 29 s, 17 948 B/s | 29 min 21 s, 17 376 B/s (vigilia 43 876 B/s, sueño 57 674 B/s) |
+| crear el modelo (540 MiB) | 2,5 s | 2,8 s |
+| prueba completa | 18,6 s (58 872 B/s) | 19,8 s (55 149 B/s) |
+| crear HABLA_A/B.BIN (2 x 540 MiB) | 25,8 s | 25,3 s |
+| guardar 566 763 280 B | 2,7 s = 209 MB/s (serializar 0,37 s, CRC32C 0,30 s, E/S 2,1 s) | 2,6 s = 214 MB/s (serializar 1,2 s) |
+| cargar (lectura + CRC32C) | 3,8-5,9 s = 97-150 MB/s | 3,8 s = 150 MB/s |
+| copiar al modelo | 0,4-0,6 s | 0,5 s |
+| comprobar pruebas congeladas al cargar | 1,1-2,6 s, idéntica | 1,7 s, idéntica |
+| tiempo total de `enca=hablar` | 3 min 24 s | 30 min 18 s |
+Sobrescrituras del hipocampo: 386 877 (desarrollo) y 5 981 839 (completo); desalojos 0,86 M y 9,8 M.
+Con 524288 ranuras por orden el hipocampo se satura con 30 MB (a diferencia de los 1,3 MB del barrido
+de ranuras). `:guardar` (hablante): evaluación 1,4 s + serializar 0,4 s + escribir 2,7 s; `:deshacer`:
+leer 4,4-4,9 s + evaluar 1,4 s (+ reescribir 2,9 s sin cambios pendientes). Generación: ~0,07 ms/byte
+(300 bytes en ~20 ms); aprender una línea tecleada, ms.
+
+### Ejemplos de conversación (los 10 prompts fijos; muestreo T 0,5, top-k 10, pen 3, ventana 256; contexto nuevo en cada uno, sin aprender; respuestas recortadas a ~300 bytes)
+**Hablante completo** (`bucles 0/10`; 85 % de las palabras en vocabulario, diversidad 0,55):
+```
+[1] TÚ: Hola, ¿cómo estás?     ENCA: ¿Para de la a más alta estradas de antes preta el del compa el camino de un símites tareas a la editas...
+[2] TÚ: ¿Quién eres?            ENCA: Las malidad de rodeos de la Seguridad.
+[3] TÚ: ¿Qué hora es?           ENCA: ¿Ha del sus ateridioma estas ha cantidad de lástros vida eso, se conocido combargo, disidentra el filón y la invernaciones de mana cuerdo con ellos.
+[4] TÚ: Cuéntame una historia.  ENCA: Las compasión explícita otras la destaca la tente en el cama con la estrellase a prevarmente de las recelancase maldición, por las tosistema en 1628...
+[5] TÚ: ¿Dónde está el rey?     ENCA: ¿Para de la acción de mayo de palmera discurso del cual se mirar a mano describe que toca en el bach diamantes...
+[6] TÚ: Te quiero.              ENCA: ¿Para ser una tintinados del tres meso de la inflexión de ejecutar de su mariscos.
+[7] TÚ: ¿Qué es la memoria?     ENCA: Las compasión y a versión sur el presentan extravado en un trata de esta parando partir del discurio de los persistas precio a su han igual que lumias...
+[8] TÚ: Háblame de España.      ENCA: Si la siguiente, entre los perio de la convertísica de los durante en el budistas y despirar por ener el contemplar tus bien de lo palmetantes condición...
+[9] TÚ: ¿Por qué lloras?        ENCA: Las del mundo publicado en la alcanza y la cielo disimulara líritualizar a la con concreación de exportante es son incluyen el boddico principaletes...
+[10] TÚ: Adiós.                 ENCA: Si la superficies sacrificio de comunidad de la es escala de cuenta de esta privada por lo que al poema de miraban entre con distintivo; no hay en 1759.7...
+```
+**Hablante de desarrollo** (`0/10`; 92 % en vocabulario, diversidad 0,48):
+```
+[1] TÚ: Hola, ¿cómo estás?     ENCA: Señor forma en que es el más de los elementos especie corporación de la consecuencias como de parecido a la elección no se le comercio de nodos...
+[2] TÚ: ¿Quién eres?            ENCA: Elementos con cincorporación como el de los ejemplo, sin de El contrario de notipos de una complejaras del caso...
+[3] TÚ: ¿Qué hora es?           ENCA: Señor Antonio,\nhonantheae
+[4] TÚ: Cuéntame una historia.  ENCA: Escena al con lo que se puede ser un elementos, si el arconte; o con el conjunto de no a dicho, estrucción de un conocidos en los difícil...
+[5] TÚ: ¿Dónde está el rey?     ENCA: Sientes en la estructura de los actual con el orden encontrarán como a los conocida dentenios. En los de nodos complejos...
+[6] TÚ: Te quiero.              ENCA: Poco desarrollo hacia articulares y el conjuntar la del canto! (Siguientes a las propios y a dos comentar...
+[7] TÚ: ¿Qué es la memoria?     ENCA: Ello antes contestir con el arcos como el proporción en el cloroplasta el de la extransmisión de enero de conductores...
+[8] TÚ: Háblame de España.      ENCA: Elamente con el acto de no se le contexto del barre la propiera escriben considerar la sal pueblo de compara serie designios en la ciento.
+[9] TÚ: ¿Por qué lloras?        ENCA: Ello ante el polite en el más arcanos como las propiedades cuando en tienen una cosa estrella partido de la comunican el carácter corte de los protomay ciero...
+[10] TÚ: Adiós.                 ENCA: Seatrona de la necen a la productos como el completa el presignios en la considerarse parte del cartesiana de cuanto ha sostener un marco de elección.
+```
+(Los textos completos están en la salida serie de cada corrida; aquí se acortan.)
+
+### Prueba con teclas (arranque sin opción, estado completo, `-EsperarAntes "ENCA> " -Teclas ...`)
+```
+modelo hablante cargado: ranura A, paso 1, 540 MB en 3770 ms = 150.3 MB/s (lectura y CRC32C); copia al modelo 508 ms; ...
+  evaluación de las pruebas congeladas en 1687 ms: idéntica a la guardada en la cabecera
+ENCA> hola, que tal
+  aprendido: 20 bytes, 4,462 bits/byte  [sin guardar 20 bytes]
+ENCA: Las de esta candelas condicionada a la con la guarto de la eso se despreciar las referio primer a la astrología...
+ENCA> que es la memoria
+  aprendido: 24 bytes, 2,576 bits/byte  [sin guardar 44 bytes]
+ENCA: A se como consejeranzas de los son los con en 1954. Allen el Estado de esta conecta entonados...
+ENCA> :ver
+  modo: muestreo / temp 0,500  topk 10  topp 1,000  pen 3,000  ventana 256  semilla 1  linea no
+  aprender si  modo d  umbral 0,2000 bits/byte  sin guardar 44 bytes  ranura A paso 1  B guardada 2,5771 bits/byte
+  modelo español (hablante)  charla si  historial 660 bytes, 2 turnos dichos  ranuras por orden 524288
+```
+Con el estado de desarrollo se probó además `:guardar` (delta B +0,0014, guardado paso 2 en B a 210 MB/s),
+`:deshacer` sin cambios (vuelve a A, reescribe como paso 3 en B), un segundo `:deshacer` ("no hay a dónde
+volver"), `:deshacer` con cambios (recarga B paso 3, evaluación idéntica), `:modelo codigo` (completa
+`flow main` con el modelo de código), `:modelo espanol`, `:charla no` (completa el prefijo con el
+español) y `:nueva`. Hitos 2-21 sin la opción: OK (el 11 falló una vez por ruido del anfitrión y pasó
+en otra corrida); `enca=prueba21` OK con los mismos bits de F que antes (0x3FDCAB7AA734D6A2); sin
+`es/` ni `HABLA_*` el arranque no imprime nada nuevo.
+
+### Valoración honesta: ¿habla?
+**La forma sí; el sentido no.** El texto es castellano reconocible a nivel de caracteres y de
+palabras: ortografía y acentos correctos, entre 85 % y 92 % de las palabras generadas existen en el
+corpus, con artículos, preposiciones, comas y mayúsculas tras punto donde corresponde, y sin bucles
+(0/10 en todas las tandas). Pero:
+- ninguna respuesta tiene sintaxis de oración completa ni relación con la pregunta (a "¿Quién eres?"
+  o "Te quiero." responde con el mismo tipo de pasta léxica); el aviso es que el prompt solo
+  condiciona unos pocos bytes;
+- el registro es el de Wikipedia (mitad del corpus): "conjunto", "nodos", "elemento", "budistas";
+  del teatro solo salen restos ("Señor Antonio,");
+- inventa palabras mezclando contextos ("comparacteriza", "estrellase", "líritualizar");
+- el formato `TÚ:` / `ENCA:` no existe en el entrenamiento, así que casi nunca cierra el turno con
+  `\n\n` (la mayoría de respuestas llega al corte de 300 bytes);
+- el entrenamiento con 11 veces más texto bajó el total de 2,68 a 2,52 bits/byte (la diferencia
+  entre palabras casi bien y palabras más largas y variadas), no cambió la falta de significado: un
+  modelo de bytes con contextos de hasta 6 bytes y una corteza de 512 unidades no representa
+  significado ni diálogo. Que supere a gzip y a xz solo en bits/byte lo dice como compresor, no como
+  conversador.
+- Aprender la línea del usuario (hito 21) no cambia las respuestas de forma visible: cuesta 3 ms, pero
+  una frase entre 30 MB de texto no pesa.
+
+### Lo que no se pudo hacer / pendiente
+- No se midió en el portátil (la imagen USB con `-CorpusEs` completo se construye, 128 MiB; en el
+  portátil hay que copiar `es/` a la partición ELEDATOS, que necesita ~1,4 GB libres, y la
+  velocidad esperada es ~12,7 KB/s: ~40 min de entrenamiento y ~70 MB/s de disco).
+- El muestreo se calibró solo con el hablante de desarrollo; no se repitió con el completo (cuyo
+  vocabulario es más variado: 85 % frente a 92 %).
+- La clasificación por fuente separa teatro y Wikipedia exactamente, pero narrativa y poesía van
+  juntas (el índice no las distingue y la tabla no pudo ser única).
+- Los ejemplos corren cada uno con contexto nuevo; las conversaciones largas con historial solo se
+  probaron con dos turnos.
+
+Verificación del líder (QEMU, disco con el estado completo, arranque normal y
+tecleando "hola, que tal"):
+```
+modelo hablante cargado: ranura A, paso 1, 540 MB en 4298 ms = 131.8 MB/s (lectura y CRC32C); copia al modelo 416 ms; 524288 ranuras por orden, 30617629 B de corpus entrenados
+  evaluación de las pruebas congeladas en 1323 ms: idéntica a la guardada en la cabecera
+ENCA> hola, que tal
+  aprendido: 20 bytes, 4,462 bits/byte  [sin guardar 20 bytes]
+ENCA: Las de esta candelas condicionada a la con la guarto de la eso se despreciar las referio primer a la astrología sobre el cara de prueve indican dirigían a los poder de allí, ...
+  [300 bytes, cortada a 300 en 20 ms]
+```
+Confirma la valoración: forma castellana (ortografía, palabras reales,
+concordancias locales), sin sentido ni relación con la pregunta.
+
+Un modelo de contextos de hasta 6 bytes no puede sostener una frase: ve
+media palabra hacia atrás. Mejoras posibles, de menor a mayor alcance:
+- contextos de palabra (órdenes por palabras, no por bytes);
+- datos en formato de diálogo de dos voces;
+- y para tener sentido, un modelo con memoria larga (la línea del
+  transformer, en pausa).
