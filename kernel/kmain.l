@@ -105,6 +105,7 @@ flow kmain() {
     hito21()
     hitoCrc32c()
     hitoDiscoCrudo()
+    encaRanurasResumen()
     hito7()
 
     during true {

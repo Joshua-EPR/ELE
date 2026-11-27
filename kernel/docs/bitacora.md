@@ -1574,6 +1574,16 @@ verifica todo y lo imprime; `iniciarDocumento` por archivo. Se prepara con
 `construir.ps1 -CorpusEle` (disco de datos y ESP de la imagen USB). Si falta, el
 barrido hace solo la parte ENCA y lo dice.
 
+### Resumen y RANURAS.LOG (portátil sin serie ni desplazamiento)
+- El barrido guarda sus resultados en memoria (`sumi`/`meta`, búferes de 8 y 32 KiB) y al terminar escribe
+  `RANURAS.LOG` en la raíz de la FAT32 (patrón de `ENTRENA.LOG`: `fatCrear` con 32 KiB, sectores de 512 B,
+  `fatCrear` con el tamaño real y `discoVaciar`); sin FAT32 lo dice y sigue. Contiene el resumen y las dos tablas.
+- `encaRanurasResumen()` (kmain, tras `hitoDiscoCrudo`, antes de `ENCA>`) reimprime el resumen compacto: título,
+  memoria libre inicial, CRC32C del corpus ELE, una línea por S (RAM, B/s ELE, bits/byte A, B, C, sobrescrituras
+  ELE; ~86 columnas) y la línea "S no cabe (necesita X MiB, libres Y MiB)". Sin `enca=ranuras` no hace nada.
+- QEMU 2 GiB: `ranuras:65536,4194304` da la fila de 65536 y "no cabe (necesita 4324 MiB, libres 2027 MiB)";
+  `ranuras:65536,131072` guarda 1261 B. Los números de la fila coinciden con la tabla de abajo.
+
 ### Resultados (QEMU WHPX, 2 CPU, 3 GiB; 1 corrida por S, mismo kernel)
 Corpus ENCA, bits/byte (mezcla / hipocampo), top-1 por mil:
 
