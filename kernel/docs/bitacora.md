@@ -2028,3 +2028,180 @@ teclado: estado 8042 0x2C
   leía un 0x60 sin dato. Si ese byte viejo era un prefijo E0, una tecla
   muerta o un modificador, el traductor quedaba atascado. Pendiente
   confirmarlo con una imagen hlt + lectura comprobada.
+
+# Fase 4
+
+## Fase 4 — Hito 23: herramienta de corpus y protocolo de evaluación (2026-11-27)
+
+Archivos nuevos, todos en `kernel/herramientas/corpus/` (no se toca el
+compilador ni el kernel): `preparar.l` (programa y opciones), `util.l`
+(CRC32C, hashes, buffers, emisión de texto), `texto.l` (normalización),
+`dedup.l` (duplicados), `proceso.l` (flujo por documento), `salida.l`
+(índices, estadísticas), `preparar.ps1`, `verificar.py`,
+`referencia_compresion.py`, `evaluacion.md`, `prompts_es.txt`.
+
+### Uso
+
+```
+.\kernel\herramientas\corpus\preparar.ps1 -Entrada D:\wikipedia,D:\libros,D:\dialogos -Salida D:\corpus_f4
+.\kernel\herramientas\corpus\preparar.ps1 -Entrada D:\todo -Salida D:\corpus_f4 -Opciones '--min=200','--similitud=80'
+python -I kernel\herramientas\corpus\verificar.py D:\corpus_f4 --sin-prueba
+```
+
+El `.ps1` solo recorre carpetas: lista los `*.txt` en orden ordinal (línea
+`T|D <TAB> ruta <TAB> id`; D si algún segmento de la ruta, o la carpeta de
+entrada, se llama `dialogos`), crea `Salida` y `Salida\prueba_sellada`,
+compila `preparar.l` con `kernel\compilador\ele.exe` a `Salida\_preparar.exe`
+y lo ejecuta (`-NoCompilar` reutiliza el .exe). Todo lo demás lo hace el
+programa ELE. Sin el `.ps1`: `_preparar.exe <lista> <salida> [opciones]`
+(las dos carpetas deben existir). Opciones (enteros): `--min` (200 bytes),
+`--min-dialogo` (40), `--basura` (10, por mil), `--letras` (50, %),
+`--similitud` (80, %), `--mojibake` (1), `--semilla` (1), `--prueba` (1, %),
+`--valida` (1, %), `--max-doc` (4194304), `--max-docs` (600000).
+
+### Diseño
+
+- **Entrada**: cada `.txt` se lee por bloques de 1 MiB (nunca entero). Un
+  documento es un archivo, o cada trozo entre líneas que sean solo `=====`.
+  Un documento de más de `--max-doc` (4 MiB) se parte en una línea y cada
+  parte es otro documento (contador "partidos").
+- **Normalización** (`texto.l`), por documento: UTF-8 estricto válido, si no
+  Windows-1252 -> UTF-8 (los 5 bytes sin asignar pasan a control C1 y se
+  quitan); BOM fuera; CRLF/CR -> LF; controles C0/DEL/C1 fuera; tab y NBSP
+  -> espacio; separadores de ancho cero, bidi y U+00AD fuera; U+2028/2029 ->
+  salto; sin espacios al final de línea; como mucho una línea en blanco;
+  documento recortado y con un único `\n` final.
+- **Mojibake**: si el UTF-8 válido tiene >= 3 marcas ("Ã" o "Â" seguidas de un
+  carácter que en Windows-1252 es 0x80..0xBF / 0xA0..0xBF), se reinterpreta
+  todo el texto como Windows-1252 y se relee como UTF-8; si no sale UTF-8
+  válido (documento mezclado) o `--mojibake=0`, se descarta como "mojibake no
+  reparable". Se mira antes de quitar controles (los C1 de "Ã\x81" cuentan).
+- **Filtros** (en este orden, un motivo por documento): mojibake; basura
+  (controles quitados + U+FFFD > `--basura` por mil de los caracteres, 10 =
+  1 %); corto (< `--min` 200 bytes; diálogos `--min-dialogo` 40); pocas
+  letras (< `--letras` 50 % de los caracteres visibles); exacto; casi exacto.
+- **Duplicados**: exacto = FNV-1a 64 + mezcla del documento normalizado en
+  una tabla abierta de 64 bits. Casi exacto = MinHash de **una permutación**
+  con 32 casillas de 16 bits sobre 5-gramas de palabras en minúscula
+  (letras latinas con tilde incluidas; E2.. y C2.. son separadores), LSH de 8
+  bandas de 4 casillas; la similitud estimada son las casillas iguales entre
+  las que tienen datos; se descarta el posterior si >= `--similitud` 80 %.
+  Se conserva el primero en el orden de la lista. Un documento solo se
+  registra en las tablas si se conserva. (Se cambió de 32 funciones MinHash
+  a una permutación por rendimiento: 32x menos trabajo por 5-grama; mismos
+  descartes en las pruebas.)
+- **División**: `hash(id del archivo, índice del documento, semilla)` ->
+  `r = 0..99`; `r < prueba` (1) -> prueba, `r < prueba + valida` (2) ->
+  validación, resto entrenamiento (98 %). Se reparte después de deduplicar,
+  así que un duplicado no puede acabar en prueba. El `id` es la ruta
+  relativa a la carpeta de entrada (con la hoja de la carpeta delante), no
+  la ruta absoluta: mover la carpeta no cambia la división. Los diálogos se
+  reparten igual y se marcan DIALOGO.
+- **Orden**: determinista. Los documentos van a cada `.bin` en el orden de
+  la lista. Sin reloj, sin aleatoriedad.
+- **Memoria acotada** por `--max-docs` (600 000 conservados; error 31 si se
+  supera): exactos `pot2(max*4/3)*8` B (8 MB), bandas `pot2(max*8*4/3)*8` B
+  (64 MB), firmas 64 B por documento (38 MB reservados) + 32 B por
+  documento de `meta` (índice en memoria) + buffers de trabajo (~110 MB con
+  `--max-doc` por defecto; `raw` ocupa `max-doc` * 8 B). Para 500 000
+  documentos conservados: ~110 + 8 + 64 + 32 + 16..32 = **~230-250 MB**.
+  Cada elemento de lista cuesta 8 bytes, por eso nada grande es una lista de
+  bytes salvo `blk`/`raw`/`dec`/`nor`.
+
+### Formato de salida
+
+`Salida\`: `entrena.bin`, `valida.bin`, `prueba_sellada\prueba.bin` (documentos
+normalizados concatenados), y por partición un índice **ELEIDX01 versión 1**
+idéntico al que lee `enca/espanol.l` (cabecera de 16 palabras, CRC32C de las
+palabras 0..8 en la 9, tabla de (desplazamiento, longitud) por documento):
+`entrena.idx`, `valida.idx`, `prueba_sellada\prueba.idx`. En esos índices la
+sección "entrena" es la partición y la sección "prueba" está vacía (0
+documentos, 0 bytes, CRC32C 0).
+
+**Tipo TEXTO/DIALOGO: el formato no tenía sitio, y no cambió.** Se guarda al
+lado: `*.tipos` (1 byte por documento: 0 TEXTO, 1 DIALOGO, mismo orden que la
+tabla), y en las palabras 10 y 11 de la cabecera (que el kernel ignora: antes
+eran ceros reservados y el CRC solo cubre 0..8) el número de diálogos y el
+CRC32C del `.tipos`. Un kernel que no sepa de esto lo lee igual.
+
+También se escribe `indice.bin` = entrena (sección "entrena") + valida
+(sección "prueba"): el kernel actual puede arrancar con `es/entrena.bin` +
+`es/indice.bin` y `valida.bin` copiado como `es/prueba.bin` sin cambiar una
+línea (llama "prueba" a la validación). **Lo que tendrá que leer el hito 24**:
+`valida.idx` + `valida.tipos` para evaluar por documento y por tipo, y los
+tipos de `entrena.tipos` si se quiere mezclar diálogos con otra proporción.
+Nota: el kernel exige `nE >= 1` y `nP >= 1`, así que `entrena.idx` y
+`valida.idx` por separado no los aceptaría `espCargarCorpus` tal cual.
+
+`ESTADISTICAS.md`: parámetros, entrada, bytes/documentos por partición y por
+tipo con CRC32C y media, descartes por motivo, conversiones, memoria de
+tablas, 40 puntos de código más frecuentes en entrenamiento y 3 extractos de
+entrenamiento (nunca de la prueba). `prueba_sellada\README.md` avisa de no
+abrir la prueba hasta el final de la fase.
+
+### Resultados
+
+Compilador: `ele.exe` autónomo (PE64). Límites del backend descubiertos: una
+función admite **16 parámetros como máximo** (código 44), y un `Text` literal
+solo se puede pasar a un parámetro `Text` por valor, no `view Text`.
+
+**Sintético** (18 archivos, `--prueba=15 --valida=15` para que haya prueba y
+validación): 20 documentos crudos (3 vienen del archivo con `=====`):
+
+| caso | resultado |
+|---|---|
+| UTF-8 a, b | conservados |
+| Windows-1252 (`c_cp1252`) | convertido, conservado (1 conversión) |
+| CRLF (`d_crlf`) | CR -> LF, conservado |
+| BOM (`e_bom`) | BOM quitado, conservado |
+| `f_separado` (3 documentos, uno con `=====\r\n`) | 3 documentos conservados, 2 separadores |
+| `g_dup_exacto` (CRLF), `g2_dup_exacto` (saltos de más) | 2 duplicados exactos (iguales a `a` tras normalizar) |
+| `h_casi` (5 palabras cambiadas de `b`) | 1 casi duplicado |
+| `i_basura_ctrl`, `i2_basura_ffd` | 2 basura (controles / U+FFFD) |
+| `i3_tabla_numeros` | 1 pocas letras |
+| `j_corto` (12 bytes) | 1 corto |
+| `k_mojibake` (UTF-8 leído como Latin-1) | reparado y conservado |
+| `l_mojibake_mezcla` | 1 mojibake no reparable (con `--mojibake=0` son 2) |
+| `dialogos/d1..d3` (72..116 B) | conservados como DIALOGO (superan 40 B) |
+
+Total: 12 conservados (9 entrena, 1 valida, 2 prueba) + 8 descartes = 20.
+Contrastado con una normalización independiente en Python: los 11 documentos
+no reparados coinciden byte a byte. `verificar.py`: CORRECTO.
+
+**Real, ~30 MB** (2086 archivos .txt generados con
+`ENCA\corpus_es\completo`: los 2041 documentos de `entrena.bin` uno por
+archivo + 45 extras: 20 copias, 10 casi copias, 10 CRLF con un sufijo, 5 en
+Windows-1252): 31 407 420 bytes leídos; entrena 2007 docs / 29 736 653 B
+(CRC32C AEE08C78), valida 19 / 529 839 (F2BDD048), prueba 14 / 261 113
+(CFDAA22C); descartes: exactos 24, casi 22, resto 0; 5 conversiones
+Windows-1252, 10 documentos con CR. **Tiempo 5,0 s = 6,0 MB/s** (antes de
+optimizar, 8,5 s). Dos ejecuciones: mismos CRC32C. `verificar.py`: CORRECTO
+(CRC32C de índice, tabla, .bin y .tipos recalculados en Python).
+
+**Escala, ~246 MB** (los 30 MB + 7 copias con las vocales permutadas, 16 373
+archivos): 245 730 823 B leídos en **36,5 s = 6,4 MB/s de entrada** (37,0 s en
+la repetición); pico de memoria (working set) **183 MB**, 226 MB virtual
+privado; entrena 16 009 docs / 239 715 134 B (CRC32C 8EEE5A55), valida 160 /
+2 804 654, prueba 137 / 1 675 411; exactos 24, casi 43. Las dos ejecuciones
+dan archivos con el mismo SHA-256 (`.bin`, `.idx`, `.tipos`, `indice.bin`,
+`ESTADISTICAS.md`). Extrapolado: 400-500 MB de entrada = 60-80 s.
+
+Dónde se va el tiempo (30 MB): ~45 % en la firma MinHash (tokenizar cada
+byte) y el resto repartido en una decena de pasadas por byte (UTF-8, mojibake,
+limpieza, letras, hash, CRC, frecuencias). Cada sentencia por byte cuesta
+~10 ns con este compilador.
+
+### Qué falta
+
+- El corpus del usuario (Wikipedia en español, libros de dominio público,
+  diálogos). Hay que decidir con datos: umbral de letras (50 %) en Wikipedia
+  con tablas/listas, y si la similitud del 80 % es demasiado estricta con
+  libros (muchas ediciones del mismo texto).
+- El hito 24 (checkpoints con `bits/byte` y las 20 generaciones según
+  `evaluacion.md`) y que el kernel lea `valida.idx`/`.tipos`.
+- Números de `gzip -9` / `xz -9` del usuario sobre su `valida.bin`
+  (`evaluacion.md`, sección 4).
+- No hay reloj en ELE: el tiempo lo mide el `.ps1`. Tampoco hay listar
+  carpetas ni crear directorios en ELE (los hace el `.ps1`).
+- Con muy pocos documentos la división 98/1/1 deja particiones vacías: sale
+  un índice válido con 0 documentos, pero el kernel no lo aceptaría.
