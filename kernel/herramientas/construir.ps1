@@ -42,7 +42,8 @@ param(
     # Sin HPET en la máquina virtual (como algunos equipos reales).
     [switch]$SinHpet,
     # Segundo disco SATA (puerto 1 del AHCI) para el hito 13. "prueba" crea
-    # construccion\datos.img con herramientas\crear_disco_prueba.py.
+    # construccion\datos.img con herramientas\crear_disco_prueba.py (512 MiB: cabe el estado de ENCA). Una ruta
+    # existente se reutiliza tal cual (segundo arranque del hito 17b).
     [string]$DiscoDatos = "",
     # Carpeta ENCA original: su corpus (18 archivos) se copia al disco de
     # datos (-DiscoDatos prueba) y a la imagen USB (-Imagen) bajo enca/.
@@ -113,9 +114,9 @@ if ($DiscoDatos) {
     if ($DiscoDatos -eq "prueba") {
         $DiscoDatos = Join-Path $salida "datos.img"
         if ($Enca) {
-            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256 --enca $Enca
+            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512 --enca $Enca
         } else {
-            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 256
+            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512
         }
         if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
     }

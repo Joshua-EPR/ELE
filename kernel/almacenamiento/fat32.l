@@ -21,8 +21,10 @@ take lib.consola
 // +88 búfer de cluster, +96 archivo: primer cluster, +104 tamaño,
 // +112 LBA de su entrada, +120 desplazamiento de su entrada,
 // +128 búfer del nombre largo (256 bytes), +136 pista de cluster libre,
-// +144 sector FSInfo (relativo a la partición), +152 FSInfo ya invalidado.
-flow estado() => Int { give reservar(160, 8) }
+// +144 sector FSInfo (relativo a la partición), +152 FSInfo ya invalidado,
+// +160 el sector de FAT en el búfer tiene cambios sin escribir (1/0),
+// +168 modo diferido: fatPoner no escribe hasta cambiar de sector o vaciar.
+flow estado() => Int { give reservar(176, 8) }
 
 expose flow fatTamanoArchivo() => Int { give leer64(estado() + 104) }
 expose flow fatBytesPorCluster() => Int { give leer64(estado() + 16) * 512 }
@@ -34,10 +36,22 @@ flow lbaDeCluster(c: Int) => Int {
 
 // ---- FAT ---------------------------------------------------------------------
 
+// Escribe en todas las copias de la FAT el sector que está en el búfer.
+flow vaciarSectorFat() => Bool {
+    hold e = estado()
+    when leer64(e + 160) == 0 { give true }
+    escribir64(e + 160, 0)
+    each f among 0..leer64(e + 40) {
+        when !discoEscribir(leer64(e + 8) + leer64(e + 24) + f * leer64(e + 32) + leer64(e + 80), 1, leer64(e + 72)) { give false }
+    }
+    give true
+}
+
 flow sectorFat(s: Int) => Int {
     hold e = estado()
     hold buf = leer64(e + 72)
     when leer64(e + 80) != s {
+        when !vaciarSectorFat() { give 0 }
         when !discoLeer(leer64(e + 8) + leer64(e + 24) + s, 1, buf) { give 0 }
         escribir64(e + 80, s)
     }
@@ -58,10 +72,9 @@ flow fatPoner(c: Int, valor: Int) => Bool {
     when buf == 0 { give false }
     hold desp = (c * 4) % 512
     escribir32(buf + desp, (leer32(buf + desp) & 0xF0000000) | (valor & 0x0FFFFFFF))
-    each f among 0..leer64(e + 40) {
-        when !discoEscribir(leer64(e + 8) + leer64(e + 24) + f * leer64(e + 32) + s, 1, buf) { give false }
-    }
-    give true
+    escribir64(e + 160, 1)
+    when leer64(e + 168) == 1 { give true }
+    give vaciarSectorFat()
 }
 
 flow esFin(c: Int) => Bool { give c < 2 || c >= 0x0FFFFFF8 }
@@ -91,6 +104,8 @@ expose flow fatMontar() => Bool {
         escribir64(e + 56, leer32(s + 44))
         escribir64(e + 64, (leer32(s + 32) - leer64(e + 48)) / leer8(s + 13))
         escribir64(e + 80, -1)
+        escribir64(e + 160, 0)
+        escribir64(e + 168, 0)
         escribir64(e + 136, 2)
         escribir64(e + 144, leer16(s + 48))
         escribir64(e + 152, 0)
@@ -267,13 +282,17 @@ flow clusterLibre() => Int {
 }
 
 flow liberarCadena(primero: Int) => Bool {
+    hold e = estado()
+    escribir64(e + 168, 1)
     change c = primero
-    during !esFin(c) {
+    change bien = true
+    during !esFin(c) && bien {
         hold siguiente = fatSiguiente(c)
-        when !fatPoner(c, 0) { give false }
+        bien = fatPoner(c, 0)
         c = siguiente
     }
-    give true
+    escribir64(e + 168, 0)
+    give bien && vaciarSectorFat()
 }
 
 // FSInfo guarda una pista de clusters libres; al reservar deja de ser
@@ -299,19 +318,30 @@ flow invalidarFsInfo() => Bool {
 flow reservarCadena(bytes: Int) => Int {
     when !invalidarFsInfo() { give 0 }
     hold cuantos = (bytes + fatBytesPorCluster() - 1) / fatBytesPorCluster()
+    hold e = estado()
+    // Diferido: cada sector de la FAT se escribe una vez, no una por cluster.
+    escribir64(e + 168, 1)
     change primero = 0
     change anterior = 0
+    change bien = true
     each i among 0..cuantos {
-        hold c = clusterLibre()
-        when c == 0 { give 0 }
-        when !fatPoner(c, 0x0FFFFFFF) { give 0 }
-        when anterior != 0 {
-            when !fatPoner(anterior, c) { give 0 }
-        } otherwise {
-            primero = c
+        when bien {
+            hold c = clusterLibre()
+            when c == 0 { bien = false }
+            when bien && !fatPoner(c, 0x0FFFFFFF) { bien = false }
+            when bien {
+                when anterior != 0 {
+                    when !fatPoner(anterior, c) { bien = false }
+                } otherwise {
+                    primero = c
+                }
+                anterior = c
+            }
         }
-        anterior = c
     }
+    escribir64(e + 168, 0)
+    when !vaciarSectorFat() { bien = false }
+    when !bien { give 0 }
     give primero
 }
 
@@ -387,6 +417,7 @@ expose flow fatCrear(nombre83: Int, nombre: Int, bytes: Int) => Bool {
 
 // Escribe `bytes` (múltiplo de 512) en el archivo abierto desde
 // `desplazamiento` (múltiplo de 512), dentro de los clusters ya reservados.
+// Los clusters contiguos se escriben con una sola orden de disco.
 expose flow fatEscribir(desplazamiento: Int, bytes: Int, dir: Int) => Bool {
     hold e = estado()
     hold tam_cluster = fatBytesPorCluster()
@@ -403,10 +434,18 @@ expose flow fatEscribir(desplazamiento: Int, bytes: Int, dir: Int) => Bool {
         when esFin(c) { give false }
         change sectores = spc - dentro
         when sectores * 512 > bytes - hecho { sectores = (bytes - hecho) / 512 }
+        // Extiende el tramo mientras el siguiente cluster sea el contiguo.
+        change ultimo = c
+        change siguiente = fatSiguiente(c)
+        during sectores < 512 && siguiente == ultimo + 1 && (sectores + spc) * 512 <= bytes - hecho {
+            sectores += spc
+            ultimo = siguiente
+            siguiente = fatSiguiente(ultimo)
+        }
         when !discoEscribir(lbaDeCluster(c) + dentro, sectores, dir + hecho) { give false }
         hecho += sectores * 512
         dentro = 0
-        c = fatSiguiente(c)
+        c = siguiente
     }
     give true
 }

@@ -800,3 +800,148 @@ hito 16 OK
 
 Línea base para el hito 17: 878 B/s de entrenamiento y 2311 B/s de
 inferencia en el portátil.
+
+## Hito 17a — ENCA optimizada: perfil, modo exacto más rápido y modo rápido (2026-11-26)
+
+Escrito por un agente redactor (Sonnet). Verificado por el líder en QEMU
+con 2 CPU y con 1 CPU.
+
+Perfil (`enca/perfil.l`, rdtsc por componente). Se apaga con la constante
+PERFIL. Antes de optimizar, en vigilia (766k ciclos por byte) dominaban:
+- logits + softmax de la corteza: 31 %
+- predicción del mezclador: 27 % (exp/ln por cada uno de los 256 símbolos)
+- sinapsis + k-WTA: 23 %
+
+Optimizaciones exactas (el hito 16 sigue "idéntico a Windows"):
+- tablas precalculadas de los tres términos del impulso y de 1 - fuga;
+- punteros recorridos con `+%` en los bucles calientes, sin llamadas;
+- pesos recorridos por filas, conservando el orden de suma de cada logit;
+- expFloat y lnRapido en línea, con las mismas operaciones;
+- k-WTA con el corte guardado en un local.
+
+Resultado: el modo exacto pasa de 107 s a 52 s en QEMU (vigilia 766k → 432k
+ciclos por byte).
+
+Modo rápido (indicador en el modelo; `enca/rapido.l`):
+- SSE f32:
+  - Salida de la corteza y softmax con vexp, con tope inferior de x - máx
+    en -16, como expFloat.
+  - El mezclador geométrico, también en f32.
+  - Nuevo `vln` (logf de Cephes con SSE): error absoluto máximo 9,73e-7,
+    relativo 7,82e-8 en el barrido.
+  - Predicción del hipocampo en una pasada densa más los símbolos vistos.
+    El aprendizaje del hipocampo sigue en f64.
+- 2 núcleos:
+  - Los activos de la corteza dependen solo de los bytes, así que el
+    avance (sinapsis + k-WTA, en f64) se reparte entre los dos núcleos.
+  - El núcleo 1 hace un tramo de unidades y el 0 el resto más la
+    predicción; después se fusionan las dos listas ordenadas.
+  - Una sincronización por byte, que cuesta 5–6 % del paso.
+  - Es determinista: mismos bits con 1 y 2 CPU.
+
+QEMU WHPX, 2 CPU:
+```
+delta bits/byte (rápido - exacto) PRUEBA A: mezcla -0.000212265640437 hipocampo 0.000000001317018 corteza -0.004224731283444
+delta bits/byte (rápido - exacto) PRUEBA B: mezcla -0.000410779630853 hipocampo 0.000000004094365 corteza -0.005386310526380
+  vigilia       exacto 6442 B/s, rápido 33444 B/s, aceleración 5.19x
+  sueño         exacto 10598 B/s, rápido 39581 B/s, aceleración 3.73x
+  entrenamiento exacto 2907 B/s, rápido 12433 B/s, aceleración 4.27x
+  inferencia    exacto 6269 B/s, rápido 21642 B/s, aceleración 3.45x
+  tiempo total ENCA: exacto 52514 ms, rápido 13572 ms, aceleración 3.86x
+hito 17 OK
+```
+
+Frente al hito 16 original (107 s), el modo rápido es unas 8 veces más
+rápido.
+
+Con 1 CPU el modo rápido da exactamente los mismos bits:
+- mezcla A: 5885276722394095·2^-52
+- mezcla B: 6230748540601682·2^-51
+
+En ese caso la aceleración es de 2,41x.
+
+En el rápido, top-1 y autocompletado no cambian (811 y 637 por mil;
+3446 y 952 caracteres). El Δ de la corteza sola (-0,004 a -0,005) se debe
+a que vexp es exacta y expFloat (polinomio elevado a 16) se aparta de e^x
+hasta un 5 % en -16.
+
+Memoria: el hipocampo exacto se libera al terminar el hito 16, y el rápido
+reserva el suyo. ENCA ocupa unos 75 MiB por las tablas del impulso.
+
+Pendiente:
+- El avance de la corteza en f64 es el cuello de botella. Repartido entre
+  los dos núcleos no escala perfecto: en total suma 103–113k ciclos frente
+  a 79k con uno solo.
+- 17b: modo interactivo y guardado del estado con los checkpoints A/B.
+
+## Hito 17b — ENCA interactiva y estado en checkpoints A/B (2026-11-26)
+
+- `checkpoint.l` tiene dos juegos de ranuras (CKPT_PRUEBA: CKPT_A/B.BIN del
+  hito 14; CKPT_ENCA: ENCA_A/B.BIN), cada uno con capacidad y cabecera propias.
+  Orden de escritura intacto (datos, vaciar, cabecera, vaciar).
+- `fat32.l`: la FAT se escribe una vez por sector (modo diferido al reservar
+  y liberar cadenas) y `fatEscribir` junta clusters contiguos; sin esto crear
+  dos ranuras de 71 MB con clusters de 512 B tardaba mucho.
+- `enca/estado.l`: formato del estado (cabecera de 256 B con configuración y
+  16 métricas exactas, luego modelo, ventana, hipocampo, corteza, mezclador),
+  71 315 216 bytes. Sin punteros; las tablas derivadas se recalculan.
+- Arranque: si hay ranura válida y compatible se carga, no se entrena, se
+  evalúa A y B y se exige igualdad bit a bit con la cabecera; luego se guarda
+  paso + 1 en la otra ranura. Si no, entrena, evalúa y guarda el paso 1.
+- `enca/interactivo.l` + hito 7: prompt `ENCA> `, prefijo a UTF-8, completado
+  voraz (hasta 200 bytes o `\n`) con el modelo congelado.
+- QEMU WHPX: guardar 1557 ms (45,7 MB/s), cargar 1656-1873 ms (38-43 MB/s),
+  completado ~0,09 ms por byte. Disco de prueba de 512 MiB (FAT32 de 384 MiB).
+
+Verificación del líder en QEMU (WHPX, 2 CPU, disco nuevo y después el mismo
+disco):
+```
+arranque 1: estado ENCA: ninguna ranura válida (ENCA_A.BIN / ENCA_B.BIN): se entrena
+            estado ENCA guardado: paso 1 en la ranura A, 71315216 bytes; ... 1524 ms = 46.7 MB/s
+            hito 17 OK
+arranque 2: estado ENCA: ranura A, paso 1, 71315216 bytes leídos y verificados (CRC32) en 1627 ms = 43.8 MB/s
+            estado recuperado: evaluación idéntica a la guardada
+            estado ENCA guardado: paso 2 en la ranura B, ... 1537 ms = 46.3 MB/s
+            hito 17 OK
+ENCA> hold x = 1; hold a = 1; hold a = 1; hold a = 1; ...
+  [200 bytes generados en 84 ms, 0.420 ms por byte]
+```
+
+Revisión del cambio en fat32.l:
+- Al cambiar de sector, el sector de FAT con cambios se escribe antes de
+  leer el siguiente.
+- `fatEscribir` puede juntar más de 512 sectores en un tramo, pero
+  discoEscribir ya trocea en órdenes de 512 y comprueba la partición sobre
+  todo el rango.
+
+Observaciones:
+- El completado voraz cae enseguida en bucles ("hold a = 1;" repetido). Es
+  lo esperable con argmax en un modelo de contexto corto. Opciones para
+  más adelante: muestreo con temperatura (PCG), penalizar la repetición o
+  búsqueda en haz.
+- El hito 11 a veces sale FALLÓ en QEMU: 2048x2048 queda en 49 % del pico
+  (umbral 50 %), y Aᵀ con 2 núcleos va más lento que con 1 (x0,48). Es la
+  CPU virtual del anfitrión compartida con Windows: el código del SGEMM no
+  cambió, y en el portátil da 62–66 %.
+
+Portátil, segundo arranque (carga el estado del primero):
+```
+RAM reservada por ENCA: 75251274 B (71 MiB); tiempo total ENCA 84 s      (exacto; era 167 s en el hito 16)
+ENCA C5: idéntico a Windows
+hito 16 OK
+ENCA rápido: núcleos en línea (BSP incluido): 2
+estado ENCA: ranura A, paso 1, 71315216 bytes leídos y verificados (CRC32) en 2965 ms = 24.0 MB/s
+PRUEBA A ... exacto: mezcla 5885276722394095 * 2^-52 ... top-1=811 por mil
+PRUEBA B ... exacto: mezcla 6230748540601682 * 2^-51 ... top-1=637 por mil
+estado recuperado: evaluación idéntica a la guardada
+estado ENCA guardado: paso 2 en la ranura B, 71315216 bytes; serializar 78 ms; escritura con CRC32 y vaciado 2761 ms = 25.8 MB/s
+hito 17 OK
+ENCA> hola + b + c", 1)                               [14 bytes, 0,084 ms por byte]
+ENCA> 01 = this.nHid + 1] * this.nHid + 1] * ...      [200 bytes, 0,937 ms por byte]
+```
+- El modo rápido da en el portátil exactamente los mismos bits que en QEMU
+  (mezcla A 5885276722394095·2^-52). Es determinista también entre máquinas.
+- En el portátil, el modo exacto pasó de 167 s a 84 s con las
+  optimizaciones que no cambian bits.
+- Guardar y cargar van a unos 25 MB/s en el HDD, frente a 46 MB/s en QEMU;
+  incluyen el CRC32 de 71 MB y el vaciado.
