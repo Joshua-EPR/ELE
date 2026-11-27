@@ -18,6 +18,7 @@
 
 take nucleo.cpu
 take nucleo.mem
+take cpu.ifdiag
 take mem.fisica
 take mem.paginacion
 take dispositivos.pci
@@ -212,7 +213,9 @@ flow transferir(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, e
     during hecho < sectores {
         change t = sectores - hecho
         when t > AHCI_MAX_SECTORES { t = AHCI_MAX_SECTORES }
+        ifVigilar(cadena("ahciA"))
         hold n = ordenTrozo(disco, orden_ata, lba + hecho, t, dir + hecho * SECTOR, escritura)
+        ifVigilar(cadena("ahciB"))
         when n < 1 { give false }
         hecho += n
     }

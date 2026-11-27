@@ -1980,3 +1980,28 @@ Resultado en el portátil (imagen con sondeo, modelo hablante cargado):
 - Pendiente: imprimir RFLAGS.IF al entrar en hito7 (intrínseco de lectura
   de flags) para confirmarlo, y encontrar qué deja IF = 0 en la carga del
   hablante.
+
+Diagnóstico de IF (cpu/ifdiag.l; para probar en el portátil): `ifActivo()` lee
+RFLAGS.IF (intrínseco `leerRflags()`; en ELE se llama así, no `rdflags`).
+`ifPunto(etiqueta)` guarda (etiqueta, IF) en una tabla estática tras cada hito
+de kmain y dentro de `espCargarHablante` (hab0, habBuf, habLeer = lectura +
+CRC32C, habMod, habCopia, habEval, habFin); `ifVigilar` anota solo el primer
+IF = 0 en bucles (cada orden AHCI, cada fatLeer, ckCab/ckLee/ckCrc de
+checkpoint.l, la evaluación). Tras el sti del hito 6 (`ifArmar`) un IF = 0 es
+anómalo; antes (h4, h5) es lo esperado. `hito7` imprime la línea "IF: h6=1
+h8=1 ..." (varias líneas de 12 puntos), "primer cero en X" y, si IF = 1, mide
+los tics del temporizador en 35 ms (esperado ~3) y cuánto tarda un `hlt` en
+despertar. Resultado en QEMU (WHPX, 2 CPU y modelo hablante cargado): IF = 1 en
+todos los puntos, 3 tics, hlt despierta en ~2,6 ms. Lectura en el portátil:
+si algún punto sale 0, ese es el culpable; si todos son 1 pero "tics" es 0, el
+que falla es el temporizador LAPIC (hlt dormiría igual) y no IF; si todo es
+normal, el fallo del bucle antiguo no era IF.
+Revisión estática: nada en el kernel deja IF = 0 sin `cli`. El compilador solo
+emite CLI/STI/HLT como intrínsecos (x86_64.l: x64Cli/x64Sti) y `leerRflags` es
+PUSHFQ; POP RAX (sin POPF); no hay `popf`, `int n` ni escritura de RFLAGS. El
+IRETQ de los stubs restaura el RFLAGS del marco (IF = 1 si se interrumpió con
+IF = 1); `excepcion` solo continúa con #BP (hito 3, antes del sti). Los AP
+ejecutan `smpEntradaAp` dentro de su propia interrupción (IF = 0 en ellos) y no
+pasan por el BSP. Además, la hipótesis IF = 0 choca con el dato del portátil
+(22 por interrupción, 0 por sondeo): con IF = 0 la primera tecla la habría
+tomado el sondeo.

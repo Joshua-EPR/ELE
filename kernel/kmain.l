@@ -21,6 +21,7 @@ take dispositivos.teclado
 take tiempo.reloj
 take tiempo.temporizador
 take cpu.smp
+take cpu.ifdiag
 take bench.sgemm
 take dispositivos.pci
 take dispositivos.ahci
@@ -91,24 +92,44 @@ flow kmain() {
     }
 
     hito4()
+    ifPunto(cadena("h4"))
     hito5()
+    ifPunto(cadena("h5"))
     hito6()
+    ifArmar()
+    ifPunto(cadena("h6"))
     hito8()
+    ifPunto(cadena("h8"))
     hito9()
+    ifPunto(cadena("h9"))
     hito12()
+    ifPunto(cadena("h12"))
     hito13()
+    ifPunto(cadena("h13"))
     hito14()
+    ifPunto(cadena("h14"))
     hito15()
+    ifPunto(cadena("h15"))
     hito16()
+    ifPunto(cadena("h16"))
     hito20()
+    ifPunto(cadena("h20"))
     hitoRanuras()
+    ifPunto(cadena("ran"))
     hito17()
+    ifPunto(cadena("h17"))
     hito18()
+    ifPunto(cadena("h18"))
     hito21()
+    ifPunto(cadena("h21"))
     hitoCrc32c()
+    ifPunto(cadena("crc"))
     hitoDiscoCrudo()
+    ifPunto(cadena("disco"))
     encaRanurasResumen()
+    ifPunto(cadena("resu"))
     hablanteArranque()
+    ifPunto(cadena("hab"))
     hito7()
 
     during true {
@@ -263,6 +284,8 @@ flow hito6() {
 
 // Hito 7: teclado PS/2 latinoamericano por IOAPIC.
 flow hito7() {
+    ifPunto(cadena("h7"))
+    ifImprimir()
     tecladoIniciar()
     ioapicIniciar()
     ioapicDirigirIrq(1, VECTOR_TECLADO, lapicId())

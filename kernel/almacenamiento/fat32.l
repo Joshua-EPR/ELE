@@ -10,6 +10,7 @@
 // tamaño y la posición de su entrada de directorio (LBA y desplazamiento).
 
 take nucleo.mem
+take cpu.ifdiag
 take mem.monton
 take almacenamiento.disco
 take lib.consola
@@ -250,6 +251,7 @@ expose flow fatLeer(desplazamiento: Int, bytes: Int, dir: Int) => Int {
                 seguidos += 1
             }
             when !discoLeer(lbaDeCluster(c), seguidos * spc, dir + hecho) { give hecho }
+            ifVigilar(cadena("fatLee"))
             hecho += seguidos * tam_cluster
             each s among 0..seguidos { c = fatSiguiente(c) }
         } otherwise {

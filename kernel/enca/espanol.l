@@ -33,6 +33,7 @@ take enca.modelo
 take enca.perfil
 take enca.estado
 take enca.exp009
+take cpu.ifdiag
 
 fixed RANURAS_HABLANTE = 524288
 fixed MARGEN = 134217728            // 128 MiB que se dejan libres
@@ -271,6 +272,7 @@ expose flow espEvaluarSilencioso(m: Int) => Int {
                 modeloMedirCongelado(m, pru + off, len)
             }
         }
+        ifVigilar(cadena("evalP"))
         total += leer64(m + 80)
         anotarPrueba(m, p)
     }
@@ -625,6 +627,7 @@ expose flow espEntrenarYGuardar() => Bool {
 // ranuras (sin mensaje); 1 = cargado; 2 = hay ranuras pero algo falló. No
 // cambia el perfil activo.
 expose flow espCargarHablante() => Int {
+    ifPunto(cadena("hab0"))
     when !discoHayPermitida() || !fatMontar() { give 0 }
     change cap = 0
     when fatAbrir(cadena("HABLA_A.BIN")) { cap = fatTamanoArchivo() }
@@ -637,10 +640,12 @@ expose flow espCargarHablante() => Int {
         kprintln(cadena("estado hablante: sin memoria para el búfer del estado"))
         give 2
     }
+    ifPunto(cadena("habBuf"))
     hold cpm = tscCiclosPorMs()
     hold t0 = rdtsc()
     hold paso = ckptCargar(CKPT_HABLA, buf)
     hold t1 = rdtsc()
+    ifPunto(cadena("habLeer"))
     when paso < 0 {
         kprintln(cadena("estado hablante: HABLA_A.BIN / HABLA_B.BIN sin ranura válida (cabecera o CRC32C); no se carga"))
         montonLiberar(buf)
@@ -667,6 +672,7 @@ expose flow espCargarHablante() => Int {
         montonLiberar(buf)
         give 2
     }
+    ifPunto(cadena("habMod"))
     hold t2 = rdtsc()
     when !encaDeserializar(m, buf) {
         kprintln(cadena("estado hablante: no se pudo copiar el estado al modelo"))
@@ -675,6 +681,7 @@ expose flow espCargarHablante() => Int {
         give 2
     }
     hold t3 = rdtsc()
+    ifPunto(cadena("habCopia"))
     hold total = leer64(buf + 96)
     kprint(cadena("modelo hablante cargado: ranura "))
     letra(ckptRanuraCargada(CKPT_HABLA))
@@ -699,6 +706,7 @@ expose flow espCargarHablante() => Int {
     when rc == 0 {
         hold te = rdtsc()
         espEvaluarSilencioso(m)
+        ifPunto(cadena("habEval"))
         hold dif = encaCompararMetricas(buf)
         kprint(cadena("  evaluación de las pruebas congeladas en "))
         kprintEntero((rdtsc() - te) / cpm)
@@ -713,5 +721,6 @@ expose flow espCargarHablante() => Int {
         kprintln(cadena("  sin es/prueba.bin: no se compara la evaluación (el CRC32C de la ranura sí se verificó); :guardar no podrá evaluar"))
     }
     montonLiberar(buf)
+    ifPunto(cadena("habFin"))
     give 1
 }

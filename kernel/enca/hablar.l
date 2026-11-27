@@ -339,7 +339,9 @@ expose flow charlaComando(linea: Int, n: Int) => Bool {
         kprintEntero(tecladoPorInterrupcion())
         kprint(cadena(" por interrupción, "))
         kprintEntero(tecladoPorSondeo())
-        kprint(cadena(" por sondeo, último estado 8042 "))
+        kprint(cadena(" por sondeo, "))
+        kprintEntero(tecladoRatonDescartados())
+        kprint(cadena(" del touchpad descartados, último estado 8042 "))
         kprintHex(tecladoUltimoEstado())
         kprintByte(10)
         give true

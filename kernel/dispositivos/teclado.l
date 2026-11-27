@@ -17,8 +17,9 @@ expose fixed TECLA_BORRAR = 8
 
 // Estado: +0 mayús, +8 altgr, +16 bloq mayús, +24 prefijo E0,
 // +32 tecla muerta pendiente (0, 0xB4 ´ o 0xA8 ¨), +40 lectura, +48 escritura,
-// +56 bytes por interrupción, +64 bytes por sondeo, +72 último estado 0x64 visto.
-flow estado() => Int { give reservar(80, 8) }
+// +56 bytes por interrupción, +64 bytes por sondeo, +72 último estado 0x64 visto,
+// +80 bytes del ratón/touchpad (AUX) descartados por el sondeo.
+flow estado() => Int { give reservar(88, 8) }
 // CAPACIDAD palabras de 8 bytes.
 flow bufer() => Int { give reservar(2048, 8) }
 
@@ -251,6 +252,8 @@ expose flow tecladoSondear() => Bool {
             escribir64(e + 64, leer64(e + 64) +% 1)
             tecladoProcesar(b)
             tomado = true
+        } otherwise {
+            escribir64(e + 80, leer64(e + 80) +% 1)
         }
     }
     sti()
@@ -260,6 +263,7 @@ expose flow tecladoSondear() => Bool {
 expose flow tecladoPorInterrupcion() => Int { give leer64(estado() + 56) }
 expose flow tecladoPorSondeo() => Int { give leer64(estado() + 64) }
 expose flow tecladoUltimoEstado() => Int { give leer64(estado() + 72) }
+expose flow tecladoRatonDescartados() => Int { give leer64(estado() + 80) }
 
 // Traduce un byte de código de exploración (común a IRQ y sondeo).
 flow tecladoProcesar(sc: Int) {

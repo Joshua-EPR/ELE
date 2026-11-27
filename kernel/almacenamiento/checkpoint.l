@@ -26,6 +26,7 @@ take lib.crc32
 take lib.consola
 take dispositivos.apic
 take nucleo.cpu
+take cpu.ifdiag
 
 fixed MAGIA = 0x3154504B43454C45      // "ELECKPT1"
 fixed VERSION = 2                     // CRC32C
@@ -166,6 +167,7 @@ flow pasoDeCabecera(juego: Int, ranura: Int) => Int {
     when !abrirRanura(juego, ranura) { give -1 }
     hold t0 = rdtsc()
     hold leidos = fatLeer(0, 512, c)
+    ifVigilar(cadena("ckCab"))
     hold m = medidas()
     escribir64(m + 24, leer64(m + 24) + rdtsc() - t0)
     when leidos != 512 { give -1 }
@@ -200,7 +202,9 @@ expose flow ckptCargar(juego: Int, dir: Int) => Int {
             when bytes <= leer64(e) {
                 hold version = leer64(c + 8)
                 hold leidos = leerDatos(bytes, dir)
-                when leidos == bytes && crcDatos(version, dir, bytes) == crc {
+                hold crcCalc = crcDatos(version, dir, bytes)
+                ifVigilar(cadena("ckCrc"))
+                when leidos == bytes && crcCalc == crc {
                     escribir64(e + 16, ranura)
                     escribir64(e + 24, paso)
                     escribir64(e + 40, version)
@@ -216,6 +220,7 @@ expose flow ckptCargar(juego: Int, dir: Int) => Int {
 flow leerDatos(bytes: Int, dir: Int) => Int {
     hold t0 = rdtsc()
     hold n = fatLeerDesde512(bytes, dir)
+    ifVigilar(cadena("ckLee"))
     hold m = medidas()
     escribir64(m + 8, leer64(m + 8) + rdtsc() - t0)
     escribir64(m + 32, bytes)
