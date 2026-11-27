@@ -1038,3 +1038,16 @@ Verificación del líder en QEMU (WHPX, 2 CPU, disco nuevo):
 - ms por byte: voraz 0,035 y muestreo 0,066; `hito 18 OK`.
 - El detector de bucles (mzTieneBucle) se revisó: hay 4 copias seguidas
   de largo L si buf[i] == buf[i+L] durante 3L bytes, con L de 8 a 66.
+
+Portátil (Celeron 3865U):
+```
+prompts con bucle: voraz 20/20, muestreo 0/20
+reproducibles con la misma semilla: 20/20
+ms por byte: voraz 0.064, muestreo 0.116, sobrecoste del muestreo 0.052
+hito 18 OK
+ENCA> :ver      -> modo: muestreo  temp 0,500  topk 10  topp 1,000  pen 2.000  ventana 128  semilla 1  linea si
+ENCA> :voraz ; flow main      -> flow main() => Int {   [12 bytes, 0.086 ms por byte]
+ENCA> :muestreo ; :semilla 5 ; hold x =   -> hold x = -1   [4 bytes, 0.167 ms por byte]
+```
+Los textos generados son los mismos que en QEMU (por ejemplo el prompt
+[20]): el muestreo es determinista también entre máquinas.
