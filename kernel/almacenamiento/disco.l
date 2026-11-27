@@ -173,30 +173,18 @@ expose flow discoHabilitarEscritura() => Bool {
     give true
 }
 
+// Lectura de `sectores` sectores (el controlador la parte en órdenes de 8 MiB).
 expose flow discoLeer(lba: Int, sectores: Int, dir: Int) => Bool {
-    change hecho = 0
-    during hecho < sectores {
-        change trozo = sectores - hecho
-        when trozo > AHCI_MAX_SECTORES { trozo = AHCI_MAX_SECTORES }
-        when !ahciLeer(discoActual(), lba + hecho, trozo, dir + hecho * 512) { give false }
-        hecho += trozo
-    }
-    give true
+    give ahciLeer(discoActual(), lba, sectores, dir)
 }
 
 // Escritura protegida: fuera de la partición permitida, o sin habilitar,
-// es un pánico (nunca un error silencioso).
+// es un pánico (nunca un error silencioso). Se comprueba el rango entero
+// antes de la primera orden.
 expose flow discoEscribir(lba: Int, sectores: Int, dir: Int) => Bool {
     when leer64(estado() + 48) != 1 { panico(cadena("escritura de disco sin habilitar")) }
     when !discoEscrituraPermitida(lba, sectores) { panico(cadena("escritura fuera de la partición ELE")) }
-    change hecho = 0
-    during hecho < sectores {
-        change trozo = sectores - hecho
-        when trozo > AHCI_MAX_SECTORES { trozo = AHCI_MAX_SECTORES }
-        when !ahciEscribir(discoActual(), lba + hecho, trozo, dir + hecho * 512) { give false }
-        hecho += trozo
-    }
-    give true
+    give ahciEscribir(discoActual(), lba, sectores, dir)
 }
 
 // Asegura que todo lo escrito está en el medio (caché del disco vaciada).

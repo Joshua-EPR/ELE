@@ -4,11 +4,14 @@
 // Cada puerto con disco usa un marco físico propio:
 //   +0     lista de órdenes (32 entradas de 32 bytes; solo se usa la 0)
 //   +1024  FIS recibidos (256 bytes)
-//   +2048  tabla de la orden 0: FIS H2D (+0), PRDT (+0x80, hasta 72
-//          entradas de 16 bytes: 256 KiB que no empiecen en página caben)
-// Los datos van a búferes del montón: cada página de 4 KiB es una entrada
-// de la PRDT (su física se obtiene con pagTraducir), así que una orden
-// mueve hasta 256 KiB.
+//   +2048  tabla de la orden 0: FIS H2D (+0), PRDT (+0x80, hasta 120
+//          entradas de 16 bytes)
+// Los datos van a búferes del montón: cada página de 4 KiB cuenta como una
+// entrada de la PRDT (su física se obtiene con pagTraducir), pero las
+// páginas contiguas en la memoria física se funden en una sola entrada (hasta
+// 4 MiB), así que una orden mueve hasta 8 MiB (AHCI_MAX_SECTORES). Si la
+// PRDT se llena antes, la orden cubre menos y ahciLeer/ahciEscribir siguen
+// con otra orden.
 //
 // Este módulo NO decide qué se puede escribir: almacenamiento/disco.l
 // comprueba la partición antes de llamar a ahciEscribir.
@@ -21,8 +24,10 @@ take dispositivos.pci
 take tiempo.reloj
 
 expose fixed SECTOR = 512
-expose fixed AHCI_MAX_SECTORES = 512    // 256 KiB por orden
+expose fixed AHCI_MAX_SECTORES = 16384    // 8 MiB por orden (LBA48: hasta 65535)
 fixed MAX_PUERTOS = 32
+fixed MAX_PRD = 120                       // entradas de la PRDT en el marco del puerto
+fixed MAX_PRD_BYTES = 0x400000            // 4 MiB por entrada
 
 // Registros del HBA y de cada puerto.
 fixed HBA_GHC = 0x04
@@ -101,33 +106,63 @@ flow prepararPuerto(p: Int) => Bool {
 
 // ---- órdenes ---------------------------------------------------------------
 
-// Orden ATA `orden` con LBA de 48 bits sobre `sectores` sectores en el
-// búfer `dir` (virtual, mapeado). escritura = el HBA lee del búfer.
-flow orden(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escritura: Bool) => Bool {
+// Orden ATA `orden_ata` con LBA de 48 bits sobre hasta `sectores` sectores en
+// el búfer `dir` (virtual, mapeado). escritura = el HBA lee del búfer.
+// Devuelve los sectores que cubrió la orden (puede ser menos si la PRDT se
+// llenó), 0 si no hay datos (p. ej. FLUSH) o -1 si falló.
+flow ordenTrozo(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escritura: Bool) => Int {
     hold e = estado()
     hold d = e + 24 + disco * 32
     hold r = puerto(leer64(d))
     hold marco = leer64(d + 8)
     hold v = memVirtual(marco)
     hold tabla = v + 2048
-    hold bytes = sectores * SECTOR
-    // PRDT: una entrada por página (o trozo de página) del búfer.
+    // PRDT: una entrada por página (o trozo de página) del búfer; las
+    // contiguas en la memoria física se funden (hasta 4 MiB por entrada).
     change entradas = 0
     change hecho = 0
-    during hecho < bytes {
+    hold limite = sectores * SECTOR
+    change ultimaFisica = 0
+    change ultimoBytes = 0
+    during hecho < limite {
         hold virtual = dir + hecho
         hold fisica = pagTraducir(virtual)
-        when fisica < 0 || entradas >= 72 { give false }
+        when fisica < 0 { give -1 }
         change trozo = 4096 - (virtual & 0xFFF)
-        when trozo > bytes - hecho { trozo = bytes - hecho }
-        hold prd = tabla + 0x80 + entradas * 16
-        escribir32(prd, fisica & 0xFFFFFFFF)
-        escribir32(prd + 4, fisica >> 32)
-        escribir32(prd + 8, 0)
-        escribir32(prd + 12, trozo - 1)
+        when trozo > limite - hecho { trozo = limite - hecho }
+        when entradas > 0 && fisica == ultimaFisica + ultimoBytes && ultimoBytes + trozo <= MAX_PRD_BYTES {
+            ultimoBytes += trozo
+            escribir32(tabla + 0x80 + (entradas - 1) * 16 + 12, ultimoBytes - 1)
+        } otherwise {
+            when entradas >= MAX_PRD { leave }
+            hold prd = tabla + 0x80 + entradas * 16
+            escribir32(prd, fisica & 0xFFFFFFFF)
+            escribir32(prd + 4, fisica >> 32)
+            escribir32(prd + 8, 0)
+            escribir32(prd + 12, trozo - 1)
+            ultimaFisica = fisica
+            ultimoBytes = trozo
+            entradas += 1
+        }
         hecho += trozo
-        entradas += 1
     }
+    // Si la PRDT se llenó, se recorta al último sector completo.
+    change sobrante = hecho % SECTOR
+    during sobrante > 0 {
+        hold prd = tabla + 0x80 + (entradas - 1) * 16
+        hold tam = leer32(prd + 12) + 1
+        when tam > sobrante {
+            escribir32(prd + 12, tam - sobrante - 1)
+            hecho -= sobrante
+            sobrante = 0
+        } otherwise {
+            entradas -= 1
+            hecho -= tam
+            sobrante -= tam
+        }
+    }
+    hold cubiertos = hecho / SECTOR
+    when sectores > 0 && cubiertos < 1 { give -1 }
     // FIS H2D (registro, de anfitrión a dispositivo).
     each i among 0..16 { escribir32(tabla + i * 4, 0) }
     escribir8(tabla, 0x27)
@@ -140,8 +175,8 @@ flow orden(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escrit
     escribir8(tabla + 8, (lba >> 24) & 0xFF)
     escribir8(tabla + 9, (lba >> 32) & 0xFF)
     escribir8(tabla + 10, (lba >> 40) & 0xFF)
-    escribir8(tabla + 12, sectores & 0xFF)
-    escribir8(tabla + 13, (sectores >> 8) & 0xFF)
+    escribir8(tabla + 12, cubiertos & 0xFF)
+    escribir8(tabla + 13, (cubiertos >> 8) & 0xFF)
     // Cabecera de la orden 0: FIS de 5 palabras, W, PRDTL.
     change cabecera = 5 | (entradas << 16)
     when escritura { cabecera = cabecera | 0x40 }
@@ -150,16 +185,38 @@ flow orden(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escrit
     escribir32(v + 8, (marco + 2048) & 0xFFFFFFFF)
     escribir32(v + 12, (marco + 2048) >> 32)
     escribir32(r + P_IS, 0xFFFFFFFF)
-    when !esperarBits(r + P_TFD, 0x88, 0, 1000000) { give false }
+    when !esperarBits(r + P_TFD, 0x88, 0, 1000000) { give -1 }
     escribir32(r + P_CI, 1)
     hold inicio = relojNanosegundos()
     during leer32(r + P_CI) & 1 != 0 {
         // IS.TFES (bit 30): error de archivo de tareas.
-        when leer32(r + P_IS) & 0x40000000 != 0 { give false }
-        when relojNanosegundos() - inicio > 5000000000 { give false }
+        when leer32(r + P_IS) & 0x40000000 != 0 { give -1 }
+        when relojNanosegundos() - inicio > 10000000000 { give -1 }
         pause()
     }
-    give leer32(r + P_TFD) & 0x01 == 0
+    when leer32(r + P_TFD) & 0x01 != 0 { give -1 }
+    give cubiertos
+}
+
+// Orden de un solo trozo (IDENTIFY, FLUSH, ...): true si cubrió todo.
+flow orden(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escritura: Bool) => Bool {
+    hold n = ordenTrozo(disco, orden_ata, lba, sectores, dir, escritura)
+    when n < 0 { give false }
+    give n == sectores
+}
+
+// Transferencia de `sectores` sectores en tantas órdenes como hagan falta.
+flow transferir(disco: Int, orden_ata: Int, lba: Int, sectores: Int, dir: Int, escritura: Bool) => Bool {
+    when sectores < 1 { give false }
+    change hecho = 0
+    during hecho < sectores {
+        change t = sectores - hecho
+        when t > AHCI_MAX_SECTORES { t = AHCI_MAX_SECTORES }
+        hold n = ordenTrozo(disco, orden_ata, lba + hecho, t, dir + hecho * SECTOR, escritura)
+        when n < 1 { give false }
+        hecho += n
+    }
+    give true
 }
 
 // IDENTIFY DEVICE: sectores (LBA48) y modelo. false si no responde.
@@ -216,16 +273,14 @@ expose flow ahciIniciar() => Int {
     give leer64(e + 16)
 }
 
-// Lee `sectores` (<= AHCI_MAX_SECTORES) desde `lba` al búfer `dir`.
+// Lee `sectores` desde `lba` al búfer `dir` (en órdenes de hasta 8 MiB).
 expose flow ahciLeer(disco: Int, lba: Int, sectores: Int, dir: Int) => Bool {
-    when sectores < 1 || sectores > AHCI_MAX_SECTORES { give false }
-    give orden(disco, 0x25, lba, sectores, dir, false)
+    give transferir(disco, 0x25, lba, sectores, dir, false)
 }
 
 // Escribe sin comprobar nada: solo para almacenamiento/disco.l.
 expose flow ahciEscribir(disco: Int, lba: Int, sectores: Int, dir: Int) => Bool {
-    when sectores < 1 || sectores > AHCI_MAX_SECTORES { give false }
-    give orden(disco, 0x35, lba, sectores, dir, true)
+    give transferir(disco, 0x35, lba, sectores, dir, true)
 }
 
 // FLUSH CACHE EXT: el disco escribe en el medio lo que tenga en su caché.

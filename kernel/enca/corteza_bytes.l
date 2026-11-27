@@ -23,11 +23,18 @@
 //   +288 (libre)  +296 puntajes2(F, k)  +304 activos2(Int, k)  +312 cuenta2
 //   +320 unidades del tramo del núcleo 0 (el resto va al núcleo 1)
 //   +328 puntajes3(F, k)  +336 activos3(Int, k)  (salida de la fusión; se intercambian con z+72 / z+64)
+//   +288 modo (0 exacto, 1 rápido)  +344 puntajeF (f32, n; trabajo del avance)
+//   +352 máscara (64 bytes alineados; trabajo del avance)
+// Hito 22: en modo rápido la dinámica de la corteza pasa a f32 con SSE: vMem
+// (+40), decaimiento (+48), umbral (+56), 1 - fuga (+176), vRespaldo (+128) y
+// las tablas R (+168) son arreglos f32 (4 bytes por unidad) y el avance es
+// cortezaAvanzarF32. El modo exacto sigue en f64 y no cambia.
 // (los contadores de MACs del original no se usan en C5 y se omiten)
 
 take nucleo.cpu
 take nucleo.mem
 take enca.matematica
+take enca.perfil
 
 flow lehmer(valor: Int) => Int {
     give (valor * 48271) % 2147483647
@@ -46,11 +53,18 @@ flow pasoProcedural(semilla: Int, retardo: Int, byte: Int) => Int {
     give (lehmer(lehmer(lehmer(semillaProcedural(semilla, retardo, byte)))) % 2048) * 2 + 1
 }
 
+// Reserva de un campo de la dinámica: f32 alineado en modo rápido, f64 si no.
+flow campoDinamica(n: Int, rapido: Bool) => Int {
+    when rapido { give ncaReservarAlineado(n * 4) }
+    give ncaReservar(n * 8)
+}
+
 expose flow cortezaCrear(n: Int, k: Int, semilla: Int, modo: Int) => Int {
+    hold rapido = modo == 1
     hold z = ncaReservar(384)
-    hold vMem = ncaReservar(n * 8)
-    hold decaimiento = ncaReservar(n * 8)
-    hold umbral = ncaReservar(n * 8)
+    hold vMem = campoDinamica(n, rapido)
+    hold decaimiento = campoDinamica(n, rapido)
+    hold umbral = campoDinamica(n, rapido)
     hold vRespaldo = ncaReservar(n * 8)
     hold activos = ncaReservar(k * 8)
     hold activosRespaldo = ncaReservar(k * 8)
@@ -63,19 +77,26 @@ expose flow cortezaCrear(n: Int, k: Int, semilla: Int, modo: Int) => Int {
     hold logits = ncaReservar(256 * 8)
     hold distribucion = ncaReservar(256 * 8)
     hold pasos = ncaReservar(256 * 8)
-    hold tablasR = ncaReservar(3 * 257 * n * 8)
-    hold omf = ncaReservar(n * 8)
+    hold tablasR = campoDinamica(3 * 257 * n, rapido)
+    hold omf = campoDinamica(n, rapido)
     when z == 0 || pasos == 0 || tablasR == 0 || omf == 0 || vMem == 0 || decaimiento == 0 || umbral == 0 || vRespaldo == 0 || activos == 0 || activosRespaldo == 0 || puntaje == 0 || tabla == 0 || wSalida == 0 || sesgo == 0 || logits == 0 || distribucion == 0 { give 0 }
     each i among 0..n {
-        ef(vMem + i * 8, 0.0)
-        ef(umbral + i * 8, 0.0)
         ef(vRespaldo + i * 8, 0.0)
         change fuga = 0.0
         when i * 4 >= n { fuga = 0.5 }
         when i * 2 >= n { fuga = 0.8 }
         when i * 4 >= n * 3 { fuga = 0.95 }
-        ef(decaimiento + i * 8, fuga)
-        ef(omf + i * 8, 1.0 - fuga)
+        when rapido {
+            escribirF32(vMem + i * 4, 0.0)
+            escribirF32(umbral + i * 4, 0.0)
+            escribirF32(decaimiento + i * 4, fuga)
+            escribirF32(omf + i * 4, 1.0 - fuga)
+        } otherwise {
+            ef(vMem + i * 8, 0.0)
+            ef(umbral + i * 8, 0.0)
+            ef(decaimiento + i * 8, fuga)
+            ef(omf + i * 8, 1.0 - fuga)
+        }
     }
     each a among 0..k {
         escribir64(activos + a * 8, 0)
@@ -96,13 +117,20 @@ expose flow cortezaCrear(n: Int, k: Int, semilla: Int, modo: Int) => Int {
             change idx = origenProcedural(semilla, r + 1, b)
             hold paso = pasoProcedural(semilla, r + 1, b)
             hold fila = tablasR + ((r * 257 + b) * n) * 8
+            hold filaF = tablasR + ((r * 257 + b) * n) * 4
             each i among 0..n {
                 idx += paso
                 when idx >= 4096 { idx -= 4096 }
                 hold t = lf(tabla + idx * 8)
-                when r == 0 { ef(fila + i * 8, t) }
-                when r == 1 { ef(fila + i * 8, 0.6 * t) }
-                when r == 2 { ef(fila + i * 8, 0.35 * t) }
+                when rapido {
+                    when r == 0 { escribirF32(filaF + i * 4, t) }
+                    when r == 1 { escribirF32(filaF + i * 4, 0.6 * t) }
+                    when r == 2 { escribirF32(filaF + i * 4, 0.35 * t) }
+                } otherwise {
+                    when r == 0 { ef(fila + i * 8, t) }
+                    when r == 1 { ef(fila + i * 8, 0.6 * t) }
+                    when r == 2 { ef(fila + i * 8, 0.35 * t) }
+                }
             }
         }
     }
@@ -135,7 +163,15 @@ expose flow cortezaCrear(n: Int, k: Int, semilla: Int, modo: Int) => Int {
     escribir64(z + 168, tablasR)
     escribir64(z + 176, omf)
     escribir64(z + 184, 0)
+    escribir64(z + 288, modo)
+    escribir64(z + 360, 0)
+    escribir64(z + 368, 1)
     when modo == 1 {
+        hold puntajeF = ncaReservarAlineado(n * 4)
+        hold mascara = ncaReservarAlineado(512)
+        when puntajeF == 0 || mascara == 0 { give 0 }
+        escribir64(z + 344, puntajeF)
+        escribir64(z + 352, mascara)
         hold puntajes2 = ncaReservar(k * 8)
         hold activos2 = ncaReservar(k * 8)
         when puntajes2 == 0 || activos2 == 0 { give 0 }
@@ -179,14 +215,17 @@ expose flow cortezaCrear(n: Int, k: Int, semilla: Int, modo: Int) => Int {
         escribir64(z + 264, 0)
         escribir64(z + 272, 0)
         escribir64(z + 280, 0)
-        escribir64(z + 288, 0)
     }
     give z
 }
 
 expose flow cortezaReiniciar(z: Int) {
     hold vMem = leer64(z + 40)
-    each i among 0..leer64(z) { ef(vMem + i * 8, 0.0) }
+    when leer64(z + 288) == 1 {
+        each i among 0..leer64(z) / 2 { escribir64(vMem + i * 8, 0) }
+    } otherwise {
+        each i among 0..leer64(z) { ef(vMem + i * 8, 0.0) }
+    }
     escribir64(z + 80, 0)
 }
 
@@ -314,6 +353,11 @@ expose flow cortezaAvanzarFin(z: Int, numActivos: Int, plastico: Bool) {
 }
 
 expose flow cortezaAvanzar(z: Int, b1: Int, b2: Int, b3: Int, plastico: Bool) {
+    when leer64(z + 288) == 1 {
+        hold cuenta = cortezaAvanzarF32(z, b1, b2, b3, plastico)
+        cortezaCerrarF32(z, cuenta, plastico)
+        give
+    }
     hold n = leer64(z)
     hold cuenta = cortezaAvanzarTramo(z, b1, b2, b3, 0, n, plastico, leer64(z + 72), leer64(z + 64))
     cortezaAvanzarFin(z, cuenta, plastico)
@@ -419,7 +463,9 @@ expose flow cortezaAprender(z: Int, byte: Int, tasa: Float) {
 expose flow cortezaGuardar(z: Int) {
     hold vMem = leer64(z + 40)
     hold vResp = leer64(z + 128)
-    each i among 0..leer64(z) { escribir64(vResp + i * 8, leer64(vMem + i * 8)) }
+    change palabras = leer64(z)
+    when leer64(z + 288) == 1 { palabras = palabras / 2 }
+    each i among 0..palabras { escribir64(vResp + i * 8, leer64(vMem + i * 8)) }
     each a among 0..leer64(z + 8) { escribir64(leer64(z + 136) + a * 8, leer64(leer64(z + 64) + a * 8)) }
     escribir64(z + 144, leer64(z + 80))
 }
@@ -427,7 +473,259 @@ expose flow cortezaGuardar(z: Int) {
 expose flow cortezaRestaurar(z: Int) {
     hold vMem = leer64(z + 40)
     hold vResp = leer64(z + 128)
-    each i among 0..leer64(z) { escribir64(vMem + i * 8, leer64(vResp + i * 8)) }
+    change palabras = leer64(z)
+    when leer64(z + 288) == 1 { palabras = palabras / 2 }
+    each i among 0..palabras { escribir64(vMem + i * 8, leer64(vResp + i * 8)) }
     each a among 0..leer64(z + 8) { escribir64(leer64(z + 64) + a * 8, leer64(leer64(z + 136) + a * 8)) }
     escribir64(z + 80, leer64(z + 144))
+}
+
+// ============================ avance rápido (f32 + SSE) ======================
+// Misma dinámica que cortezaAvanzarTramo, en f32 y con SSE, sobre todas las
+// unidades (sin tramos: un solo núcleo hace todo el avance, así que 1 y 2 CPU
+// dan los mismos bits):
+//   impulso = R1[b1] + R2[b2] + R3[b3]; v = decaimiento * v + (1 - fuga) *
+//   impulso; puntaje = v - umbral; (plástico) umbral -= bajada.
+// Etapa A (vectorial, 4 unidades por instrucción): actualiza vMem y umbral y
+// deja los puntajes en puntajeF (+344).
+// Etapa B (k-WTA): los k puntajes más altos (descendente; a igual puntaje gana
+// el índice menor). Cota inferior T: el menor puntaje nuevo de los k activos
+// del paso anterior (lista principal); como esas k unidades tienen puntaje
+// >= T, el k-ésimo mejor es >= T, y ninguna unidad con puntaje < T puede
+// entrar: se descartan por grupos de 16 con comparaciones SSE (el resultado
+// es el mismo que recorrerlas todas). Las que quedan se insertan en orden.
+// El resultado queda en las listas 2 (z + 296 puntajes f64, z + 304 activos);
+// devuelve cuántos activos hay. cortezaCerrarF32 las convierte en principales.
+expose flow cortezaAvanzarF32(z: Int, b1: Int, b2: Int, b3: Int, plastico: Bool) => Int {
+    hold n = leer64(z)
+    hold k = leer64(z + 8)
+    hold vMem = leer64(z + 40)
+    hold decaimiento = leer64(z + 48)
+    hold umbral = leer64(z + 56)
+    hold tablasR = leer64(z + 168)
+    hold omf = leer64(z + 176)
+    hold pu = leer64(z + 344)
+    hold mascara = leer64(z + 352)
+    hold puntajes = leer64(z + 296)
+    hold activos = leer64(z + 304)
+    hold bytes = n * 4
+    hold r1 = tablasR + b1 * bytes
+    hold r2 = tablasR + (257 + b2) * bytes
+    hold r3 = tablasR + (514 + b3) * bytes
+    // ---- etapa A ----
+    hold tA = perfilIni()
+    escribir32(mascara + 16, 0xFF7FFFFF)
+    xmmDifundirEn(13, mascara, 16)
+    when plastico {
+        escribirF32(mascara, lf(z + 32) * lf(z + 24))
+        xmmDifundirEn(15, mascara, 0)
+        change p = 0
+        during p < bytes {
+            xmmCargar(1, r1 +% p)
+            xmmCargar(2, r2 +% p)
+            xmmSumar(1, 2)
+            xmmCargar(2, r3 +% p)
+            xmmSumar(1, 2)
+            xmmCargar(2, omf +% p)
+            xmmMultiplicar(1, 2)
+            xmmCargar(2, decaimiento +% p)
+            xmmCargar(3, vMem +% p)
+            xmmMultiplicar(2, 3)
+            xmmSumar(1, 2)
+            xmmGuardar(vMem +% p, 1)
+            xmmCargar(2, umbral +% p)
+            xmmRestar(1, 2)
+            xmmGuardar(pu +% p, 1)
+            xmmMaximo(13, 1)
+            xmmRestar(2, 15)
+            xmmGuardar(umbral +% p, 2)
+            p = p +% 16
+        }
+    } otherwise {
+        change p = 0
+        during p < bytes {
+            xmmCargar(1, r1 +% p)
+            xmmCargar(2, r2 +% p)
+            xmmSumar(1, 2)
+            xmmCargar(2, r3 +% p)
+            xmmSumar(1, 2)
+            xmmCargar(2, omf +% p)
+            xmmMultiplicar(1, 2)
+            xmmCargar(2, decaimiento +% p)
+            xmmCargar(3, vMem +% p)
+            xmmMultiplicar(2, 3)
+            xmmSumar(1, 2)
+            xmmGuardar(vMem +% p, 1)
+            xmmCargar(2, umbral +% p)
+            xmmRestar(1, 2)
+            xmmGuardar(pu +% p, 1)
+            xmmMaximo(13, 1)
+            p = p +% 16
+        }
+    }
+    perfilFin(PF_AVA_A, tA)
+    hold tB = perfilIni()
+    // ---- cota T ----
+    // Máximo M de los puntajes (acumulado en la etapa A). El hueco entre M y el
+    // k-ésimo puntaje del paso anterior (z + 360) es parecido de un paso a otro,
+    // así que se prueban cotas M - 1,25 hueco y M - 2,5 hueco: se cuentan (SSE)
+    // las unidades que la alcanzan y es válida si son al menos k. Si ninguna lo
+    // es se usa el menor puntaje nuevo de los k activos previos (también
+    // válido), o ninguna cota.
+    xmmGuardar(mascara + 112, 13)
+    change maximo = leerF32(mascara + 112)
+    each i among 1..4 {
+        hold m = leerF32(mascara + 112 + i * 4)
+        when m > maximo { maximo = m }
+    }
+    hold hueco = lf(z + 360)
+    change cota = -1.0e30
+    change hallada = false
+    // Factores 0,5 / 0,9 / 1,5 / 2,5 (índice en z + 368): se empieza por el que
+    // sirvió el paso anterior y se afloja si no alcanzan k unidades.
+    change indice = leer64(z + 368)
+    change intento = 0
+    during intento < 4 && indice < 4 && !hallada && hueco > 0.0 {
+        change factor = 0.5
+        when indice == 1 { factor = 0.9 }
+        when indice == 2 { factor = 1.5 }
+        when indice == 3 { factor = 2.5 }
+        hold asp = maximo - factor * hueco
+        escribirF32(mascara + 16, asp)
+        xmmDifundirEn(12, mascara, 16)
+        xmmCero(11)
+        change pc = 0
+        during pc < bytes {
+            xmmCargar(1, pu +% pc)
+            xmmCargar(2, pu +% (pc + 16))
+            xmmComparar(1, 12, 5)
+            xmmComparar(2, 12, 5)
+            xmmRestarEnteros(11, 1)
+            xmmRestarEnteros(11, 2)
+            pc = pc +% 32
+        }
+        xmmGuardar(mascara + 96, 11)
+        hold alcanzan = leer32(mascara + 96) + leer32(mascara + 100) + leer32(mascara + 104) + leer32(mascara + 108)
+        when alcanzan >= k {
+            cota = asp
+            hallada = true
+            // Si sobran muchas, la próxima vez se prueba un factor más justo.
+            when alcanzan > 2 * k && indice > 0 { escribir64(z + 368, indice - 1) } otherwise { escribir64(z + 368, indice) }
+        } otherwise {
+            indice += 1
+        }
+        intento += 1
+    }
+    when !hallada { escribir64(z + 368, 1) }
+    when !hallada && leer64(z + 80) == k {
+        hold previos = leer64(z + 64)
+        change minimo = leerF32(pu + leer64(previos) * 4)
+        each a among 1..k {
+            hold v = leerF32(pu + leer64(previos + a * 8) * 4)
+            when v < minimo { minimo = v }
+        }
+        cota = minimo
+    }
+    escribirF32(mascara + 16, cota)
+    xmmDifundirEn(14, mascara, 16)
+    perfilFin(PF_AVA_B, tB)
+    hold tC = perfilIni()
+    // ---- etapa B ----
+    // Lista de trabajo: claves compuestas (clave << 10) | (1023 - unidad),
+    // con clave = clave monótona del f32 (signo 1: ~bits; si no: bits |
+    // 0x80000000), en orden descendente: a igual puntaje gana el índice menor.
+    hold lista = mascara + 192
+    change numActivos = 0
+    change corte = 0
+    change revisados = 0
+    change inserciones = 0
+    change g = 0
+    during g < bytes {
+        xmmCargar(1, pu +% g)
+        xmmCargar(2, pu +% (g + 16))
+        xmmCargar(3, pu +% (g + 32))
+        xmmCargar(4, pu +% (g + 48))
+        xmmComparar(1, 14, 5)
+        xmmComparar(2, 14, 5)
+        xmmComparar(3, 14, 5)
+        xmmComparar(4, 14, 5)
+        xmmGuardar(mascara + 32, 1)
+        xmmGuardar(mascara + 48, 2)
+        xmmGuardar(mascara + 64, 3)
+        xmmGuardar(mascara + 80, 4)
+        xmmO(1, 2)
+        xmmO(3, 4)
+        xmmO(1, 3)
+        xmmGuardar(mascara + 96, 1)
+        when (leer64(mascara + 96) | leer64(mascara + 104)) != 0 {
+            each vv among 0..4 {
+                hold mm = mascara + 32 +% vv *% 16
+                when (leer64(mm) | leer64(mm + 8)) != 0 {
+                    hold u0 = (g >> 2) +% vv *% 4
+                    each ln among 0..4 {
+                        when leer32(mm +% ln *% 4) != 0 {
+                            hold u = u0 +% ln
+                            revisados = revisados +% 1
+                            hold bits = leer32(pu +% u *% 4)
+                            change clave = bits | 0x80000000
+                            when bits >= 0x80000000 { clave = bits ^ 0xFFFFFFFF }
+                            hold comp = (clave << 10) | (1023 -% u)
+                            when numActivos < k || comp > corte {
+                                inserciones = inserciones +% 1
+                                change posicion = k - 1
+                                when numActivos < k {
+                                    posicion = numActivos
+                                    numActivos = numActivos +% 1
+                                }
+                                during posicion > 0 {
+                                    hold previo = leer64(lista +% (posicion -% 1) *% 8)
+                                    when previo >= comp { leave }
+                                    escribir64(lista +% posicion *% 8, previo)
+                                    posicion = posicion -% 1
+                                }
+                                escribir64(lista +% posicion *% 8, comp)
+                                when numActivos == k { corte = leer64(lista +% (k -% 1) *% 8) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        g = g +% 64
+    }
+    perfilContar(PF_AVA_D, revisados)
+    perfilContar(PF_AVA_E, inserciones)
+    // Resultado: unidad y puntaje (f64) de cada activo; el hueco para el
+    // próximo paso es M menos el último puntaje.
+    each a among 0..numActivos {
+        hold unidad = 1023 - (leer64(lista +% a *% 8) & 1023)
+        escribir64(activos + a * 8, unidad)
+        escribir64(puntajes + a * 8, bitsDeFloat(leerF32(pu + unidad * 4)))
+    }
+    when numActivos == k { ef(z + 360, maximo - lf(puntajes + (k - 1) * 8)) }
+    perfilFin(PF_AVA_C, tC)
+    escribir64(z + 312, numActivos)
+    give numActivos
+}
+
+// Cierra el avance rápido: las listas 2 pasan a principales (se intercambian
+// los punteros), anota los activos y, si es plástico, sube el umbral de los
+// activos (homeostasis).
+expose flow cortezaCerrarF32(z: Int, cuenta: Int, plastico: Bool) {
+    hold activosViejos = leer64(z + 64)
+    hold puntajesViejos = leer64(z + 72)
+    escribir64(z + 64, leer64(z + 304))
+    escribir64(z + 72, leer64(z + 296))
+    escribir64(z + 304, activosViejos)
+    escribir64(z + 296, puntajesViejos)
+    escribir64(z + 80, cuenta)
+    when plastico {
+        hold umbral = leer64(z + 56)
+        hold activos = leer64(z + 64)
+        hold tasaHomeo = lf(z + 32)
+        each a among 0..cuenta {
+            hold u = umbral + leer64(activos + a * 8) * 4
+            escribirF32(u, leerF32(u) + tasaHomeo)
+        }
+    }
 }

@@ -15,14 +15,17 @@
 //    pocos símbolos vistos de cada orden ya escalados por las escalas de los
 //    órdenes superiores.
 //  * La dinámica de la corteza (sinapsis + k-WTA, estado vMem/umbral/activos)
-//    sigue en f64 con las mismas operaciones que el modo exacto: la secuencia
-//    de conjuntos activos es idéntica. Solo depende de los bytes (no de lo que
-//    se aprende), así que se calcula en el núcleo 1 mientras el 0 predice y
-//    aprende con los activos del paso actual (copia en activosLectura).
+//    pasa en el hito 22 a f32 con SSE (cortezaAvanzarF32, 4 unidades por
+//    instrucción y k-WTA con descarte vectorial; ver corteza_bytes.l). Solo
+//    depende de los bytes (no de lo que se aprende), así que se calcula en el
+//    núcleo 1 mientras el 0 predice y aprende con los activos del paso actual
+//    (copia en activosLectura). Antes (hitos 17 a 21) iba en f64 y repartida
+//    en dos tramos entre los núcleos; ahora es tan barata que un solo núcleo
+//    hace todo el avance.
 //
 // Determinismo: cada estructura la escribe un solo núcleo a la vez; el
-// núcleo 1 solo ejecuta cortezaAvanzar (la misma función que corre el núcleo 0
-// cuando no hay núcleo 1), así que 1 y 2 núcleos dan los mismos bits. Las
+// núcleo 1 solo ejecuta cortezaAvanzarF32 (la misma función que corre el
+// núcleo 0 cuando no hay núcleo 1), así que 1 y 2 núcleos dan los mismos bits. Las
 // sumas SSE usan siempre 4 sumas parciales por carril y se combinan en el
 // orden fijo (l0 + l1) + (l2 + l3).
 //
@@ -578,19 +581,18 @@ expose flow mezAprenderRapido(g: Int, byte: Int) {
 
 // ============================ dos núcleos =====================================
 
-// Reparto del avance de la corteza: el núcleo 0 hace las primeras
-// `unidadesNucleo0` unidades (después de su trabajo propio) y el 1 el resto.
-// No cambia ningún resultado: solo el equilibrio entre núcleos (ver
-// cortezaAvanzarTramo / cortezaFusionar).
+// Antes repartía el avance de la corteza entre los núcleos; desde el hito 22
+// el avance rápido es de un solo núcleo (sin tramos). Se conserva por los
+// llamadores (el reparto ya no influye).
 expose flow encaFijarReparto(z: Int, unidadesNucleo0: Int) {
-    escribir64(z + 320, unidadesNucleo0)
+    escribir64(z + 320, 0)
 }
 
-// Tarea del núcleo 1: tramo [h, n) del avance con los bytes que dejó el
-// núcleo 0 en z + 256..280; su lista queda en puntajes2 / activos2.
+// Tarea del núcleo 1: todo el avance (cortezaAvanzarF32) con los bytes que dejó
+// el núcleo 0 en z + 256..280; su lista queda en puntajes2 / activos2.
 expose flow encaTrabajoAvanzar(z: Int) {
     hold t0 = perfilIni()
-    hold cuenta = cortezaAvanzarTramo(z, leer64(z + 256), leer64(z + 264), leer64(z + 272), leer64(z + 320), leer64(z), leer64(z + 280) != 0, leer64(z + 296), leer64(z + 304))
+    hold cuenta = cortezaAvanzarF32(z, leer64(z + 256), leer64(z + 264), leer64(z + 272), leer64(z + 280) != 0)
     escribir64(z + 312, cuenta)
     perfilFin(PF_COR_AVANZAR, t0)
 }
@@ -601,7 +603,7 @@ expose flow encaHayNucleo1() => Int {
     give 0
 }
 
-// Anota los bytes del avance y, si hay núcleo 1, le encarga su tramo.
+// Anota los bytes del avance y, si hay núcleo 1, le encarga el avance.
 expose flow encaIniciarAvance(z: Int, b1: Int, b2: Int, b3: Int, plastico: Bool) {
     escribir64(z + 256, b1)
     escribir64(z + 264, b2)
@@ -611,28 +613,20 @@ expose flow encaIniciarAvance(z: Int, b1: Int, b2: Int, b3: Int, plastico: Bool)
     when buzonNucleos() > 1 { buzonPublicar(1, TRABAJO_ENCA_AVANZAR, z) }
 }
 
-// Termina el avance: tramo del núcleo 0 y, según haya o no núcleo 1, espera
-// o hace el suyo; fusiona las listas y deja el estado final.
+// Termina el avance: según haya o no núcleo 1, espera o lo hace el núcleo 0,
+// y deja el estado final (listas principales, activos, homeostasis).
 expose flow encaAcabarAvance(z: Int) {
     hold plastico = leer64(z + 280) != 0
-    hold t1 = perfilIni()
-    hold b1 = leer64(z + 256)
-    hold b2 = leer64(z + 264)
-    hold b3 = leer64(z + 272)
-    hold h = leer64(z + 320)
-    hold cuentaA = cortezaAvanzarTramo(z, b1, b2, b3, 0, h, plastico, leer64(z + 72), leer64(z + 64))
-    perfilFin(PF_COR_AVANZAR, t1)
     when buzonNucleos() > 1 {
         hold t0 = perfilIni()
         buzonEsperarFin(1)
         perfilFin(PF_ESPERA, t0)
     } otherwise {
-        hold t2 = perfilIni()
-        escribir64(z + 312, cortezaAvanzarTramo(z, b1, b2, b3, h, leer64(z), plastico, leer64(z + 296), leer64(z + 304)))
-        perfilFin(PF_COR_AVANZAR, t2)
+        hold t1 = perfilIni()
+        escribir64(z + 312, cortezaAvanzarF32(z, leer64(z + 256), leer64(z + 264), leer64(z + 272), plastico))
+        perfilFin(PF_COR_AVANZAR, t1)
     }
     hold t3 = perfilIni()
-    hold total = cortezaFusionar(z, cuentaA, leer64(z + 296), leer64(z + 304), leer64(z + 312))
-    cortezaAvanzarFin(z, total, plastico)
+    cortezaCerrarF32(z, leer64(z + 312), plastico)
     perfilFin(PF_COR_AVANZAR, t3)
 }
