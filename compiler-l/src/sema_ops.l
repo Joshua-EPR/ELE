@@ -444,9 +444,9 @@ expose flow semaPlatformEmit(ctx: edit SemaContext, op: Int, args: view List of[
 // not taken is an ordinary (user) flow name.
 expose flow semaIntrinsicCode(source: view Text, start: Int, end: Int, cpu: Bool, mem: Bool) => Int {
     change first = 31
-    change last = 84
+    change last = 109
     each op among first..(last + 1) {
-        hold in_mem = (op >= 41 && op <= 51)
+        hold in_mem = (op >= 41 && op <= 51) || op == 85 || op == 86
         when (in_mem && mem) || (!in_mem && cpu) {
             hold name = semaIntrinsicName(op)
             when symbolNameEqualsText(source, start, end, name) { give op }
@@ -486,6 +486,31 @@ expose flow semaIntrinsicName(op: Int) => Text {
     when op == 82 { give "xmmDifundirEn" }
     when op == 83 { give "leerRsp" }
     when op == 84 { give "xmmMulSumar4M" }
+    when op == 85 { give "leerF32" }
+    when op == 86 { give "escribirF32" }
+    when op == 87 { give "bitsDeFloat" }
+    when op == 88 { give "floatDeBits" }
+    when op == 89 { give "raizF" }
+    when op == 90 { give "xmmRestar" }
+    when op == 91 { give "xmmDividir" }
+    when op == 92 { give "xmmMaximo" }
+    when op == 93 { give "xmmMinimo" }
+    when op == 94 { give "xmmRaiz" }
+    when op == 95 { give "xmmY" }
+    when op == 96 { give "xmmYNo" }
+    when op == 97 { give "xmmO" }
+    when op == 98 { give "xmmOExclusivo" }
+    when op == 99 { give "xmmAEnteros" }
+    when op == 100 { give "xmmAFlotantes" }
+    when op == 101 { give "xmmSumarEnteros" }
+    when op == 102 { give "xmmRestarEnteros" }
+    when op == 103 { give "xmmDesplazarIzq" }
+    when op == 104 { give "xmmComparar" }
+    when op == 105 { give "xmmBarajar" }
+    when op == 106 { give "xmmCargarEscalar" }
+    when op == 107 { give "xmmGuardarEscalar" }
+    when op == 108 { give "xmmTruncarAEnteros" }
+    when op == 109 { give "xmmDesplazarDer" }
     give lirIntrinsicName(op)
 }
 

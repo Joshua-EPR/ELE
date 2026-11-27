@@ -598,3 +598,68 @@ pero queda pendiente copiar un texto real de varios MB. La lectura de
 varios MB con clústeres de 8 KiB se comprobó en QEMU, con una FAT32 creada
 por mkfs.vfat -s 16 y un texto de 5 MiB: 5242914 bytes en 16 ms, CRC32
 0xBEB090E9, igual que en el anfitrión.
+
+## 2026-11-26 — Hito 15: tensores y operaciones
+
+Plan: puente Float <-> f32 y más SSE en el compilador; matemática de
+referencia en f64; tensores sobre una arena; PCG; exp/tanh SSE con su error
+medido; forward/backward de cada operación, verificados con diferencias
+finitas en f64.
+
+Compilador (intrínsecos 85-109):
+- `leerF32`/`escribirF32` (MOVSS + CVTSS2SD / CVTSD2SS) en nucleo.mem;
+  `bitsDeFloat`, `floatDeBits`, `raizF` (SQRTSD). Los intrínsecos ya tienen
+  tipos por argumento y por resultado (Int / Float / Unit) en sema, en el
+  verificador LIR y en el backend.
+- SSE empaquetado: SUBPS, DIVPS, MAXPS, MINPS, SQRTPS, ANDPS, ANDNPS, ORPS,
+  XORPS, CVTPS2DQ, CVTTPS2DQ, CVTDQ2PS, PADDD, PSUBD, PSLLD/PSRLD (inmediato),
+  CMPPS y SHUFPS (inmediato), MOVSS con memoria. Prueba de codificación en
+  `driver_kernel_target_l`.
+
+Kernel:
+- `lib/matf64.l`: expF (reducción con ln2 partido + Taylor hasta r^14), logF
+  (atanh en serie), expm1F, tanhF, raizF64, `kprintCientifico`.
+- `lib/aleatorio.l`: PCG32 XSH-RR con semilla y secuencia (`*%` y `+%`).
+- `lib/tensor.l`: tensores 2D f32/f64 con paso de fila (vistas), datos
+  alineados a 64, gradiente opcional. Arena por bloques de 2 MiB del
+  montón con marca/vuelta. Nota: son bloques virtuales de 2 MiB respaldados
+  por páginas de 4 KiB; mapear páginas grandes de verdad queda para cuando
+  la arena se conecte a NEXO.
+- `lib/ops.l`: matmul (SGEMM en f32 con N % 16 == 0, si no escalar),
+  suma con sesgo difundido, multiplicación, embedding, máscara causal,
+  softmax estable, RMSNorm, GELU (aproximación tanh) y entropía cruzada,
+  todas con backward que suma a los gradientes. Las reducciones se hacen
+  en Float, en orden fijo: el resultado es determinista. Se escriben una vez
+  sobre tLeer/tEscribir, así el mismo código corre en f32 y en f64.
+- `lib/vexp.l`: exp (Cephes: acotar, n = redondeo(x·log2 e), ln2 = C1 + C2,
+  polinomio de grado 5, 2^n por PADDD+PSLLD 23) y tanh
+  (1 - 2/(exp(2|x|)+1), con serie para |x| < 1/16 y mezcla por máscara).
+- `bench/gradientes.l`: L = Σ W⊙y con W aleatorios; diferencias centradas en
+  f64 con h = 1e-6 sobre cada elemento de cada entrada.
+
+QEMU (WHPX):
+```
+PCG32 (semilla 42, secuencia 54): 0xA15C02B7 0x7B47F409 0xBA1D3330 0x83D2F293
+tensor 64x256 f32 alineado a 64: sí
+exp SSE: 2097152 valores en [-87, 88], error relativo máximo 8,02e-08 (1,35 ulp)
+tanh SSE: en [-10, 10], error absoluto máximo 1,03e-07, relativo 1,56e-06
+  matmul            3,03e-09   matmul f32/SGEMM 1,35e-04 (umbral f32 1e-3)
+  suma con sesgo    1,96e-09   multiplicación   1,02e-08
+  embedding         1,28e-09   máscara+softmax  3,78e-10
+  softmax           6,45e-09   RMSNorm          1,09e-09
+  GELU              2,28e-07   entropía cruzada 6,55e-09
+hito 15 OK
+```
+Los primeros valores de PCG32 coinciden con los del ejemplo de referencia
+de pcg32 (semilla 42, secuencia 54): 0xa15c02b7 0x7b47f409 0xba1d3330
+0x83d2f293.
+
+Pendiente y anotado:
+- La máscara causal sola no se puede verificar con diferencias finitas:
+  L incluiría W·(-1e9) y la cancelación se come la precisión. Se verifica
+  como se usa, softmax(máscara(x)).
+- Lo elemento a elemento es escalar (Float por elemento); solo SGEMM y
+  exp/tanh van vectorizados. exp SSE cuesta ~11 ciclos por valor, por el
+  coste de cada intrínseco sin asignación de registros. Paralelizar y
+  vectorizar el resto se decide en el hito 17, con el perfil real de
+  dónde se va el tiempo, como pide el plan.
