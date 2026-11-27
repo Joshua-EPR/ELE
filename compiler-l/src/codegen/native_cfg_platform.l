@@ -164,11 +164,13 @@ flow cfgIntrinsicCode(source: view Text, word: view NativeWord) => Int {
     when nativeEquals(source, word, "xsts") { give 107 }
     when nativeEquals(source, word, "xcvttdq") { give 108 }
     when nativeEquals(source, word, "xpsrld") { give 109 }
+    when nativeEquals(source, word, "crc32c64") { give 110 }
+    when nativeEquals(source, word, "crc32c8") { give 111 }
     give -1
 }
 
 expose flow cfgIsIntrinsic(op: Int) => Bool {
-    give op >= 31 && op <= 109
+    give op >= 31 && op <= 111
 }
 
 // -1: 1..256 arguments (datos64, cadena).
@@ -205,7 +207,7 @@ flow cfgIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89
+    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89 || op == 110 || op == 111
 }
 
 // Float result (85, 88, 89) and Float argument `i` (86 arg 1, 87, 89).
@@ -224,7 +226,7 @@ flow cfgIntrinsicWidth(op: Int) => Int {
 // Intrinsics that take their first argument in RAX and their second one
 // in RCX (memory access and most CPU forms).
 flow cfgIntrinsicRaxRcx(op: Int) => Bool {
-    give (op >= 41 && op <= 48) || (op >= 53 && op <= 73) || (op >= 85 && op <= 89)
+    give (op >= 41 && op <= 48) || (op >= 53 && op <= 73) || (op >= 85 && op <= 89) || op == 110 || op == 111
 }
 
 flow cfgCheckIntrinsic(p: view CfgProgram, f: Int, inst: view CfgInst) => Int {
@@ -514,8 +516,9 @@ flow cfgEmitIntrinsic(code: edit X64Code, p: view CfgProgram, f: Int, inst: view
     }
     when op == 72 { x64ReadFlags(edit code) }
     when op == 73 { x64Int3(edit code) }
-    when (op >= 74 && op <= 82) || op == 84 || op >= 90 { cfgEmitSse(edit code, p, f, inst, edit fix) }
+    when (op >= 74 && op <= 82) || op == 84 || (op >= 90 && op <= 109) { cfgEmitSse(edit code, p, f, inst, edit fix) }
     when op >= 85 && op <= 89 { x64FloatBridge(edit code, op) }
+    when op == 110 || op == 111 { x64Crc32c(edit code, op == 110) }
     when op == 83 { x64ReadRsp(edit code) }
     when cfgIntrinsicHasResult(op) {
         x64StoreSlot(edit code, p.slot_start[cfgVarIndex(p, f, inst.dst)], 0)

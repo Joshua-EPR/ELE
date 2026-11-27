@@ -481,3 +481,30 @@ flow kmain() {\n\
         assert!(contains(text, seq), "missing {seq:02x?}");
     }
 }
+
+#[test]
+fn kernel_crc32c_intrinsics() {
+    let dir = work("crc32c");
+    let source = "take nucleo.cpu\n\
+take nucleo.mem\n\
+\n\
+flow kmain() {\n\
+    hold p = reservar(64, 16)\n\
+    hold a = crc32c64(0xFFFFFFFF, leer64(p))\n\
+    hold b = crc32c8(a, leer8(p + 8))\n\
+    escribir64(p + 16, b)\n\
+}\n";
+    let (out, image) = build(&dir, source, &[]);
+    assert!(
+        out.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = &fs::read(&image).unwrap()[0x1000..];
+    for seq in [
+        &[0xF2, 0x48, 0x0F, 0x38, 0xF1, 0xC1][..], // CRC32 RAX,RCX
+        &[0xF2, 0x0F, 0x38, 0xF0, 0xC1],           // CRC32 EAX,CL
+    ] {
+        assert!(contains(text, seq), "missing {seq:02x?}");
+    }
+}
