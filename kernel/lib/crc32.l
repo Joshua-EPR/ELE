@@ -74,8 +74,17 @@ expose flow crc32cSoft(dir: Int, bytes: Int) => Int {
 expose flow crc32cSse(dir: Int, bytes: Int) => Int {
     change c = 0xFFFFFFFF
     change p = dir
+    hold fin32 = dir + bytes - bytes % 32
     hold fin8 = dir + bytes - bytes % 8
     hold fin = dir + bytes
+    // Bloques de 32 bytes: 4 palabras por vuelta reparten el costo del bucle.
+    during p != fin32 {
+        c = crc32c64(c, leer64(p))
+        c = crc32c64(c, leer64(p +% 8))
+        c = crc32c64(c, leer64(p +% 16))
+        c = crc32c64(c, leer64(p +% 24))
+        p = p +% 32
+    }
     during p != fin8 {
         c = crc32c64(c, leer64(p))
         p = p +% 8

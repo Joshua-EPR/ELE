@@ -1441,3 +1441,90 @@ Revisión y verificación del líder:
 - Arranques normales después sobre el mismo disco: "estado recuperado:
   evaluación idéntica a la guardada" e "hito 21: F congelado 0,448780
   bits/byte (bits 0x3FDCB8D0AE580CF4)", los mismos bits que al guardar.
+
+## Hito 22 — velocidad de ENCA y del disco (2026-11-27)
+
+Archivos: `dispositivos/ahci.l`, `almacenamiento/{disco,fat32,checkpoint}.l`,
+`lib/crc32.l`, `enca/{corteza_bytes,rapido,estado,perfil,exp009,aprender}.l`,
+`kmain.l` (prueba de disco crudo), `herramientas/construir.ps1`
+(`-PuertoMonitor`, por defecto 45454).
+
+### Parte A — disco
+- Checkpoint formato 2: CRC32C (instrucción SSE4.2, `crc32cSse` desenrollada
+  de 4 palabras) en cabecera y datos. El formato 1 (CRC32 por software) se
+  sigue LEYENDO; se escribe siempre el 2. Compatibilidad probada con copia
+  del disco del hito 21: 1er arranque `formato 1 (CRC32)`, se reescribe en
+  formato 2 (ranura A, paso 5); 2º arranque `formato 2 (CRC32C)`, evaluación
+  idéntica. Leer el formato 1 sigue costando ~1 s de CRC por software.
+- AHCI: una orden mueve hasta 8 MiB (`AHCI_MAX_SECTORES` = 16384): las páginas
+  contiguas en memoria física se funden en una entrada de PRDT (hasta 4 MiB,
+  120 entradas); si la PRDT se llena la orden cubre menos y se encadena otra.
+  `fatLeer/fatEscribir` ya no limitan a 512 sectores.
+- Medición (`ckptImprimirDesglose`): serializar/copiar, CRC, E/S, vaciado,
+  cabeceras y total, con MB/s. QEMU, 71 MB: antes guardar 1670 ms = 42,6 MB/s
+  (CRC32 por software ~1,1 s); ahora ~360 ms = 199 MB/s (serializar 45 ms,
+  CRC 35 ms = 2000 MB/s, E/S 203 ms, vaciado 119 ms); cargar ~410 ms =
+  173 MB/s. En QEMU el límite es la caché del anfitrión, no el medio.
+- No se solapó el CRC con la E/S: a 2 GB/s es ~10 % del tiempo en QEMU y <3 %
+  a 25-100 MB/s. En el portátil no medido todavía (sin acceso): la lectura
+  cruda (`hito disco`, solo lectura: 64 MiB al inicio y final de la partición
+  y del disco, órdenes de 8 MiB y de 256 KiB) debe fijar el techo físico; en
+  QEMU las órdenes de 8 MiB leen ~2 veces más rápido que las de 256 KiB.
+  La meta de >= 100 MB/s en el HDD queda por verificar con esa prueba en el
+  equipo real (las pistas interiores/finales de un HDD son más lentas).
+
+### Parte B — modo rápido
+Perfil de vigilia antes (ciclos/paso, 2 núcleos): total 128,7k; avance de la
+corteza 143,8k sumando ambos núcleos (f64), espera 24k, hipocampo 17,5k,
+logits+softmax 14,1k, mezclador 9,4k. Ahora: total 50,4k; avance 38,9k en el
+núcleo 1 (etapa A SSE 4,9k, cota 2,4k, k-WTA 29,7k) escondido tras ~41k del
+núcleo 0; espera 6,6k.
+
+Cambios: en modo rápido vMem, umbral, decaimiento, 1-fuga y tablas R son f32
+alineados; `cortezaAvanzarF32` (4 unidades por instrucción) en un solo núcleo
+(sin tramos; 1 y 2 CPU = mismos bits). k-WTA: cota válida por conteo SSE
+(k unidades la alcanzan) y filtro vectorial; claves enteras compuestas.
+El exacto no cambia (hito 16 y hito 20 `idéntico a Windows`).
+
+| QEMU 2 CPU | exacto | rápido antes | rápido ahora |
+|---|---|---|---|
+| entrenamiento B/s | 2971 | 12433 | 20282 (6,8x) |
+| inferencia B/s | 6135 | 21642 | 28510 (4,6x) |
+| total ENCA | 51,8 s | 13,6 s | 9,2 s (5,6x) |
+
+Con 1 CPU: inferencia 3,17x. Δ bits/byte (rápido - exacto), mezcla: A
++0,000399, B +0,000415 (antes -0,00021 y -0,00041; |Δ| < 0,001). top-1 sin
+cambio (811 y 637); autocompletado 3422 y 946 (antes 3446 y 952). Determinismo:
+1 CPU y 2 CPU dan los mismos bits (mezcla A 5888031017282589·2^-52, B
+6232608311089226·2^-51).
+
+Estado de ENCA versión 2: vMem y umbral van como f32. Versión 1 se convierte
+al cargar (f64 a f32; Δ mezcla A 2,6e-7, B 0) y se reescribe en v2; la
+evaluación ya no puede ser idéntica bit a bit con una v1 (se exige |Δ| <
+0,001).
+
+Pendiente: el k-WTA (~30k ciclos) es lo más caro; el código escalar de ELE
+cuesta ~250 ciclos por candidato. Hipocampo (11k) y mezclador sin tocar.
+
+Verificación del líder (QEMU WHPX):
+- Compatibilidad: generé un disco con el kernel del hito 21 (estado ENCA en
+  formato 1) y arranqué con él el kernel del hito 22:
+  - Primer arranque: "leídos y verificados (formato 1 (CRC32))".
+    Conversión v1 → f32 con Δ mezcla A 2,2e-7. Se reescribe en formato 2
+    a 198 MB/s. F congelado con los mismos bits (0x40112763DED1D1FB).
+  - Segundo arranque: "formato 2 (CRC32C)", 148 MB/s, "evaluación
+    idéntica a la guardada".
+- Disco nuevo, 2 CPU: hitos 2–18 OK, el 16 "idéntico a Windows".
+
+| | exacto | rápido | aceleración |
+|---|---|---|---|
+| entrenamiento | 2907 B/s | 20486 B/s | 7,04x |
+| inferencia | 6411 B/s | 28694 B/s | 4,47x |
+| tiempo total | 52,3 s | 9,0 s | 5,79x |
+
+  Δ mezcla A +0,00040 y B +0,00042. Guardado a 195,5 MB/s.
+- 1 CPU: mismos bits en el modo rápido (mezcla A 5888031017282589·2^-52,
+  B 6232608311089226·2^-51); aceleración total 4,16x.
+- Pendiente en el portátil: la meta de 100 MB/s se mide en el HDD real. La
+  partición ELEDATOS está al final del disco; la lectura cruda al principio
+  y al final de la partición dirá cuánto da el propio disco.

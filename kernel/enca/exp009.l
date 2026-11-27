@@ -624,6 +624,12 @@ flow letraRanura(r: Int) {
     when r == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
 }
 
+// "1 (CRC32)" / "2 (CRC32C)": formato de un checkpoint (checkpoint.l).
+flow imprimirFormatoCkpt(version: Int) {
+    kprintEntero(version)
+    when version == 1 { kprint(cadena(" (CRC32)")) } otherwise { kprint(cadena(" (CRC32C)")) }
+}
+
 // "N ms = X,Y MB/s" para `bytes` en `ciclos`.
 flow imprimirMsMBs(bytes: Int, ciclos: Int) {
     hold cpm = tscCiclosPorMs()
@@ -721,9 +727,10 @@ flow guardarEstado(m: Int, buf: Int, paso: Int, preparar: Bool, entrenados: Int)
     kprintEntero(total)
     kprint(cadena(" bytes; serializar "))
     kprintEntero((ts1 - ts0) / cpm)
-    kprint(cadena(" ms; escritura con CRC32 y vaciado "))
+    kprint(cadena(" ms; escritura con CRC32C y vaciado "))
     imprimirMsMBs(total, t1 - t0)
     kprintByte(10)
+    ckptImprimirDesglose(ts1 - ts0)
     give true
 }
 
@@ -733,7 +740,7 @@ flow guardarEstado(m: Int, buf: Int, paso: Int, preparar: Bool, entrenados: Int)
 flow encaIntentarCargar() => Int {
     when !discoHayPermitida() { give 0 }
     when !fatMontar() { give 0 }
-    hold cap = encaTamEstado()
+    hold cap = encaTamEstadoMax()
     ckptConfigurar(CKPT_ENCA, cap)
     hold buf = montonReservar(cap + 1024)
     when buf == 0 {
@@ -757,7 +764,9 @@ flow encaIntentarCargar() => Int {
     kprintEntero(paso)
     kprint(cadena(", "))
     kprintEntero(leer64(buf + 96))
-    kprint(cadena(" bytes leídos y verificados (CRC32) en "))
+    kprint(cadena(" bytes leídos y verificados (formato "))
+    imprimirFormatoCkpt(ckptVersionCargada(CKPT_ENCA))
+    kprint(cadena(") en "))
     imprimirMsMBs(leer64(buf + 96), t1 - t0)
     kprintByte(10)
     when !encaCabeceraCompatible(buf) {
@@ -777,21 +786,43 @@ flow encaIntentarCargar() => Int {
         montonLiberar(buf)
         give 2
     }
+    hold ciclosCopia = rdtsc() - t2
     kprint(cadena("estado copiado al modelo en "))
-    kprintEntero((rdtsc() - t2) / cpm)
+    kprintEntero(ciclosCopia / cpm)
     kprintln(cadena(" ms; no se entrena (la comparación de velocidad de entrenamiento exacto/rápido no aplica)"))
+    ckptImprimirDesglose(ciclosCopia)
     escribir64(vivo(), m)
     perfilReiniciar()
     evaluarAB(m, 1)
-    hold dif = compararMetricas(buf)
-    when dif != 0 {
-        kprint(cadena("estado recuperado: evaluación DIFERENTE de la guardada ("))
-        kprintEntero(dif)
-        kprintln(cadena(" métricas)"))
-        montonLiberar(buf)
-        give 2
+    when encaEstadoAntiguo(buf) {
+        // Estado de la versión 1 (corteza en f64): la dinámica ahora es f32, así
+        // que la evaluación no puede ser idéntica bit a bit; se exige que la
+        // mezcla A y B cambie menos de 0,001 bits/byte y se reescribe en v2.
+        hold ra = encaResultado(1)
+        hold dA = lf(ra) - floatDeBits(leer64(buf + ENCA_CAB_METRICAS * 8))
+        hold dB = lf(ra + 32) - floatDeBits(leer64(buf + (ENCA_CAB_METRICAS + 8) * 8))
+        kprint(cadena("estado ENCA v1 (corteza f64) convertido a f32: evaluación frente a la guardada, delta mezcla A "))
+        imprimirF(dA)
+        kprint(cadena(", B "))
+        imprimirF(dB)
+        kprintByte(10)
+        when !(absF(dA) < 0.001 && absF(dB) < 0.001) {
+            kprintln(cadena("estado recuperado: la conversión cambia la evaluación más de 0,001 bits/byte"))
+            montonLiberar(buf)
+            give 2
+        }
+        kprintln(cadena("estado recuperado: evaluación coherente con la guardada (v1); se reescribe en la versión 2"))
+    } otherwise {
+        hold dif = compararMetricas(buf)
+        when dif != 0 {
+            kprint(cadena("estado recuperado: evaluación DIFERENTE de la guardada ("))
+            kprintEntero(dif)
+            kprintln(cadena(" métricas)"))
+            montonLiberar(buf)
+            give 2
+        }
+        kprintln(cadena("estado recuperado: evaluación idéntica a la guardada"))
     }
-    kprintln(cadena("estado recuperado: evaluación idéntica a la guardada"))
     // Alternancia: el paso siguiente va a la otra ranura.
     hold guardado = guardarEstado(m, buf, paso + 1, false, leer64(buf + 104))
     montonLiberar(buf)

@@ -51,7 +51,10 @@ param(
     # Línea de órdenes del kernel (opciones "clave=valor") para la entrada
     # por defecto del menú, p. ej. -Opciones "enca=nuevo". Sin ella, igual
     # que antes (la entrada del menú sin opciones).
-    [string]$Opciones = ""
+    [string]$Opciones = "",
+    # Puerto TCP del monitor de QEMU (con -Prueba): cámbielo para que dos QEMU
+    # a la vez no choquen.
+    [int]$PuertoMonitor = 45454
 )
 
 $ErrorActionPreference = "Stop"
@@ -147,7 +150,7 @@ if (-not $Prueba) {
 
 Write-Host "==> QEMU sin ventana, esperando '$Esperado' (máx. $Segundos s)"
 if (Test-Path $registro) { Remove-Item -Force $registro }
-$puerto = 45454
+$puerto = $PuertoMonitor
 $proceso = Start-Process -FilePath $qemuExe -ArgumentList ($argumentos + @("-display", "none", "-serial", "file:`"$registro`"", "-monitor", "tcp:127.0.0.1:${puerto},server,nowait")) -PassThru -WindowStyle Hidden
 function Leer-Serie {
     if (-not (Test-Path $registro)) { return "" }

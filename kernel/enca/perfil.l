@@ -23,7 +23,12 @@ expose fixed PF_REPLAY = 7
 expose fixed PF_METRICAS = 8
 expose fixed PF_ESPERA = 9
 expose fixed PF_VENTANA = 10
-fixed COMPONENTES = 11
+expose fixed PF_AVA_A = 11
+expose fixed PF_AVA_B = 12
+expose fixed PF_AVA_C = 13
+expose fixed PF_AVA_D = 14
+expose fixed PF_AVA_E = 15
+fixed COMPONENTES = 16
 
 flow tabla() => Int { give reservar(64 + 4 * 16 * 8, 64) }
 
@@ -54,6 +59,15 @@ expose flow perfilIni() => Int {
     give 0
 }
 
+// Suma `n` (una cuenta, no ciclos) a un componente.
+expose flow perfilContar(componente: Int, n: Int) {
+    when PERFIL == 1 {
+        hold t = tabla()
+        hold p = t + 64 + (leer64(t) * 16 + componente) * 8
+        escribir64(p, leer64(p) + n)
+    }
+}
+
 expose flow perfilFin(componente: Int, t0: Int) {
     when PERFIL == 1 {
         hold t = tabla()
@@ -73,6 +87,11 @@ flow nombre(c: Int) => Int {
     when c == 7 { give cadena("replay (control)       ") }
     when c == 8 { give cadena("métricas               ") }
     when c == 9 { give cadena("espera entre núcleos   ") }
+    when c == 11 { give cadena("  avance: etapa A (SSE)  ") }
+    when c == 12 { give cadena("  avance: B1 cota        ") }
+    when c == 13 { give cadena("  avance: B2 k-WTA       ") }
+    when c == 14 { give cadena("  (cuenta) lanes revisados") }
+    when c == 15 { give cadena("  (cuenta) inserciones   ") }
     give cadena("ventana                ")
 }
 

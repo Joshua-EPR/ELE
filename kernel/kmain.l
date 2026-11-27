@@ -102,6 +102,7 @@ flow kmain() {
     hito18()
     hito21()
     hitoCrc32c()
+    hitoDiscoCrudo()
     hito7()
 
     during true {
@@ -691,6 +692,72 @@ flow hitoCrc32c() {
     montonLiberar(check)
     montonLiberar(b)
     when bien { kprintln(cadena("hito crc32c OK")) } otherwise { kprintln(cadena("hito crc32c FALLÓ")) }
+}
+
+// Lee `sectores` desde `lba` en órdenes de `trozo` sectores (solo lectura) y
+// imprime el tiempo y los MB/s. Devuelve false si una lectura falla.
+flow lecturaCruda(titulo: Int, lba: Int, sectores: Int, trozo: Int, buf: Int) => Bool {
+    hold t0 = relojNanosegundos()
+    change hecho = 0
+    change bien = true
+    during hecho < sectores && bien {
+        change n = sectores - hecho
+        when n > trozo { n = trozo }
+        bien = discoLeer(lba + hecho, n, buf)
+        hecho += n
+    }
+    hold ns = relojNanosegundos() - t0
+    kprint(cadena("  "))
+    kprint(titulo)
+    kprint(cadena(": LBA "))
+    kprintEntero(lba)
+    kprint(cadena(", "))
+    kprintEntero(sectores / 2048)
+    kprint(cadena(" MiB en órdenes de "))
+    kprintEntero(trozo / 2)
+    kprint(cadena(" KiB: "))
+    kprintEntero(ns / 1000000)
+    kprint(cadena(" ms = "))
+    when ns > 0 {
+        hold d10 = sectores * 512 * 10000 / ns
+        kprintEntero(d10 / 10)
+        kprintByte(46)
+        kprintEntero(d10 % 10)
+    }
+    kprintln(cadena(" MB/s"))
+    give bien
+}
+
+// Hito 22: lectura secuencial cruda de 64 MiB al principio de la partición
+// ELEDATOS, al final de la partición y al final del disco (solo lectura), con
+// órdenes de 8 MiB y de 256 KiB, para situar el límite físico del medio (en un
+// HDD las pistas interiores son más lentas; la FAT32 de ELEDATOS está al
+// final del disco).
+flow hitoDiscoCrudo() {
+    when !discoHayPermitida() {
+        kprintln(cadena("hito disco omitido: sin partición ELEDATOS"))
+        give
+    }
+    hold buf = montonReservar(8388608 + 64)
+    when buf == 0 {
+        kprintln(cadena("hito disco FALLÓ: sin memoria"))
+        give
+    }
+    hold n64 = 131072
+    hold primero = discoPermitidoPrimero()
+    hold ultimo = discoPermitidoUltimo()
+    hold fin = ahciSectores(discoActual())
+    kprintln(cadena("lectura secuencial cruda (solo lectura):"))
+    change bien = true
+    when !lecturaCruda(cadena("inicio de la partición"), primero, n64, 16384, buf) { bien = false }
+    when !lecturaCruda(cadena("inicio de la partición, tramo siguiente"), primero + n64, n64, 512, buf) { bien = false }
+    when !lecturaCruda(cadena("final de la partición"), ultimo + 1 - n64, n64, 16384, buf) { bien = false }
+    when fin >= n64 {
+        when !lecturaCruda(cadena("final del disco"), fin - n64, n64, 16384, buf) { bien = false }
+        when !lecturaCruda(cadena("final del disco, tramo anterior"), fin - 2 * n64, n64, 512, buf) { bien = false }
+    }
+    montonLiberar(buf)
+    when bien { kprintln(cadena("hito disco OK")) } otherwise { kprintln(cadena("hito disco FALLÓ")) }
 }
 
 // Línea base opcional (PAUSADA, no se llama): AdamW, XOR/círculos y bigramas.

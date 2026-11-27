@@ -25,9 +25,14 @@
 //                 etiquetas, totales, distintos   (órdenes x ranuras cada una)
 //                 simbolos, cuentas               (órdenes x ranuras x ancho)
 //   corteza       numActivos, actualizaciones                  (2)
-//                 vMem[n], umbral[n], activos[k], puntaje[k]   (f64 / Int)
+//                 vMem, umbral: n f32 cada uno (n/2 palabras; v2)
+//                 activos[k] Int, puntaje[k] f64
 //                 wF[n x 256] f32 (n x 128 palabras), sesgoF[256] f32 (128)
 //   mezclador     contexto, pesos[contextos x expertos]
+// Versión 2 (hito 22): la dinámica de la corteza pasó a f32, así que vMem y
+// umbral se guardan como n f32 (n/2 palabras). Versión 1 (hitos 17 a 21): los
+// guardaba como n f64 (n palabras). Los estados de versión 1 se LEEN y se
+// convierten (f64 a f32) al cargar; siempre se escribe la versión 2.
 // No se guardan: tablas derivadas, búferes de trabajo (logits, distribución,
 // respaldo, listas del núcleo 1), métricas de evaluación del modelo y
 // ciclos medidos. Cada documento (iniciarDocumento) reconstruye los activos
@@ -38,7 +43,8 @@ take nucleo.cpu
 take nucleo.mem
 
 fixed MAGIA_ENCA = 0x3154534541434E45        // "ENCAEST1"
-fixed VERSION_ENCA = 1
+fixed VERSION_ENCA = 2
+fixed VERSION_ENCA_ANTIGUA = 1
 fixed CAB_PALABRAS = 32
 
 // Configuración de ENCA C5 (la que crea modeloCrear).
@@ -57,17 +63,29 @@ expose fixed ENCA_CAB_METRICAS = 14
 expose fixed ENCA_CAB_BYTES = 12
 expose fixed ENCA_CAB_ENTRENADOS = 13
 
-// Tamaño en bytes del estado de la configuración C5.
-expose flow encaTamEstado() => Int {
+// Tamaño en bytes del estado de la configuración C5 en la versión `version`.
+flow tamEstadoVersion(version: Int) => Int {
     hold ts = ENCA_ORDENES * ENCA_RANURAS
     hold te = ts * ENCA_ANCHO
     hold modelo = 5
     hold ventana = 2 + ENCA_VENTANA
     hold hipocampo = 4 + 256 + 3 * ts + 2 * te
-    hold corteza = 2 + 2 * ENCA_N + 2 * ENCA_K + ENCA_N * 128 + 128
+    change dinamica = ENCA_N        // vMem + umbral en f32: n/2 palabras cada uno
+    when version == VERSION_ENCA_ANTIGUA { dinamica = 2 * ENCA_N }
+    hold corteza = 2 + dinamica + 2 * ENCA_K + ENCA_N * 128 + 128
     hold mezclador = 1 + ENCA_CONTEXTOS * ENCA_EXPERTOS
     give (CAB_PALABRAS + modelo + ventana + hipocampo + corteza + mezclador) * 8
 }
+
+// Tamaño del estado que se escribe (versión 2).
+expose flow encaTamEstado() => Int { give tamEstadoVersion(VERSION_ENCA) }
+
+// Tamaño máximo de un estado que se sabe leer (la versión 1, la mayor): para
+// los búferes y la capacidad de las ranuras al CARGAR.
+expose flow encaTamEstadoMax() => Int { give tamEstadoVersion(VERSION_ENCA_ANTIGUA) }
+
+// ¿El búfer tiene un estado de la versión 1 (corteza en f64)?
+expose flow encaEstadoAntiguo(buf: Int) => Bool { give leer64(buf + 8) == VERSION_ENCA_ANTIGUA }
 
 // Cursor de la transferencia (bytes desde el inicio del búfer).
 flow cursor() => Int { give reservar(8, 8) }
@@ -93,9 +111,18 @@ flow mover(guardar: Bool, buf: Int, dir: Int, palabras: Int) {
     escribir64(c, leer64(c) + bytes)
 }
 
-// Recorre todo el estado en el orden del formato. Devuelve los bytes
-// recorridos (incluida la cabecera).
-flow transferir(guardar: Bool, m: Int, buf: Int) => Int {
+// Solo al cargar un estado de la versión 1: n f64 del búfer pasan a un arreglo
+// f32 del modelo (redondeo al f32 más cercano).
+flow moverDeF64(buf: Int, dirF32: Int, n: Int) {
+    hold c = cursor()
+    hold pos = buf + leer64(c)
+    each i among 0..n { escribirF32(dirF32 + i * 4, floatDeBits(leer64(pos + i * 8))) }
+    escribir64(c, leer64(c) + n * 8)
+}
+
+// Recorre todo el estado en el orden del formato de `version`. Devuelve los
+// bytes recorridos (incluida la cabecera).
+flow transferir(guardar: Bool, m: Int, buf: Int, version: Int) => Int {
     hold v = leer64(m)
     hold mem = leer64(m + 8)
     hold cor = leer64(m + 16)
@@ -121,8 +148,13 @@ flow transferir(guardar: Bool, m: Int, buf: Int) => Int {
     hold k = leer64(cor + 8)
     mover(guardar, buf, cor + 80, 1)
     mover(guardar, buf, cor + 184, 1)
-    mover(guardar, buf, leer64(cor + 40), n)
-    mover(guardar, buf, leer64(cor + 56), n)
+    when version == VERSION_ENCA_ANTIGUA {
+        moverDeF64(buf, leer64(cor + 40), n)
+        moverDeF64(buf, leer64(cor + 56), n)
+    } otherwise {
+        mover(guardar, buf, leer64(cor + 40), n / 2)
+        mover(guardar, buf, leer64(cor + 56), n / 2)
+    }
     mover(guardar, buf, leer64(cor + 64), k)
     mover(guardar, buf, leer64(cor + 72), k)
     mover(guardar, buf, leer64(cor + 192), n * 128)
@@ -155,7 +187,7 @@ expose flow encaSerializar(m: Int, buf: Int, entrenados: Int) => Int {
     escribir64(buf + 80, leer64(mez))
     escribir64(buf + 88, leer64(mez + 8))
     escribir64(buf + 104, entrenados)
-    hold total = transferir(true, m, buf)
+    hold total = transferir(true, m, buf, VERSION_ENCA)
     when total != encaTamEstado() { give 0 }
     escribir64(buf + 96, total)
     // El último sector se escribe completo: el relleno va a cero.
@@ -167,22 +199,24 @@ expose flow encaSerializar(m: Int, buf: Int, entrenados: Int) => Int {
     give total
 }
 
-// ¿La cabecera describe la configuración C5 en modo rápido y este formato?
+// ¿La cabecera describe la configuración C5 en modo rápido y un formato que se
+// sabe leer (versión 2, o la 1 con conversión)?
 expose flow encaCabeceraCompatible(buf: Int) => Bool {
-    when leer64(buf) != MAGIA_ENCA || leer64(buf + 8) != VERSION_ENCA { give false }
+    hold version = leer64(buf + 8)
+    when leer64(buf) != MAGIA_ENCA || (version != VERSION_ENCA && version != VERSION_ENCA_ANTIGUA) { give false }
     when leer64(buf + 16) != ENCA_RANURAS || leer64(buf + 24) != ENCA_ORDENES { give false }
     when leer64(buf + 32) != ENCA_ANCHO || leer64(buf + 40) != ENCA_VENTANA { give false }
     when leer64(buf + 48) != ENCA_N || leer64(buf + 56) != ENCA_K { give false }
     when leer64(buf + 64) != ENCA_SEMILLA || leer64(buf + 72) != 1 { give false }
     when leer64(buf + 80) != ENCA_CONTEXTOS || leer64(buf + 88) != ENCA_EXPERTOS { give false }
-    give leer64(buf + 96) == encaTamEstado()
+    give leer64(buf + 96) == tamEstadoVersion(version)
 }
 
 // Copia el estado de `buf` en el modelo `m` (recién creado con la misma
 // configuración, en modo rápido) y recalcula el espejo f32 del unigrama.
 expose flow encaDeserializar(m: Int, buf: Int) => Bool {
     when !encaCabeceraCompatible(buf) { give false }
-    hold total = transferir(false, m, buf)
+    hold total = transferir(false, m, buf, leer64(buf + 8))
     when total != leer64(buf + 96) { give false }
     hold mem = leer64(m + 8)
     hold unigramaF = leer64(mem + 4192)

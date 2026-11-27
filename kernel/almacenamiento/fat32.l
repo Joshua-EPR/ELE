@@ -246,7 +246,7 @@ expose flow fatLeer(desplazamiento: Int, bytes: Int, dir: Int) => Int {
         when resto >= tam_cluster {
             // Clusters contiguos en una sola lectura.
             change seguidos = 1
-            during seguidos * tam_cluster <= resto - tam_cluster && fatSiguiente(c + seguidos - 1) == c + seguidos && seguidos * spc < 512 {
+            during seguidos * tam_cluster <= resto - tam_cluster && fatSiguiente(c + seguidos - 1) == c + seguidos {
                 seguidos += 1
             }
             when !discoLeer(lbaDeCluster(c), seguidos * spc, dir + hecho) { give hecho }
@@ -437,7 +437,7 @@ expose flow fatEscribir(desplazamiento: Int, bytes: Int, dir: Int) => Bool {
         // Extiende el tramo mientras el siguiente cluster sea el contiguo.
         change ultimo = c
         change siguiente = fatSiguiente(c)
-        during sectores < 512 && siguiente == ultimo + 1 && (sectores + spc) * 512 <= bytes - hecho {
+        during siguiente == ultimo + 1 && (sectores + spc) * 512 <= bytes - hecho {
             sectores += spc
             ultimo = siguiente
             siguiente = fatSiguiente(ultimo)

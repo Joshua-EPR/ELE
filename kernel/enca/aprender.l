@@ -81,7 +81,7 @@ expose flow aprInicializar() => Bool {
     ef(e + 48, lf(r + 32))
     when !discoHayPermitida() { give false }
     when !fatMontar() { give false }
-    ckptConfigurar(CKPT_ENCA, encaTamEstado())
+    ckptConfigurar(CKPT_ENCA, encaTamEstadoMax())
     hold pa = ckptPasoRanura(CKPT_ENCA, 0)
     hold pb = ckptPasoRanura(CKPT_ENCA, 1)
     when pa >= 0 || pb >= 0 {
@@ -294,9 +294,10 @@ expose flow aprGuardar(m: Int) => Int {
     kprintEntero(total)
     kprint(cadena(" bytes; serializar "))
     kprintEntero((ts1 - ts0) / cpm)
-    kprint(cadena(" ms; escritura con CRC32 y vaciado "))
+    kprint(cadena(" ms; escritura con CRC32C y vaciado "))
     encaImprimirMsMBs(total, t3 - t2)
     kprintByte(10)
+    ckptImprimirDesglose(ts1 - ts0)
     give 1
 }
 
@@ -371,7 +372,7 @@ expose flow aprDeshacer(m: Int) => Int {
         kprintEntero(pasoOtra)
         kprintByte(10)
     }
-    hold cap = encaTamEstado()
+    hold cap = encaTamEstadoMax()
     hold buf = montonReservar(cap + 1024)
     when buf == 0 {
         kprintln(cadena("  deshacer: sin memoria para el búfer del estado"))
@@ -381,7 +382,7 @@ expose flow aprDeshacer(m: Int) => Int {
     hold pasoLeido = ckptCargarRanura(CKPT_ENCA, origen, buf)
     hold t1 = rdtsc()
     when pasoLeido < 0 {
-        kprintln(cadena("  deshacer: no se pudo leer la ranura (cabecera o CRC32 inválidos)"))
+        kprintln(cadena("  deshacer: no se pudo leer la ranura (cabecera o CRC inválidos)"))
         montonLiberar(buf)
         give -1
     }
@@ -392,7 +393,9 @@ expose flow aprDeshacer(m: Int) => Int {
     }
     kprint(cadena("  ranura "))
     letra(origen)
-    kprint(cadena(" leída y verificada (CRC32) en "))
+    kprint(cadena(" leída y verificada (formato "))
+    kprintEntero(ckptVersionCargada(CKPT_ENCA))
+    kprint(cadena(") en "))
     kprintEntero((t1 - t0) / cpm)
     kprintln(cadena(" ms; se comprueba la evaluación contra su cabecera..."))
     // Igual que el hito 17 tras cargar: la evaluación debe ser idéntica.
@@ -401,14 +404,19 @@ expose flow aprDeshacer(m: Int) => Int {
     hold dif = encaCompararMetricas(buf)
     kprint(cadena("  evaluación "))
     kprintEntero((rdtsc() - t2) / cpm)
-    when dif != 0 {
+    // Un estado de la versión 1 (corteza f64) no puede dar la misma evaluación bit a bit.
+    when dif != 0 && !encaEstadoAntiguo(buf) {
         kprint(cadena(" ms: DIFERENTE de la cabecera ("))
         kprintEntero(dif)
         kprintln(cadena(" métricas); no se reescribe nada"))
         montonLiberar(buf)
         give -1
     }
-    kprintln(cadena(" ms: idéntica a la cabecera"))
+    when dif != 0 {
+        kprintln(cadena(" ms: estado v1 (corteza f64 convertida): evaluación distinta de la cabecera, como se espera"))
+    } otherwise {
+        kprintln(cadena(" ms: idéntica a la cabecera"))
+    }
     // La referencia es la cabecera de lo restaurado (mezcla A y B).
     ef(e + 40, floatDeBits(leer64(buf + (ENCA_CAB_METRICAS) * 8)))
     ef(e + 48, floatDeBits(leer64(buf + (ENCA_CAB_METRICAS + 8) * 8)))
