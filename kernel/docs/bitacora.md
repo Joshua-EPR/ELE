@@ -1238,3 +1238,206 @@ Verificación del líder:
   B 7575402504172646·2^-52) están en la salida de Windows.
 - `enca_exp010.l` vive en ENCA/experiments, que está fuera de git
   (/ENCA/ en .gitignore), como el resto de ENCA.
+
+## Hito 21 — ENCA aprende de lo que escribe el usuario (2026-11-26)
+
+Archivos: `enca/aprender.l` (nuevo: aprendizaje, `:guardar`, `:deshacer`, comandos),
+`enca/hito21.l` (nuevo: prueba de aceptación), `almacenamiento/checkpoint.l`
+(escritura/lectura de una ranura concreta), `enca/exp009.l` (evaluación silenciosa
+y accesos), `enca/modelo.l` (`modeloMedirCongelado`), `enca/muestreo.l` (accesos),
+`kmain.l` (hito 21 y bucle de ENCA>), `herramientas/limine.conf` (entrada
+"/ELE kernel (ENCA: prueba de aprendizaje)", `cmdline: enca=prueba21`).
+
+### Diseño
+- **Qué se aprende.** Con `:aprender si` (por defecto) cada línea normal que se
+  teclea, más su '\n', es un documento nuevo que se procesa con
+  `modeloPrecuencial` (= el paso de vigilia del entrenamiento): predecir, medir
+  los bits del byte real con la mezcla y aprender (hipocampo; corteza con la
+  compuerta de sorpresa; mezclador), sin replay. Se imprime
+  `aprendido: N bytes, X bits/byte` y se vuelve a mostrar lo tecleado para que el
+  completado siga a continuación. La generación no aprende. `:aprender no` deja
+  ENCA> como antes. `:ver` muestra aprender, umbral, bytes sin guardar, ranura y
+  paso actuales y la mezcla B guardada.
+- **Cuenta de bytes sin guardar**: sube con cada línea aprendida; vuelve a 0 con
+  `:guardar` correcto o `:deshacer`.
+- **`:guardar`.** Evalúa las pruebas A y B congeladas con la misma función que el
+  hito 17 al cargar (`evaluarAB`, autocompletado incluido, que ya restaura la
+  ventana y la corteza), compara la mezcla de B con la del último estado
+  guardado o cargado y, si no empeora más que el umbral (`:umbral x`, bits/byte),
+  serializa y guarda como paso + 1 en la OTRA ranura con las métricas nuevas en la
+  cabecera (la comprobación del hito 17 al recargar sigue valiendo). Si empeora:
+  `no se guarda: la prueba B empeora X bits/byte (umbral U); use :deshacer ...`.
+  La comparación es contra la última versión guardada, no contra la original: pasos
+  pequeños consecutivos podrían acumular degradación (cada uno bajo el umbral).
+- **`:deshacer`** (difiere de "volver a la otra ranura" a secas por la
+  persistencia; hay que ver que el arranque siguiente carga lo restaurado, y el
+  hito 17 carga la ranura de paso MÁS ALTO):
+  - con cambios sin guardar: recarga la ranura del último estado guardado o
+    cargado (descarta lo aprendido); no escribe nada;
+  - sin cambios: recarga la OTRA ranura (la versión anterior) y la reescribe como
+    paso + 1 en la ranura de la que se viene (la actual), así sigue siendo la de
+    paso más alto y el arranque siguiente la carga. Si las dos ranuras tienen el
+    mismo CRC32 (p. ej. recién restaurado, o tras el guardado del hito 17 al
+    arrancar, que copia el estado cargado en la otra ranura) o la otra no es válida,
+    dice que no hay a dónde volver y no toca nada.
+  - Tras recargar (CRC32 de la ranura incluido) se evalúa A y B y se exige igualdad
+    bit a bit con la cabecera (como el hito 17); si no coincide, no se reescribe.
+    Cuesta ~2 s de evaluación.
+  - El estado se deserializa sobre el modelo vivo (los datos derivados, como la
+    tabla del impulso, no cambian con el aprendizaje).
+- **Umbral por defecto: 0,35 bits/byte** (13 % de la mezcla B, 2,767), con estos
+  datos del propio hito (QEMU WHPX, partiendo del estado del hito 17):
+
+  | aprendizaje | delta B (congelada) |
+  |---|---|
+  | F (284 B, 8 líneas) x1 | -0,149 (mejora) |
+  | F x2 | +0,151 |
+  | F x5 (prueba de aceptación, 1420 B) | +0,252 |
+  | 1 línea `hold zeta = 12` x1 (sobre F x5) | -0,039 |
+  | basura (3072 B, PCG) x1, sobre F x5 guardado | +1,514 |
+  | basura x2 | +0,599 |
+  | basura x3 (prueba de aceptación) | +0,449 |
+
+  El buen aprendizaje (incluso repetido 5 veces) queda en 0,25 y la basura x3 en
+  0,45; 0,35 deja ~0,10 de margen por cada lado. Una pasada de basura es muy
+  nociva (+1,5) y repetirla la "memoriza" y baja el delta (el mezclador vuelve a
+  fiarse de los órdenes altos, como pasaba con C6 en el hito 20): con muchas
+  repeticiones la basura podría pasar el umbral, aunque la evaluación mide el daño
+  real en B. Por eso la comparación es sobre una prueba congelada y no sobre los
+  bits/byte del propio texto aprendido (que bajan siempre).
+
+### Prueba de aceptación (`enca=prueba21`) y reinicio
+`hito21()` va tras el 18 y antes del 7. Sin la opción imprime
+`hito 21: prueba con enca=prueba21` y mide F congelado con el modelo cargado.
+Con ella usa las mismas funciones que los comandos (`aprPasada` = lo que hace
+cada línea tecleada, `aprGuardar`, `aprDeshacer`). F: 8 líneas de código ELE con
+nombres inventados (zorvalMezclar, lumbre, hebra...; 284 B); basura: 3072 B
+imprimibles de un PCG32 con '\n' cada 64.
+
+Arranque 1 (disco nuevo, entrena y guarda el paso 1; luego la prueba):
+```
+hito 21: ... F = 284 bytes en 8 líneas; umbral de :guardar 0,3500 bits/byte; estado de partida: ranura B paso 2, B guardada 2,7670
+a) F congelado antes: 4,2885 bits/byte; completado voraz ... desde 10 bytes: 4/205 bytes
+b) pasada 1: 3,2598 bits/byte precuenciales (284 bytes); delta B congelado -0,1492
+b) pasada 2: 0,8205 ...; delta B 0,1506   pasada 3: 0,5328   pasada 4: 0,4567
+b) pasada 5: 0,4178 ...; delta B congelado 0,2522
+b) F congelado después: 0,3791 bits/byte; completado voraz: 51/205 bytes; sin guardar 1420 bytes; aprender 0,053 ms por byte
+c) prueba B congelada: 3,0192 (guardada 2,7670), delta B = 0,2522; prueba A: 1,3568 (delta A = 0,0500); evaluación 2087 ms
+   guardado: paso 3 en la ranura A, 71315216 bytes; serializar 56 ms; escritura con CRC32 y vaciado 1552 ms = 45.9 MB/s
+d) basura, pasada 1: 7,4058 bits/byte (delta B 1,5137)  pasada 2: 0,4480 (0,5992)  pasada 3: 0,3410 (0,4487)
+   no se guarda: la prueba B empeora 0,4487 bits/byte (umbral 0,3500); use :deshacer para volver al último estado guardado
+   deshacer: se descartan 9216 bytes aprendidos sin guardar; se recarga la ranura A, paso 3
+   ranura A leída y verificada (CRC32) en 1622 ms; ... evaluación 2319 ms: idéntica a la cabecera
+hito 21: delta B de F 0,2522 (guardado), de la basura 0,4487 (rechazado), umbral 0,3500
+hito 21: F congelado 0,379136 bits/byte (bits 0x3FD843C1B61D457D)
+hito 21 OK
+```
+(En el disco de prueba el primer arranque deja el paso 1 en la ranura A; la
+prueba parte de la ranura B paso 2 porque el hito 17 copia el estado cargado en
+la otra ranura. Hito 11 sale FALLÓ en este equipo por el ruido del anfitrión, como
+en las corridas anteriores; el resto de los hitos 2-20 OK.)
+
+Arranque 2 (mismo disco, normal): `estado ENCA: ranura A, paso 3 ... verificados
+(CRC32)`, `estado recuperado: evaluación idéntica a la guardada`, guarda el paso 4
+en B, `hito 21: prueba con enca=prueba21` y
+`hito 21: F congelado 0,379136 bits/byte (bits 0x3FD843C1B61D457D)`: los mismos
+bits que el estado guardado en c), no los de antes (4,2885): lo aprendido sobrevive
+al reinicio. El arranque con `enca=exp010` también da `exp010 C5: idéntico a
+Windows`, `hito 20 OK`, 17 OK, 18 OK.
+
+Arranque 3 (mismo disco, teclas; las ranuras quedaron A paso 5, B paso 4):
+```
+ENCA> hold zeta = 12
+  aprendido: 15 bytes, 6,090 bits/byte  [0.047 ms por byte; sin guardar 15 bytes]
+  hold zeta = 12
+  [0 bytes generados ...]       (la línea aprendida termina en '\n': el completado la da por cerrada)
+ENCA> :ver  -> ... aprender si  umbral 0,3500 bits/byte  sin guardar 15 bytes  ranura A paso 5  B guardada 3,0192
+ENCA> :guardar
+  prueba B congelada: 2,9799 bits/byte (guardada 3,0192), delta B = -0,0394; prueba A: 1,3513 (delta A = -0,0055); evaluación 2108 ms
+  guardado: paso 6 en la ranura B, 71315216 bytes; serializar 67 ms; escritura ... 1641 ms = 43.4 MB/s
+ENCA> :deshacer          (sin cambios: versión anterior)
+  deshacer: sin cambios pendientes; se vuelve a la versión anterior, ranura A, paso 5
+  ranura A leída y verificada (CRC32) en 2626 ms; ...; evaluación 3004 ms: idéntica a la cabecera
+  restaurada: reescrita como paso 7 en la ranura B (2329 ms); el próximo arranque la carga
+ENCA> :deshacer
+  deshacer: no hay a dónde volver (las dos ranuras guardan el mismo estado: B paso 7, A paso 5)
+ENCA> hold zeta = 12 ; :deshacer      (con cambios: recarga lo guardado)
+  deshacer: se descartan 15 bytes aprendidos sin guardar; se recarga la ranura B, paso 7
+  ... evaluación 2431 ms: idéntica a la cabecera
+```
+
+### Tiempos (QEMU WHPX, 2 CPU)
+- Aprender: 0,043-0,053 ms por byte (~20 KB/s; la vigilia del entrenamiento rápido
+  hacía 19 KB/s); una línea tecleada de 15-60 B tarda menos de 3 ms.
+- `:guardar`: evaluación A+B congelada 2,1 s (autocompletado incluido) + serializar
+  0,06 s + escritura con CRC32 y vaciado 1,6 s (44-46 MB/s) = ~3,8 s en total;
+  rechazado: solo los 2,1 s de evaluación.
+- `:deshacer`: lectura y CRC32 1,6-2,8 s + evaluación 2,3-5 s (+ reescritura 2,3 s
+  sin cambios pendientes).
+- En el portátil (HDD, ~25 MB/s) la escritura/lectura de 71 MB sube a ~3 s; no
+  probado en este hito.
+
+Límites: ENCA> no tiene un `:guardar` automático; al apagar sin `:guardar` lo
+aprendido se pierde. La comparación del umbral es contra la última versión guardada
+(ver arriba). Una línea aprendida y vuelta a completar da el '\n' de inmediato: la
+memorización es literal, no generalización.
+
+
+### Hito 21, revisión: variantes del aprendizaje y umbral estrecho
+El aprendizaje inicial (a: hipocampo + corteza + mezclador) dañaba B (+0,252 con
+F x5, 9 %). Se midieron cuatro variantes con la opción `enca=estudio21` (cada una
+desde el mismo estado guardado del hito 17; se restaura con `:deshacer` entre
+medidas; F y la basura son los de la prueba de aceptación). `modeloPasoRapido`
+elige la variante solo mientras aprende una línea tecleada (`modeloFijarVariante`);
+el entrenamiento no cambia.
+
+| variante | dB F x1 | dB F x5 | F congelado antes -> después | voraz F | dB basura x1 | dB basura x3 |
+|---|---|---|---|---|---|---|
+| a hipocampo + corteza + mezclador | -0,149 | +0,252 | 4,2885 -> 0,3791 | 4 -> 51/205 | +1,244 | +0,765 |
+| b sin mezclador (hipocampo + corteza) | -0,024 | -0,031 | 4,2885 -> 0,5582 | 4 -> 51/205 | -0,017 | -0,012 |
+| c solo hipocampo | -0,025 | -0,033 | 4,2885 -> 0,5980 | 4 -> 51/205 | -0,021 | -0,020 |
+| d mezclador con tasa / 10 + hipocampo + corteza | -0,083 | +0,067 | 4,2885 -> 0,4488 | 4 -> 51/205 | +0,129 | +0,595 |
+
+Lectura:
+- Todo el daño sobre B viene del mezclador (y la corteza con él): b y c no dañan B
+  ni con basura (la basura queda en el hipocampo/corteza sin tocar la prueba B), así
+  que no hay nada que la protección pueda separar: la basura no se rechazaría, y
+  la prueba de aceptación exige rechazarla. Además aprenden F algo peor (0,56-0,60
+  frente a 0,38-0,45), aunque el completado voraz es igual (51/205) en las cuatro.
+- a daña mucho con F x5 (0,252) y la basura x3 da +0,765, separación 3x.
+- d conserva casi toda la mejora de F (0,449 frente a 0,379 de a), el voraz idéntico,
+  F x5 apenas daña (+0,067, 2,4 %) y la basura x3 daña 9 veces más (+0,595).
+  Es la que mejor separa.
+
+**Decisión: variante d por defecto** (`:modoaprender a|b|c|d` elige; `:ver` muestra
+la letra) y **umbral 0,20 bits/byte** (7 % de B): 3x por encima de F x5 (0,067) y
+3x por debajo de la basura x3 (0,595). Una sola pasada de basura (+0,13) pasa el
+umbral: es poco dañina en d. Prueba de aceptación con d (desde el disco nuevo):
+F x1 -0,083, x2 -0,032, x5 +0,067 -> `:guardar` guarda (paso 3); basura sobre ese
+estado: x1 +0,034, x2 +0,443, x3 +0,455 -> rechazada (umbral 0,2000); `:deshacer`
+recarga el paso 3 con evaluación idéntica. F congelado 4,2885 -> 0,4488; voraz
+4 -> 51/205. Arranque normal siguiente: `ranura A, paso 3`, `evaluación idéntica a
+la guardada`, `hito 21: F congelado 0,448780 bits/byte (bits 0x3FDCB8D0AE580CF4)`
+(mismos bits que antes de reiniciar). (Esta revisión sustituye las cifras del
+umbral 0,35 y de la variante a que aparecen más arriba en la entrada original.)
+
+Revisión y verificación del líder:
+- Con la primera versión (variante a), aprender F cinco veces empeoraba B
+  +0,252 bits/byte y el umbral era 0,35. Pedí medir variantes; la tabla de
+  arriba muestra que el daño a B lo causa el mezclador.
+- Variante b (sin mezclador): la basura tampoco daña B, así que la
+  protección no tendría nada que rechazar.
+- Variante d (mezclador con tasa/10): separa los dos casos. F×5 da
+  +0,067 y la basura×3 da +0,455 a +0,595, con umbral 0,20.
+- Limitación: una sola pasada de basura de 3 KB con la variante d daña
+  poco (+0,03 a +0,13) y se guardaría. La protección mide el daño a B,
+  no si el texto "es basura".
+- QEMU, disco nuevo con enca=prueba21:
+  - F: 4,2885 → 0,4488 bits/byte; completado voraz 4/205 → 51/205.
+  - Guardar F: ΔB +0,0666, guardado (paso 2, ranura B).
+  - Basura ×3: ΔB +0,4548, "no se guarda".
+  - :deshacer: evaluación idéntica a la cabecera.
+  - Resultado: "hito 21 OK".
+- Arranques normales después sobre el mismo disco: "estado recuperado:
+  evaluación idéntica a la guardada" e "hito 21: F congelado 0,448780
+  bits/byte (bits 0x3FDCB8D0AE580CF4)", los mismos bits que al guardar.

@@ -141,6 +141,47 @@ expose flow ckptGuardar(juego: Int, paso: Int, dir: Int, bytes: Int, cortar: Boo
     hold pb = pasoDeCabecera(juego, 1)
     change ranura = 0
     when pa >= 0 && (pb < 0 || pa > pb) { ranura = 1 }
+    give escribirRanura(juego, ranura, paso, dir, bytes, cortar)
+}
+
+// Guarda como el paso `paso` en la ranura elegida (0 A, 1 B). Mismo orden de
+// escritura que ckptGuardar (datos, vaciar, cabecera, vaciar).
+expose flow ckptGuardarEn(juego: Int, ranura: Int, paso: Int, dir: Int, bytes: Int) => Bool {
+    when bytes > leer64(estado(juego)) { give false }
+    give escribirRanura(juego, ranura, paso, dir, bytes, false)
+}
+
+// Paso de la ranura (cabecera válida, sin comprobar los datos); -1 si no.
+expose flow ckptPasoRanura(juego: Int, ranura: Int) => Int { give pasoDeCabecera(juego, ranura) }
+
+// CRC32 de los datos según la cabecera de la ranura; -1 si la cabecera no es válida.
+expose flow ckptCrcRanura(juego: Int, ranura: Int) => Int {
+    when pasoDeCabecera(juego, ranura) < 0 { give -1 }
+    give leer64(leer64(estado(juego) + 8) + 32)
+}
+
+// Carga una ranura concreta en `dir` (sus datos deben cuadrar con el CRC).
+// Devuelve su paso, o -1 si la cabecera o los datos no son válidos.
+expose flow ckptCargarRanura(juego: Int, ranura: Int, dir: Int) => Int {
+    hold e = estado(juego)
+    escribir64(e + 16, -1)
+    hold paso = pasoDeCabecera(juego, ranura)
+    when paso < 0 { give -1 }
+    hold c = leer64(e + 8)
+    hold bytes = leer64(c + 24)
+    hold crc = leer64(c + 32)
+    when bytes > leer64(e) { give -1 }
+    hold leidos = fatLeerDesde512(bytes, dir)
+    when leidos == bytes && crc32(dir, bytes) == crc {
+        escribir64(e + 16, ranura)
+        escribir64(e + 24, paso)
+        give paso
+    }
+    give -1
+}
+
+flow escribirRanura(juego: Int, ranura: Int, paso: Int, dir: Int, bytes: Int, cortar: Bool) => Bool {
+    hold e = estado(juego)
     hold sectores = (bytes + 511) / 512
     when !abrirRanura(juego, ranura) { give false }
     escribir64(e + 32, ranura)

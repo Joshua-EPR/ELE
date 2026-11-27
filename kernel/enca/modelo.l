@@ -76,6 +76,13 @@ flow calcularHashes(m: Int) {
     escribir64(m + 184, ventanaHash(v, 6))
 }
 
+// Variante del aprendizaje de lo tecleado (hito 21). 0 hipocampo + corteza +
+// mezclador; 1 sin mezclador; 2 solo hipocampo; 3 mezclador con tasa / 10.
+// El entrenamiento la deja en 0; solo enca/aprender.l la cambia mientras
+// aprende una línea.
+flow variante() => Int { give reservar(8, 8) }
+expose flow modeloFijarVariante(v: Int) { escribir64(variante(), v) }
+
 flow modoRapido(m: Int) => Bool { give leer64(m + 216) == 1 }
 
 // Predicción rápida del paso (los hashes ya están en +152 y los activos de
@@ -173,16 +180,24 @@ flow modeloPasoRapido(m: Int, byte: Int, aprender: Bool) {
         hold t1 = perfilIni()
         memAprender(mem, m + 152, byte)
         perfilFin(PF_HIP_APR, t1)
-        when sorpresa > lf(m + 48) {
+        hold v = leer64(variante())
+        when sorpresa > lf(m + 48) && v != 2 {
             hold t2 = perfilIni()
             cortezaAprenderRapido(cor, byte, lf(m + 56))
             perfilFin(PF_COR_APR, t2)
         } otherwise {
             escribir64(m + 64, leer64(m + 64) + 1)
         }
-        hold t3 = perfilIni()
-        mezAprenderRapido(mez, byte)
-        perfilFin(PF_MEZ_ACT, t3)
+        when v == 0 {
+            hold t3 = perfilIni()
+            mezAprenderRapido(mez, byte)
+            perfilFin(PF_MEZ_ACT, t3)
+        } otherwise when v == 3 {
+            hold tasa = lf(mez + 16)
+            ef(mez + 16, tasa / 10.0)
+            mezAprenderRapido(mez, byte)
+            ef(mez + 16, tasa)
+        }
     }
     encaAcabarAvance(cor)
 }
@@ -319,6 +334,17 @@ expose flow modeloSueno(m: Int, texto: Int, len: Int) {
 // compuerta de sorpresa, mezclador). Sin replay ni autocompletado.
 expose flow modeloPrecuencial(m: Int, texto: Int, len: Int) {
     modeloVigilia(m, texto, len)
+}
+
+// Medida congelada de un documento (hito 21): predice y mide cada byte sin
+// aprender y sin autocompletar. Documento nuevo; solo cambian las métricas
+// (m + 80...) y el estado transitorio de la corteza, que cada documento
+// reconstruye.
+expose flow modeloMedirCongelado(m: Int, texto: Int, len: Int) {
+    perfilFase(2)
+    encaFijarReparto(leer64(m + 16), 140)
+    modeloIniciarDocumento(m)
+    each pos among 0..len { modeloPaso(m, leer8(texto + pos), false) }
 }
 
 flow guardarRespaldo(m: Int) {
