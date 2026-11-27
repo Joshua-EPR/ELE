@@ -1643,3 +1643,30 @@ Verificación del líder (QEMU WHPX, 2 CPU, 3 GiB, enca=ranuras:65536,524288 y
 - Después del barrido el arranque sigue normal: hito 16 "idéntico a
   Windows", hito 17 guarda a 202 MB/s y los hitos 17 y 18 dan OK. El cambio
   de mem/monton.l no altera el camino normal.
+
+### Hito 22 en el portátil (imagen del hito 22, arranque normal)
+```
+crc32c 64 MiB: software 1671 ms (38 MB/s), SSE4.2 60 ms (1066 MB/s)
+lectura secuencial cruda (solo lectura):
+  inicio de la partición: LBA 943216640, 64 MiB en órdenes de 8192 KiB: 871 ms = 76.9 MB/s
+  inicio de la partición, tramo siguiente: LBA 943347712, 64 MiB en órdenes de 256 KiB: 864 ms = 77.5 MB/s
+  final del disco: LBA 976642096, 64 MiB en órdenes de 8192 KiB: 942 ms = 71.1 MB/s
+  final del disco: LBA 976640000, 64 MiB en órdenes de 8192 KiB: 937 ms = 71.5 MB/s
+  final del disco, tramo anterior: LBA 976511024, 64 MiB en órdenes de 256 KiB: 917 ms = 73.1 MB/s
+hito disco OK
+hito 18: voraz 20/20 con bucle, muestreo 0/20; reproducibles 20/20; ms por byte voraz 0.034, muestreo 0.101
+hito 21: F congelado 0,451807 bits/byte (bits 0x3FDCEA67E7666A96)
+```
+- La meta de 100 MB/s no se alcanza en ELEDATOS. El límite es el HDD: la
+  partición está en las pistas interiores (de la LBA 943 M a la 977 M de
+  un disco de 500 GB), donde el disco da 71–77 MB/s. Órdenes de 8 MiB y de
+  256 KiB dan lo mismo, porque el cuello de botella es el medio. Al
+  principio del disco (hito 13) daba 111–115 MB/s.
+- El CRC32C por hardware (1066 MB/s, 28 veces el software) deja de limitar.
+  Guardar y cargar el estado de 71 MB queda acotado por el disco, unos
+  70 MB/s, frente a los 25 MB/s de antes del hito 22.
+- Para pasar de 100 MB/s habría que mover ELEDATOS al principio del disco,
+  reparticionando desde Linux.
+- El 0,451807 de F tras reiniciar muestra que lo aprendido persiste. Es
+  algo distinto del 0,448780 de QEMU porque la corteza del modo rápido
+  pasó a f32 en el hito 22 y el estado del portátil viene de otra historia.
