@@ -314,6 +314,13 @@ expose flow modeloSueno(m: Int, texto: Int, len: Int) {
     each pos among 0..len { modeloPasoReplay(m, leer8(texto + pos)) }
 }
 
+// Evaluación precuencial (exp010): sobre `texto` predice, mide y luego aprende
+// con el mismo paso de vigilia del entrenamiento (hipocampo, corteza con su
+// compuerta de sorpresa, mezclador). Sin replay ni autocompletado.
+expose flow modeloPrecuencial(m: Int, texto: Int, len: Int) {
+    modeloVigilia(m, texto, len)
+}
+
 flow guardarRespaldo(m: Int) {
     ventanaGuardar(leer64(m))
     cortezaGuardar(leer64(m + 16))

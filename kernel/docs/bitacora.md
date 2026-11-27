@@ -1148,3 +1148,93 @@ Verificación del líder (QEMU, mismo disco):
 - Arranque normal después: "estado ENCA: ranura B, paso 2 ... verificados
   (CRC32)" y "evaluación idéntica a la guardada". Las ranuras quedaron
   intactas.
+
+## Hito 20 — exp010: recalibrar el mezclador (C6) y evaluación precuencial (2026-11-26)
+
+Windows primero (`ENCA\experiments\enca_exp010.l`, salida completa en
+`ENCA\target\enca_exp010_salida.txt`), luego el kernel.
+
+### Diseño
+- **C5**: exp009 C5 sin cambios (mezcla geométrica, vigilia + 2 sueños
+  intercalados por archivo, 65536 ranuras). C5-O0 reproduce exp009 bit a bit
+  (A 5886232681853270·2^-52, B 6231673534097902·2^-51).
+- **C6** = C5 + tras los 2 replays de CADA archivo, una pasada sobre ese mismo
+  archivo en la que solo aprende el mezclador: hipocampo y corteza predicen
+  pero no aprenden ni consolidan; ventana y vMem avanzan como en evaluación
+  (plástico = false). Alternativa no implementada: recalibrar solo una vez,
+  tras el último archivo (el mezclador vería la corteza final, pero sobre un
+  archivo que ya memorizó).
+- **Precuencial**: byte a byte predice, mide (bits de la mezcla, del hipocampo
+  y de la corteza, top-1) y aprende con el mismo paso de vigilia del
+  entrenamiento (hipocampo, corteza con compuerta de sorpresa, mezclador). Sin
+  replay ni autocompletado. A y B parten por separado del estado al terminar
+  el entrenamiento; el modelo hospedado no se copia, así que B reentrena
+  (determinista; en la salida el "reentrenado" repite las mismas
+  estadísticas de corteza).
+- **Órdenes** (índices del corpus 0..10): O0 = [0 1 2 3 4 5 6 7 8 9 10],
+  O1 = [5 2 8 0 10 3 7 1 9 4 6], O2 = [9 6 1 4 10 0 8 3 5 2 7].
+
+### Tabla de Windows (bits/byte de la mezcla; media y rango sobre O0..O2)
+| | C5 media (mín–máx) | C6 media (mín–máx) | C6 − C5 por orden (O0, O1, O2) |
+|---|---|---|---|
+| A congelada | 1,3189 (1,3070–1,3422) | 1,4181 (1,3954–1,4355) | +0,116 +0,088 +0,093 |
+| B congelada | 2,9090 (2,7674–3,0611) | 3,4084 (3,3004–3,4978) | +0,660 +0,402 +0,437 |
+| A precuencial | 0,9849 (0,9768–0,9908) | 0,9878 (0,9804–0,9931) | +0,0036 +0,0023 +0,0028 |
+| B precuencial | 1,6898 (1,6795–1,7077) | 1,6974 (1,6856–1,7150) | +0,0094 +0,0061 +0,0073 |
+
+C6 empeora en las 4 pruebas y en los 3 órdenes (0/3 mejoras). En las
+congeladas la pérdida (0,1 y 0,5) supera con holgura el ruido entre órdenes
+(0,035 y 0,29 de rango de C5); en las precuenciales es pequeña (0,003 y 0,008)
+pero consistente en signo. Causa probable: el mezclador se recalibra sobre un
+archivo que el hipocampo (y la corteza) acaban de memorizar, así que sus
+órdenes altos parecen casi perfectos y los pesos suben (orden 4: 0,52 -> 0,98,
+orden 5: 0,51 -> 1,06 con O0), sobreconfianza que se paga en archivos nuevos.
+Recalibrar sobre datos no vistos (un archivo apartado) sería la variante
+honesta; no se probó.
+
+**Mejor configuración: C5** (menor media de B precuencial, 1,6898 frente a
+1,6974). Por eso el kernel no necesita la pasada de recalibración; solo la
+evaluación precuencial (`modeloPrecuencial` = el paso de vigilia).
+
+Ejemplo O0 (C5): A cong. 1,307 (top-1 811), B cong. 2,767 (637), A prec.
+0,9768 (841), B prec. 1,6821 (740).
+
+### Kernel: reproducción exacta (C5, O0)
+- `kernel/enca/exp010.l` (nuevo), `modeloPrecuencial` en `modelo.l`, accesos
+  `encaCorpusListo/encaTextoDe/...` en `exp009.l`, `hito20` en `kmain.l` y la
+  entrada "/ELE kernel (exp010: reproducir mejoras de ENCA)"
+  (`cmdline: enca=exp010`) en `limine.conf`.
+- Se ejecuta solo con `enca=exp010`; sin ella imprime "hito 20: se ejecuta con
+  la opción de arranque enca=exp010". Va justo tras el hito 16 (reutiliza el
+  corpus verificado), antes de 17 y 18, de modo que `-Esperado "hito 18"` lo
+  incluye.
+- Modo exacto: entrena (48 s), evalúa A y B congeladas, A precuencial, libera
+  el hipocampo y reentrena (51 s) para B precuencial.
+- Salida clave (QEMU WHPX, 2 CPUs, 2 GiB): las cuatro evaluaciones coinciden
+  en mezcla, hipocampo, corteza (mantisa y exponente), top-1 y autocompletado
+  con Windows; "exp010 C5: idéntico a Windows" y "hito 20 OK". Tiempo total
+  117,5 s; 844 280 B procesados = 7186 B/s (exacto). El arranque normal
+  (sin opciones) sigue dando hitos 2-18 OK y la línea de aviso del hito 20.
+
+### Comparación con gzip y xz (prueba B, 15 781 B, bpb)
+| | bpb |
+|---|---|
+| gzip -9 (por archivo) | 2,112 |
+| xz -9 (por archivo) | 2,117 |
+| ENCA C5 congelada | 2,767 |
+| gzip -9 condicional al corpus | 1,800 |
+| xz -9 condicional al corpus | 1,588 |
+| **ENCA C5 precuencial (media O0-O2)** | **1,690** (O0 1,682; 1,680–1,708) |
+
+Precuencial, ENCA supera a gzip y xz por archivo (-20 %) y a gzip
+condicional (1,800), pero no a xz condicional (1,588; +6 %).
+
+Verificación del líder:
+- Windows: volví a correr `enca_exp010.l`, 4 min 48 s; la salida es
+  idéntica byte a byte a ENCA/target/enca_exp010_salida.txt.
+- QEMU con `-Opciones "enca=exp010"`: "exp010 C5: idéntico a Windows" y
+  "hito 20 OK", en 119 s (7068 B/s en modo exacto). Las mantisas
+  precuenciales del kernel (A 8798484689747517·2^-53,
+  B 7575402504172646·2^-52) están en la salida de Windows.
+- `enca_exp010.l` vive en ENCA/experiments, que está fuera de git
+  (/ENCA/ en .gitignore), como el resto de ENCA.

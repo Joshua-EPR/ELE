@@ -161,6 +161,17 @@ flow porMil(parte: Int, total: Int) => Int {
     give (parte * 1000) / total
 }
 
+// Accesos para exp010 (enca/exp010.l): corpus ya verificado por el hito 16.
+expose flow encaCorpusListo() => Bool { give leer64(tablaTextos() + 152) == 1 }
+expose flow encaTextoDe(i: Int) => Int { give textoDe(i) }
+expose flow encaRutaDe(i: Int) => Int { give corpusRuta(i) }
+expose flow encaTamDe(i: Int) => Int { give corpusTam(i) }
+expose flow encaImprimirF(x: Float) { imprimirF(x) }
+expose flow encaImprimirMs(ciclos: Int) { imprimirMs(ciclos) }
+expose flow encaExactoM(x: Float) => Int { give exactoM(x) }
+expose flow encaExactoE(x: Float) => Int { give exactoE(x) }
+expose flow encaPorMil(parte: Int, total: Int) => Int { give porMil(parte, total) }
+
 // ---- comparación con Windows ---------------------------------------------------
 
 flow comparar(nombre: Int, obtenido: Int, esperado: Int) {

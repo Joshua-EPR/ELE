@@ -34,6 +34,7 @@ take lib.vexp
 take bench.gradientes
 take bench.aprender
 take enca.exp009
+take enca.exp010
 take enca.interactivo
 take enca.muestreo
 take enca.hito18
@@ -94,6 +95,7 @@ flow kmain() {
     hito14()
     hito15()
     hito16()
+    hito20()
     hito17()
     hito18()
     hito7()
@@ -667,6 +669,24 @@ flow hito18() {
         kprintln(cadena("hito 18 omitido (sin modelo de ENCA)"))
     } otherwise {
         kprintln(cadena("hito 18 FALLÓ"))
+    }
+}
+
+// Hito 20: exp010 (C5 + evaluación precuencial) reproducido en modo exacto.
+// Solo con la opción de arranque enca=exp010 (cuesta ~2 min más). Va tras el
+// hito 16 porque reutiliza el corpus ya verificado.
+flow hito20() {
+    when !arranqueOpcionEs(cadena("enca"), cadena("exp010")) {
+        kprintln(cadena("hito 20: se ejecuta con la opción de arranque enca=exp010"))
+        give
+    }
+    hold r = encaExp010()
+    when r == 1 {
+        kprintln(cadena("hito 20 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 20 omitido (sin corpus)"))
+    } otherwise {
+        kprintln(cadena("hito 20 FALLÓ"))
     }
 }
 
