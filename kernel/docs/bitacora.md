@@ -1528,3 +1528,118 @@ Verificación del líder (QEMU WHPX):
 - Pendiente en el portátil: la meta de 100 MB/s se mide en el HDD real. La
   partición ELEDATOS está al final del disco; la lectura cruda al principio
   y al final de la partición dirá cuánto da el propio disco.
+
+## ENCA: barrido de ranuras (2026-11-27)
+
+Archivos: `enca/ranuras.l` (nuevo), `enca/{matematica,exp009}.l`, `mem/monton.l`,
+`kmain.l` (`hitoRanuras`, tras el hito 20), `herramientas/{construir.ps1,
+crear_corpus_ele.py,crear_imagen.py,crear_disco_prueba.py,limine.conf}`.
+
+### Diseño
+- Opción de arranque `enca=ranuras` (menú "ENCA: barrido de ranuras") o
+  `enca=ranuras:262144,524288` (lista de S, para repartir el barrido en corridas
+  de menos de 10 min). Sin la opción no cambia nada (una corrida normal da
+  hito 16 idéntico a Windows y hito 17 OK).
+- Modo rápido, C5, solo cambian las ranuras por orden S (65536 ... 4194304).
+  Por S: modelo nuevo para el corpus ENCA (vigilia + 2 sueños por archivo,
+  pruebas A y B congeladas, con autocompletado como el hito 17), se libera, y
+  modelo nuevo para el corpus ELE (mismo esquema por documento; prueba C
+  congelada sin autocompletado). No escribe al disco.
+- Memoria: antes de cada S se calcula `5*S*(24+12*16)` B + 4 MiB y se compara con
+  marcos libres + montón libre; con margen de 256 MiB. Si no cabe: "S no cabe
+  (necesita X MiB, libres Y MiB)" y termina; si `montonReservar` da 0 también.
+  Todo lo del modelo se devuelve con un rastro de reservas (`ncaRastrear`,
+  `ncaLiberarRastreado`; hay reservas alineadas cuyo puntero original se
+  perdía). Tras liberar se comprueba `montonEnUso` (volvió exacto en todas) y
+  la lista libre (`montonVerificar`).
+- `crecer` del montón: si el último bloque libre termina en el fin de la
+  región, solo mapea lo que falta (antes mapeaba siempre el tamaño completo y
+  desperdiciaba ~40 % al encadenar bloques enormes). Los marcos físicos no
+  vuelven al asignador físico: tras liberar, el montón conserva lo mapeado
+  (un único bloque libre de ~S x 1080 B, sin fragmentación: 5 bloques libres
+  antes y después).
+- Coste por ranura (por orden): 1080 B por S y 5 órdenes = 216 B por ranura
+  (etiqueta, total y distintos 24 B + 12 sucesores x 16 B). RAM medida =
+  1082 MiB para S=1048576.
+
+### Corpus ELE
+Código fuente del compilador: `compiler-l/src/**/*.l`, 113 archivos, 1 447 846 B.
+Ordenados por ruta relativa (bytes UTF-8); el archivo i (desde 0) es de prueba
+si `i % 10 == 9`, si no entrena: 102 documentos de entrenamiento = 1 287 947 B
+(CRC32C 0xAAFAB8F7) y 11 de prueba = 159 899 B (CRC32C 0x9815E3D0). Se concatenan
+en `ele/entrena.bin`, `ele/prueba.bin` con `ele/indice.bin` (cabecera de 128 B
+con magia, versión, recuentos, tamaños y CRC32C de cada .bin, de la tabla y de
+la propia cabecera; luego (desplazamiento, longitud) por documento). El kernel
+verifica todo y lo imprime; `iniciarDocumento` por archivo. Se prepara con
+`construir.ps1 -CorpusEle` (disco de datos y ESP de la imagen USB). Si falta, el
+barrido hace solo la parte ENCA y lo dice.
+
+### Resultados (QEMU WHPX, 2 CPU, 3 GiB; 1 corrida por S, mismo kernel)
+Corpus ENCA, bits/byte (mezcla / hipocampo), top-1 por mil:
+
+| S por orden | RAM MiB | A mezcla | A hip | B mezcla | B hip | sobrescr. | entren. B/s | eval. B/s |
+|---|---|---|---|---|---|---|---|---|
+| 65536 | 69 | 1,3074 | 1,5808 | 2,7678 | 3,9526 | 10799 | 20210 | 66129 |
+| 131072 | 137 | 1,3070 | 1,5987 | 2,7664 | 3,9823 | 6719 | 20237 | 52009 |
+| 262144 | 272 | 1,3014 | 1,5960 | 2,7646 | 3,9924 | 4791 | 19206 | 66068 |
+| 524288 | 542 | 1,2940 | 1,5938 | 2,7388 | 3,9857 | 1552 | 20082 | 64519 |
+| 1048576 | 1082 | 1,2909 | 1,5940 | 2,7335 | 3,9927 | 541 | 19971 | 64061 |
+| 2097152 | 2162 | 1,2906 | 1,5947 | 2,7326 | 3,9926 | 215 | 19640 | 63786 |
+| 4194304 | no cabe (necesita 4324 MiB, libres 3047 MiB) | | | | | | | |
+
+Corpus ELE (prueba C, 159 899 B), entrenado con 1 287 947 B:
+
+| S por orden | RAM MiB | C mezcla | C hip | C cor | top-1 | sobrescr. | ocupadas % | entren. B/s | eval. B/s |
+|---|---|---|---|---|---|---|---|---|---|
+| 65536 | 69 | 2,0958 | 2,4842 | 3,7967 | 670 | 286389 | 36 | 19526 | 55319 |
+| 131072 | 137 | 1,9843 | 2,3181 | 3,7964 | 682 | 188585 | 25 | 19408 | 60520 |
+| 262144 | 272 | 1,9549 | 2,2583 | 3,7987 | 687 | 125622 | 15 | 18844 | 60220 |
+| 524288 | 542 | 1,9272 | 2,2385 | 3,7965 | 692 | 53203 | 8 | 19184 | 60182 |
+| 1048576 | 1082 | 1,9248 | 2,2321 | 3,7970 | 693 | 26190 | 4 | 19311 | 58064 |
+| 2097152 | 2162 | 1,9076 | 2,2387 | 3,7978 | 690 | 12203 | 2 | 19034 | 59104 |
+
+S=65536 sale con 10799 sobrescrituras y bits como el estado de referencia.
+
+### Conclusión
+- Corpus ENCA (125 KB): el hipocampo ya cabe en 65536 ranuras; ocupa 11 % y la
+  mezcla solo gana 0,017 bits/byte en A (1,307 a 1,291) y 0,035 en B; satura en
+  ~S=524288. Subir S no mejora el hipocampo solo (su bits/byte sube un poco:
+  menos desalojo de contextos raros hace la distribución más repartida).
+- Corpus ELE (1,3 MB): mejora real y claramente mayor: mezcla 2,096 a 1,925
+  (-8 %) de 65536 a 524288, con rendimientos decrecientes (-0,111, -0,029,
+  -0,027, -0,003, -0,017 por duplicación); se satura hacia S=524288 a 1048576
+  (la prueba C es de 160 KB y es ruidosa a partir de ahí). Hipocampo solo:
+  2,484 a 2,232. La corteza no cambia (3,797).
+- Velocidad: independiente de S (~19-20 kB/s entrenamiento, 55-65 kB/s
+  evaluación): solo se tocan las ranuras que el contexto indica; la creación
+  cuesta (1,1 GB en 5,5 s, 2,2 GB en 6,5 s en QEMU).
+- Coste: 216 B por ranura de orden, o 1080 B por unidad de S; 542 MiB a 524288.
+- Techo del portátil (4 GB, ~3,3 a 3,6 GiB usables, con el margen de 256 MiB):
+  S=2097152 (2,2 GiB) debería caber; S=4194304 (4,3 GiB) no cabe en ninguna
+  máquina de 4 GB; con 3 GiB en QEMU el límite fue S=2097152. Para estos
+  corpus, S=524288 (542 MiB) a 1048576 (1,1 GiB) es el punto razonable.
+- Limitaciones: una sola corrida por S; ELE y ENCA con ruido de prueba chica
+  (un solo modelo, sin semillas); QEMU/WHPX con el anfitrión cargado (velocidades
+  absolutas no son las del Celeron).
+
+### Pendiente en el portátil
+Medir con USB (`construir.ps1 -Imagen -CorpusEle -Enca ...`, entrada de menú
+"barrido de ranuras", o `enca=ranuras:524288` etc.) todos los S, en especial
+524288, 1048576 y 2097152 (si cabe) y los tiempos reales; comprobar que el
+Celeron mantiene velocidad independiente de S (su caché es mucho menor que la
+de QEMU/anfitrión). Nota: `hito 11` (SGEMM) falló en una corrida de QEMU por
+carga del anfitrión (umbral de rendimiento, ajeno a este cambio).
+
+Verificación del líder (QEMU WHPX, 2 CPU, 3 GiB, enca=ranuras:65536,524288 y
+-CorpusEle):
+- Coincide con la tabla:
+
+| S | A | B | C |
+|---|---|---|---|
+| 65536 | 1,30741 | 2,76783 | 2,09584 |
+| 524288 | 1,29398 | 2,73885 | 1,92722 |
+
+- Corpus ELE verificado (CRC32C 0xAAFAB8F7 y 0x9815E3D0).
+- Después del barrido el arranque sigue normal: hito 16 "idéntico a
+  Windows", hito 17 guarda a 202 MB/s y los hitos 17 y 18 dan OK. El cambio
+  de mem/monton.l no altera el camino normal.

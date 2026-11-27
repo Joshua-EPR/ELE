@@ -40,6 +40,7 @@ take enca.muestreo
 take enca.hito18
 take enca.aprender
 take enca.hito21
+take enca.ranuras
 take tiempo.reloj
 
 flow kmain() {
@@ -98,6 +99,7 @@ flow kmain() {
     hito15()
     hito16()
     hito20()
+    hitoRanuras()
     hito17()
     hito18()
     hito21()
@@ -817,6 +819,14 @@ flow hito21() {
     } otherwise when r == 2 {
         kprintln(cadena("hito 21 omitido (sin ranuras de ENCA)"))
     }
+}
+
+// Barrido de ranuras del hipocampo (enca/ranuras.l): solo con la opción de
+// arranque enca=ranuras[:lista]. Va tras el hito 16 (usa su corpus verificado)
+// y antes del 17, cuando casi toda la memoria está libre.
+flow hitoRanuras() {
+    when !encaRanurasPedido() { give }
+    encaRanuras()
 }
 
 // Hito 20: exp010 (C5 + evaluación precuencial) reproducido en modo exacto.

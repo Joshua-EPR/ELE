@@ -615,6 +615,10 @@ expose flow encaEvaluarSilencioso(m: Int) {
     escribir64(vivo() + 16, 0)
 }
 
+// Tiempos y bytes de la última evaluación A/B (ver medidasEval): +0 tE0 +8 tE1
+// +16 tE2 +24 ciclos de autocompletado A +32 B +40 bytes A +48 bytes B.
+expose flow encaMedidasEval() => Int { give medidasEval() }
+
 expose flow encaLetraRanura(r: Int) { letraRanura(r) }
 expose flow encaImprimirMsMBs(bytes: Int, ciclos: Int) { imprimirMsMBs(bytes, ciclos) }
 expose flow encaMetricasAlBufer(buf: Int) { metricasAlBufer(buf) }

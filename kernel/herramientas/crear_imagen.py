@@ -11,6 +11,8 @@ boot/limine/limine.conf). Sin dependencias: GPT, FAT32 y nombres largos
 Con `--enca <carpeta ENCA>` copia antes al árbol los 18 archivos del corpus
 de ENCA bajo enca/<ruta relativa> (los lee el hito 16), verificando tamaño y
 CRC32. `--solo-enca <carpeta ENCA> <esp_dir>` solo hace esa copia.
+Con `--ele <compiler-l/src>` añade el segundo corpus (ele/entrena.bin,
+prueba.bin, indice.bin; ver crear_corpus_ele.py).
 
 Para grabarla en un USB (borra todo el USB): Rufus en modo "DD" o, en
 Linux, `dd if=ele.img of=/dev/sdX bs=4M conv=fsync`. En el equipo:
@@ -21,6 +23,8 @@ import struct
 import sys
 import uuid
 import zlib
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 SECTOR = 512
 INICIO_PARTICION = 2048           # 1 MiB, alineado
@@ -251,10 +255,18 @@ def main():
         i = args.index("--enca")
         enca = args[i + 1]
         del args[i:i + 2]
+    ele = None
+    if "--ele" in args:
+        i = args.index("--ele")
+        ele = args[i + 1]
+        del args[i:i + 2]
     origen, destino = args[0], args[1]
     mib = int(args[2]) if len(args) > 2 else 64
     if enca:
         copiar_enca(enca, origen)
+    if ele:
+        from crear_corpus_ele import preparar
+        preparar(ele, origen)
     total = mib * 1024 * 1024 // SECTOR
     fin = total - 34
     sectores = fin - INICIO_PARTICION + 1

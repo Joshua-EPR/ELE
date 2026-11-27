@@ -36,6 +36,30 @@ expose flow montonIniciar() {
 
 expose flow montonEnUso() => Int { give leer64(estado() + 16) }
 
+// Bytes mapeados en total en la región del montón (en uso + libres).
+expose flow montonMapeado() => Int { give leer64(estado()) - BASE }
+
+// Bloques libres: cuántos hay y el tamaño del mayor (para medir fragmentación).
+expose flow montonBloquesLibres() => Int {
+    change n = 0
+    change b = leer64(estado() + 8)
+    during b != 0 {
+        n += 1
+        b = leer64(b + 8)
+    }
+    give n
+}
+
+expose flow montonMayorLibre() => Int {
+    change mayor = 0
+    change b = leer64(estado() + 8)
+    during b != 0 {
+        when leer64(b) > mayor { mayor = leer64(b) }
+        b = leer64(b + 8)
+    }
+    give mayor
+}
+
 // Inserta el bloque `b` en la lista libre (por dirección) y lo fusiona con
 // sus vecinos contiguos.
 flow insertarLibre(b: Int) {
@@ -64,7 +88,20 @@ flow insertarLibre(b: Int) {
 flow crecer(bytes: Int) => Bool {
     hold e = estado()
     hold inicio = leer64(e)
-    hold total = (bytes + CRECIMIENTO - 1) / CRECIMIENTO * CRECIMIENTO
+    // Si el último bloque libre termina justo en el fin de la región, la
+    // región nueva se fusionará con él: solo hace falta mapear lo que falta
+    // (así un bloque enorme tras otro no desperdicia memoria física).
+    change falta = bytes
+    change ultimo = 0
+    change n = leer64(e + 8)
+    during n != 0 {
+        ultimo = n
+        n = leer64(n + 8)
+    }
+    when ultimo != 0 && ultimo + leer64(ultimo) == inicio && leer64(ultimo) < bytes {
+        falta = bytes - leer64(ultimo)
+    }
+    hold total = (falta + CRECIMIENTO - 1) / CRECIMIENTO * CRECIMIENTO
     change d = 0
     during d < total {
         hold marco = memFisicaReservar()

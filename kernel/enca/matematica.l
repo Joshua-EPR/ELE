@@ -109,10 +109,50 @@ expose flow ef(dir: Int, v: Float) { escribir64(dir, bitsDeFloat(v)) }
 // reservas durante el entrenamiento). Devuelve 0 si no hay memoria.
 flow contadorReservas() => Int { give reservar(8, 8) }
 
+// Rastro de reservas (solo el barrido de ranuras lo activa): +0 activo,
+// +8 cuántas, +16 (puntero, bytes) x 512. Permite devolver TODO lo de un
+// modelo al montón aunque algunas direcciones se hayan alineado después.
+flow rastro() => Int { give reservar(16 + 512 * 16, 8) }
+
+expose flow ncaRastrear(activo: Bool) {
+    hold r = rastro()
+    escribir64(r + 8, 0)
+    when activo { escribir64(r, 1) } otherwise { escribir64(r, 0) }
+}
+
 expose flow ncaReservar(bytes: Int) => Int {
     hold p = montonReservar(bytes)
-    when p != 0 { escribir64(contadorReservas(), leer64(contadorReservas()) + bytes) }
+    when p != 0 {
+        escribir64(contadorReservas(), leer64(contadorReservas()) + bytes)
+        hold r = rastro()
+        when leer64(r) == 1 {
+            hold n = leer64(r + 8)
+            when n < 512 {
+                escribir64(r + 16 + n * 16, p)
+                escribir64(r + 24 + n * 16, bytes)
+                escribir64(r + 8, n + 1)
+            } otherwise {
+                escribir64(r, 2)
+            }
+        }
+    }
     give p
+}
+
+// Libera todo lo reservado con el rastro activo; devuelve cuántos bloques, o
+// -1 si el rastro se desbordó (hubo reservas sin anotar).
+expose flow ncaLiberarRastreado() => Int {
+    hold r = rastro()
+    hold n = leer64(r + 8)
+    hold completo = leer64(r) == 1
+    each i among 0..n {
+        montonLiberar(leer64(r + 16 + i * 16))
+        escribir64(contadorReservas(), leer64(contadorReservas()) - leer64(r + 24 + i * 16))
+    }
+    escribir64(r, 0)
+    escribir64(r + 8, 0)
+    when !completo { give -1 }
+    give n
 }
 
 // Reserva alineada a 64 bytes (para SSE y líneas de caché); 0 si no hay memoria.

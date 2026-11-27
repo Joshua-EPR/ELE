@@ -48,6 +48,10 @@ param(
     # Carpeta ENCA original: su corpus (18 archivos) se copia al disco de
     # datos (-DiscoDatos prueba) y a la imagen USB (-Imagen) bajo enca/.
     [string]$Enca = "",
+    # Segundo corpus (barrido de ranuras, enca=ranuras): el código fuente del
+    # compilador de ELE (compiler-l\src) en ele/{entrena,prueba,indice}.bin del
+    # disco de datos y de la imagen USB. Ver herramientas\crear_corpus_ele.py.
+    [switch]$CorpusEle,
     # Línea de órdenes del kernel (opciones "clave=valor") para la entrada
     # por defecto del menú, p. ej. -Opciones "enca=nuevo". Sin ella, igual
     # que antes (la entrada del menú sin opciones).
@@ -62,6 +66,7 @@ $kernel = Split-Path -Parent $PSScriptRoot
 $herramientas = $PSScriptRoot
 $ele = Join-Path $kernel "compilador\ele.exe"
 $salida = Join-Path $kernel "construccion"
+$fuenteEle = Join-Path (Split-Path -Parent $kernel) "compiler-l\src"
 $esp = Join-Path $salida "esp"
 $elf = Join-Path $salida "kernel.elf"
 $registro = Join-Path $salida "serie.log"
@@ -108,11 +113,10 @@ $disco = "format=raw,file=fat:rw:`"$esp`""
 if ($Imagen) {
     $img = Join-Path $salida "ele.img"
     Write-Host "==> creando imagen USB"
-    if ($Enca) {
-        python (Join-Path $herramientas "crear_imagen.py") --enca $Enca $esp $img
-    } else {
-        python (Join-Path $herramientas "crear_imagen.py") $esp $img
-    }
+    $extra = @()
+    if ($Enca) { $extra += @("--enca", $Enca) }
+    if ($CorpusEle) { $extra += @("--ele", $fuenteEle) }
+    python (Join-Path $herramientas "crear_imagen.py") @extra $esp $img
     if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear la imagen" }
     $disco = "format=raw,file=`"$img`""
 }
@@ -130,11 +134,10 @@ if ($Acelerar) { $argumentos += @("-accel", "whpx") }
 if ($DiscoDatos) {
     if ($DiscoDatos -eq "prueba") {
         $DiscoDatos = Join-Path $salida "datos.img"
-        if ($Enca) {
-            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512 --enca $Enca
-        } else {
-            python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512
-        }
+        $extra = @()
+        if ($Enca) { $extra += @("--enca", $Enca) }
+        if ($CorpusEle) { $extra += @("--ele", $fuenteEle) }
+        python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos 512 @extra
         if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
     }
     $argumentos += @("-drive", "file=`"$DiscoDatos`",format=raw,if=none,id=datos", "-device", "ide-hd,drive=datos,bus=ide.1")
