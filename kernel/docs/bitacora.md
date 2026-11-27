@@ -2005,3 +2005,26 @@ ejecutan `smpEntradaAp` dentro de su propia interrupción (IF = 0 en ellos) y no
 pasan por el BSP. Además, la hipótesis IF = 0 choca con el dato del portátil
 (22 por interrupción, 0 por sondeo): con IF = 0 la primera tecla la habría
 tomado el sondeo.
+
+Diagnóstico en el portátil (imagen con puntos de IF, arranque normal con el
+hablante):
+```
+IF: h4=0 h5=0 h6=1 h8=1 h9=1 h12=1 h13=1 h14=1 h15=1 h16=1 h20=1 ran=1
+IF: h17=1 h18=1 h21=1 crc=1 disco=1 resu=1 hab0=1 habBuf=1 habLeer=1 habMod=1 habCopia=1 habEval=1
+IF: habFin=1 hab=1 h7=1
+IF: ahora 1, primer cero en ninguno, vigilados con cero 0; tics del temporizador en 35 ms: 3; hlt despertó en 3460 us
+teclado: estado 8042 0x2C
+:ver -> teclado: 26 por interrupción, 0 por sondeo, 0 del touchpad descartados
+```
+- IF no se pierde en ningún punto, ni durante la carga del hablante, y
+  hlt despierta con el temporizador.
+- Ningún byte del touchpad. Quedan descartadas las dos hipótesis (IF = 0 y
+  bloqueo por AUX).
+- Diferencias con la imagen que fallaba en el camino del teclado:
+  1. bucle con sondeo/pause en lugar de hlt;
+  2. tecladoInterrupcion ya no lee 0x60 si el 8042 no tiene dato
+     (estado & 1).
+- Hipótesis vigente: una IRQ1 de más (por ejemplo al programar el IOAPIC)
+  leía un 0x60 sin dato. Si ese byte viejo era un prefijo E0, una tecla
+  muerta o un modificador, el traductor quedaba atascado. Pendiente
+  confirmarlo con una imagen hlt + lectura comprobada.
