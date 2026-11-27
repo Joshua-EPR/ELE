@@ -923,3 +923,25 @@ Observaciones:
   (umbral 50 %), y Aᵀ con 2 núcleos va más lento que con 1 (x0,48). Es la
   CPU virtual del anfitrión compartida con Windows: el código del SGEMM no
   cambió, y en el portátil da 62–66 %.
+
+Portátil, segundo arranque (carga el estado del primero):
+```
+RAM reservada por ENCA: 75251274 B (71 MiB); tiempo total ENCA 84 s      (exacto; era 167 s en el hito 16)
+ENCA C5: idéntico a Windows
+hito 16 OK
+ENCA rápido: núcleos en línea (BSP incluido): 2
+estado ENCA: ranura A, paso 1, 71315216 bytes leídos y verificados (CRC32) en 2965 ms = 24.0 MB/s
+PRUEBA A ... exacto: mezcla 5885276722394095 * 2^-52 ... top-1=811 por mil
+PRUEBA B ... exacto: mezcla 6230748540601682 * 2^-51 ... top-1=637 por mil
+estado recuperado: evaluación idéntica a la guardada
+estado ENCA guardado: paso 2 en la ranura B, 71315216 bytes; serializar 78 ms; escritura con CRC32 y vaciado 2761 ms = 25.8 MB/s
+hito 17 OK
+ENCA> hola + b + c", 1)                               [14 bytes, 0,084 ms por byte]
+ENCA> 01 = this.nHid + 1] * this.nHid + 1] * ...      [200 bytes, 0,937 ms por byte]
+```
+- El modo rápido da en el portátil exactamente los mismos bits que en QEMU
+  (mezcla A 5885276722394095·2^-52). Es determinista también entre máquinas.
+- En el portátil, el modo exacto pasó de 167 s a 84 s con las
+  optimizaciones que no cambian bits.
+- Guardar y cargar van a unos 25 MB/s en el HDD, frente a 46 MB/s en QEMU;
+  incluyen el CRC32 de 71 MB y el vaciado.
