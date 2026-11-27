@@ -1680,3 +1680,27 @@ hito 21: F congelado 0,451807 bits/byte (bits 0x3FDCEA67E7666A96)
 - El 0,451807 de F tras reiniciar muestra que lo aprendido persiste. Es
   algo distinto del 0,448780 de QEMU porque la corteza del modo rápido
   pasó a f32 en el hito 22 y el estado del portátil viene de otra historia.
+
+### Barrido de ranuras en el portátil (Celeron 3865U, 4 GB)
+```
+memoria libre inicial: 3788 MiB (marcos 3721 MiB); corpus ELE CRC32C entrena 0xAAFAB8F7 prueba 0x9815E3D0
+medidas 6 de 7 en 723 s
+S por orden | RAM MiB | ELE ent B/s | ELE eval B/s | bits/byte A | B | C | ELE sobrescr.
+    65536 |      69 |       12745 |        39723 | 1,3074 | 2,7678 | 2,0958 |   286389
+   131072 |     137 |       12744 |        39650 | 1,3070 | 2,7664 | 1,9843 |   188585
+   262144 |     272 |       12734 |        39556 | 1,3014 | 2,7646 | 1,9549 |   125622
+   524288 |     542 |       12718 |        39473 | 1,2940 | 2,7388 | 1,9272 |    53203
+  1048576 |    1082 |       12704 |        39385 | 1,2909 | 2,7335 | 1,9248 |    26190
+  2097152 |    2162 |       12698 |        39315 | 1,2906 | 2,7326 | 1,9076 |    12203
+S=4194304 no cabe (necesita 4324 MiB, libres 3783 MiB)
+```
+- Bits/byte y sobrescrituras idénticos a QEMU en los 6 tamaños: el modo
+  rápido es determinista entre máquinas también con hipocampos grandes.
+- Techo de los 4 GB: 2097152 ranuras por orden (2162 MiB). 4194304 no cabe
+  por unos 540 MiB.
+- Velocidad independiente del tamaño: unos 12,7 KB/s entrenando y
+  39,4 KB/s evaluando (0,65 de QEMU).
+- Para este corpus (1,29 MB) el punto útil es 524288 ranuras por orden
+  (542 MiB). De ahí a 2097152 la RAM se multiplica por 4 y C solo baja de
+  1,927 a 1,908. Aprovechar hipocampos más grandes requiere más texto de
+  entrenamiento.
