@@ -47,7 +47,11 @@ param(
     [string]$DiscoDatos = "",
     # Carpeta ENCA original: su corpus (18 archivos) se copia al disco de
     # datos (-DiscoDatos prueba) y a la imagen USB (-Imagen) bajo enca/.
-    [string]$Enca = ""
+    [string]$Enca = "",
+    # Línea de órdenes del kernel (opciones "clave=valor") para la entrada
+    # por defecto del menú, p. ej. -Opciones "enca=nuevo". Sin ella, igual
+    # que antes (la entrada del menú sin opciones).
+    [string]$Opciones = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,7 +88,16 @@ Write-Host ("    kernel.elf: {0} bytes" -f (Get-Item $elf).Length)
 if (Test-Path $esp) { Remove-Item -Recurse -Force $esp }
 New-Item -ItemType Directory -Force (Join-Path $esp "EFI\BOOT"), (Join-Path $esp "boot\limine") | Out-Null
 Copy-Item (Join-Path $herramientas "limine\BOOTX64.EFI") (Join-Path $esp "EFI\BOOT\BOOTX64.EFI")
-Copy-Item (Join-Path $herramientas "limine.conf") (Join-Path $esp "boot\limine\limine.conf")
+# limine.conf: con -Prueba sin menú (timeout 0); -Opciones se pone como
+# cmdline de la primera entrada.
+$conf = [System.IO.File]::ReadAllText((Join-Path $herramientas "limine.conf")).Replace("`r`n", "`n")
+if ($Prueba) { $conf = $conf -replace "(?m)^timeout: \d+", "timeout: 0" }
+if ($Opciones) {
+    $marca = "    path: boot():/boot/kernel.elf`n"
+    $i = $conf.IndexOf($marca)
+    $conf = $conf.Insert($i + $marca.Length, "    cmdline: $Opciones`n")
+}
+[System.IO.File]::WriteAllText((Join-Path $esp "boot\limine\limine.conf"), $conf, (New-Object System.Text.UTF8Encoding($false)))
 Copy-Item $elf (Join-Path $esp "boot\kernel.elf")
 
 $disco = "format=raw,file=fat:rw:`"$esp`""

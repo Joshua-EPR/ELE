@@ -1051,3 +1051,100 @@ ENCA> :muestreo ; :semilla 5 ; hold x =   -> hold x = -1   [4 bytes, 0.167 ms po
 ```
 Los textos generados son los mismos que en QEMU (por ejemplo el prompt
 [20]): el muestreo es determinista también entre máquinas.
+
+## Hito 19 — opción de arranque "ENCA desde cero" (2026-11-26)
+
+Problema: con ENCA_A.BIN/ENCA_B.BIN válidos el hito 17 carga el estado y no
+entrena, así que en el portátil no se podía medir la velocidad de entrenamiento
+exacto frente a rápido.
+
+Cómo se pasa la opción:
+- Limine 12.11.1, petición "Executable Cmdline" (ID `4b161536e598651e b390ad4a2f1f303a`
+  tras el prefijo común; respuesta: revisión + puntero a la cadena). El kernel la copia en
+  `arranqueCopiar()` (hasta 255 bytes) y la expone con `arranqueLinea()`,
+  `arranqueOpcion(clave)` (valor de "clave=valor", separadas por espacios, o 0) y
+  `arranqueOpcionEs(clave, valor)`. Al inicio imprime `línea de órdenes: <texto>` o `(vacía)`.
+- `kernel/herramientas/limine.conf`: `timeout: 3` y dos entradas: "/ELE kernel" (por
+  defecto, sin opciones) y "/ELE kernel (ENCA desde cero: medir entrenamiento)" con
+  `cmdline: enca=nuevo` (la clave en Limine 12 es `cmdline:`; `kernel_cmdline:` es la antigua).
+- Timeout: `construir.ps1 -Prueba` genera su copia del conf con `timeout: 0` (no espera);
+  sin -Prueba (ventana, -Imagen/USB) conserva el menú de 3 s.
+- `construir.ps1 -Opciones "enca=nuevo"` pone ese texto como `cmdline:` de la entrada por
+  defecto (para QEMU sin menú).
+
+Qué hace `enca=nuevo` en el hito 17: no carga ninguna ranura (no las toca),
+entrena en modo rápido desde cero, evalúa, imprime la tabla exacto/rápido y no guarda
+("no se guarda: medición"). Comprueba que los bits/byte son los del rápido normal
+(A 5885276722394095·2^-52, B 6230748540601682·2^-51) e imprime el resultado. Luego
+sigue el hito 18 con el modelo recién entrenado.
+
+QEMU (WHPX, 2 CPU, 2G, disco nuevo):
+1. Normal: `línea de órdenes: (vacía)`; `estado ENCA: ninguna ranura válida ... se entrena`;
+   `estado ENCA guardado: paso 1 en la ranura A`; hito 17 OK, hito 18 OK.
+2. Mismo disco, `-Opciones "enca=nuevo"`: `línea de órdenes: enca=nuevo`;
+   `estado ENCA: opción enca=nuevo, se ignoran ENCA_A.BIN/ENCA_B.BIN (no se tocan)`;
+   mezcla A 5885276722394095 * 2^-52, B 6230748540601682 * 2^-51; aceleración total 3.74x
+   (entrenamiento 2755 -> 10955 B/s); `enca=nuevo: bits/byte idénticos ...`;
+   `no se guarda: medición`; hito 17 OK, hito 18 OK. (El hito 11 falló en esta
+   corrida por ruido del anfitrión; pasó en las otras dos.)
+3. Mismo disco, normal: `estado ENCA: ranura A, paso 1 ... verificados (CRC32)`;
+   `estado recuperado: evaluación idéntica`; `estado ENCA guardado: paso 2 en la ranura B`.
+   El paso cargado (1) es el mismo que dejó el arranque 1: el 2 no escribió nada, y el 3
+   guarda paso+1 en la otra ranura.
+
+### Hito 19: la "diferencia de compilador" en exp009 C5 es exacto frente a rápido
+
+Se planteó que exp009 C5 daba en la prueba B, mezcla, 2,767418975801085 con
+el compilador viejo y 2,767008196170232 con el actual. No es una diferencia
+de compilador:
+- 2,767418975801085 es el modo exacto. Lo dan el compilador actual en
+  Windows (Cranelift, medido otra vez el 2026-11-26), QEMU y el portátil:
+  mantisa 6231673534097902·2^-51.
+- 2,767008196170232 es el modo rápido del hito 17: mantisa
+  6230748540601682·2^-51.
+- 2,767418975801085 - 0,000410779630853 (Δ rápido - exacto del hito 17)
+  = 2,767008196170232.
+
+Caso mínimo. El modo rápido cambia expFloat de ENCA (Taylor de grado 5
+en x/16 elevado a la 16, con la entrada saturada a [-16, 16]) por exp en
+f32 con SSE (vexp, error ~1e-8):
+
+| x | expFloat | e^x | error relativo de expFloat |
+|---|---|---|---|
+| -16 | 1,0674385597e-7 | 1,1253517472e-7 | -5,15e-2 |
+| -8 | 3,3528353494e-4 | 3,3546262790e-4 | -5,34e-4 |
+| -4 | 1,8315515715e-2 | 1,8315638889e-2 | -6,73e-6 |
+| -1 | 0,36787944066 | 0,36787944117 | -1,40e-9 |
+| 4 | 54,597910838 | 54,598150033 | -4,38e-6 |
+
+En los softmax de 256 símbolos (corteza y mezclador), los términos lejanos
+del máximo (x ≈ -8 a -16) quedan subestimados hasta un 5 %. Con vexp la
+corteza mejora 0,004–0,005 bits/byte y la mezcla 0,0002–0,0004.
+
+### Hito 19: gzip y xz sobre la prueba B
+
+Prueba B: memoria_secuencial.l y corteza_bytes.l, 15 781 B. Ejecutables
+`gzip -9 -n` y `xz -9` de Git para Windows, cada archivo por separado:
+
+| | memoria_secuencial.l (6428 B) | corteza_bytes.l (9353 B) | total B |
+|---|---|---|---|
+| gzip -9 | 1646 B = 2,049 bpb | 2520 B = 2,155 bpb | 2,112 bpb |
+| xz -9 | 1672 B = 2,081 bpb | 2504 B = 2,142 bpb | 2,117 bpb |
+
+Condicional al corpus de entrenamiento: tamaño(entrenamiento + B) -
+tamaño(entrenamiento), con Python (gzip nivel 9, lzma preset 9):
+- gzip: 1,800 bpb
+- xz: 1,588 bpb
+
+ENCA C5 evaluada congelada da 2,767 bpb: peor que gzip -9 incluso sin
+corpus. gzip y xz se adaptan al propio archivo mientras lo comprimen;
+ENCA congelada no aprende de B. La evaluación precuencial del hito 20
+(predecir, medir y aprender) es la comparación justa.
+
+Verificación del líder (QEMU, mismo disco):
+- Arranque con `-Opciones "enca=nuevo"`: "se ignoran ENCA_A.BIN/ENCA_B.BIN",
+  bits/byte idénticos al entrenamiento rápido normal, aceleración 3,75x,
+  "no se guarda: medición".
+- Arranque normal después: "estado ENCA: ranura B, paso 2 ... verificados
+  (CRC32)" y "evaluación idéntica a la guardada". Las ranuras quedaron
+  intactas.
