@@ -2,15 +2,17 @@
 //
 // El modelo está congelado: cada completado empieza con un documento nuevo
 // (iniciarDocumento), pasa el prefijo por la corteza sin predecir ni
-// aprender (condicionar) y genera con el byte de máxima probabilidad de la
-// mezcla (voraz, como el autocompletado de la evaluación). Nada de lo
-// aprendido cambia: el mismo prefijo da siempre el mismo completado.
+// aprender (condicionar) y genera byte a byte con enca.muestreo (temperatura,
+// top-k/top-p, penalización de n-gramas, PCG32 con semilla; o voraz con
+// :voraz). Nada de lo aprendido cambia: mismo prefijo y misma configuración
+// (semilla incluida) dan siempre el mismo completado.
 
 take nucleo.cpu
 take nucleo.mem
 take lib.consola
 take dispositivos.apic
 take enca.modelo
+take enca.muestreo
 
 fixed MAX_GENERADOS = 200
 
@@ -82,18 +84,18 @@ flow mostrarByte(b: Int) {
 // Completa el prefijo (n bytes UTF-8 en `prefijo`): imprime hasta 200 bytes
 // o hasta el primer '\n' generado, y después los bytes y los ms por byte.
 expose flow encaCompletar(m: Int, prefijo: Int, n: Int) {
-    modeloIniciarDocumento(m)
-    each i among 0..n { condicionar(m, leer8(prefijo + i)) }
+    mzIniciar(m, prefijo, n)
+    hold voraz = mzEsVoraz()
+    hold paraLinea = mzParaEnLinea()
     hold d = decodificador()
     escribir64(d, 0)
     escribir64(d + 8, 0)
     hold t0 = rdtsc()
     change generados = 0
     during generados < MAX_GENERADOS {
-        hold b = modeloPredecirMezcla(m)
-        when b == 10 { leave }
+        hold b = mzSiguiente(m, voraz)
+        when b == 10 && paraLinea { leave }
         mostrarByte(b)
-        condicionar(m, b)
         generados += 1
     }
     hold t1 = rdtsc()

@@ -20,6 +20,7 @@ take enca.rapido
 take enca.estado
 take almacenamiento.checkpoint
 take cpu.buzon
+take arranque.limine
 
 fixed ARCHIVOS = 18
 fixed ENTRENAMIENTO = 11
@@ -160,6 +161,17 @@ flow porMil(parte: Int, total: Int) => Int {
     give (parte * 1000) / total
 }
 
+// Accesos para exp010 (enca/exp010.l): corpus ya verificado por el hito 16.
+expose flow encaCorpusListo() => Bool { give leer64(tablaTextos() + 152) == 1 }
+expose flow encaTextoDe(i: Int) => Int { give textoDe(i) }
+expose flow encaRutaDe(i: Int) => Int { give corpusRuta(i) }
+expose flow encaTamDe(i: Int) => Int { give corpusTam(i) }
+expose flow encaImprimirF(x: Float) { imprimirF(x) }
+expose flow encaImprimirMs(ciclos: Int) { imprimirMs(ciclos) }
+expose flow encaExactoM(x: Float) => Int { give exactoM(x) }
+expose flow encaExactoE(x: Float) => Int { give exactoE(x) }
+expose flow encaPorMil(parte: Int, total: Int) => Int { give porMil(parte, total) }
+
 // ---- comparación con Windows ---------------------------------------------------
 
 flow comparar(nombre: Int, obtenido: Int, esperado: Int) {
@@ -221,6 +233,7 @@ flow informar(m: Int, etiqueta: Int, prueba: Int, modo: Int) {
     escribir64(encaResultado(modo) + 144 + prueba * 8, leer64(m + 128))
     escribir64(encaResultado(modo) + 160 + prueba * 8, leer64(m + 120))
     escribir64(encaResultado(modo) + 176 + prueba * 8, leer64(m + 136))
+    when evalSilenciosa() { give }
     kprint(etiqueta)
     kprint(cadena(": bits/byte mezcla="))
     imprimirF(bm)
@@ -330,11 +343,13 @@ flow evaluarAB(m: Int, modo: Int) {
     escribir64(m + 208, 0)
     change bytesA = 0
     each i among ENTRENAMIENTO..PRUEBA_A {
-        kprint(cadena("evaluando "))
-        kprint(corpusRuta(i))
-        kprint(cadena(" "))
-        kprintEntero(corpusTam(i))
-        kprintln(cadena(" B ..."))
+        when !evalSilenciosa() {
+            kprint(cadena("evaluando "))
+            kprint(corpusRuta(i))
+            kprint(cadena(" "))
+            kprintEntero(corpusTam(i))
+            kprintln(cadena(" B ..."))
+        }
         modeloEvaluar(m, textoDe(i), corpusTam(i))
         bytesA += corpusTam(i)
     }
@@ -346,11 +361,13 @@ flow evaluarAB(m: Int, modo: Int) {
     escribir64(m + 208, 0)
     change bytesB = 0
     each i among PRUEBA_A..ARCHIVOS {
-        kprint(cadena("evaluando "))
-        kprint(corpusRuta(i))
-        kprint(cadena(" "))
-        kprintEntero(corpusTam(i))
-        kprintln(cadena(" B ..."))
+        when !evalSilenciosa() {
+            kprint(cadena("evaluando "))
+            kprint(corpusRuta(i))
+            kprint(cadena(" "))
+            kprintEntero(corpusTam(i))
+            kprintln(cadena(" B ..."))
+        }
         modeloEvaluar(m, textoDe(i), corpusTam(i))
         bytesB += corpusTam(i)
     }
@@ -578,11 +595,30 @@ flow filaVelocidad(nombre: Int, exacto: Int, rapido: Int) {
 // ---- estado de ENCA en checkpoints A/B (hito 17b) -------------------------------
 
 // +0 modelo rápido vivo (entrenado o cargado; lo usa el modo interactivo),
-// +8 paso del último estado válido encontrado en disco (0 si no había).
+// +8 paso del último estado válido encontrado en disco (0 si no había),
+// +16 evaluación silenciosa (1: evaluarAB no imprime), +24 bytes de corpus
+// entrenados del estado vivo (van en la cabecera de los estados que se guarden).
 flow vivo() => Int { give reservar(32, 8) }
+flow evalSilenciosa() => Bool { give leer64(vivo() + 16) == 1 }
 
 // Modelo rápido en memoria, o 0 si ENCA no está disponible.
 expose flow encaModelo() => Int { give leer64(vivo()) }
+
+// Bytes de corpus entrenados del estado vivo (palabra 13 de la cabecera).
+expose flow encaEntrenados() => Int { give leer64(vivo() + 24) }
+
+// Evalúa las pruebas A y B congeladas (como el hito 17, con autocompletado)
+// sin imprimir; deja las métricas en encaResultado(1).
+expose flow encaEvaluarSilencioso(m: Int) {
+    escribir64(vivo() + 16, 1)
+    evaluarAB(m, 1)
+    escribir64(vivo() + 16, 0)
+}
+
+expose flow encaLetraRanura(r: Int) { letraRanura(r) }
+expose flow encaImprimirMsMBs(bytes: Int, ciclos: Int) { imprimirMsMBs(bytes, ciclos) }
+expose flow encaMetricasAlBufer(buf: Int) { metricasAlBufer(buf) }
+expose flow encaCompararMetricas(buf: Int) => Int { give compararMetricas(buf) }
 
 flow letraRanura(r: Int) {
     when r == 0 { kprint(cadena("A")) } otherwise { kprint(cadena("B")) }
@@ -714,6 +750,7 @@ flow encaIntentarCargar() => Int {
         give 0
     }
     escribir64(vivo() + 8, paso)
+    escribir64(vivo() + 24, leer64(buf + 104))
     kprint(cadena("estado ENCA: ranura "))
     letraRanura(ckptRanuraCargada(CKPT_ENCA))
     kprint(cadena(", paso "))
@@ -771,13 +808,22 @@ expose flow encaHito17() => Int {
     kprintByte(10)
     // Hito 17b: si hay un estado válido en ENCA_A.BIN / ENCA_B.BIN se carga
     // en vez de entrenar.
-    hold cargado = encaIntentarCargar()
+    // Opción de arranque enca=nuevo: se ignoran las ranuras (sin tocarlas),
+    // se entrena desde cero y no se guarda (medición de velocidad).
+    hold nuevo = arranqueOpcionEs(cadena("enca"), cadena("nuevo"))
+    change cargado = 0
+    when nuevo {
+        kprintln(cadena("estado ENCA: opción enca=nuevo, se ignoran ENCA_A.BIN/ENCA_B.BIN (no se tocan)"))
+    } otherwise {
+        cargado = encaIntentarCargar()
+    }
     when cargado == 1 { give 1 }
     when cargado == 2 { give 0 }
     hold vlnOk = vlnMedir(1048576)
     hold r = encaEjecutar(1)
     when r != 1 { give 0 }
     hold ra = encaResultado(1)
+    escribir64(vivo() + 24, leer64(ra + 80))
     hold dA = lf(ra) - lf(ex)
     hold dB = lf(ra + 32) - lf(ex + 32)
     kprintln(cadena("---- rápido frente a exacto ----"))
@@ -839,6 +885,18 @@ expose flow encaHito17() => Int {
     kprintByte(10)
     hold limite = 0.001
     hold bien = absF(dA) < limite && absF(dB) < limite && tR < tE && vlnOk
+    when bien && nuevo {
+        // Mismos bits que el entrenamiento rápido normal (mezcla A y B).
+        hold igualA = exactoM(lf(ra)) == 5885276722394095 && exactoE(lf(ra)) == -52
+        hold igualB = exactoM(lf(ra + 32)) == 6230748540601682 && exactoE(lf(ra + 32)) == -51
+        when igualA && igualB {
+            kprintln(cadena("enca=nuevo: bits/byte idénticos al entrenamiento rápido normal (A 5885276722394095*2^-52, B 6230748540601682*2^-51)"))
+        } otherwise {
+            kprintln(cadena("enca=nuevo: AVISO bits/byte DISTINTOS de los del entrenamiento rápido normal"))
+        }
+        kprintln(cadena("no se guarda: medición"))
+        give 1
+    }
     when bien {
         // Hito 17b: guarda el estado entrenado (paso 1, o el siguiente al
         // de un estado incompatible que hubiera en disco).

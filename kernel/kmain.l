@@ -34,7 +34,12 @@ take lib.vexp
 take bench.gradientes
 take bench.aprender
 take enca.exp009
+take enca.exp010
 take enca.interactivo
+take enca.muestreo
+take enca.hito18
+take enca.aprender
+take enca.hito21
 take tiempo.reloj
 
 flow kmain() {
@@ -42,6 +47,13 @@ flow kmain() {
     arranqueCopiar()
     consolaIniciar()
     kprintln(cadena("ELE kernel OK"))
+    // Línea de órdenes de Limine (opciones de arranque, p. ej. enca=nuevo).
+    kprint(cadena("línea de órdenes: "))
+    when leer64(arranqueLinea()) == 0 {
+        kprintln(cadena("(vacía)"))
+    } otherwise {
+        kprintln(arranqueLinea())
+    }
 
     // Hito 2: framebuffer, fuente 8x16 y kprint.
     when !arranqueRevisionAceptada() {
@@ -85,7 +97,10 @@ flow kmain() {
     hito14()
     hito15()
     hito16()
+    hito20()
     hito17()
+    hito18()
+    hito21()
     hitoCrc32c()
     hito7()
 
@@ -249,7 +264,8 @@ flow hito7() {
     // el eco de siempre.
     hold modelo = encaModelo()
     when modelo != 0 {
-        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro"))
+        mzDefecto()
+        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro; :ayuda lista los comandos"))
         kprint(cadena("ENCA> "))
     } otherwise {
         kprintln(cadena("hito 7: escriba una línea y pulse Intro"))
@@ -261,10 +277,17 @@ flow hito7() {
         hlt()
         change cp = tecladoLeer()
         during cp >= 0 {
-            when cp == TECLA_INTRO && modelo != 0 {
+            when cp == TECLA_INTRO && modelo != 0 && n > 0 && leer64(linea) == 58 {
+                // Línea que empieza por ':': comando de configuración.
+                kprintByte(10)
+                when !aprComando(linea, n) { mzComando(linea, n) }
+                kprint(cadena("ENCA> "))
+                n = 0
+            } otherwise when cp == TECLA_INTRO && modelo != 0 {
                 // El prefijo pasa a bytes UTF-8, como estaría en un archivo.
                 change nb = 0
                 each i among 0..n { nb += utf8Codificar(leer64(linea + i * 8), bytes + nb) }
+                when aprendiendo() && nb > 0 { aprTeclear(modelo, bytes, nb, linea, n) }
                 encaCompletar(modelo, bytes, nb)
                 kprint(cadena("ENCA> "))
                 n = 0
@@ -688,6 +711,62 @@ flow hito17() {
         kprintln(cadena("hito 17 omitido (sin corpus)"))
     } otherwise {
         kprintln(cadena("hito 17 FALLÓ"))
+    }
+}
+
+// Hito 18: generación sin bucles (muestreo) frente al voraz.
+flow hito18() {
+    hold r = encaHito18()
+    when r == 1 {
+        kprintln(cadena("hito 18 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 18 omitido (sin modelo de ENCA)"))
+    } otherwise {
+        kprintln(cadena("hito 18 FALLÓ"))
+    }
+}
+
+// Hito 21: ENCA aprende de lo que escribe el usuario (enca/aprender.l).
+// La prueba de aceptación solo corre con la opción de arranque enca=prueba21;
+// sin ella se mide F con el modelo cargado (lo aprendido sobrevive al reinicio).
+flow hito21() {
+    when encaModelo() == 0 {
+        kprintln(cadena("hito 21 omitido (sin modelo de ENCA)"))
+        give
+    }
+    aprInicializar()
+    when arranqueOpcionEs(cadena("enca"), cadena("estudio21")) {
+        encaEstudio21()
+        give
+    }
+    when !arranqueOpcionEs(cadena("enca"), cadena("prueba21")) {
+        kprintln(cadena("hito 21: prueba con enca=prueba21"))
+        encaMedirF()
+        give
+    }
+    hold r = encaHito21()
+    when r == 1 {
+        kprintln(cadena("hito 21 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 21 omitido (sin ranuras de ENCA)"))
+    }
+}
+
+// Hito 20: exp010 (C5 + evaluación precuencial) reproducido en modo exacto.
+// Solo con la opción de arranque enca=exp010 (cuesta ~2 min más). Va tras el
+// hito 16 porque reutiliza el corpus ya verificado.
+flow hito20() {
+    when !arranqueOpcionEs(cadena("enca"), cadena("exp010")) {
+        kprintln(cadena("hito 20: se ejecuta con la opción de arranque enca=exp010"))
+        give
+    }
+    hold r = encaExp010()
+    when r == 1 {
+        kprintln(cadena("hito 20 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 20 omitido (sin corpus)"))
+    } otherwise {
+        kprintln(cadena("hito 20 FALLÓ"))
     }
 }
 

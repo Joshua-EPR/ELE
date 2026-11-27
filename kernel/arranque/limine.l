@@ -39,6 +39,12 @@ flow peticionDireccionKernel() => Int {
     give datos64(LIMINE_COMUN_0, LIMINE_COMUN_1, 0x71BA76863CC55F63, 0xB2644A48C516A487, 0, 0)
 }
 
+// Executable Cmdline (Limine >= 9): la respuesta trae en +8 un puntero a la
+// cadena terminada en 0 con la línea de órdenes de la entrada del menú.
+flow peticionLineaOrdenes() => Int {
+    give datos64(LIMINE_COMUN_0, LIMINE_COMUN_1, 0x4B161536E598651E, 0xB390AD4A2F1F303A, 0, 0)
+}
+
 flow respuesta(peticion: Int) => Int {
     give leer64(peticion + RESPUESTA)
 }
@@ -50,8 +56,13 @@ flow respuesta(peticion: Int) => Int {
 //   +24 kernel física  +32 kernel virtual  +40 hay framebuffer (1/0)
 //   +48 entradas del mapa de memoria  +64.. framebuffer (64 bytes)
 //   +128.. mapa de memoria: hasta 256 entradas de 24 bytes
+//   +6272 línea de órdenes (registro de cadena: +0 longitud, +8 bytes)
+//   +6536 valor de la última opción pedida (mismo formato)
 fixed MAX_ENTRADAS = 256
-flow copia() => Int { give reservar(6272, 8) }
+fixed LINEA = 6272
+fixed VALOR = 6536
+fixed MAX_LINEA = 255
+flow copia() => Int { give reservar(6800, 8) }
 
 flow copiar64(origen: Int, destino: Int, bytes: Int) {
     change i = 0
@@ -100,6 +111,22 @@ expose flow arranqueCopiar() {
         copiar64(leer64(leer64(mapa + 16) + i * 8), c + 128 + i * 24, 24)
     }
     escribir64(c + 48, n)
+
+    // Línea de órdenes: copia propia (hasta 255 bytes), vacía si no hay.
+    escribir64(c + LINEA, 0)
+    escribir64(c + VALOR, 0)
+    hold cmd = respuesta(peticionLineaOrdenes())
+    when cmd != 0 {
+        hold texto = leer64(cmd + 8)
+        when texto != 0 {
+            change k = 0
+            during k < MAX_LINEA && leer8(texto + k) != 0 {
+                escribir8(c + LINEA + 8 + k, leer8(texto + k))
+                k += 1
+            }
+            escribir64(c + LINEA, k)
+        }
+    }
 }
 
 // true si Limine aceptó la revisión base 3 del protocolo.
@@ -153,4 +180,57 @@ expose flow arranqueKernelFisica() => Int {
 
 expose flow arranqueKernelVirtual() => Int {
     give leer64(copia() + 32)
+}
+
+// Línea de órdenes del kernel como registro de cadena (kprint la imprime);
+// longitud 0 si no hay.
+expose flow arranqueLinea() => Int {
+    give copia() + LINEA
+}
+
+// Opciones "clave=valor" separadas por espacios. Devuelve el valor de la
+// opción `clave` (registro de cadena, válido hasta la siguiente llamada) o 0
+// si no está. Una clave sin "=" da un valor vacío.
+expose flow arranqueOpcion(clave: Int) => Int {
+    hold linea = copia() + LINEA
+    hold n = leer64(linea)
+    hold kn = leer64(clave)
+    change i = 0
+    during i < n {
+        during i < n && leer8(linea + 8 + i) == 32 { i += 1 }
+        hold ini = i
+        during i < n && leer8(linea + 8 + i) != 32 { i += 1 }
+        hold fin = i
+        change igual = fin > ini
+        change e = ini
+        during e < fin && leer8(linea + 8 + e) != 61 { e += 1 }
+        when e - ini != kn { igual = false }
+        when igual {
+            each j among 0..kn {
+                when leer8(linea + 8 + ini + j) != leer8(clave + 8 + j) { igual = false }
+            }
+        }
+        when igual {
+            change vi = e
+            when e < fin { vi = e + 1 }
+            hold vn = fin - vi
+            escribir64(copia() + VALOR, vn)
+            each j among 0..vn {
+                escribir8(copia() + VALOR + 8 + j, leer8(linea + 8 + vi + j))
+            }
+            give copia() + VALOR
+        }
+    }
+    give 0
+}
+
+// true si la opción `clave` está y vale exactamente `valor` (registro de cadena).
+expose flow arranqueOpcionEs(clave: Int, valor: Int) => Bool {
+    hold v = arranqueOpcion(clave)
+    when v == 0 { give false }
+    when leer64(v) != leer64(valor) { give false }
+    each j among 0..leer64(valor) {
+        when leer8(v + 8 + j) != leer8(valor + 8 + j) { give false }
+    }
+    give true
 }

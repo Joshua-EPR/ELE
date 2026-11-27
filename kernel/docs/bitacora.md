@@ -945,3 +945,499 @@ ENCA> 01 = this.nHid + 1] * this.nHid + 1] * ...      [200 bytes, 0,937 ms por b
   optimizaciones que no cambian bits.
 - Guardar y cargar van a unos 25 MB/s en el HDD, frente a 46 MB/s en QEMU;
   incluyen el CRC32 de 71 MB y el vaciado.
+
+## Hito 18 — generación de ENCA sin bucles: muestreo y penalización de n-gramas (2026-11-26)
+
+Problema: el completado voraz (argmax) caía en bucles ("hold a = 1; hold a = 1; ...").
+`enca/muestreo.l` elige cada byte de la distribución de la mezcla del modelo
+rápido (256 probabilidades f32), todo en orden fijo y sin depender del tiempo.
+
+Diseño (por byte):
+1. Penalización por continuación de n-grama. Para cada posición j de la
+   ventana (últimos W bytes de prefijo + generado) donde el sufijo actual,
+   de largo L >= m (m = 4), ya apareció terminando en j, el byte que siguió
+   (hist[j+1]) es candidato a penalizar; cada byte candidato se penaliza una
+   sola vez con el mayor L de sus emparejamientos: p <- p / pen^e, con
+   e = min(1 + (L-m)/4, 8). Una penalización por presencia castigaría siempre
+   a espacios y letras comunes; esta solo castiga repetir lo ya visto, y
+   crece con la longitud del emparejamiento (un bucle largo se corta aunque
+   el modelo esté muy seguro). Emparejamiento máximo contado: 64 bytes.
+2. Temperatura: p ∝ p^(1/T); T = 0 equivale a argmax tras penalizar.
+3. top-k (k = 0 desactiva) y top-p (p = 1 desactiva) sobre la distribución
+   con temperatura; lista acotada a k, en orden de puntuación y, a igual
+   puntuación, byte menor primero. Se descartan los pesos < e^-16 del máximo.
+4. Inversión de la CDF con PCG32 (`lib/aleatorio.l`). Cada completado
+   re-siembra con la semilla configurada: la semilla no avanza entre
+   completados (mismo prefijo + misma configuración = mismo texto).
+Los cálculos van en logaritmos de f64 (lnRapido/expFloat de enca/matematica).
+
+Comandos de `ENCA> ` (línea que empieza por ':'): `:temp`, `:topk`, `:topp`,
+`:pen`, `:ventana`, `:semilla`, `:linea si|no`, `:voraz`, `:muestreo`, `:ver`,
+`:ayuda`. Decimales con punto o coma. Comando desconocido o valor inválido:
+mensaje y no cambia nada. Rangos: temp 0..10, topk 0..256, topp (0,1],
+pen 1..100, ventana 1..1024. ':' = Mayús+'.' en el mapa latinoamericano.
+
+Valores por defecto: T 0,5, top-k 10, top-p 1 (apagado), pen 2, ventana 128,
+m 4, exponente creciente, semilla 1, parar en '
+' = sí.
+Medición para elegirlos (QEMU WHPX, 3 semillas x 20 prompts = 60 generaciones
+de 200 bytes; "bucle" = subcadena L 8..66 repetida 4+ veces seguidas):
+
+| configuración                                   | con bucle | µs/byte |
+|-------------------------------------------------|-----------|---------|
+| T0,5 k10 pen 1 (sin penalización)                | 5/60      | 70      |
+| T0,5 k10 pen 2 e=1 (una vez por byte)            | 4/60      | 76      |
+| T0,5 k10 pen 1,5 e=1                             | 4/60      | 69      |
+| T0 (argmax) pen 2 e=1                            | 60/60     | 91      |
+| T0 (argmax) pen 2 e creciente                    | 0/60      | 63      |
+| T0,5 k10 pen 2 e creciente (DEFECTO)             | 0/60      | 74      |
+| T0,3 k10 pen 2 e creciente                       | 0/60      | 71      |
+| T0,5 top-p 0,9 sin top-k, pen 2 e creciente      | 0/60      | 70      |
+| T0,5 k10 pen 2 e creciente, ventana 32           | 0/60      | 68      |
+| T1,0 sin top-k, pen 2 e creciente                | 0/60      | 267     |
+
+(En una exploración previa de 20 prompts: T0,8 k20 e creciente 0/20, con
+frases más desordenadas.) La temperatura baja y top-k pequeño dan texto con
+estructura de código ELE de ENCA; sin penalización siguen 5/60 bucles, y la
+penalización plana (e = 1) no basta cuando el modelo está muy seguro: lo que
+corta los bucles es el exponente creciente, que además funciona con T = 0.
+T alta y sin top-k es lenta (muchos candidatos) y ruidosa.
+
+Hito automático (después del 17, antes del 7): 20 prompts, 200 bytes sin parar
+en '
+', configuración por defecto, semilla 20261126; bucle sí/no (voraz y
+muestreo) y misma salida con la misma semilla. OK si 0/20 con bucles en
+muestreo y 20/20 reproducibles.
+
+| | voraz | muestreo |
+|---|---|---|
+| prompts con bucle (de 20) | 20 | 0 |
+| reproducibles con la misma semilla | (determinista) | 20/20 |
+| ms por byte (modelo + elección, sin pantalla) | 0,035 | 0,068 |
+
+El sobrecoste del muestreo es de ~0,033 ms por byte. En el modo interactivo
+sube a ~0,45 ms por byte por el dibujo en pantalla.
+
+Ejemplos (muestreo, 80 bytes; ¶ = salto de línea):
+- `flow main` -> `() => Int { ¶ this.wRec: wRecSnap[i] ¶ ¶ change bestMargin { ¶ wRe`
+  (voraz: `() => Int { ` y luego espacios)
+- `hold x = ` -> `0 ¶ hold redundante (espaldo[idxIn] - this.alphas: Int = 0 ¶ ¶ each i am`
+  (voraz: `1; hold a = 1; hold a = 1; hold a = 1; ...`)
+- `each i among ` -> `0..this.nFeat) ¶ hold b = conteoPrev += 1.0) ¶ wOutAncla[idxOut] = t`
+  (voraz: `0..this.nHid + i] * deltaOut[o] * this.nHid + i] * this.nHid + i] ...`)
+- `take ` -> `"../math/rng.l" ¶ ¶ // --- 1. NÚCLEO MATEMÁTICO PURO ENCA-EXP-002 (CORTEZA ESCA`
+
+Límites: el modelo es un LM de bytes pequeño; el texto tiene estructura
+(sangría, llaves, nombres del corpus) pero no es código válido. Las palabras
+inventadas ("EpisodioTarea(mong") salen de mezclar contextos. El detector de
+bucles también cuenta una racha larga de espacios (32+) como bucle.
+
+Verificación del líder en QEMU (WHPX, 2 CPU, disco nuevo):
+- Hitos 11–17 OK; el 16 sigue "idéntico a Windows".
+- `prompts con bucle: voraz 20/20, muestreo 0/20`; `reproducibles con la misma semilla: 20/20`.
+- ms por byte: voraz 0,035 y muestreo 0,066; `hito 18 OK`.
+- El detector de bucles (mzTieneBucle) se revisó: hay 4 copias seguidas
+  de largo L si buf[i] == buf[i+L] durante 3L bytes, con L de 8 a 66.
+
+Portátil (Celeron 3865U):
+```
+prompts con bucle: voraz 20/20, muestreo 0/20
+reproducibles con la misma semilla: 20/20
+ms por byte: voraz 0.064, muestreo 0.116, sobrecoste del muestreo 0.052
+hito 18 OK
+ENCA> :ver      -> modo: muestreo  temp 0,500  topk 10  topp 1,000  pen 2.000  ventana 128  semilla 1  linea si
+ENCA> :voraz ; flow main      -> flow main() => Int {   [12 bytes, 0.086 ms por byte]
+ENCA> :muestreo ; :semilla 5 ; hold x =   -> hold x = -1   [4 bytes, 0.167 ms por byte]
+```
+Los textos generados son los mismos que en QEMU (por ejemplo el prompt
+[20]): el muestreo es determinista también entre máquinas.
+
+## Hito 19 — opción de arranque "ENCA desde cero" (2026-11-26)
+
+Problema: con ENCA_A.BIN/ENCA_B.BIN válidos el hito 17 carga el estado y no
+entrena, así que en el portátil no se podía medir la velocidad de entrenamiento
+exacto frente a rápido.
+
+Cómo se pasa la opción:
+- Limine 12.11.1, petición "Executable Cmdline" (ID `4b161536e598651e b390ad4a2f1f303a`
+  tras el prefijo común; respuesta: revisión + puntero a la cadena). El kernel la copia en
+  `arranqueCopiar()` (hasta 255 bytes) y la expone con `arranqueLinea()`,
+  `arranqueOpcion(clave)` (valor de "clave=valor", separadas por espacios, o 0) y
+  `arranqueOpcionEs(clave, valor)`. Al inicio imprime `línea de órdenes: <texto>` o `(vacía)`.
+- `kernel/herramientas/limine.conf`: `timeout: 3` y dos entradas: "/ELE kernel" (por
+  defecto, sin opciones) y "/ELE kernel (ENCA desde cero: medir entrenamiento)" con
+  `cmdline: enca=nuevo` (la clave en Limine 12 es `cmdline:`; `kernel_cmdline:` es la antigua).
+- Timeout: `construir.ps1 -Prueba` genera su copia del conf con `timeout: 0` (no espera);
+  sin -Prueba (ventana, -Imagen/USB) conserva el menú de 3 s.
+- `construir.ps1 -Opciones "enca=nuevo"` pone ese texto como `cmdline:` de la entrada por
+  defecto (para QEMU sin menú).
+
+Qué hace `enca=nuevo` en el hito 17: no carga ninguna ranura (no las toca),
+entrena en modo rápido desde cero, evalúa, imprime la tabla exacto/rápido y no guarda
+("no se guarda: medición"). Comprueba que los bits/byte son los del rápido normal
+(A 5885276722394095·2^-52, B 6230748540601682·2^-51) e imprime el resultado. Luego
+sigue el hito 18 con el modelo recién entrenado.
+
+QEMU (WHPX, 2 CPU, 2G, disco nuevo):
+1. Normal: `línea de órdenes: (vacía)`; `estado ENCA: ninguna ranura válida ... se entrena`;
+   `estado ENCA guardado: paso 1 en la ranura A`; hito 17 OK, hito 18 OK.
+2. Mismo disco, `-Opciones "enca=nuevo"`: `línea de órdenes: enca=nuevo`;
+   `estado ENCA: opción enca=nuevo, se ignoran ENCA_A.BIN/ENCA_B.BIN (no se tocan)`;
+   mezcla A 5885276722394095 * 2^-52, B 6230748540601682 * 2^-51; aceleración total 3.74x
+   (entrenamiento 2755 -> 10955 B/s); `enca=nuevo: bits/byte idénticos ...`;
+   `no se guarda: medición`; hito 17 OK, hito 18 OK. (El hito 11 falló en esta
+   corrida por ruido del anfitrión; pasó en las otras dos.)
+3. Mismo disco, normal: `estado ENCA: ranura A, paso 1 ... verificados (CRC32)`;
+   `estado recuperado: evaluación idéntica`; `estado ENCA guardado: paso 2 en la ranura B`.
+   El paso cargado (1) es el mismo que dejó el arranque 1: el 2 no escribió nada, y el 3
+   guarda paso+1 en la otra ranura.
+
+### Hito 19: la "diferencia de compilador" en exp009 C5 es exacto frente a rápido
+
+Se planteó que exp009 C5 daba en la prueba B, mezcla, 2,767418975801085 con
+el compilador viejo y 2,767008196170232 con el actual. No es una diferencia
+de compilador:
+- 2,767418975801085 es el modo exacto. Lo dan el compilador actual en
+  Windows (Cranelift, medido otra vez el 2026-11-26), QEMU y el portátil:
+  mantisa 6231673534097902·2^-51.
+- 2,767008196170232 es el modo rápido del hito 17: mantisa
+  6230748540601682·2^-51.
+- 2,767418975801085 - 0,000410779630853 (Δ rápido - exacto del hito 17)
+  = 2,767008196170232.
+
+Caso mínimo. El modo rápido cambia expFloat de ENCA (Taylor de grado 5
+en x/16 elevado a la 16, con la entrada saturada a [-16, 16]) por exp en
+f32 con SSE (vexp, error ~1e-8):
+
+| x | expFloat | e^x | error relativo de expFloat |
+|---|---|---|---|
+| -16 | 1,0674385597e-7 | 1,1253517472e-7 | -5,15e-2 |
+| -8 | 3,3528353494e-4 | 3,3546262790e-4 | -5,34e-4 |
+| -4 | 1,8315515715e-2 | 1,8315638889e-2 | -6,73e-6 |
+| -1 | 0,36787944066 | 0,36787944117 | -1,40e-9 |
+| 4 | 54,597910838 | 54,598150033 | -4,38e-6 |
+
+En los softmax de 256 símbolos (corteza y mezclador), los términos lejanos
+del máximo (x ≈ -8 a -16) quedan subestimados hasta un 5 %. Con vexp la
+corteza mejora 0,004–0,005 bits/byte y la mezcla 0,0002–0,0004.
+
+### Hito 19: gzip y xz sobre la prueba B
+
+Prueba B: memoria_secuencial.l y corteza_bytes.l, 15 781 B. Ejecutables
+`gzip -9 -n` y `xz -9` de Git para Windows, cada archivo por separado:
+
+| | memoria_secuencial.l (6428 B) | corteza_bytes.l (9353 B) | total B |
+|---|---|---|---|
+| gzip -9 | 1646 B = 2,049 bpb | 2520 B = 2,155 bpb | 2,112 bpb |
+| xz -9 | 1672 B = 2,081 bpb | 2504 B = 2,142 bpb | 2,117 bpb |
+
+Condicional al corpus de entrenamiento: tamaño(entrenamiento + B) -
+tamaño(entrenamiento), con Python (gzip nivel 9, lzma preset 9):
+- gzip: 1,800 bpb
+- xz: 1,588 bpb
+
+ENCA C5 evaluada congelada da 2,767 bpb: peor que gzip -9 incluso sin
+corpus. gzip y xz se adaptan al propio archivo mientras lo comprimen;
+ENCA congelada no aprende de B. La evaluación precuencial del hito 20
+(predecir, medir y aprender) es la comparación justa.
+
+Verificación del líder (QEMU, mismo disco):
+- Arranque con `-Opciones "enca=nuevo"`: "se ignoran ENCA_A.BIN/ENCA_B.BIN",
+  bits/byte idénticos al entrenamiento rápido normal, aceleración 3,75x,
+  "no se guarda: medición".
+- Arranque normal después: "estado ENCA: ranura B, paso 2 ... verificados
+  (CRC32)" y "evaluación idéntica a la guardada". Las ranuras quedaron
+  intactas.
+
+## Hito 20 — exp010: recalibrar el mezclador (C6) y evaluación precuencial (2026-11-26)
+
+Windows primero (`ENCA\experiments\enca_exp010.l`, salida completa en
+`ENCA\target\enca_exp010_salida.txt`), luego el kernel.
+
+### Diseño
+- **C5**: exp009 C5 sin cambios (mezcla geométrica, vigilia + 2 sueños
+  intercalados por archivo, 65536 ranuras). C5-O0 reproduce exp009 bit a bit
+  (A 5886232681853270·2^-52, B 6231673534097902·2^-51).
+- **C6** = C5 + tras los 2 replays de CADA archivo, una pasada sobre ese mismo
+  archivo en la que solo aprende el mezclador: hipocampo y corteza predicen
+  pero no aprenden ni consolidan; ventana y vMem avanzan como en evaluación
+  (plástico = false). Alternativa no implementada: recalibrar solo una vez,
+  tras el último archivo (el mezclador vería la corteza final, pero sobre un
+  archivo que ya memorizó).
+- **Precuencial**: byte a byte predice, mide (bits de la mezcla, del hipocampo
+  y de la corteza, top-1) y aprende con el mismo paso de vigilia del
+  entrenamiento (hipocampo, corteza con compuerta de sorpresa, mezclador). Sin
+  replay ni autocompletado. A y B parten por separado del estado al terminar
+  el entrenamiento; el modelo hospedado no se copia, así que B reentrena
+  (determinista; en la salida el "reentrenado" repite las mismas
+  estadísticas de corteza).
+- **Órdenes** (índices del corpus 0..10): O0 = [0 1 2 3 4 5 6 7 8 9 10],
+  O1 = [5 2 8 0 10 3 7 1 9 4 6], O2 = [9 6 1 4 10 0 8 3 5 2 7].
+
+### Tabla de Windows (bits/byte de la mezcla; media y rango sobre O0..O2)
+| | C5 media (mín–máx) | C6 media (mín–máx) | C6 − C5 por orden (O0, O1, O2) |
+|---|---|---|---|
+| A congelada | 1,3189 (1,3070–1,3422) | 1,4181 (1,3954–1,4355) | +0,116 +0,088 +0,093 |
+| B congelada | 2,9090 (2,7674–3,0611) | 3,4084 (3,3004–3,4978) | +0,660 +0,402 +0,437 |
+| A precuencial | 0,9849 (0,9768–0,9908) | 0,9878 (0,9804–0,9931) | +0,0036 +0,0023 +0,0028 |
+| B precuencial | 1,6898 (1,6795–1,7077) | 1,6974 (1,6856–1,7150) | +0,0094 +0,0061 +0,0073 |
+
+C6 empeora en las 4 pruebas y en los 3 órdenes (0/3 mejoras). En las
+congeladas la pérdida (0,1 y 0,5) supera con holgura el ruido entre órdenes
+(0,035 y 0,29 de rango de C5); en las precuenciales es pequeña (0,003 y 0,008)
+pero consistente en signo. Causa probable: el mezclador se recalibra sobre un
+archivo que el hipocampo (y la corteza) acaban de memorizar, así que sus
+órdenes altos parecen casi perfectos y los pesos suben (orden 4: 0,52 -> 0,98,
+orden 5: 0,51 -> 1,06 con O0), sobreconfianza que se paga en archivos nuevos.
+Recalibrar sobre datos no vistos (un archivo apartado) sería la variante
+honesta; no se probó.
+
+**Mejor configuración: C5** (menor media de B precuencial, 1,6898 frente a
+1,6974). Por eso el kernel no necesita la pasada de recalibración; solo la
+evaluación precuencial (`modeloPrecuencial` = el paso de vigilia).
+
+Ejemplo O0 (C5): A cong. 1,307 (top-1 811), B cong. 2,767 (637), A prec.
+0,9768 (841), B prec. 1,6821 (740).
+
+### Kernel: reproducción exacta (C5, O0)
+- `kernel/enca/exp010.l` (nuevo), `modeloPrecuencial` en `modelo.l`, accesos
+  `encaCorpusListo/encaTextoDe/...` en `exp009.l`, `hito20` en `kmain.l` y la
+  entrada "/ELE kernel (exp010: reproducir mejoras de ENCA)"
+  (`cmdline: enca=exp010`) en `limine.conf`.
+- Se ejecuta solo con `enca=exp010`; sin ella imprime "hito 20: se ejecuta con
+  la opción de arranque enca=exp010". Va justo tras el hito 16 (reutiliza el
+  corpus verificado), antes de 17 y 18, de modo que `-Esperado "hito 18"` lo
+  incluye.
+- Modo exacto: entrena (48 s), evalúa A y B congeladas, A precuencial, libera
+  el hipocampo y reentrena (51 s) para B precuencial.
+- Salida clave (QEMU WHPX, 2 CPUs, 2 GiB): las cuatro evaluaciones coinciden
+  en mezcla, hipocampo, corteza (mantisa y exponente), top-1 y autocompletado
+  con Windows; "exp010 C5: idéntico a Windows" y "hito 20 OK". Tiempo total
+  117,5 s; 844 280 B procesados = 7186 B/s (exacto). El arranque normal
+  (sin opciones) sigue dando hitos 2-18 OK y la línea de aviso del hito 20.
+
+### Comparación con gzip y xz (prueba B, 15 781 B, bpb)
+| | bpb |
+|---|---|
+| gzip -9 (por archivo) | 2,112 |
+| xz -9 (por archivo) | 2,117 |
+| ENCA C5 congelada | 2,767 |
+| gzip -9 condicional al corpus | 1,800 |
+| xz -9 condicional al corpus | 1,588 |
+| **ENCA C5 precuencial (media O0-O2)** | **1,690** (O0 1,682; 1,680–1,708) |
+
+Precuencial, ENCA supera a gzip y xz por archivo (-20 %) y a gzip
+condicional (1,800), pero no a xz condicional (1,588; +6 %).
+
+Verificación del líder:
+- Windows: volví a correr `enca_exp010.l`, 4 min 48 s; la salida es
+  idéntica byte a byte a ENCA/target/enca_exp010_salida.txt.
+- QEMU con `-Opciones "enca=exp010"`: "exp010 C5: idéntico a Windows" y
+  "hito 20 OK", en 119 s (7068 B/s en modo exacto). Las mantisas
+  precuenciales del kernel (A 8798484689747517·2^-53,
+  B 7575402504172646·2^-52) están en la salida de Windows.
+- `enca_exp010.l` vive en ENCA/experiments, que está fuera de git
+  (/ENCA/ en .gitignore), como el resto de ENCA.
+
+## Hito 21 — ENCA aprende de lo que escribe el usuario (2026-11-26)
+
+Archivos: `enca/aprender.l` (nuevo: aprendizaje, `:guardar`, `:deshacer`, comandos),
+`enca/hito21.l` (nuevo: prueba de aceptación), `almacenamiento/checkpoint.l`
+(escritura/lectura de una ranura concreta), `enca/exp009.l` (evaluación silenciosa
+y accesos), `enca/modelo.l` (`modeloMedirCongelado`), `enca/muestreo.l` (accesos),
+`kmain.l` (hito 21 y bucle de ENCA>), `herramientas/limine.conf` (entrada
+"/ELE kernel (ENCA: prueba de aprendizaje)", `cmdline: enca=prueba21`).
+
+### Diseño
+- **Qué se aprende.** Con `:aprender si` (por defecto) cada línea normal que se
+  teclea, más su '\n', es un documento nuevo que se procesa con
+  `modeloPrecuencial` (= el paso de vigilia del entrenamiento): predecir, medir
+  los bits del byte real con la mezcla y aprender (hipocampo; corteza con la
+  compuerta de sorpresa; mezclador), sin replay. Se imprime
+  `aprendido: N bytes, X bits/byte` y se vuelve a mostrar lo tecleado para que el
+  completado siga a continuación. La generación no aprende. `:aprender no` deja
+  ENCA> como antes. `:ver` muestra aprender, umbral, bytes sin guardar, ranura y
+  paso actuales y la mezcla B guardada.
+- **Cuenta de bytes sin guardar**: sube con cada línea aprendida; vuelve a 0 con
+  `:guardar` correcto o `:deshacer`.
+- **`:guardar`.** Evalúa las pruebas A y B congeladas con la misma función que el
+  hito 17 al cargar (`evaluarAB`, autocompletado incluido, que ya restaura la
+  ventana y la corteza), compara la mezcla de B con la del último estado
+  guardado o cargado y, si no empeora más que el umbral (`:umbral x`, bits/byte),
+  serializa y guarda como paso + 1 en la OTRA ranura con las métricas nuevas en la
+  cabecera (la comprobación del hito 17 al recargar sigue valiendo). Si empeora:
+  `no se guarda: la prueba B empeora X bits/byte (umbral U); use :deshacer ...`.
+  La comparación es contra la última versión guardada, no contra la original: pasos
+  pequeños consecutivos podrían acumular degradación (cada uno bajo el umbral).
+- **`:deshacer`** (difiere de "volver a la otra ranura" a secas por la
+  persistencia; hay que ver que el arranque siguiente carga lo restaurado, y el
+  hito 17 carga la ranura de paso MÁS ALTO):
+  - con cambios sin guardar: recarga la ranura del último estado guardado o
+    cargado (descarta lo aprendido); no escribe nada;
+  - sin cambios: recarga la OTRA ranura (la versión anterior) y la reescribe como
+    paso + 1 en la ranura de la que se viene (la actual), así sigue siendo la de
+    paso más alto y el arranque siguiente la carga. Si las dos ranuras tienen el
+    mismo CRC32 (p. ej. recién restaurado, o tras el guardado del hito 17 al
+    arrancar, que copia el estado cargado en la otra ranura) o la otra no es válida,
+    dice que no hay a dónde volver y no toca nada.
+  - Tras recargar (CRC32 de la ranura incluido) se evalúa A y B y se exige igualdad
+    bit a bit con la cabecera (como el hito 17); si no coincide, no se reescribe.
+    Cuesta ~2 s de evaluación.
+  - El estado se deserializa sobre el modelo vivo (los datos derivados, como la
+    tabla del impulso, no cambian con el aprendizaje).
+- **Umbral por defecto: 0,35 bits/byte** (13 % de la mezcla B, 2,767), con estos
+  datos del propio hito (QEMU WHPX, partiendo del estado del hito 17):
+
+  | aprendizaje | delta B (congelada) |
+  |---|---|
+  | F (284 B, 8 líneas) x1 | -0,149 (mejora) |
+  | F x2 | +0,151 |
+  | F x5 (prueba de aceptación, 1420 B) | +0,252 |
+  | 1 línea `hold zeta = 12` x1 (sobre F x5) | -0,039 |
+  | basura (3072 B, PCG) x1, sobre F x5 guardado | +1,514 |
+  | basura x2 | +0,599 |
+  | basura x3 (prueba de aceptación) | +0,449 |
+
+  El buen aprendizaje (incluso repetido 5 veces) queda en 0,25 y la basura x3 en
+  0,45; 0,35 deja ~0,10 de margen por cada lado. Una pasada de basura es muy
+  nociva (+1,5) y repetirla la "memoriza" y baja el delta (el mezclador vuelve a
+  fiarse de los órdenes altos, como pasaba con C6 en el hito 20): con muchas
+  repeticiones la basura podría pasar el umbral, aunque la evaluación mide el daño
+  real en B. Por eso la comparación es sobre una prueba congelada y no sobre los
+  bits/byte del propio texto aprendido (que bajan siempre).
+
+### Prueba de aceptación (`enca=prueba21`) y reinicio
+`hito21()` va tras el 18 y antes del 7. Sin la opción imprime
+`hito 21: prueba con enca=prueba21` y mide F congelado con el modelo cargado.
+Con ella usa las mismas funciones que los comandos (`aprPasada` = lo que hace
+cada línea tecleada, `aprGuardar`, `aprDeshacer`). F: 8 líneas de código ELE con
+nombres inventados (zorvalMezclar, lumbre, hebra...; 284 B); basura: 3072 B
+imprimibles de un PCG32 con '\n' cada 64.
+
+Arranque 1 (disco nuevo, entrena y guarda el paso 1; luego la prueba):
+```
+hito 21: ... F = 284 bytes en 8 líneas; umbral de :guardar 0,3500 bits/byte; estado de partida: ranura B paso 2, B guardada 2,7670
+a) F congelado antes: 4,2885 bits/byte; completado voraz ... desde 10 bytes: 4/205 bytes
+b) pasada 1: 3,2598 bits/byte precuenciales (284 bytes); delta B congelado -0,1492
+b) pasada 2: 0,8205 ...; delta B 0,1506   pasada 3: 0,5328   pasada 4: 0,4567
+b) pasada 5: 0,4178 ...; delta B congelado 0,2522
+b) F congelado después: 0,3791 bits/byte; completado voraz: 51/205 bytes; sin guardar 1420 bytes; aprender 0,053 ms por byte
+c) prueba B congelada: 3,0192 (guardada 2,7670), delta B = 0,2522; prueba A: 1,3568 (delta A = 0,0500); evaluación 2087 ms
+   guardado: paso 3 en la ranura A, 71315216 bytes; serializar 56 ms; escritura con CRC32 y vaciado 1552 ms = 45.9 MB/s
+d) basura, pasada 1: 7,4058 bits/byte (delta B 1,5137)  pasada 2: 0,4480 (0,5992)  pasada 3: 0,3410 (0,4487)
+   no se guarda: la prueba B empeora 0,4487 bits/byte (umbral 0,3500); use :deshacer para volver al último estado guardado
+   deshacer: se descartan 9216 bytes aprendidos sin guardar; se recarga la ranura A, paso 3
+   ranura A leída y verificada (CRC32) en 1622 ms; ... evaluación 2319 ms: idéntica a la cabecera
+hito 21: delta B de F 0,2522 (guardado), de la basura 0,4487 (rechazado), umbral 0,3500
+hito 21: F congelado 0,379136 bits/byte (bits 0x3FD843C1B61D457D)
+hito 21 OK
+```
+(En el disco de prueba el primer arranque deja el paso 1 en la ranura A; la
+prueba parte de la ranura B paso 2 porque el hito 17 copia el estado cargado en
+la otra ranura. Hito 11 sale FALLÓ en este equipo por el ruido del anfitrión, como
+en las corridas anteriores; el resto de los hitos 2-20 OK.)
+
+Arranque 2 (mismo disco, normal): `estado ENCA: ranura A, paso 3 ... verificados
+(CRC32)`, `estado recuperado: evaluación idéntica a la guardada`, guarda el paso 4
+en B, `hito 21: prueba con enca=prueba21` y
+`hito 21: F congelado 0,379136 bits/byte (bits 0x3FD843C1B61D457D)`: los mismos
+bits que el estado guardado en c), no los de antes (4,2885): lo aprendido sobrevive
+al reinicio. El arranque con `enca=exp010` también da `exp010 C5: idéntico a
+Windows`, `hito 20 OK`, 17 OK, 18 OK.
+
+Arranque 3 (mismo disco, teclas; las ranuras quedaron A paso 5, B paso 4):
+```
+ENCA> hold zeta = 12
+  aprendido: 15 bytes, 6,090 bits/byte  [0.047 ms por byte; sin guardar 15 bytes]
+  hold zeta = 12
+  [0 bytes generados ...]       (la línea aprendida termina en '\n': el completado la da por cerrada)
+ENCA> :ver  -> ... aprender si  umbral 0,3500 bits/byte  sin guardar 15 bytes  ranura A paso 5  B guardada 3,0192
+ENCA> :guardar
+  prueba B congelada: 2,9799 bits/byte (guardada 3,0192), delta B = -0,0394; prueba A: 1,3513 (delta A = -0,0055); evaluación 2108 ms
+  guardado: paso 6 en la ranura B, 71315216 bytes; serializar 67 ms; escritura ... 1641 ms = 43.4 MB/s
+ENCA> :deshacer          (sin cambios: versión anterior)
+  deshacer: sin cambios pendientes; se vuelve a la versión anterior, ranura A, paso 5
+  ranura A leída y verificada (CRC32) en 2626 ms; ...; evaluación 3004 ms: idéntica a la cabecera
+  restaurada: reescrita como paso 7 en la ranura B (2329 ms); el próximo arranque la carga
+ENCA> :deshacer
+  deshacer: no hay a dónde volver (las dos ranuras guardan el mismo estado: B paso 7, A paso 5)
+ENCA> hold zeta = 12 ; :deshacer      (con cambios: recarga lo guardado)
+  deshacer: se descartan 15 bytes aprendidos sin guardar; se recarga la ranura B, paso 7
+  ... evaluación 2431 ms: idéntica a la cabecera
+```
+
+### Tiempos (QEMU WHPX, 2 CPU)
+- Aprender: 0,043-0,053 ms por byte (~20 KB/s; la vigilia del entrenamiento rápido
+  hacía 19 KB/s); una línea tecleada de 15-60 B tarda menos de 3 ms.
+- `:guardar`: evaluación A+B congelada 2,1 s (autocompletado incluido) + serializar
+  0,06 s + escritura con CRC32 y vaciado 1,6 s (44-46 MB/s) = ~3,8 s en total;
+  rechazado: solo los 2,1 s de evaluación.
+- `:deshacer`: lectura y CRC32 1,6-2,8 s + evaluación 2,3-5 s (+ reescritura 2,3 s
+  sin cambios pendientes).
+- En el portátil (HDD, ~25 MB/s) la escritura/lectura de 71 MB sube a ~3 s; no
+  probado en este hito.
+
+Límites: ENCA> no tiene un `:guardar` automático; al apagar sin `:guardar` lo
+aprendido se pierde. La comparación del umbral es contra la última versión guardada
+(ver arriba). Una línea aprendida y vuelta a completar da el '\n' de inmediato: la
+memorización es literal, no generalización.
+
+
+### Hito 21, revisión: variantes del aprendizaje y umbral estrecho
+El aprendizaje inicial (a: hipocampo + corteza + mezclador) dañaba B (+0,252 con
+F x5, 9 %). Se midieron cuatro variantes con la opción `enca=estudio21` (cada una
+desde el mismo estado guardado del hito 17; se restaura con `:deshacer` entre
+medidas; F y la basura son los de la prueba de aceptación). `modeloPasoRapido`
+elige la variante solo mientras aprende una línea tecleada (`modeloFijarVariante`);
+el entrenamiento no cambia.
+
+| variante | dB F x1 | dB F x5 | F congelado antes -> después | voraz F | dB basura x1 | dB basura x3 |
+|---|---|---|---|---|---|---|
+| a hipocampo + corteza + mezclador | -0,149 | +0,252 | 4,2885 -> 0,3791 | 4 -> 51/205 | +1,244 | +0,765 |
+| b sin mezclador (hipocampo + corteza) | -0,024 | -0,031 | 4,2885 -> 0,5582 | 4 -> 51/205 | -0,017 | -0,012 |
+| c solo hipocampo | -0,025 | -0,033 | 4,2885 -> 0,5980 | 4 -> 51/205 | -0,021 | -0,020 |
+| d mezclador con tasa / 10 + hipocampo + corteza | -0,083 | +0,067 | 4,2885 -> 0,4488 | 4 -> 51/205 | +0,129 | +0,595 |
+
+Lectura:
+- Todo el daño sobre B viene del mezclador (y la corteza con él): b y c no dañan B
+  ni con basura (la basura queda en el hipocampo/corteza sin tocar la prueba B), así
+  que no hay nada que la protección pueda separar: la basura no se rechazaría, y
+  la prueba de aceptación exige rechazarla. Además aprenden F algo peor (0,56-0,60
+  frente a 0,38-0,45), aunque el completado voraz es igual (51/205) en las cuatro.
+- a daña mucho con F x5 (0,252) y la basura x3 da +0,765, separación 3x.
+- d conserva casi toda la mejora de F (0,449 frente a 0,379 de a), el voraz idéntico,
+  F x5 apenas daña (+0,067, 2,4 %) y la basura x3 daña 9 veces más (+0,595).
+  Es la que mejor separa.
+
+**Decisión: variante d por defecto** (`:modoaprender a|b|c|d` elige; `:ver` muestra
+la letra) y **umbral 0,20 bits/byte** (7 % de B): 3x por encima de F x5 (0,067) y
+3x por debajo de la basura x3 (0,595). Una sola pasada de basura (+0,13) pasa el
+umbral: es poco dañina en d. Prueba de aceptación con d (desde el disco nuevo):
+F x1 -0,083, x2 -0,032, x5 +0,067 -> `:guardar` guarda (paso 3); basura sobre ese
+estado: x1 +0,034, x2 +0,443, x3 +0,455 -> rechazada (umbral 0,2000); `:deshacer`
+recarga el paso 3 con evaluación idéntica. F congelado 4,2885 -> 0,4488; voraz
+4 -> 51/205. Arranque normal siguiente: `ranura A, paso 3`, `evaluación idéntica a
+la guardada`, `hito 21: F congelado 0,448780 bits/byte (bits 0x3FDCB8D0AE580CF4)`
+(mismos bits que antes de reiniciar). (Esta revisión sustituye las cifras del
+umbral 0,35 y de la variante a que aparecen más arriba en la entrada original.)
+
+Revisión y verificación del líder:
+- Con la primera versión (variante a), aprender F cinco veces empeoraba B
+  +0,252 bits/byte y el umbral era 0,35. Pedí medir variantes; la tabla de
+  arriba muestra que el daño a B lo causa el mezclador.
+- Variante b (sin mezclador): la basura tampoco daña B, así que la
+  protección no tendría nada que rechazar.
+- Variante d (mezclador con tasa/10): separa los dos casos. F×5 da
+  +0,067 y la basura×3 da +0,455 a +0,595, con umbral 0,20.
+- Limitación: una sola pasada de basura de 3 KB con la variante d daña
+  poco (+0,03 a +0,13) y se guardaría. La protección mide el daño a B,
+  no si el texto "es basura".
+- QEMU, disco nuevo con enca=prueba21:
+  - F: 4,2885 → 0,4488 bits/byte; completado voraz 4/205 → 51/205.
+  - Guardar F: ΔB +0,0666, guardado (paso 2, ranura B).
+  - Basura ×3: ΔB +0,4548, "no se guarda".
+  - :deshacer: evaluación idéntica a la cabecera.
+  - Resultado: "hito 21 OK".
+- Arranques normales después sobre el mismo disco: "estado recuperado:
+  evaluación idéntica a la guardada" e "hito 21: F congelado 0,448780
+  bits/byte (bits 0x3FDCB8D0AE580CF4)", los mismos bits que al guardar.
