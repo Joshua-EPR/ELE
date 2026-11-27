@@ -313,14 +313,26 @@ flow hito7() {
     hold bytes = reservar(2304, 8)
     change n = 0
     change avisado = false
+    // Prueba de diagnóstico (opción teclado=hlt): el bucle antiguo, que
+    // duerme con hlt y no sondea, con la lectura de 0x60 ya comprobada.
+    hold con_hlt = arranqueOpcionEs(cadena("teclado"), cadena("hlt"))
+    when con_hlt {
+        kprintByte(10)
+        kprintln(cadena("teclado: prueba con hlt y sin sondeo (opción teclado=hlt)"))
+        when hay { kprint(cadena("ENCA> ")) }
+    }
     during true {
-        // Sin hlt: si la IRQ1 no llega no hay quien despierte. Se sondea el 8042.
-        when tecladoSondear() && !avisado && tecladoPorInterrupcion() == 0 {
-            avisado = true
-            kprintByte(10)
-            kprintln(cadena("teclado: la interrupción IRQ1 no llega; leo el teclado por sondeo"))
+        when con_hlt {
+            hlt()
+        } otherwise {
+            // Sin hlt: si la IRQ1 no llega no hay quien despierte. Se sondea el 8042.
+            when tecladoSondear() && !avisado && tecladoPorInterrupcion() == 0 {
+                avisado = true
+                kprintByte(10)
+                kprintln(cadena("teclado: la interrupción IRQ1 no llega; leo el teclado por sondeo"))
+            }
+            pause()
         }
-        pause()
         change cp = tecladoLeer()
         during cp >= 0 {
             when cp == TECLA_INTRO && hay && n > 0 && leer64(linea) == 58 {
