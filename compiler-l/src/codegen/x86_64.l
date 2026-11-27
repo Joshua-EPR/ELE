@@ -1011,6 +1011,18 @@ expose flow x64FloatBridge(code: edit X64Code, op: Int) {
     }
 }
 
+// CRC32C step with the accumulator in RAX and the datum in RCX:
+//   wide: CRC32 RAX,RCX (F2 48 0F 38 F1 C1); otherwise CRC32 EAX,CL
+//   (F2 0F 38 F0 C1). Either form leaves RAX zero-extended.
+expose flow x64Crc32c(code: edit X64Code, wide: Bool) {
+    x64Put(edit code, 242)
+    when wide { x64Put(edit code, 72) }
+    x64Put(edit code, 15)
+    x64Put(edit code, 56)
+    when wide { x64Put(edit code, 241) } otherwise { x64Put(edit code, 240) }
+    x64Put(edit code, 193)
+}
+
 // MOV RAX,RSP (48 89 E0).
 expose flow x64ReadRsp(code: edit X64Code) {
     x64Put(edit code, 72)

@@ -444,7 +444,7 @@ expose flow semaPlatformEmit(ctx: edit SemaContext, op: Int, args: view List of[
 // not taken is an ordinary (user) flow name.
 expose flow semaIntrinsicCode(source: view Text, start: Int, end: Int, cpu: Bool, mem: Bool) => Int {
     change first = 31
-    change last = 109
+    change last = 111
     each op among first..(last + 1) {
         hold in_mem = (op >= 41 && op <= 51) || op == 85 || op == 86
         when (in_mem && mem) || (!in_mem && cpu) {
@@ -511,6 +511,8 @@ expose flow semaIntrinsicName(op: Int) => Text {
     when op == 107 { give "xmmGuardarEscalar" }
     when op == 108 { give "xmmTruncarAEnteros" }
     when op == 109 { give "xmmDesplazarDer" }
+    when op == 110 { give "crc32c64" }
+    when op == 111 { give "crc32c8" }
     give lirIntrinsicName(op)
 }
 

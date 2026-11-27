@@ -130,8 +130,11 @@ expose fixed LIR_PLATFORM_TEXT_FROM_BYTES = 30
 //   100 cvtdq2ps, 101 paddd, 102 psubd, 103 pslld (r, n), 104 cmpps (d, s,
 //   predicado), 105 shufps (d, s, imm), 106 movss r <- [dir],
 //   107 movss [dir] <- r, 108 cvttps2dq, 109 psrld (r, n).
+// SSE4.2 CRC32C (Castagnoli), without the initial/final inversion: 110 crc32c64
+//   (acum, valor) -> Int (CRC32 r64, r/m64), 111 crc32c8 (acum, byte) -> Int
+//   (CRC32 r32, r/m8); both leave the new 32-bit accumulator zero-extended.
 expose fixed LIR_PLATFORM_INTRINSIC_FIRST = 31
-expose fixed LIR_PLATFORM_INTRINSIC_LAST = 109
+expose fixed LIR_PLATFORM_INTRINSIC_LAST = 111
 
 expose flow lirIsIntrinsicOp(op: Int) => Bool {
     give op >= LIR_PLATFORM_INTRINSIC_FIRST && op <= LIR_PLATFORM_INTRINSIC_LAST
@@ -171,7 +174,7 @@ expose flow lirIntrinsicHasResult(op: Int) => Bool {
     when (op >= 35 && op <= 37) || (op >= 41 && op <= 44) { give true }
     when op >= 49 && op <= 51 { give true }
     when op == 53 || op == 54 || (op >= 56 && op <= 59) { give true }
-    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89
+    give op == 71 || op == 72 || op == 83 || op == 85 || op == 87 || op == 88 || op == 89 || op == 110 || op == 111
 }
 
 // Type of the result (1 Int, 2 Float, 6 Unit) and of argument `i` (1 Int,
@@ -267,7 +270,9 @@ expose flow lirIntrinsicName(op: Int) => Text {
     when op == 106 { give "xlds" }
     when op == 107 { give "xsts" }
     when op == 108 { give "xcvttdq" }
-    give "xpsrld"
+    when op == 109 { give "xpsrld" }
+    when op == 110 { give "crc32c64" }
+    give "crc32c8"
 }
 
 // ---- Linear resource operation table ------------------------------------

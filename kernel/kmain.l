@@ -86,6 +86,7 @@ flow kmain() {
     hito15()
     hito16()
     hito17()
+    hitoCrc32c()
     hito7()
 
     during true {
@@ -618,6 +619,55 @@ flow hito15() {
     } otherwise {
         kprintln(cadena("hito 15 FALLÓ"))
     }
+}
+
+// CRC-32C: la instrucción CRC32 (SSE4.2) frente a la tabla de referencia.
+flow hitoCrc32c() {
+    hold n = 1048576 * 64
+    hold b = montonReservar(n + 64)
+    when b == 0 {
+        kprintln(cadena("hito crc32c FALLÓ: sin memoria"))
+        give
+    }
+    // Datos pseudoaleatorios y valor de comprobación estándar.
+    hold g = reservar(16, 8)
+    pcgSembrar(g, 7, 11)
+    each i among 0..(n / 4) { escribir32(b + i * 4, pcgSiguiente(g)) }
+    hold check = montonReservar(16)
+    hold texto = cadena("123456789")
+    each i among 0..9 { escribir8(check + i, leer8(texto + 8 + i)) }
+    hold v = crc32cSse(check, 9)
+    kprint(cadena("crc32c(123456789) = "))
+    kprintHex(v)
+    kprintByte(10)
+    change bien = v == 0xE3069283 && crc32cSoft(check, 9) == 0xE3069283
+    // Tamaños y alineaciones: ambas implementaciones deben coincidir.
+    each desp among 0..9 {
+        each k among 0..40 {
+            hold largo = k * 7 + desp
+            when crc32cSse(b + desp, largo) != crc32cSoft(b + desp, largo) { bien = false }
+        }
+    }
+    hold t0 = relojNanosegundos()
+    hold cs = crc32cSoft(b, n)
+    hold t1 = relojNanosegundos()
+    hold ce = crc32cSse(b, n)
+    hold t2 = relojNanosegundos()
+    when cs != ce { bien = false }
+    hold msSoft = (t1 - t0) / 1000000
+    hold msSse = (t2 - t1) / 1000000
+    kprint(cadena("crc32c 64 MiB: software "))
+    kprintEntero(msSoft)
+    kprint(cadena(" ms ("))
+    when msSoft > 0 { kprintEntero(64 * 1000 / msSoft) }
+    kprint(cadena(" MB/s), SSE4.2 "))
+    kprintEntero(msSse)
+    kprint(cadena(" ms ("))
+    when msSse > 0 { kprintEntero(64 * 1000 / msSse) }
+    kprintln(cadena(" MB/s)"))
+    montonLiberar(check)
+    montonLiberar(b)
+    when bien { kprintln(cadena("hito crc32c OK")) } otherwise { kprintln(cadena("hito crc32c FALLÓ")) }
 }
 
 // Línea base opcional (PAUSADA, no se llama): AdamW, XOR/círculos y bigramas.
