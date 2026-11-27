@@ -945,3 +945,96 @@ ENCA> 01 = this.nHid + 1] * this.nHid + 1] * ...      [200 bytes, 0,937 ms por b
   optimizaciones que no cambian bits.
 - Guardar y cargar van a unos 25 MB/s en el HDD, frente a 46 MB/s en QEMU;
   incluyen el CRC32 de 71 MB y el vaciado.
+
+## Hito 18 — generación de ENCA sin bucles: muestreo y penalización de n-gramas (2026-11-26)
+
+Problema: el completado voraz (argmax) caía en bucles ("hold a = 1; hold a = 1; ...").
+`enca/muestreo.l` elige cada byte de la distribución de la mezcla del modelo
+rápido (256 probabilidades f32), todo en orden fijo y sin depender del tiempo.
+
+Diseño (por byte):
+1. Penalización por continuación de n-grama. Para cada posición j de la
+   ventana (últimos W bytes de prefijo + generado) donde el sufijo actual,
+   de largo L >= m (m = 4), ya apareció terminando en j, el byte que siguió
+   (hist[j+1]) es candidato a penalizar; cada byte candidato se penaliza una
+   sola vez con el mayor L de sus emparejamientos: p <- p / pen^e, con
+   e = min(1 + (L-m)/4, 8). Una penalización por presencia castigaría siempre
+   a espacios y letras comunes; esta solo castiga repetir lo ya visto, y
+   crece con la longitud del emparejamiento (un bucle largo se corta aunque
+   el modelo esté muy seguro). Emparejamiento máximo contado: 64 bytes.
+2. Temperatura: p ∝ p^(1/T); T = 0 equivale a argmax tras penalizar.
+3. top-k (k = 0 desactiva) y top-p (p = 1 desactiva) sobre la distribución
+   con temperatura; lista acotada a k, en orden de puntuación y, a igual
+   puntuación, byte menor primero. Se descartan los pesos < e^-16 del máximo.
+4. Inversión de la CDF con PCG32 (`lib/aleatorio.l`). Cada completado
+   re-siembra con la semilla configurada: la semilla no avanza entre
+   completados (mismo prefijo + misma configuración = mismo texto).
+Los cálculos van en logaritmos de f64 (lnRapido/expFloat de enca/matematica).
+
+Comandos de `ENCA> ` (línea que empieza por ':'): `:temp`, `:topk`, `:topp`,
+`:pen`, `:ventana`, `:semilla`, `:linea si|no`, `:voraz`, `:muestreo`, `:ver`,
+`:ayuda`. Decimales con punto o coma. Comando desconocido o valor inválido:
+mensaje y no cambia nada. Rangos: temp 0..10, topk 0..256, topp (0,1],
+pen 1..100, ventana 1..1024. ':' = Mayús+'.' en el mapa latinoamericano.
+
+Valores por defecto: T 0,5, top-k 10, top-p 1 (apagado), pen 2, ventana 128,
+m 4, exponente creciente, semilla 1, parar en '
+' = sí.
+Medición para elegirlos (QEMU WHPX, 3 semillas x 20 prompts = 60 generaciones
+de 200 bytes; "bucle" = subcadena L 8..66 repetida 4+ veces seguidas):
+
+| configuración                                   | con bucle | µs/byte |
+|-------------------------------------------------|-----------|---------|
+| T0,5 k10 pen 1 (sin penalización)                | 5/60      | 70      |
+| T0,5 k10 pen 2 e=1 (una vez por byte)            | 4/60      | 76      |
+| T0,5 k10 pen 1,5 e=1                             | 4/60      | 69      |
+| T0 (argmax) pen 2 e=1                            | 60/60     | 91      |
+| T0 (argmax) pen 2 e creciente                    | 0/60      | 63      |
+| T0,5 k10 pen 2 e creciente (DEFECTO)             | 0/60      | 74      |
+| T0,3 k10 pen 2 e creciente                       | 0/60      | 71      |
+| T0,5 top-p 0,9 sin top-k, pen 2 e creciente      | 0/60      | 70      |
+| T0,5 k10 pen 2 e creciente, ventana 32           | 0/60      | 68      |
+| T1,0 sin top-k, pen 2 e creciente                | 0/60      | 267     |
+
+(En una exploración previa de 20 prompts: T0,8 k20 e creciente 0/20, con
+frases más desordenadas.) La temperatura baja y top-k pequeño dan texto con
+estructura de código ELE de ENCA; sin penalización siguen 5/60 bucles, y la
+penalización plana (e = 1) no basta cuando el modelo está muy seguro: lo que
+corta los bucles es el exponente creciente, que además funciona con T = 0.
+T alta y sin top-k es lenta (muchos candidatos) y ruidosa.
+
+Hito automático (después del 17, antes del 7): 20 prompts, 200 bytes sin parar
+en '
+', configuración por defecto, semilla 20261126; bucle sí/no (voraz y
+muestreo) y misma salida con la misma semilla. OK si 0/20 con bucles en
+muestreo y 20/20 reproducibles.
+
+| | voraz | muestreo |
+|---|---|---|
+| prompts con bucle (de 20) | 20 | 0 |
+| reproducibles con la misma semilla | (determinista) | 20/20 |
+| ms por byte (modelo + elección, sin pantalla) | 0,035 | 0,068 |
+
+El sobrecoste del muestreo es de ~0,033 ms por byte. En el modo interactivo
+sube a ~0,45 ms por byte por el dibujo en pantalla.
+
+Ejemplos (muestreo, 80 bytes; ¶ = salto de línea):
+- `flow main` -> `() => Int { ¶ this.wRec: wRecSnap[i] ¶ ¶ change bestMargin { ¶ wRe`
+  (voraz: `() => Int { ` y luego espacios)
+- `hold x = ` -> `0 ¶ hold redundante (espaldo[idxIn] - this.alphas: Int = 0 ¶ ¶ each i am`
+  (voraz: `1; hold a = 1; hold a = 1; hold a = 1; ...`)
+- `each i among ` -> `0..this.nFeat) ¶ hold b = conteoPrev += 1.0) ¶ wOutAncla[idxOut] = t`
+  (voraz: `0..this.nHid + i] * deltaOut[o] * this.nHid + i] * this.nHid + i] ...`)
+- `take ` -> `"../math/rng.l" ¶ ¶ // --- 1. NÚCLEO MATEMÁTICO PURO ENCA-EXP-002 (CORTEZA ESCA`
+
+Límites: el modelo es un LM de bytes pequeño; el texto tiene estructura
+(sangría, llaves, nombres del corpus) pero no es código válido. Las palabras
+inventadas ("EpisodioTarea(mong") salen de mezclar contextos. El detector de
+bucles también cuenta una racha larga de espacios (32+) como bucle.
+
+Verificación del líder en QEMU (WHPX, 2 CPU, disco nuevo):
+- Hitos 11–17 OK; el 16 sigue "idéntico a Windows".
+- `prompts con bucle: voraz 20/20, muestreo 0/20`; `reproducibles con la misma semilla: 20/20`.
+- ms por byte: voraz 0,035 y muestreo 0,066; `hito 18 OK`.
+- El detector de bucles (mzTieneBucle) se revisó: hay 4 copias seguidas
+  de largo L si buf[i] == buf[i+L] durante 3L bytes, con L de 8 a 66.

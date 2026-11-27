@@ -35,6 +35,8 @@ take bench.gradientes
 take bench.aprender
 take enca.exp009
 take enca.interactivo
+take enca.muestreo
+take enca.hito18
 take tiempo.reloj
 
 flow kmain() {
@@ -86,6 +88,7 @@ flow kmain() {
     hito15()
     hito16()
     hito17()
+    hito18()
     hito7()
 
     during true {
@@ -248,7 +251,8 @@ flow hito7() {
     // el eco de siempre.
     hold modelo = encaModelo()
     when modelo != 0 {
-        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro"))
+        mzDefecto()
+        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro; :ayuda lista los comandos"))
         kprint(cadena("ENCA> "))
     } otherwise {
         kprintln(cadena("hito 7: escriba una línea y pulse Intro"))
@@ -260,7 +264,13 @@ flow hito7() {
         hlt()
         change cp = tecladoLeer()
         during cp >= 0 {
-            when cp == TECLA_INTRO && modelo != 0 {
+            when cp == TECLA_INTRO && modelo != 0 && n > 0 && leer64(linea) == 58 {
+                // Línea que empieza por ':': comando de configuración.
+                kprintByte(10)
+                mzComando(linea, n)
+                kprint(cadena("ENCA> "))
+                n = 0
+            } otherwise when cp == TECLA_INTRO && modelo != 0 {
                 // El prefijo pasa a bytes UTF-8, como estaría en un archivo.
                 change nb = 0
                 each i among 0..n { nb += utf8Codificar(leer64(linea + i * 8), bytes + nb) }
@@ -638,6 +648,18 @@ flow hito17() {
         kprintln(cadena("hito 17 omitido (sin corpus)"))
     } otherwise {
         kprintln(cadena("hito 17 FALLÓ"))
+    }
+}
+
+// Hito 18: generación sin bucles (muestreo) frente al voraz.
+flow hito18() {
+    hold r = encaHito18()
+    when r == 1 {
+        kprintln(cadena("hito 18 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 18 omitido (sin modelo de ENCA)"))
+    } otherwise {
+        kprintln(cadena("hito 18 FALLÓ"))
     }
 }
 
