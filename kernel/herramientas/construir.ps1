@@ -88,10 +88,11 @@ Write-Host ("    kernel.elf: {0} bytes" -f (Get-Item $elf).Length)
 if (Test-Path $esp) { Remove-Item -Recurse -Force $esp }
 New-Item -ItemType Directory -Force (Join-Path $esp "EFI\BOOT"), (Join-Path $esp "boot\limine") | Out-Null
 Copy-Item (Join-Path $herramientas "limine\BOOTX64.EFI") (Join-Path $esp "EFI\BOOT\BOOTX64.EFI")
-# limine.conf: con -Prueba sin menú (timeout 0); -Opciones se pone como
-# cmdline de la primera entrada.
+# limine.conf: con -Prueba sin -Imagen, sin menú (timeout 0). La imagen USB
+# conserva siempre el menú (va al portátil). -Opciones se pone como cmdline
+# de la primera entrada.
 $conf = [System.IO.File]::ReadAllText((Join-Path $herramientas "limine.conf")).Replace("`r`n", "`n")
-if ($Prueba) { $conf = $conf -replace "(?m)^timeout: \d+", "timeout: 0" }
+if ($Prueba -and -not $Imagen) { $conf = $conf -replace "(?m)^timeout: \d+", "timeout: 0" }
 if ($Opciones) {
     $marca = "    path: boot():/boot/kernel.elf`n"
     $i = $conf.IndexOf($marca)
