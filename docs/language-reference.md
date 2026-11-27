@@ -264,6 +264,7 @@ argument is an `Int`.
 | `nucleo.cpu` | `xmmRestar`, `xmmDividir`, `xmmMaximo`, `xmmMinimo`, `xmmRaiz`, `xmmY`, `xmmYNo`, `xmmO`, `xmmOExclusivo`, `xmmAEnteros`, `xmmTruncarAEnteros`, `xmmAFlotantes`, `xmmSumarEnteros`, `xmmRestarEnteros` `(d, s)`; `xmmDesplazarIzq/Der(r, n)`; `xmmComparar(d, s, predicado)`; `xmmBarajar(d, s, imm)` | `SUBPS`, `DIVPS`, `MAXPS`, `MINPS`, `SQRTPS`, `ANDPS`, `ANDNPS`, `ORPS`, `XORPS`, `CVTPS2DQ`, `CVTTPS2DQ`, `CVTDQ2PS`, `PADDD`, `PSUBD`, `PSLLD`/`PSRLD`, `CMPPS`, `SHUFPS` | — |
 | `nucleo.cpu` | `xmmCargarEscalar(r, dir)`, `xmmGuardarEscalar(dir, r)` | `MOVSS` | — |
 | `nucleo.cpu` | `bitsDeFloat(x: Float)`, `floatDeBits(n)`, `raizF(x: Float)` | bit copy / `SQRTSD` | `Int` / `Float` / `Float` |
+| `nucleo.cpu` | `crc32c64(acum, valor)`, `crc32c8(acum, byte)` | SSE4.2 `CRC32 r64, r/m64` / `CRC32 r32, r/m8` (Castagnoli; no initial or final inversion) | `Int` (32-bit accumulator, upper bits zero) |
 | `nucleo.mem` | `leerF32(dir)`, `escribirF32(dir, x: Float)` | `MOVSS` + `CVTSS2SD` / `CVTSD2SS` + `MOVSS` | `Float` / — |
 | `nucleo.mem` | `leer8/leer16/leer32/leer64(dir)` | `MOVZX`/`MOV` from `[dir]` | `Int`, zero-extended |
 | `nucleo.mem` | `escribir8/escribir16/escribir32/escribir64(dir, valor)` | `MOV [dir]`, low bytes | — |
