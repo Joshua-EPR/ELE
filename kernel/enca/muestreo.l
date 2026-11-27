@@ -320,6 +320,11 @@ flow leerDecimal(linea: Int, a: Int, b: Int, ok: Int) => Float {
     give Float(entera) + Float(frac) / Float(escala)
 }
 
+// Accesos para los comandos de enca/aprender.l.
+expose flow mzEsPalabra(pal: Int, n: Int, c: Int) => Bool { give esPalabra(pal, n, c) }
+expose flow mzLeerDecimal(linea: Int, a: Int, b: Int, ok: Int) => Float { give leerDecimal(linea, a, b, ok) }
+expose flow mzMinuscula(cp: Int) => Int { give minuscula(cp) }
+
 flow imprimirConfig() {
     hold c = config()
     when leer64(c) == 1 {

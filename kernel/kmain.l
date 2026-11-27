@@ -38,6 +38,8 @@ take enca.exp010
 take enca.interactivo
 take enca.muestreo
 take enca.hito18
+take enca.aprender
+take enca.hito21
 take tiempo.reloj
 
 flow kmain() {
@@ -98,6 +100,7 @@ flow kmain() {
     hito20()
     hito17()
     hito18()
+    hito21()
     hito7()
 
     during true {
@@ -276,13 +279,14 @@ flow hito7() {
             when cp == TECLA_INTRO && modelo != 0 && n > 0 && leer64(linea) == 58 {
                 // Línea que empieza por ':': comando de configuración.
                 kprintByte(10)
-                mzComando(linea, n)
+                when !aprComando(linea, n) { mzComando(linea, n) }
                 kprint(cadena("ENCA> "))
                 n = 0
             } otherwise when cp == TECLA_INTRO && modelo != 0 {
                 // El prefijo pasa a bytes UTF-8, como estaría en un archivo.
                 change nb = 0
                 each i among 0..n { nb += utf8Codificar(leer64(linea + i * 8), bytes + nb) }
+                when aprendiendo() && nb > 0 { aprTeclear(modelo, bytes, nb, linea, n) }
                 encaCompletar(modelo, bytes, nb)
                 kprint(cadena("ENCA> "))
                 n = 0
@@ -669,6 +673,32 @@ flow hito18() {
         kprintln(cadena("hito 18 omitido (sin modelo de ENCA)"))
     } otherwise {
         kprintln(cadena("hito 18 FALLÓ"))
+    }
+}
+
+// Hito 21: ENCA aprende de lo que escribe el usuario (enca/aprender.l).
+// La prueba de aceptación solo corre con la opción de arranque enca=prueba21;
+// sin ella se mide F con el modelo cargado (lo aprendido sobrevive al reinicio).
+flow hito21() {
+    when encaModelo() == 0 {
+        kprintln(cadena("hito 21 omitido (sin modelo de ENCA)"))
+        give
+    }
+    aprInicializar()
+    when arranqueOpcionEs(cadena("enca"), cadena("estudio21")) {
+        encaEstudio21()
+        give
+    }
+    when !arranqueOpcionEs(cadena("enca"), cadena("prueba21")) {
+        kprintln(cadena("hito 21: prueba con enca=prueba21"))
+        encaMedirF()
+        give
+    }
+    hold r = encaHito21()
+    when r == 1 {
+        kprintln(cadena("hito 21 OK"))
+    } otherwise when r == 2 {
+        kprintln(cadena("hito 21 omitido (sin ranuras de ENCA)"))
     }
 }
 
