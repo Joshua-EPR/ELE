@@ -1965,3 +1965,18 @@ media palabra hacia atrás. Mejoras posibles, de menor a mayor alcance:
 ## Teclado: sondeo de respaldo
 
 En el portátil real (Dell, Celeron 3865U) el prompt `ENCA>` no recibía teclas aunque el kernel seguía vivo: el bucle de `hito7` dormía en `hlt()` y, si la IRQ1 no llega, nada lo despierta. Ahora el bucle no usa `hlt()`: llama a `tecladoSondear()` (lee el 8042 con `cli`/`sti`, descarta lo del ratón por el bit AUX) y avisa una vez si un byte llegó por sondeo sin ninguno por interrupción. `tecladoInterrupcion()` ya no lee el puerto 0x60 si el 8042 no tiene dato (evita repetir el byte anterior cuando el sondeo se adelantó). Diagnóstico: `teclado: estado 8042 0xNN` al entrar y, en `:ver`, `teclado: N por interrupción, M por sondeo, último estado 8042`. Pendiente de confirmar en el portátil.
+
+Resultado en el portátil (imagen con sondeo, modelo hablante cargado):
+- "teclado: estado 8042 0x...0C" (en QEMU 0x1C): solo difiere el bit 4,
+  que en los 8042 modernos depende del fabricante. No es la causa.
+- Se puede escribir. :ver dice "teclado: 22 por interrupción, 0 por
+  sondeo": la IRQ1 sí llega.
+- Conclusión: el fallo no estaba en la IRQ del teclado sino en el bucle
+  antiguo, que dormía con hlt. Hipótesis principal: en el portátil,
+  después de cargar el modelo hablante (540 MB), hito7 empieza con las
+  interrupciones del procesador desactivadas (IF = 0). hlt con IF = 0 no
+  despierta nunca. El bucle nuevo no duerme y su sondeo hace cli/sti, y
+  ese sti las reactiva. En QEMU el mismo camino no deja IF = 0.
+- Pendiente: imprimir RFLAGS.IF al entrar en hito7 (intrínseco de lectura
+  de flags) para confirmarlo, y encontrar qué deja IF = 0 en la carga del
+  hablante.
