@@ -266,6 +266,9 @@ flow hito7() {
     tecladoIniciar()
     ioapicIniciar()
     ioapicDirigirIrq(1, VECTOR_TECLADO, lapicId())
+    kprint(cadena("teclado: estado 8042 "))
+    kprintHex(in8(0x64))
+    kprintByte(10)
     // Con el modelo de ENCA entrenado o cargado (hito 17) o el hablante en
     // español (enca/hablar.l) el bucle es el modo interactivo: se completa en
     // pantalla el prefijo tecleado o, con el español, se conversa. Sin ellos,
@@ -286,8 +289,15 @@ flow hito7() {
     hold linea = reservar(4096, 8)
     hold bytes = reservar(2304, 8)
     change n = 0
+    change avisado = false
     during true {
-        hlt()
+        // Sin hlt: si la IRQ1 no llega no hay quien despierte. Se sondea el 8042.
+        when tecladoSondear() && !avisado && tecladoPorInterrupcion() == 0 {
+            avisado = true
+            kprintByte(10)
+            kprintln(cadena("teclado: la interrupción IRQ1 no llega; leo el teclado por sondeo"))
+        }
+        pause()
         change cp = tecladoLeer()
         during cp >= 0 {
             when cp == TECLA_INTRO && hay && n > 0 && leer64(linea) == 58 {

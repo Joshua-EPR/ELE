@@ -22,6 +22,7 @@ take nucleo.mem
 take lib.consola
 take lib.matf64
 take dispositivos.apic
+take dispositivos.teclado
 take arranque.limine
 take enca.matematica
 take enca.modelo
@@ -333,6 +334,13 @@ expose flow charlaComando(linea: Int, n: Int) => Bool {
         kprintEntero(leer64(ch() + 16))
         kprint(cadena(" turnos dichos  ranuras por orden "))
         kprintEntero(encaRanurasEstado())
+        kprintByte(10)
+        kprint(cadena("  teclado: "))
+        kprintEntero(tecladoPorInterrupcion())
+        kprint(cadena(" por interrupción, "))
+        kprintEntero(tecladoPorSondeo())
+        kprint(cadena(" por sondeo, último estado 8042 "))
+        kprintHex(tecladoUltimoEstado())
         kprintByte(10)
         give true
     }

@@ -1961,3 +1961,7 @@ media palabra hacia atrás. Mejoras posibles, de menor a mayor alcance:
 - datos en formato de diálogo de dos voces;
 - y para tener sentido, un modelo con memoria larga (la línea del
   transformer, en pausa).
+
+## Teclado: sondeo de respaldo
+
+En el portátil real (Dell, Celeron 3865U) el prompt `ENCA>` no recibía teclas aunque el kernel seguía vivo: el bucle de `hito7` dormía en `hlt()` y, si la IRQ1 no llega, nada lo despierta. Ahora el bucle no usa `hlt()`: llama a `tecladoSondear()` (lee el 8042 con `cli`/`sti`, descarta lo del ratón por el bit AUX) y avisa una vez si un byte llegó por sondeo sin ninguno por interrupción. `tecladoInterrupcion()` ya no lee el puerto 0x60 si el 8042 no tiene dato (evita repetir el byte anterior cuando el sondeo se adelantó). Diagnóstico: `teclado: estado 8042 0xNN` al entrar y, en `:ver`, `teclado: N por interrupción, M por sondeo, último estado 8042`. Pendiente de confirmar en el portátil.
