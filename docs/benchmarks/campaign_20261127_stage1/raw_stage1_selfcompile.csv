@@ -1,0 +1,7 @@
+﻿"tag","program","phase","run","ms","peak_b","exit","out_sha256"
+"stage1_selfcompile","main_driver","compile_warmup","0","16174.95","593108992","0",""
+"stage1_selfcompile","main_driver","compile","1","16740.07","593100800","0",""
+"stage1_selfcompile","main_driver","compile","2","15709.71","593100800","0",""
+"stage1_selfcompile","main_driver","compile","3","15543.83","593096704","0",""
+"stage1_selfcompile","main_driver","compile","4","16038.11","593100800","0",""
+"stage1_selfcompile","main_driver","compile","5","17508.37","593104896","0",""

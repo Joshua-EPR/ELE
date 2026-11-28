@@ -1,0 +1,204 @@
+﻿{
+    "schema":  "ele-seed-bootstrap/v1",
+    "status":  "ok",
+    "failure":  null,
+    "target":  "pe",
+    "host":  {
+                 "os":  "windows",
+                 "script":  "scripts/bootstrap/ele_seed_bootstrap.ps1",
+                 "powershell":  "5.1.19041.1237"
+             },
+    "started_utc":  "2026-11-28T02:18:27Z",
+    "finished_utc":  "2026-11-28T02:18:59Z",
+    "source":  {
+                   "commit":  "ec410984c8311f0e79e1a876932cff785f88ad13",
+                   "commit_from":  "git",
+                   "tracked_files_dirty":  false,
+                   "driver_source":  "compiler-l/src/main_driver.l",
+                   "driver_source_sha256":  "4fcbe9752769d96403711ba7be1c22082f536ec40eaa130687059b5251a129ba"
+               },
+    "seed":  {
+                 "file_name":  "ele-seed-pe.exe",
+                 "sha256_expected":  "eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5",
+                 "sha256_actual":  "eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5",
+                 "size":  1220096
+             },
+    "guard":  {
+                  "never_executed":  [
+                                         "cargo",
+                                         "rustc",
+                                         "rustup",
+                                         "l",
+                                         "cl",
+                                         "link",
+                                         "gcc",
+                                         "clang",
+                                         "ld",
+                                         "lld",
+                                         "ld.lld",
+                                         "cc"
+                                     ],
+                  "executes_only_inside_out_dir":  true,
+                  "rust_toolchain_forbidden":  false,
+                  "host_tools_info":  {
+                                          "cargo":  "%USERPROFILE%\\.cargo\\bin\\cargo.exe",
+                                          "rustc":  "%USERPROFILE%\\.cargo\\bin\\rustc.exe",
+                                          "rustup":  "%USERPROFILE%\\.cargo\\bin\\rustup.exe",
+                                          "l":  null,
+                                          "cl":  null,
+                                          "link":  null,
+                                          "gcc":  null,
+                                          "clang":  null,
+                                          "ld":  null,
+                                          "lld":  null,
+                                          "ld.lld":  null,
+                                          "cc":  null
+                                      }
+              },
+    "generations":  [
+                        {
+                            "name":  "gen1prime",
+                            "built_by":  "seed",
+                            "file":  "gen1prime.exe",
+                            "sha256":  "634f77c44cab756c15007fe2aaa09b2b8ddcc82ee7eece77e0a4773b3a8885bf",
+                            "size":  2438656,
+                            "started_utc":  "2026-11-28T02:18:28Z",
+                            "finished_utc":  "2026-11-28T02:18:31Z",
+                            "seconds":  3.39
+                        },
+                        {
+                            "name":  "gen2",
+                            "built_by":  "gen1prime",
+                            "file":  "gen2.exe",
+                            "sha256":  "cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218",
+                            "size":  2438656,
+                            "started_utc":  "2026-11-28T02:18:32Z",
+                            "finished_utc":  "2026-11-28T02:18:45Z",
+                            "seconds":  13.33
+                        },
+                        {
+                            "name":  "gen3",
+                            "built_by":  "gen2",
+                            "file":  "gen3.exe",
+                            "sha256":  "cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218",
+                            "size":  2438656,
+                            "started_utc":  "2026-11-28T02:18:45Z",
+                            "finished_utc":  "2026-11-28T02:18:58Z",
+                            "seconds":  13
+                        }
+                    ],
+    "fixpoint":  {
+                     "gen2_sha256":  "cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218",
+                     "gen3_sha256":  "cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218",
+                     "gen2_equals_gen3":  true,
+                     "gen1prime_equals_gen2":  false
+                 },
+    "smoke":  [
+                  {
+                      "name":  "hello",
+                      "source":  "examples/hello.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "fibonacci",
+                      "source":  "examples/fibonacci.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "arithmetic",
+                      "source":  "examples/arithmetic.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "loops",
+                      "source":  "examples/loops.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "control_flow",
+                      "source":  "examples/control_flow.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "interpolation",
+                      "source":  "examples/interpolation.l",
+                      "build_exit":  0,
+                      "expected_exit":  0,
+                      "actual_exit":  0,
+                      "stdout_match":  true,
+                      "ok":  true
+                  },
+                  {
+                      "name":  "exit_code",
+                      "source":  "scripts/bootstrap/smoke/exit_code.l",
+                      "build_exit":  0,
+                      "expected_exit":  7,
+                      "actual_exit":  7,
+                      "stdout_match":  true,
+                      "ok":  true
+                  }
+              ],
+    "reject":  [
+                   {
+                       "name":  "immutable",
+                       "source":  "examples/invalid/immutable.l",
+                       "expected_exit":  1,
+                       "actual_exit":  1,
+                       "required_stderr":  "error[L0006]",
+                       "stderr_matched":  true,
+                       "image_written":  false,
+                       "ok":  true
+                   },
+                   {
+                       "name":  "text_moved",
+                       "source":  "examples/invalid/text_moved.l",
+                       "expected_exit":  1,
+                       "actual_exit":  1,
+                       "required_stderr":  "error[L0005]",
+                       "stderr_matched":  true,
+                       "image_written":  false,
+                       "ok":  true
+                   },
+                   {
+                       "name":  "return_type",
+                       "source":  "examples/invalid/return.l",
+                       "expected_exit":  1,
+                       "actual_exit":  1,
+                       "required_stderr":  "error[L0003]",
+                       "stderr_matched":  true,
+                       "image_written":  false,
+                       "ok":  true
+                   },
+                   {
+                       "name":  "unknown_ident",
+                       "source":  "examples/invalid/unknown.l",
+                       "expected_exit":  1,
+                       "actual_exit":  1,
+                       "required_stderr":  "error[L0001]",
+                       "stderr_matched":  true,
+                       "image_written":  false,
+                       "ok":  true
+                   }
+               ]
+}
+

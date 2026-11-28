@@ -158,3 +158,12 @@ This file is meant to let a new session resume without repeating investigations.
 - `git fetch origin` completed; `origin/main` = `f166cad`.
 - `git grep` on `origin/main` for undo/redo/clipboard/open/save: only save present in ELEPad.
 - `terminal_dispatch.l` lines 10-13 read directly.
+
+## 6. Update 2026-11-27: Stage 1 re-verified and measured (documentation pass)
+
+Verified on `origin/main` = `ec41098` (PR #210), Windows 10, Intel i5-7300U. This status file otherwise still describes 2026-11-21; sections 1-5 were not re-verified.
+
+- Stage 0 / Stage 1 are now defined once in [building-with-stage1.md](building-with-stage1.md#definitions). Stage 1 = the ELE compiler built from the pinned seed without Rust.
+- `python tools/verify_seed_archive.py pe` + `scripts/bootstrap/ele_seed_bootstrap.ps1` ran green in 31.8 s: Gen2 == Gen3 = `cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218` (2,438,656 B), 7 smoke and 4 reject programs ok. The same SHA-256 is recorded in `kernel/compilador/provenance.json` (built from a dirty tree at `758270d`; a clean `758270d` gives `76ba7275...`).
+- Measured (median of 5, Stage 1 vs Stage 0 Cranelift): small programs compile in 34.8-65.0 ms vs 125-193 ms; the compiler compiles itself in 16.04 s / 565.63 MiB vs 2.72 s / 75.89 MiB; Stage 1 executables run 1.0-14x slower than Stage 0 ones (tight loops 4.7-5.2x, `text_build` 14x, `list_text_100k` 7.3x and 395 MiB). Data: [campaign_20261127_stage1](benchmarks/campaign_20261127_stage1/README.md); figures of `56f34fb` are marked historical in [performance.md](performance.md).
+- Open: Stage 1 does not accept `async`/`spawn`/region programs (10 of the 30 `bench/programs` files were measured; the others fail to compile, see the campaign README); the Stage 1 self-compile peak memory (565.63 MiB) and text-heavy run memory are the largest measured costs; Linux chain not re-run.

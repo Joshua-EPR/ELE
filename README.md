@@ -26,8 +26,8 @@ Unlike languages that rely on large runtime layers or external linkers, ELE feat
 
 - **Compile-Time Ownership without GC:** Affine type system with deterministic drop elaboration, move semantics, and borrow checking (`view` shared loans, `edit` exclusive loans).
 - **Zero-Dependency Native Binaries:** Produces tiny standalone executables (**~5 KiB**) directly from intermediate representation to x86-64 machine code without linking against `msvcrt.dll`, `ucrt.dll`, or `glibc`.
-- **Autonomous Self-Hosting Fixpoint:** Demonstrated 3-generation bit-for-bit reproducible self-rebuilding on both Windows and Linux (`Gen 2 SHA256 == Gen 3 SHA256`, 0 external compiler invocations).
-- **Fast Compilation Latency:** Standard modules compile natively in **30–55 ms** with low compiler memory overhead (~24.5 MiB).
+- **Autonomous Self-Hosting Fixpoint:** Bit-for-bit reproducible self-rebuilding from a pinned seed, with no Rust (`Gen 2 SHA256 == Gen 3 SHA256`; re-verified on Windows on 2026-11-27, see [Self-Hosting](#self-hosting--generational-reproducibility)).
+- **Fast Compilation Latency:** Small programs compile natively in **35–65 ms** with the self-hosted compiler (Stage 1), using **18.6 MiB** of peak memory (measured 2026-11-27, see [Performance](#performance--benchmarks)). Compiling the compiler itself takes **16.0 s** and **565.6 MiB**.
 - **Clean Canonical Syntax (v2):** Purpose-designed systems grammar with explicit intent: `flow`, `shape`, `choice`, `hold`, `change`, `during`, `when`, `give`.
 
 ---
@@ -71,7 +71,20 @@ chmod +x hello
 # Output: Hello from native ELE!
 ```
 
-For bootstrapping instructions from source, consult the [Getting Started Guide](docs/getting-started.md).
+### 4. Building the compiler from source (Stage 1, no Rust)
+
+**Stage 1** is the compiler written in ELE, built without Rust from a pinned seed (`seed -> Gen1' -> Gen2 -> Gen3`, accepted only if `Gen2 == Gen3`).
+Definitions of the stages and the Rust route: [Building with Stage 1](docs/building-with-stage1.md). Verified on Windows (about 32 s):
+
+```powershell
+python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
+.\scripts\bootstrap\ele_seed_bootstrap.ps1 -Seed .\seed\ele-seed-pe.exe `
+    -SeedSha256 eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5 -Target pe -OutDir .\out\bootstrap
+.\out\bootstrap\gen2.exe build hello.l -o hello.exe     # gen2.exe is the compiler; copy it as bin\ele.exe if you want
+```
+
+Note: `install.ps1` does not build anything; it installs `ele.exe` from a distribution archive (`dist/ele-windows-x86_64.zip`).
+Full steps, options (`--target pe|elf|kernel`, `--lib`, `--entry`) and expected output: [Getting Started Guide](docs/getting-started.md).
 
 ---
 
@@ -121,6 +134,34 @@ Read the complete [Language Reference](docs/language-reference.md) for detailed 
 All performance claims in ELE are backed by auditable, automated benchmarks executed on physical hardware (Intel x86-64, Windows 10 & WSL2 Ubuntu). No numbers or charts are simulated.
 
 For complete methodology, raw data, and statistical distributions, see [Performance Report](docs/performance.md) and [Benchmark Methodology](docs/benchmarks/methodology.md).
+
+### Measured 2026-11-27 (Stage 1, current `main`)
+
+Commit `ec41098`, Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U @ 2.60 GHz (2 cores, 4 threads), about 8 GiB RAM, interactive session without other builds.
+Median of 5 timed runs after 1 warm-up (range in parentheses). Units: B = byte, KiB = 1,024 B, MiB = 2^20 B, ms and s. Process start costs about 24 ms on this PC, which is the floor of any run time below.
+Stage 1 = the ELE compiler built without Rust (`gen2.exe`).
+
+| Compile | Time | Peak memory | Executable |
+|---|---|---|---|
+| `hello.l` | **34.8 ms** (34.2–39.7) | 18.61 MiB | 4,608 B (4.5 KiB) |
+| `fibonacci.l` | **38.6 ms** (37.7–40.0) | 18.65 MiB | 5,632 B (5.5 KiB) |
+| `structs.l` | **65.0 ms** (63.8–68.4) | 18.70 MiB | 9,216 B (9.0 KiB) |
+| `main_driver.l` (the compiler, 28,535 B) | **16.04 s** (15.54–17.51) | **565.63 MiB** | 2,438,656 B (2,381.5 KiB) |
+
+| Run (compiled by Stage 1) | Time |
+|---|---|
+| `fib.l` (fib 32) | 56.0 ms |
+| `collatz.l` | 2,801.2 ms |
+| `sum_loop.l` (200 M iterations) | 4,313.2 ms |
+| `list_index_1m.l` | 119.9 ms |
+| `text_build.l` | 4,362.0 ms |
+| `list_text_100k.l` (peak memory) | 424.1 ms (395.16 MiB) |
+
+Tight arithmetic loops and text building are the slow spots of the generated code. The comparison with the Rust reference compiler, all tables, hardware, method and raw CSV data:
+[Building with Stage 1](docs/building-with-stage1.md), [Performance Report](docs/performance.md#0-measurements-2026-11-27-stage-1) and
+[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md). No C compiler was available, so no C comparison was run.
+
+### Historical measurements (commit `56f34fb`)
 
 **Measurement provenance:** The Windows results below were recorded on commit [`56f34fb`](https://github.com/Joshua-EPR/ELE/commit/56f34fb437e20ca2b6b5613106f96ec153f36969) (November 20, 2026), **before** the Stage 3.5 merges. They are historical measurements, not fresh measurements of the current `main`. Re-run benchmarks on the integrated compiler before attributing these results to it. The external-comparison suite and standalone runtime suite are separate runs; the runtime table uses the comparison dataset.
 
@@ -194,8 +235,9 @@ ELE has established autonomous, bit-for-bit generational self-rebuilding across 
   <img src="assets/benchmarks/self-hosting.svg" alt="Self-Hosting Generational Fixpoint" width="760">
 </p>
 
-- **Windows Fixpoint:** `Gen 2 SHA256 == Gen 3 SHA256` (`F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D`)
-- **Linux Fixpoint:** `Gen 2 SHA256 == Gen 3 SHA256` (`4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9`)
+- **Current Windows fixpoint (verified 2026-11-27, commit `ec41098`, from the pinned seed, no Rust):** `Gen 2 SHA256 == Gen 3 SHA256` = `cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218` (2,438,656 B = 2,381.5 KiB).
+- **Historical Windows fixpoint (older source):** `F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D`
+- **Historical Linux fixpoint (older source; not re-run on 2026-11-27):** `4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9`
 - **External Invocations:** **0** (neither `rustc`, `cargo`, `gcc`, nor `link.exe` are called during Gen 2 and Gen 3 builds).
 
 For the full architectural report, read [Self-Hosting Documentation](docs/self-hosting.md).
