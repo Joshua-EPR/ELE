@@ -2322,3 +2322,159 @@ Referencias sobre valida.bin (2 245 451 B):
 | xz -9 (línea de órdenes) | 715 520 | 2,549 |
 
 Python (referencia_compresion.py) da gzip 3,142 y xz 2,549.
+
+
+## Fase 4 — Hito 24: entrenamiento largo, reanudable y a prueba de apagones (2026-11-27)
+
+Archivos: `enca/entrenar.l` (nuevo), `enca/hablar.l` (llama a `entrenarArranque` y carga un
+entrenamiento terminado), `almacenamiento/checkpoint.l` (juego `CKPT_ENTRENA` y retardo de prueba),
+`almacenamiento/fat32.l` (el directorio raíz crece si se llena), `lib/crc32.l` (`crc32cContinuarSse`),
+`herramientas/{construir.ps1,crear_disco_prueba.py,crear_imagen.py,limine.conf,leer_fat32.py}`.
+No se tocó el compilador, ni el modelo de ENCA, ni ENCA\ ni `prueba_sellada`.
+
+### Uso
+Entrada de menú "/ELE kernel (ENCA: entrenamiento largo reanudable)" = `enca=entrenar`. Las demás
+claves van en la misma línea de órdenes (`construir.ps1 -Opciones "..."` o editar `limine.conf`):
+
+| clave | defecto | significado |
+|---|---|---|
+| `ent_ranuras` | 524288 | ranuras por orden del hipocampo (potencia de 2 >= 65536; si no cabe en RAM se baja a la mitad con aviso) |
+| `ent_min` | 30 | minutos (reloj del kernel) entre checkpoints |
+| `ent_mb` | 10 | MB (10^6 B) de corpus entre puntos de evaluación (0 = solo la evaluación final) |
+| `ent_pasadas` | 1 | número de pasadas |
+| `ent_limite` | 0 | límite de MB por pasada (0 = todo); para pruebas |
+| `ent_nuevo` | 0 | 1 = ignorar y sobrescribir un entrenamiento guardado |
+| `ent_retardo` | 0 | solo pruebas: pausa de N ms a mitad de la escritura de cada checkpoint |
+
+Corpus en `f4/` de la FAT32: `entrena|valida .bin .idx .tipos` y `prompts.txt` (copia de
+`corpus/prompts_es.txt`, el protocolo de `evaluacion.md`). `construir.ps1 -CorpusF4 <carpeta>
+-DiscoDatos prueba` los copia (sin `prueba_sellada`; disco de 2 GiB); `-Carpeta` cambia la carpeta de
+trabajo (dos QEMU a la vez) y `-MatarDespues <s>` mata QEMU esos segundos tras ver `-Esperado`.
+No va en la imagen USB (no cabe).
+
+### Diseño
+- **Corpus.** Al empezar verifica los dos índices ELEIDX01 (cabecera, tabla, `.tipos`) y los CRC32C
+  de `valida.bin` (cargado entero, 2,2 MB) y de `entrena.bin` (por tramos de 8 MiB, 10-11 s en QEMU; no
+  se deja en RAM). **No se cachea `entrena.bin`**: cada documento se lee con `fatLeer` en un búfer del
+  tamaño del mayor (1,1 MB en este corpus; la lectura cuesta ms frente a ~1 s de entrenar un documento
+  medio) y así el presupuesto de RAM no depende del corpus.
+- **Entrenamiento.** Por pasadas, documento a documento: vigilia + 2 sueños (C5, modo rápido), con los
+  mismos pasos que `modeloVigilia/modeloSueno` pero por tramos de 1024 B para poder informar. Pasada 1:
+  orden del índice; pasada p >= 2: Fisher-Yates con PCG32 (semilla 20261127 + p), regenerable. Los bits/byte
+  acumulados son la media precuencial (bits de la mezcla del byte real antes de aprender) desde el
+  inicio de la pasada.
+- **Checkpoints** en `ENTREN_A.BIN` / `ENTREN_B.BIN` (8.3: `ENTREN_A` ya tiene 8 letras; `checkpoint.l`
+  formato 2, CRC32C, alternando ranuras, datos antes que cabecera): cada `ent_min` minutos y tras cada
+  punto de evaluación, SIEMPRE al acabar un documento. Datos = bloque de cursor de 256 KiB (magia
+  `ELEENT01`, ranuras, CRC32C de entrena/valida/prompts, pasada, posición en la permutación, bytes de
+  la pasada y totales, bits acumulados, semilla y estado del PCG, próximo punto, banderas, curva de
+  hasta 4092 puntos de 64 B) + el estado de `enca/estado.l`. El formato completo está en la cabecera de
+  `entrenar.l`. Nada de los datos depende del reloj ni del número de checkpoints, así que el CRC32C
+  de los datos coincide entre un entrenamiento cortado y uno sin cortes. El `paso` de la ranura es el
+  número de checkpoint (solo sirve para alternar y elegir la más reciente).
+- **Reanudar.** Con `ENTREN_*` válidas y compatibles (ranuras, CRC32C de los corpus y de los prompts,
+  `ent_mb`, `ent_limite`; `ent_pasadas` y `ent_min` pueden cambiar, y subir `ent_pasadas` alarga un
+  entrenamiento terminado) imprime pasada/documento/MB y la curva y sigue. `CURVA.LOG` se recorta a los
+  puntos del checkpoint (o se regenera sin velocidad ni hora). Si hay un entrenamiento guardado que NO
+  es compatible NO se sobrescribe (desviación del "empieza de cero" del encargo, para no perder horas por
+  una opción mal escrita): se avisa y sigue el arranque normal; `ent_nuevo=1` lo ignora. Si ninguna ranura
+  tiene cabecera válida (corte en el primer checkpoint) empieza de cero.
+- **Puntos de evaluación** por bytes procesados (primera frontera de documento con bytes >= múltiplo de
+  `ent_mb`), independientes de los checkpoints: `valida.bin` congelada entera (bits/byte total, TEXTO y
+  DIALOGO), las 20 generaciones del protocolo (semilla 4242, T 0,5, top-k 0, top-p 1, hasta 300 B; los
+  diálogos con `\nENCA:` y hasta el primer `\n`), archivo `Mnnnn.TXT` en la raíz, línea de `CURVA.LOG`
+  (punto, MB, bytes, pasada, bits acumulados, valida, TEXTO, DIALOGO, B/s, ms del kernel) y checkpoint.
+  El directorio raíz de `fat32.l` crece al llenarse. Hora = TSC calibrado, ms desde el arranque.
+- **La evaluación no altera el estado.** Medido (volcado palabra a palabra del estado antes y después):
+  cambian ~300 palabras, todas transitorias (contexto del mezclador, orden usado del hipocampo, ventana y
+  potenciales/activos de la corteza, que cada documento reconstruye). Aun así tras evaluar se restaura
+  el estado exacto del búfer previo (43-54 ms con 65536 ranuras, 437 ms con 524288) y se comprueba
+  volviendo a serializar: en cada punto se imprime "CRC32C ... = idéntico". El muestreo se deja en
+  `mzDefecto`.
+- **Fin.** Tras la última pasada: evaluación final (si no coincide con el último punto), checkpoint con
+  la bandera "terminado" y "entrenamiento terminado"; el modelo queda como hablante de ENCA>. En un
+  arranque normal sin la opción, un `ENTREN_*` terminado se carga como hablante (tiene prioridad sobre
+  `HABLA_*`; uno sin terminar se ignora con un aviso); sin `ENTREN_*` el arranque no cambia.
+
+### Prueba de apagón (QEMU WHPX, 2 CPU, 65536 ranuras; `enca=entrenar ent_ranuras=65536 ent_pasadas=2 ent_limite=3 ent_mb=2 ent_min=1`)
+Dos pasadas de ~3 MB (la segunda barajada), 4 puntos de evaluación, 9 checkpoints.
+- (a) referencia: 10 min 15 s sin cortes.
+- (b) corte: se mata QEMU 75 s después de empezar el punto 2; se arranca con el mismo disco y opciones:
+  `entrenamiento guardado: ranura A, checkpoint 7` / `REANUDA: pasada 2/2, documento 91/16595, 4,0 MB` y termina.
+- (c) corte DURANTE la escritura de un checkpoint (`ent_retardo=3000`, se mata 1,5 s después de
+  "checkpoint 3: escribiendo"): la ranura A queda con la cabecera vieja y datos a medias; al reanudar
+  carga la B (checkpoint 2, pasada 1 documento 99), sigue y termina.
+Comparación con `herramientas/leer_fat32.py` (lector FAT32 de solo lectura sobre `datos.img`):
+```
+python -I herramientas/leer_fat32.py ra/datos.img comparar rb/datos.img     (y rc_datos.img)
+  M0001..M0004.TXT: IDÉNTICO (8375, 8191, 7441, 7879 B)
+  CURVA.LOG (punto MB bytes pasada acum valida texto dialogo):
+   1 2,01 2014597 1 2,2299 3,0053 3,0054 2,7740   idéntica en a, b y c
+   2 4,01 4006901 2 2,5095 2,7819 2,7819 2,7627
+   3 6,00 6001442 2 2,4821 2,7226 2,7226 2,7849
+   4 6,03 6030548 2 2,4823 2,7109 2,7109 2,8025
+  CRC32C de los datos del último checkpoint: a 0x2D47F819, b 0x2D47F819, c 0x2D47F819 -> IDÉNTICO
+RESULTADO: TODO IDÉNTICO
+```
+Además, el checkpoint 7 de (b) (0xF8A68A4C) coincide con el 5 de (a): el estado en el mismo punto es
+idéntico aunque los checkpoints por tiempo caigan en sitios distintos. Con 2 MB de corpus la validación
+es 3,01 bits/byte; con 6 MB, 2,71 (referencias sobre este `valida.bin`: gzip -9 3,137; xz -9 2,549).
+
+### Tiempos y RAM medidos en QEMU
+| | 65536 ranuras | 524288 ranuras |
+|---|---:|---:|
+| entrenar (vigilia + 2 sueños) | 13,6-17 KB/s | 17 KB/s (1,1 MB) |
+| verificar `entrena.bin` (231 MB, CRC32C) | 10-11 s | 10 s |
+| crear el modelo | 0,4 s | 3,0 s |
+| crear ENTREN_A/B.BIN | 4 s (68 MiB) | 26 s (540 MiB) |
+| evaluar `valida.bin` (2,2 MB) + 20 generaciones | 40-44 s + 0,6 s | 42 s + 1,6 s |
+| restaurar tras evaluar | 0,05 s | 0,44 s |
+| escribir un checkpoint | 0,36-0,5 s (140-210 MB/s) | 2,7-3,6 s (158-212 MB/s; 567 025 424 B) |
+| RAM: búfer del checkpoint / ENCA / montón | 68 MiB / 69 MiB / 149 MiB | 540 MiB / 542 MiB / 1094 MiB en uso |
+Para 524288 ranuras QEMU necesitó ~2,8 GB (el modelo del hito 17 y los demás hitos están vivos al lado).
+
+### Estimación para el portátil (Celeron 3865U, HDD ~72 MB/s)
+- Una pasada de 230 938 650 B a ~12,7 KB/s: 18 200 s = **5,05 h**; más 24 puntos de evaluación de ~1 min
+  (24 min) y unos 34 checkpoints (10 de 30 min + 24 tras puntos) de 567 MB: 7,9 s de escritura a 72 MB/s
+  más ~2 s de serializar y CRC32C = ~10 s cada uno (6 min): **~5,6 h**.
+- RAM: modelo 542 MiB + búfer 540 MiB + valida 2 MiB + documento mayor 1 MiB = ~1,1 GB (+ lo que ya usan
+  los hitos del arranque: ~1,6 GB en total, dentro de 2,5 GB).
+- Cada ranura: 567 025 936 B (540,7 MiB). Crear las dos: ~30 s. El disco de datos necesita
+  231 MB + 2 x 541 MiB (+ `HABLA_*` si existe).
+- La FAT32 del portátil tiene clústeres de 8 KiB: `fatLeer` salta menos clústeres que en la imagen de QEMU
+  (512 B); no se probó con ese formato.
+
+### Copiar el corpus al portátil (no cabe en la imagen USB)
+```
+# en Windows (NO copiar prueba_sellada)
+ssh usuario@portatil "mkdir -p /tmp/f4"
+scp C:\Users\Usuario\Desktop\corpus_f4\entrena.bin C:\Users\Usuario\Desktop\corpus_f4\entrena.idx C:\Users\Usuario\Desktop\corpus_f4\entrena.tipos usuario@portatil:/tmp/f4/
+scp C:\Users\Usuario\Desktop\corpus_f4\valida.bin C:\Users\Usuario\Desktop\corpus_f4\valida.idx C:\Users\Usuario\Desktop\corpus_f4\valida.tipos usuario@portatil:/tmp/f4/
+scp kernel\herramientas\corpus\prompts_es.txt usuario@portatil:/tmp/f4/prompts.txt
+# en el portátil (ELEDATOS es /dev/sda4)
+sudo mkdir -p /mnt/datos && sudo mount /dev/sda4 /mnt/datos
+sudo mkdir -p /mnt/datos/f4 && sudo cp /tmp/f4/* /mnt/datos/f4/ && sync
+cd /mnt/datos/f4 && sha256sum * ; cd / && sudo umount /mnt/datos
+```
+Luego arrancar la entrada del menú (o `enca=entrenar ent_min=30 ent_mb=10`). Para parar basta apagar: al
+volver a arrancar la misma entrada reanuda. Los `M*.TXT` y `CURVA.LOG` se leen montando ELEDATOS.
+
+### Lo que no se pudo hacer / límites
+- No se midió en el portátil. No se probó el entrenamiento completo de 231 MB (5 h) ni más de 2 pasadas en QEMU.
+- Un corte mientras se escribe `CURVA.LOG` o un `Mnnnn.TXT` no está cubierto (se regeneran al reanudar o al
+  repetir el punto). No se probó el crecimiento del directorio raíz.
+- Los hitos 2-23 sin opción no se repitieron uno a uno; se comprobó un arranque normal con `ENTREN_*` terminado
+  (carga el modelo; hitos 11-15 OK). Sin `ENTREN_*` el arranque no ejecuta código nuevo.
+- `:guardar`/`:deshacer` de ENCA> escriben en `HABLA_*`, no en `ENTREN_*`.
+
+Verificación del líder (discos de la prueba de apagón leídos con
+leer_fat32.py):
+- (a) referencia y (b) corte a mitad: M0001..M0004.TXT idénticos y
+  CURVA.LOG idéntica en todas las columnas de resultado (validación 3,0053 →
+  2,7819 → 2,7226 → 2,7109).
+- Último checkpoint con el mismo CRC32C, 0x2D47F819, recalculado sobre los
+  datos. El número de paso difiere (9 frente a 12) por las reanudaciones.
+- (c) corte durante la escritura: su disco se reutilizó después, así que
+  queda su serie.log. Al reanudar cargó la ranura B (checkpoint 2), porque
+  la A había quedado a medias. Terminó con el último checkpoint 0x2D47F819 y
+  la validación final 2,7109, idénticos a (a).

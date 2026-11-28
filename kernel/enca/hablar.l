@@ -31,6 +31,7 @@ take enca.interactivo
 take enca.exp009
 take enca.espanol
 take enca.aprender
+take enca.entrenar
 
 fixed MAX_RESPUESTA = 300
 fixed HIST_MAX = 1536
@@ -423,6 +424,14 @@ expose flow hablanteArranque() {
         } otherwise {
             when !espEntrenarYGuardar() { kprintln(cadena("enca=hablar: el entrenamiento o el guardado falló")) }
         }
+    }
+    // Hito 24: enca=entrenar entrena (o reanuda) y deja el modelo como hablante; sin la
+    // opción, un entrenamiento TERMINADO en ENTREN_A/B.BIN tiene prioridad sobre HABLA_*.
+    hold entrenando = arranqueOpcionEs(cadena("enca"), cadena("entrenar"))
+    when entrenando { entrenarArranque() }
+    when encaHablante() == 0 {
+        hold e = entrenarCargarTerminado()
+        when e == 2 { kprintln(cadena("entrenamiento guardado: no se pudo cargar; se prueba con HABLA_A/B.BIN")) }
     }
     when encaHablante() == 0 {
         hold r = espCargarHablante()

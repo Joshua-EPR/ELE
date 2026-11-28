@@ -3,6 +3,7 @@
 
     python crear_disco_prueba.py <salida.img> [MiB]   (256 por defecto; 512 para el hito 17b; 2048 con --es: el estado del hablante
         son ~570 MB por ranura) [--enca <carpeta ENCA>] [--ele <compiler-l/src>] [--es <corpus_es/completo|desarrollo>]
+        [--f4 <corpus_f4: entrena/valida .bin .idx .tipos>]  (2048 MiB: 231 MB de corpus + 2 ranuras de ~550 MB)
 
 GPT con tres particiones:
   1  "Datos Windows" (datos Microsoft), llena de 0xAB: no se debe tocar.
@@ -11,7 +12,8 @@ GPT con tres particiones:
      Lleva texto.txt (texto en español de varios MB) para el hito 14 y, con
      --enca, el corpus de ENCA bajo enca/<ruta> para el hito 16 y, con
      --ele, el corpus del compilador de ELE bajo ele/ (barrido de ranuras) y,
-     con --es, el corpus en español bajo es/ (enca=hablar).
+     con --es, el corpus en español bajo es/ (enca=hablar) y, con --f4, el
+     corpus de la Fase 4 bajo f4/ (enca=entrenar; sin prueba_sellada).
   3  "ELE crudo" con el GUID de tipo 7F03465A-8D62-4902-B881-2A624BFA16B6
      (también permitida; el kernel usa la primera que encuentra).
 """
@@ -23,7 +25,7 @@ import uuid
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from crear_imagen import Fat32, escribir_directorio, copiar_enca, copiar_es  # noqa: E402
+from crear_imagen import Fat32, escribir_directorio, copiar_enca, copiar_es, copiar_f4  # noqa: E402
 
 SECTOR = 512
 ELE = uuid.UUID("7F03465A-8D62-4902-B881-2A624BFA16B6")
@@ -70,7 +72,7 @@ def texto_espanol(bytes_objetivo):
     return ("\n".join(lineas) + "\n").encode("utf-8")
 
 
-def particion_fat32(sectores, oculto, enca=None, ele=None, es=None):
+def particion_fat32(sectores, oculto, enca=None, ele=None, es=None, f4=None):
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "texto.txt"), "wb") as f:
             f.write(texto_espanol(3 * 1024 * 1024))
@@ -83,6 +85,8 @@ def particion_fat32(sectores, oculto, enca=None, ele=None, es=None):
             preparar(ele, d)
         if es:
             copiar_es(es, d)
+        if f4:
+            copiar_f4(f4, d)
         fs = Fat32(sectores)
         raiz = fs.reservar_cadena(b"\0" * SECTOR * 4)
         escribir_directorio(fs, d, raiz, None)
@@ -123,6 +127,11 @@ def main():
         i = args.index("--es")
         es = args[i + 1]
         del args[i:i + 2]
+    f4 = None
+    if "--f4" in args:
+        i = args.index("--f4")
+        f4 = args[i + 1]
+        del args[i:i + 2]
     destino = args[0]
     mib = int(args[1]) if len(args) > 1 else 256
     total = mib * 1024 * 1024 // SECTOR
@@ -154,7 +163,7 @@ def main():
     mbr[510:512] = b"\x55\xAA"
     # La FAT32 se arma antes de abrir el disco y se vuelca por zonas: un disco
     # de 2 GiB nunca está entero en memoria.
-    fs = particion_fat32(p2[1] - p2[0] + 1, p2[0], enca, ele, es)
+    fs = particion_fat32(p2[1] - p2[0] + 1, p2[0], enca, ele, es, f4)
     with open(destino, "wb") as f:
         marcar_disperso(f)
         f.truncate(total * SECTOR)

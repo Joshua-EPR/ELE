@@ -364,12 +364,15 @@ flow escribirEntrada(lba: Int, desp: Int, nombre83: Int, primero: Int, tamano: I
     give bien
 }
 
-// Busca una entrada libre en el directorio raíz (no lo amplía).
+// Busca una entrada libre en el directorio raíz. Si el directorio está lleno
+// lo amplía con un cluster nuevo puesto a cero (hito 24: cientos de archivos
+// M0001.TXT... de los puntos de evaluación).
 flow entradaLibre() => Bool {
     hold e = estado()
     hold buf = leer64(e + 88)
     hold bytes = fatBytesPorCluster()
     change c = leer64(e + 56)
+    change ultimo = c
     during !esFin(c) {
         when !discoLeer(lbaDeCluster(c), leer64(e + 16), buf) { give false }
         change p = 0
@@ -382,9 +385,20 @@ flow entradaLibre() => Bool {
             }
             p += 32
         }
+        ultimo = c
         c = fatSiguiente(c)
     }
-    give false
+    // Lleno: un cluster más para el directorio.
+    when ultimo < 2 || !invalidarFsInfo() { give false }
+    hold nuevo = clusterLibre()
+    when nuevo == 0 { give false }
+    each i among 0..bytes { escribir8(buf + i, 0) }
+    when !discoEscribir(lbaDeCluster(nuevo), leer64(e + 16), buf) { give false }
+    when !fatPoner(nuevo, 0x0FFFFFFF) { give false }
+    when !fatPoner(ultimo, nuevo) { give false }
+    escribir64(e + 112, lbaDeCluster(nuevo))
+    escribir64(e + 120, 0)
+    give true
 }
 
 // Crea (o sobrescribe) en la raíz el archivo de nombre 8.3 `nombre83`

@@ -36,12 +36,15 @@ expose fixed CKPT_PRUEBA = 0
 expose fixed CKPT_ENCA = 1
 // Juego 2: HABLA_A.BIN y HABLA_B.BIN, el modelo hablante (español, ~570 MB por ranura).
 expose fixed CKPT_HABLA = 2
+// Juego 3: ENTREN_A.BIN y ENTREN_B.BIN, el entrenamiento largo reanudable
+// (enca/entrenar.l, hito 24): cursor de entrenamiento + estado completo de ENCA.
+expose fixed CKPT_ENTRENA = 3
 
 // Estado de cada juego (48 bytes): +0 capacidad de datos, +8 cabecera
 // (512 bytes, del montón), +16 ranura de la última carga (0 A, 1 B, -1
 // ninguna), +24 paso cargado, +32 ranura de la última escritura, +40 versión
 // del formato de la última ranura cargada.
-flow estados() => Int { give reservar(144, 8) }
+flow estados() => Int { give reservar(192, 8) }
 flow estado(juego: Int) => Int { give estados() + juego * 48 }
 
 // Medidas de la última operación (64 bytes), en ciclos de TSC:
@@ -49,6 +52,12 @@ flow estado(juego: Int) => Int { give estados() + juego * 48 }
 // disco, +24 cabeceras (lecturas y escritura), +32 bytes de datos,
 // +40 1 si fue guardar y 0 si fue cargar.
 flow medidas() => Int { give reservar(64, 8) }
+
+// Solo para pruebas (hito 24, corte durante la escritura de un checkpoint):
+// milisegundos de espera a mitad de la escritura de los datos de una ranura.
+// 0 = sin retardo (siempre, salvo la opción de arranque ent_retardo).
+flow retardoPrueba() => Int { give reservar(8, 8) }
+expose flow ckptFijarRetardoPrueba(ms: Int) { escribir64(retardoPrueba(), ms) }
 
 flow medidasReiniciar(guardar: Bool) {
     hold m = medidas()
@@ -119,6 +128,10 @@ expose flow ckptRanuraCargada(juego: Int) => Int { give leer64(estado(juego) + 1
 expose flow ckptPasoCargado(juego: Int) => Int { give leer64(estado(juego) + 24) }
 
 flow abrirRanura(juego: Int, ranura: Int) => Bool {
+    when juego == CKPT_ENTRENA {
+        when ranura == 0 { give fatAbrir(cadena("ENTREN_A.BIN")) }
+        give fatAbrir(cadena("ENTREN_B.BIN"))
+    }
     when juego == CKPT_HABLA {
         when ranura == 0 { give fatAbrir(cadena("HABLA_A.BIN")) }
         give fatAbrir(cadena("HABLA_B.BIN"))
@@ -147,7 +160,10 @@ expose flow ckptPreparar(juego: Int, capacidad: Int) => Bool {
     hold bytes = leer64(estado(juego)) + 512
     change a = false
     change b = false
-    when juego == CKPT_HABLA {
+    when juego == CKPT_ENTRENA {
+        a = fatCrear(cadena("ENTREN_ABIN"), cadena("ENTREN_A.BIN"), bytes)
+        b = fatCrear(cadena("ENTREN_BBIN"), cadena("ENTREN_B.BIN"), bytes)
+    } otherwise when juego == CKPT_HABLA {
         a = fatCrear(cadena("HABLA_A BIN"), cadena("HABLA_A.BIN"), bytes)
         b = fatCrear(cadena("HABLA_B BIN"), cadena("HABLA_B.BIN"), bytes)
     } otherwise when juego == CKPT_ENCA {
@@ -312,7 +328,16 @@ flow escribirRanura(juego: Int, ranura: Int, paso: Int, dir: Int, bytes: Int, co
     // Los datos van en el búfer de llamada; el último sector incompleto se
     // escribe completo (lo que sobre después de `bytes` no cuenta en el CRC).
     hold t0 = rdtsc()
-    when !fatEscribir(512, escribir * 512, dir) { give false }
+    when leer64(retardoPrueba()) > 0 && escribir > 8 {
+        // Prueba de corte: la primera mitad, una pausa y el resto.
+        hold mitad = escribir / 2
+        when !fatEscribir(512, mitad * 512, dir) { give false }
+        hold fin = rdtsc() + leer64(retardoPrueba()) * tscCiclosPorMs()
+        during rdtsc() < fin { pause() }
+        when !fatEscribir(512 + mitad * 512, (escribir - mitad) * 512, dir + mitad * 512) { give false }
+    } otherwise {
+        when !fatEscribir(512, escribir * 512, dir) { give false }
+    }
     hold t1 = rdtsc()
     escribir64(m + 8, leer64(m + 8) + t1 - t0)
     when !discoVaciar() { give false }

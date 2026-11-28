@@ -96,6 +96,31 @@ def copiar_es(origen, destino):
           % (origen, palabras[4], palabras[6], salida))
 
 
+def copiar_f4(origen, destino):
+    """Copia (bytes idénticos) el corpus de la Fase 4 a <destino>/f4/: entrena y valida
+    (.bin, .idx, .tipos) y los prompts del protocolo de evaluación. NO copia
+    prueba_sellada (la prueba no se toca hasta el final de la fase). Comprueba la
+    cabecera y los tamaños (el CRC32C completo lo verifica el kernel, enca/entrenar.l)."""
+    import shutil
+    salida = os.path.join(destino, "f4")
+    os.makedirs(salida, exist_ok=True)
+    for parte in ("entrena", "valida"):
+        idx = open(os.path.join(origen, parte + ".idx"), "rb").read()
+        if len(idx) < 128 or idx[0:8] != b"ELEIDX01":
+            raise SystemExit("corpus f4: %s.idx inválido en %s" % (parte, origen))
+        palabras = struct.unpack("<16Q", idx[:128])
+        if os.path.getsize(os.path.join(origen, parte + ".bin")) != palabras[4]:
+            raise SystemExit("corpus f4: %s.bin no mide lo que dice el índice" % parte)
+        if os.path.getsize(os.path.join(origen, parte + ".tipos")) != palabras[2]:
+            raise SystemExit("corpus f4: %s.tipos no mide lo que dice el índice" % parte)
+        for ext in (".bin", ".idx", ".tipos"):
+            shutil.copyfile(os.path.join(origen, parte + ext), os.path.join(salida, parte + ext))
+        print("corpus f4: %s: %d documentos, %d B" % (parte, palabras[2], palabras[4]))
+    prompts = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "prompts_es.txt")
+    shutil.copyfile(prompts, os.path.join(salida, "prompts.txt"))
+    print("corpus f4 copiado a %s (con prompts.txt)" % salida)
+
+
 # ---------------------------------------------------------------- FAT32 ----
 
 class Fat32:

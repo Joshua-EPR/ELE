@@ -95,3 +95,30 @@ expose flow crc32cSse(dir: Int, bytes: Int) => Int {
     }
     give c ^ 0xFFFFFFFF
 }
+
+// CRC-32C de `bytes` bytes continuando desde `previo` (0 al empezar): para
+// verificar archivos grandes por tramos. crc32cContinuarSse(0, d, n) == crc32cSse(d, n)
+// y encadenar tramos da el mismo CRC que el bloque entero.
+expose flow crc32cContinuarSse(previo: Int, dir: Int, bytes: Int) => Int {
+    change c = (previo ^ 0xFFFFFFFF) & 0xFFFFFFFF
+    change p = dir
+    hold fin32 = dir + bytes - bytes % 32
+    hold fin8 = dir + bytes - bytes % 8
+    hold fin = dir + bytes
+    during p != fin32 {
+        c = crc32c64(c, leer64(p))
+        c = crc32c64(c, leer64(p +% 8))
+        c = crc32c64(c, leer64(p +% 16))
+        c = crc32c64(c, leer64(p +% 24))
+        p = p +% 32
+    }
+    during p != fin8 {
+        c = crc32c64(c, leer64(p))
+        p = p +% 8
+    }
+    during p != fin {
+        c = crc32c8(c, leer8(p))
+        p = p +% 1
+    }
+    give c ^ 0xFFFFFFFF
+}
