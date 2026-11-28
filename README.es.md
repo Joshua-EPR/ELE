@@ -26,8 +26,8 @@ A diferencia de los lenguajes que dependen de capas de runtime pesadas o enlazad
 
 - **Seguridad de memoria en compilación sin GC:** Sistema de tipos afines con elaboración determinista de liberaciones (*drop flags*), semántica de movimientos (*moves*) y comprobación estricta de préstamos (`view` para préstamos compartidos de lectura, `edit` para préstamos exclusivos de escritura).
 - **Binarios nativos sin dependencias externas:** Produce ejecutables independientes extremadamente compactos (**~5 KiB**) directamente desde su representación intermedia a código máquina x86-64 sin enlazar contra `msvcrt.dll`, `ucrt.dll` ni `glibc`.
-- **Punto fijo generacional reproducible (Self-Hosting):** Demostrada autorreconstrucción circular de 3 generaciones idéntica bit a bit tanto en Windows como en Linux (`Gen 2 SHA256 == Gen 3 SHA256`, con cero invocaciones a compiladores externos).
-- **Baja latencia de compilación:** Los módulos estándar compilan nativamente en **30–55 ms** con un consumo reducido de memoria del compilador (~24.5 MiB).
+- **Punto fijo generacional reproducible (Self-Hosting):** Autorreconstrucción idéntica bit a bit desde una semilla fijada, sin Rust (`Gen 2 SHA256 == Gen 3 SHA256`; verificada de nuevo en Windows el 2026-11-27, véase [Autorreconstrucción](#autorreconstrucción-y-reproducibilidad-generacional-self-hosting)).
+- **Baja latencia de compilación:** Los programas pequeños compilan nativamente en **35–65 ms** con el compilador autoalojado (Stage 1), con un pico de memoria de **18,6 MiB** (medido el 2026-11-27; véase [Rendimiento](#rendimiento-y-benchmarks)). Compilar el propio compilador tarda **16,0 s** y usa **565,6 MiB**.
 - **Sintaxis canónica limpia (v2):** Gramática de sistemas diseñada específicamente para expresar intención: `flow`, `shape`, `choice`, `hold`, `change`, `during`, `when`, `give`.
 
 ---
@@ -71,7 +71,21 @@ chmod +x hello
 # Salida: ¡Hola desde ELE nativo!
 ```
 
-Para instrucciones detalladas de compilación desde código fuente, consulta la [Guía de Inicio Rápido](docs/getting-started.md).
+### 4. Compilar el compilador desde el código fuente (Stage 1, sin Rust)
+
+**Stage 0** es el compilador escrito en Rust (`cargo build -p project-l --bin l`). **Stage 1** es el compilador escrito en ELE, construido
+sin Rust desde una semilla fijada (`semilla -> Gen1' -> Gen2 -> Gen3`, aceptado solo si `Gen2 == Gen3`). Definiciones: [Self-Hosting](docs/self-hosting.md#0-terminology-stage-0-and-stage-1) (en inglés).
+Comprobado en Windows (unos 32 s):
+
+```powershell
+python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
+.\scripts\bootstrap\ele_seed_bootstrap.ps1 -Seed .\seed\ele-seed-pe.exe `
+    -SeedSha256 eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5 -Target pe -OutDir .\out\bootstrap
+.\out\bootstrap\gen2.exe build hello.l -o hello.exe     # gen2.exe es el compilador; cópialo como bin\ele.exe si quieres
+```
+
+Nota: `install.ps1` no compila nada; instala `ele.exe` desde un archivo de distribución (`dist/ele-windows-x86_64.zip`).
+Pasos completos, opciones (`--target pe|elf|kernel`, `--lib`, `--entry`) y salida esperada: [Guía de Inicio Rápido](docs/getting-started.md).
 
 ---
 
@@ -121,6 +135,35 @@ Consulta la [Referencia del Lenguaje](docs/language-reference.md) para especific
 Todas las afirmaciones de rendimiento en ELE están respaldadas por benchmarks auditables y automatizados ejecutados sobre hardware real (Intel x86-64, Windows 10 y WSL2 Ubuntu). Ninguna cifra ni gráfico es simulado.
 
 Para la metodología completa y los datos brutos, consulta el [Informe de Rendimiento](docs/performance.md) y la [Metodología de Benchmarking](docs/benchmarks/methodology.md).
+
+### Medido el 2026-11-27 (Stage 1, `main` actual)
+
+Commit `ec41098`, Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U @ 2,60 GHz (2 núcleos, 4 hilos), unos 8 GiB de RAM, sesión interactiva sin otras compilaciones.
+Mediana de 5 ejecuciones medidas tras 1 de calentamiento (rango entre paréntesis). Unidades: B = byte, KiB = 1.024 B, MiB = 2^20 B, ms y s. Arrancar un proceso cuesta unos 24 ms en este PC: es el suelo de cualquier tiempo de ejecución de abajo.
+Stage 1 = el compilador de ELE construido sin Rust (`gen2.exe`); Stage 0 = el compilador en Rust `l build --backend cranelift`.
+
+| Compilación | Tiempo Stage 1 | Memoria pico Stage 1 | Ejecutable Stage 1 | Tiempo Stage 0 | Ejecutable Stage 0 |
+|---|---|---|---|---|---|
+| `hello.l` | **34,8 ms** (34,2–39,7) | 18,61 MiB | 4.608 B (4,5 KiB) | 138,4 ms (130,8–301,5) | 9.216 B (9,0 KiB) |
+| `fibonacci.l` | **38,6 ms** (37,7–40,0) | 18,65 MiB | 5.632 B (5,5 KiB) | 125,2 ms (124,4–140,0) | 9.728 B (9,5 KiB) |
+| `structs.l` | **65,0 ms** (63,8–68,4) | 18,70 MiB | 9.216 B (9,0 KiB) | 137,2 ms (133,6–201,0) | 11.776 B (11,5 KiB) |
+| `main_driver.l` (el compilador, 28.535 B) | **16,04 s** (15,54–17,51) | **565,63 MiB** | 2.438.656 B (2.381,5 KiB) | 2,72 s (2,48–3,75) | 1.437.696 B (1.404,0 KiB) |
+
+| Ejecución (compilado con Stage 1 / Stage 0) | Stage 1 | Stage 0 | Stage 1 / Stage 0 |
+|---|---|---|---|
+| `fib.l` (fib 32) | 56,0 ms | 52,7 ms | 1,06x |
+| `collatz.l` | 2.801,2 ms | 540,8 ms | 5,18x |
+| `sum_loop.l` (200 M iteraciones) | 4.313,2 ms | 912,9 ms | 4,72x |
+| `list_index_1m.l` | 119,9 ms | 86,4 ms | 1,39x |
+| `text_build.l` | 4.362,0 ms | 306,5 ms | 14,23x |
+| `list_text_100k.l` (memoria pico) | 424,1 ms (395,16 MiB) | 58,3 ms (9,34 MiB) | 7,27x |
+
+En resumen: Stage 1 compila los programas pequeños entre 2 y 4 veces más rápido que Stage 0 y emite ejecutables más pequeños, pero el código que genera es tan rápido como el de Stage 0 en código con muchas llamadas
+y entre 4,7 y 14 veces más lento en bucles cerrados y en construcción de texto; compilar el propio compilador tarda unas 6 veces más y usa 7,5 veces más memoria que con Stage 0.
+No había compilador de C disponible, así que no se hizo comparación con C. Tablas completas, hardware, método y datos brutos en CSV: [Informe de Rendimiento](docs/performance.md#0-measurements-2026-11-27-stage-1) y
+[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md) (ambos en inglés).
+
+### Mediciones históricas (commit `56f34fb`)
 
 **Procedencia de las mediciones:** Los resultados de Windows aquí mostrados se registraron en el commit [`56f34fb`](https://github.com/Joshua-EPR/ELE/commit/56f34fb437e20ca2b6b5613106f96ec153f36969) (20 de noviembre de 2026), **antes** de fusionar Stage 3.5. Son mediciones históricas, no resultados recién obtenidos de `main`. Se deben repetir los benchmarks sobre la versión integrada antes de atribuirle estas cifras. La comparativa externa y la suite de runtime independiente son experimentos diferentes; la tabla de runtime usa los datos de la comparativa.
 
@@ -194,8 +237,9 @@ ELE ha establecido un ciclo de autorreconstrucción generacional determinista e 
   <img src="assets/benchmarks/self-hosting.svg" alt="Punto Fijo Generacional Self-Hosting" width="760">
 </p>
 
-- **Punto Fijo en Windows:** `Gen 2 SHA256 == Gen 3 SHA256` (`F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D`)
-- **Punto Fijo en Linux:** `Gen 2 SHA256 == Gen 3 SHA256` (`4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9`)
+- **Punto fijo ACTUAL en Windows (verificado el 2026-11-27, commit `ec41098`, desde la semilla fijada, sin Rust):** `Gen 2 SHA256 == Gen 3 SHA256` = `cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218` (2.438.656 B = 2.381,5 KiB).
+- **Punto fijo histórico en Windows (fuente anterior):** `F0CE6F57427B5A60D51095975A85A56D5FD43F18DC4FA2F732DA0D02E0B5370D`
+- **Punto fijo histórico en Linux (fuente anterior; no repetido el 2026-11-27):** `4C952A75B28AEB5BE6770372BA426137A32E0C7B0C5A31E798B235E97CE4E9E9`
 - **Invocaciones Externas:** **0** (no se invoca a `rustc`, `cargo`, `gcc` ni `link.exe` durante las compilaciones de Gen 2 y Gen 3).
 
 Para el informe arquitectónico completo, consulta la [Documentación de Self-Hosting](docs/self-hosting.md).

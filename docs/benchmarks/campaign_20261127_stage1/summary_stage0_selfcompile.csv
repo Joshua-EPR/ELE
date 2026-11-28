@@ -1,0 +1,2 @@
+﻿"tag","kind","program","source_b","compile_ok","compile_error","compile_runs","compile_ms_median","compile_ms_min","compile_ms_max","compile_peak_mib","exe_b","exe_kib","exe_sha256"
+"stage0_selfcompile","stage0","main_driver","28535","True","","5","2717.3","2481.5","3745.8","75.89","1437696","1404","1835a8a321297083ca586db16bf6dde95533d76a40c0ad21a3dd90f3dc556296"

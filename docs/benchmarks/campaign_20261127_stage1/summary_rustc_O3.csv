@@ -1,0 +1,3 @@
+﻿"tag","kind","program","source_b","compile_ok","compile_error","compile_runs","compile_ms_median","compile_ms_min","compile_ms_max","compile_peak_mib","exe_b","exe_kib","exe_sha256","run_ms_median","run_ms_min","run_ms_max","run_peak_mib","run_exit","run_output_stable","run_first_line"
+"rustc_O3","rustc","fibonacci_recursive","227","True","","5","249","237.5","255","8.5","131072","128","6d0e0fd1bd91d2135c3d5893158eea0456369c7bf6b57debb814d332222312ed","29.8","28.3","31","3.15","0","True","75025"
+"rustc_O3","rustc","arithmetic_loop","294","True","","5","256.8","236.2","261.8","8.57","131072","128","af4a3d9f2e570538f361b4559f407cd9948569d0e0004b679ad244d1f310c343","30.1","28.7","31.4","3.15","0","True","149999995000000"

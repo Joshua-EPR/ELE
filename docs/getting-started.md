@@ -11,9 +11,12 @@ ELE currently targets **x86-64** architectures on:
 - **Linux x86-64:** Ubuntu 20.04+, Debian, Fedora, or WSL2 on Windows (ELF64 generation).
 
 ### Prerequisites for Bootstrap
-To build the compiler from source:
-- **Rust Toolchain:** `1.99.1` (used strictly as the temporary Stage 0 bootstrap compiler).
-- **Python:** `3.8+` (used for running benchmarks and verification scripts; not required by the compiled binaries).
+To build the compiler from source **without Rust** (Stage 1, Option B below):
+- **Windows PowerShell** (the bootstrap script is `scripts/bootstrap/ele_seed_bootstrap.ps1`; POSIX `sh` on Linux: `ele_seed_bootstrap.sh`).
+- **Python:** `3.8+` (extracts and verifies the pinned seed with `tools/verify_seed_archive.py`; not required by the compiled binaries).
+
+Only the optional Stage 0 route (Option C) needs the **Rust Toolchain** `1.99.1`. Terms (Stage 0, Stage 1, fixpoint) are defined once in
+[self-hosting.md](self-hosting.md#0-terminology-stage-0-and-stage-1).
 - **C/C++ Tools (Optional for comparisons):** MSVC on Windows or GCC on Linux.
 
 ---
@@ -38,9 +41,47 @@ If you have downloaded a distribution package or cloned the repository, install 
 
 The installer verifies the installation by running `ele --version` and building a sample verification program.
 
-### Option B: Bootstrapping the Compiler from Source
+> **Checked 2026-11-27:** `install.ps1` only forwards to `scripts/install.ps1`, which installs `bin\ele.exe` **from a distribution archive**
+> (`dist/ele-windows-x86_64.zip` or `-PackagePath`); it does not build anything and throws "ELE distribution archive not found" without one.
+> That `ele.exe` is the Stage 1 compiler (Gen2/Gen3). To get it from a fresh clone, use Option B and build the archive with
+> `scripts/package_distribution.py`, or simply copy `gen2.exe` anywhere and call it (see below).
+
+### Option B: Build the Stage 1 compiler from the pinned seed (no Rust)
 
 ELE features an autonomous self-hosting driver (`compiler-l/src/main_driver.l`) capable of compiling ELE programs and rebuilding its own compiler binary without external dependencies.
+**Stage 1** is that driver built from a hash-pinned seed: `seed -> Gen1' -> Gen2 -> Gen3`, accepted only if `Gen2 == Gen3` bit for bit.
+These commands were executed on 2026-11-27 (commit `ec41098`, Windows 10, i5-7300U) and took about 32 s in total.
+
+```powershell
+git clone https://github.com/Joshua-EPR/ELE.git
+cd ELE
+
+# 1. Extract and verify the seed (archive and payload SHA-256, PE32+ AMD64 header)
+python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
+#    verified PE32+ AMD64 seed: ...\seed\ele-seed-pe.exe
+
+# 2. Bootstrap (the output folder must not exist or be empty)
+.\scripts\bootstrap\ele_seed_bootstrap.ps1 -Seed .\seed\ele-seed-pe.exe `
+    -SeedSha256 eb98a908ca5a36b5a4f29c9114a8232a6031f7d35c2c4298569adf67ebccc2f5 -Target pe -OutDir .\out\bootstrap
+```
+
+Expected end of the output:
+
+```text
+    gen2 sha256 cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218 (2438656 bytes, 13.33 s)
+    gen3 sha256 cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218 (2438656 bytes, 13 s)
+    BITWISE EQUAL (gen1prime == gen2: False)
+==> OK: Stage-0-free chain seed -> gen1prime -> gen2 -> gen3 is a bitwise fixpoint (cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218)
+```
+
+`out\bootstrap` then holds `gen1prime.exe`, `gen2.exe`, `gen3.exe` (2,438,656 B = 2,381.5 KiB each), `provenance.json`, `SHA256SUMS`, `logs\` and `smoke\`.
+`gen2.exe` **is** the compiler: copy it where you want (for example `bin\ele.exe`) and use it as in section 3. Details, the meaning of each output and the
+note about the hash recorded in `kernel/compilador/provenance.json`: [self-hosting.md](self-hosting.md#01-stage-1-step-by-step-verified-2026-11-27).
+If the hash differs from the one above, your sources differ from commit `ec41098`; the fixpoint (`gen2 == gen3`) is what must hold.
+
+### Option C: Build the Stage 0 compiler (needs Rust)
+
+Stage 0 is the Rust compiler. It is the reference and the faster-running (optimizing) backend, but it is not needed to build or use ELE.
 
 #### Step 1: Clone the Repository
 ```bash
@@ -96,7 +137,7 @@ flow main() {
 
 ### Compilation
 
-Compile `hello.l` using the autonomous `ele` driver:
+Compile `hello.l` using the autonomous `ele` driver (checked with `gen2.exe` from Option B; replace `.\bin\ele.exe` by the path to your copy):
 
 **On Windows (PE32+ executable):**
 ```powershell
@@ -172,6 +213,10 @@ Build Options:
   --target <pe|elf>         Target binary format:
                               pe  = Windows x86-64 PE32+
                               elf = Linux x86-64 ELF64
+  --target kernel           Freestanding ELF64 x86-64 in the upper half (0xFFFFFFFF80000000), no runtime
+                            (no print, Text, List or system I/O)
+  --entry <flow>            Entry flow (default 'main'; 'kmain' with --target kernel)
+  --lib <root>              Search missing imports under this root (e.g. --lib . for std/)
   --pe64                    Shorthand for --target pe
   --elf64                   Shorthand for --target elf
 
