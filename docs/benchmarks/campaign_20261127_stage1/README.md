@@ -1,7 +1,7 @@
 # Campaign 2026-11-27: Stage 1 vs Stage 0 on Windows
 
 Measurements of the ELE compiler built **without Rust** (Stage 1, see
-[Stage definitions](../../self-hosting.md#0-terminology-stage-0-and-stage-1)) and of the Rust compiler
+[Stage definitions](../../building-with-stage1.md#definitions)) and of the Rust compiler
 (Stage 0, `l build --backend cranelift`) on the same sources, plus `rustc` as an external reference.
 
 ## Environment

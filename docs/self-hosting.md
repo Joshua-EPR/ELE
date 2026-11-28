@@ -4,26 +4,17 @@ This document details the self-hosting capabilities, generational build pipeline
 
 ---
 
-## 0. Terminology: Stage 0 and Stage 1
+## 0. Terminology
 
-One definition, used by the user-facing documentation (README, getting started, performance):
-
-- **Stage 0** is the compiler written in Rust (`crates/l`, binary `l`; `cargo build -p project-l --bin l`). It needs the Rust toolchain.
-- **Stage 1** is the compiler written in ELE (`compiler-l/src/main_driver.l`, 743 lines, 28,535 B), built **without Rust** from the pinned seed: `seed -> Gen1' -> Gen2 -> Gen3`, with `Gen2 == Gen3` bit for bit (the fixpoint). `Gen2`/`Gen3` is what the installers ship as `ele.exe` / `ele.elf`.
-
-Other documents number the stages differently. They are not wrong, but they describe other things:
-
-| Document | Meaning of "Stage N" there |
-|---|---|
-| [BOOTSTRAP_ARCHITECTURE.md](BOOTSTRAP_ARCHITECTURE.md) (lines 50-66) | Plan: Stage 1 = Stage 0 compiles an L driver; Stage 2 = that executable rebuilds the compiler; Stage 3 = second rebuild |
-| [STAGE0_FREE_BOOTSTRAP.md](STAGE0_FREE_BOOTSTRAP.md) | The seed-based chain below (seed, Gen1', Gen2, Gen3), no Stage 0 involved |
-| [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) (line 13 and the phase 8.x entries around line 1474) | Historical phase logs: "no Stage 2 or Stage 3 exists" was true when written and is superseded by the fixpoint below |
-| "Stage 3.x" in sections 1 and 2 below | Names of engineering milestones of the fixpoint work, not compiler generations |
+**Stage 1** is the compiler written in ELE (`compiler-l/src/main_driver.l`, 743 lines, 28,535 B), built **without Rust** from the pinned seed:
+`seed -> Gen1' -> Gen2 -> Gen3`, with `Gen2 == Gen3` bit for bit (the fixpoint). `Gen2`/`Gen3` is what the installers ship as `ele.exe` / `ele.elf`.
+Other documents number the stages differently; the table that relates them, the Rust route and the comparison between both are in
+[building-with-stage1.md](building-with-stage1.md). "Stage 3.x" in sections 1 and 2 below are names of engineering milestones, not compiler generations.
 
 ## 0.1 Stage 1 step by step (verified 2026-11-27)
 
 Everything below was executed on commit `ec410984c8311f0e79e1a876932cff785f88ad13`
-(Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U, about 8 GiB RAM). No Rust, no Cargo.
+(Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U, about 8 GiB RAM). No Rust toolchain was used.
 
 ```powershell
 # 1. Extract and verify the pinned seed (checks archive and payload SHA-256 and the PE32+ AMD64 header)
@@ -39,7 +30,7 @@ python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
 
 Parameters (the `param()` block of the script): `-Seed` and `-SeedSha256` (mandatory), `-Target pe` (the only value),
 `-OutDir` (mandatory; must not exist or be empty), `-RepoRoot` (default: the repository that contains the script),
-`-ForbidToolchainOnPath` (error if `cargo`/`rustc`/`rustup` are on `PATH`) and `-TimeoutSeconds` (default 600).
+`-ForbidToolchainOnPath` (error if the Rust toolchain is on `PATH`) and `-TimeoutSeconds` (default 600).
 
 Key output observed:
 
@@ -66,12 +57,8 @@ produced by an older revision of the compiler, so Gen1' is only the first output
 **Current fixpoint (Windows PE32+, commit `ec41098`):** `cfcfa798f9b5680721184de780bbeed8566947962828e4cc49471407f063d218`, 2,438,656 B.
 Data: [`benchmarks/campaign_20261127_stage1/bootstrap/`](benchmarks/campaign_20261127_stage1/bootstrap/).
 
-About the SHA-256 recorded in `kernel/compilador/provenance.json`: it is the same `cfcfa798...` value, but that file says
-`commit 758270d..., tracked_files_dirty: true`. A **clean** checkout of `758270d` gives a different fixpoint
-(`76ba727530350611dff52ba3fbea502ce1580752a0cfdd8e7a55d81e474b44bc`, 2,436,096 B, same seed; run on 2026-11-27, provenance in
-`provenance_758270d_clean.json` next to the other data). The kernel build therefore came from a working tree that already contained the
-compiler changes that were committed afterwards (`native_cfg_platform.l`, `x86_64.l`, `lir_build.l`, `sema_expr.l`, `sema_ops.l`, 31 lines
-changed between `758270d` and `ec41098`), and it matches `ec41098` byte for byte.
+The SHA-256 recorded in `kernel/compilador/provenance.json` is the same value, but that file was produced from a dirty tree at `758270d`;
+a clean `758270d` gives a different fixpoint. The explanation is in [building-with-stage1.md](building-with-stage1.md#about-the-fixpoints).
 
 ### Using the Stage 1 compiler
 
@@ -92,14 +79,14 @@ Options (from `printHelp` in `compiler-l/src/main_driver.l`): `--output`/`-o`, `
 Checked: a kernel program that calls `print` is rejected (`error[BACKEND]: --target kernel no tiene runtime ...`, exit 3), and
 writing over the source file is refused (`error[CLI]: el archivo de salida no puede sobrescribir ...`, exit 2).
 
-Compiled **and run** with `gen2.exe` on this commit, stdout identical to the Stage 0 build in every case: `examples/hello.l`,
+Compiled **and run** with `gen2.exe` on this commit, stdout as expected in every case (also identical to the output of the Rust-built compiler): `examples/hello.l`,
 `fibonacci.l`, `loops.l`, `structs.l`, `text.l`, `native_text_stage1.l`, `benchmarks/sources/arithmetic.l`, `text_processing.l`,
 `comparisons/fibonacci_recursive.l`, `comparisons/arithmetic_loop.l` and 10 programs of `bench/programs/`. All 36 files of `examples/*.l`
 compile (the `native_*` ones were compiled but not run), and `compiler-l/src/main_driver.l` compiles to a file equal to Gen2.
 Programs that use `async`, `spawn` or regions are not accepted by Stage 1 yet (list in the
 [campaign README](benchmarks/campaign_20261127_stage1/README.md)).
 
-Performance of this compiler and of its output: [performance.md](performance.md#0-measurements-2026-11-27-stage-1).
+Performance of this compiler and of its output: [performance.md](performance.md#0-measurements-2026-11-27-stage-1); the comparison with the Rust reference compiler: [building-with-stage1.md](building-with-stage1.md).
 
 ---
 
@@ -120,7 +107,7 @@ In ELE:
 ## 2. Generational Verification Experiment
 
 > **Historical (Stage 3.2/3.3 chain, before 2026-11-20).** The hashes (`F0CE6F57...`, `4C952A75...`) and sizes (1,508,352 B and
-> 1,511,424 B) below belong to an older source revision whose Gen 1 was built by Stage 0. The current Windows fixpoint is the one in
+> 1,511,424 B) below belong to an older source revision whose Gen 1 came from the previous route (see [building-with-stage1.md](building-with-stage1.md#about-the-fixpoints)). The current Windows fixpoint is the one in
 > section 0.1 (2,438,656 B, `cfcfa798...`). The Linux chain was not re-run on 2026-11-27.
 
 The self-hosting reproducibility experiment executes a 3-generation circular compilation process:

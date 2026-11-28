@@ -73,9 +73,8 @@ chmod +x hello
 
 ### 4. Building the compiler from source (Stage 1, no Rust)
 
-**Stage 0** is the compiler written in Rust (`cargo build -p project-l --bin l`). **Stage 1** is the compiler written in ELE, built
-without Rust from a pinned seed (`seed -> Gen1' -> Gen2 -> Gen3`, accepted only if `Gen2 == Gen3`). Definitions: [Self-Hosting](docs/self-hosting.md#0-terminology-stage-0-and-stage-1).
-Verified on Windows (about 32 s):
+**Stage 1** is the compiler written in ELE, built without Rust from a pinned seed (`seed -> Gen1' -> Gen2 -> Gen3`, accepted only if `Gen2 == Gen3`).
+Definitions of the stages and the Rust route: [Building with Stage 1](docs/building-with-stage1.md). Verified on Windows (about 32 s):
 
 ```powershell
 python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
@@ -140,28 +139,27 @@ For complete methodology, raw data, and statistical distributions, see [Performa
 
 Commit `ec41098`, Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U @ 2.60 GHz (2 cores, 4 threads), about 8 GiB RAM, interactive session without other builds.
 Median of 5 timed runs after 1 warm-up (range in parentheses). Units: B = byte, KiB = 1,024 B, MiB = 2^20 B, ms and s. Process start costs about 24 ms on this PC, which is the floor of any run time below.
-Stage 1 = the ELE compiler built without Rust (`gen2.exe`); Stage 0 = the Rust compiler `l build --backend cranelift`.
+Stage 1 = the ELE compiler built without Rust (`gen2.exe`).
 
-| Compile | Stage 1 time | Stage 1 peak memory | Stage 1 executable | Stage 0 time | Stage 0 executable |
-|---|---|---|---|---|---|
-| `hello.l` | **34.8 ms** (34.2–39.7) | 18.61 MiB | 4,608 B (4.5 KiB) | 138.4 ms (130.8–301.5) | 9,216 B (9.0 KiB) |
-| `fibonacci.l` | **38.6 ms** (37.7–40.0) | 18.65 MiB | 5,632 B (5.5 KiB) | 125.2 ms (124.4–140.0) | 9,728 B (9.5 KiB) |
-| `structs.l` | **65.0 ms** (63.8–68.4) | 18.70 MiB | 9,216 B (9.0 KiB) | 137.2 ms (133.6–201.0) | 11,776 B (11.5 KiB) |
-| `main_driver.l` (the compiler, 28,535 B) | **16.04 s** (15.54–17.51) | **565.63 MiB** | 2,438,656 B (2,381.5 KiB) | 2.72 s (2.48–3.75) | 1,437,696 B (1,404.0 KiB) |
-
-| Run (compiled by Stage 1 / Stage 0) | Stage 1 | Stage 0 | Stage 1 / Stage 0 |
+| Compile | Time | Peak memory | Executable |
 |---|---|---|---|
-| `fib.l` (fib 32) | 56.0 ms | 52.7 ms | 1.06x |
-| `collatz.l` | 2,801.2 ms | 540.8 ms | 5.18x |
-| `sum_loop.l` (200 M iterations) | 4,313.2 ms | 912.9 ms | 4.72x |
-| `list_index_1m.l` | 119.9 ms | 86.4 ms | 1.39x |
-| `text_build.l` | 4,362.0 ms | 306.5 ms | 14.23x |
-| `list_text_100k.l` (peak memory) | 424.1 ms (395.16 MiB) | 58.3 ms (9.34 MiB) | 7.27x |
+| `hello.l` | **34.8 ms** (34.2–39.7) | 18.61 MiB | 4,608 B (4.5 KiB) |
+| `fibonacci.l` | **38.6 ms** (37.7–40.0) | 18.65 MiB | 5,632 B (5.5 KiB) |
+| `structs.l` | **65.0 ms** (63.8–68.4) | 18.70 MiB | 9,216 B (9.0 KiB) |
+| `main_driver.l` (the compiler, 28,535 B) | **16.04 s** (15.54–17.51) | **565.63 MiB** | 2,438,656 B (2,381.5 KiB) |
 
-In short: Stage 1 compiles small programs 2 to 4 times faster than Stage 0 and emits smaller executables, but the code it generates is as fast as Stage 0 on call-heavy code
-and 4.7 to 14 times slower on tight loops and text building, and compiling the compiler itself takes about 6 times longer and 7.5 times more memory than Stage 0.
-No C compiler was available, so no C comparison was run. All tables, hardware, method and raw CSV data: [Performance Report](docs/performance.md#0-measurements-2026-11-27-stage-1) and
-[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md).
+| Run (compiled by Stage 1) | Time |
+|---|---|
+| `fib.l` (fib 32) | 56.0 ms |
+| `collatz.l` | 2,801.2 ms |
+| `sum_loop.l` (200 M iterations) | 4,313.2 ms |
+| `list_index_1m.l` | 119.9 ms |
+| `text_build.l` | 4,362.0 ms |
+| `list_text_100k.l` (peak memory) | 424.1 ms (395.16 MiB) |
+
+Tight arithmetic loops and text building are the slow spots of the generated code. The comparison with the Rust reference compiler, all tables, hardware, method and raw CSV data:
+[Building with Stage 1](docs/building-with-stage1.md), [Performance Report](docs/performance.md#0-measurements-2026-11-27-stage-1) and
+[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md). No C compiler was available, so no C comparison was run.
 
 ### Historical measurements (commit `56f34fb`)
 

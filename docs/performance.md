@@ -9,7 +9,7 @@ This document reports verifiable, reproducible performance benchmarks for the **
 These are fresh measurements of the current compiler, taken on **commit `ec410984c8311f0e79e1a876932cff785f88ad13`**
 (`origin/main`, PR #210). They replace the figures of sections 1-5, which are kept below as historical data of commit `56f34fb`.
 Stage 1 means the compiler written in ELE and built without Rust (`gen2.exe`); Stage 0 is the Rust compiler `l`
-(`l build --backend cranelift`). Definitions and the exact commands: [self-hosting.md](self-hosting.md#0-terminology-stage-0-and-stage-1).
+(`l build --backend cranelift`). Definitions and the exact commands: [building-with-stage1.md](building-with-stage1.md#definitions).
 Raw data, scripts and method: [benchmarks/campaign_20261127_stage1/](benchmarks/campaign_20261127_stage1/README.md).
 
 ### Units

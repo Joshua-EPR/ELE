@@ -15,8 +15,8 @@ To build the compiler from source **without Rust** (Stage 1, Option B below):
 - **Windows PowerShell** (the bootstrap script is `scripts/bootstrap/ele_seed_bootstrap.ps1`; POSIX `sh` on Linux: `ele_seed_bootstrap.sh`).
 - **Python:** `3.8+` (extracts and verifies the pinned seed with `tools/verify_seed_archive.py`; not required by the compiled binaries).
 
-Only the optional Stage 0 route (Option C) needs the **Rust Toolchain** `1.99.1`. Terms (Stage 0, Stage 1, fixpoint) are defined once in
-[self-hosting.md](self-hosting.md#0-terminology-stage-0-and-stage-1).
+Only the optional route through the Rust toolchain (Option C, version `1.99.1`) needs Rust. Terms (Stage 1, fixpoint) and the comparison between both routes:
+[building-with-stage1.md](building-with-stage1.md).
 - **C/C++ Tools (Optional for comparisons):** MSVC on Windows or GCC on Linux.
 
 ---
@@ -79,9 +79,9 @@ Expected end of the output:
 note about the hash recorded in `kernel/compilador/provenance.json`: [self-hosting.md](self-hosting.md#01-stage-1-step-by-step-verified-2026-11-27).
 If the hash differs from the one above, your sources differ from commit `ec41098`; the fixpoint (`gen2 == gen3`) is what must hold.
 
-### Option C: Build the Stage 0 compiler (needs Rust)
+### Option C: Build with the Rust toolchain (reference route)
 
-Stage 0 is the Rust compiler. It is the reference and the faster-running (optimizing) backend, but it is not needed to build or use ELE.
+This route builds the compiler written in Rust. It is the reference and has the faster-running (optimizing) backend, but it is not needed to build or use ELE. See [building-with-stage1.md](building-with-stage1.md).
 
 #### Step 1: Clone the Repository
 ```bash

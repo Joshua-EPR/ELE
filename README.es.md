@@ -73,9 +73,8 @@ chmod +x hello
 
 ### 4. Compilar el compilador desde el código fuente (Stage 1, sin Rust)
 
-**Stage 0** es el compilador escrito en Rust (`cargo build -p project-l --bin l`). **Stage 1** es el compilador escrito en ELE, construido
-sin Rust desde una semilla fijada (`semilla -> Gen1' -> Gen2 -> Gen3`, aceptado solo si `Gen2 == Gen3`). Definiciones: [Self-Hosting](docs/self-hosting.md#0-terminology-stage-0-and-stage-1) (en inglés).
-Comprobado en Windows (unos 32 s):
+**Stage 1** es el compilador escrito en ELE, construido sin Rust desde una semilla fijada (`semilla -> Gen1' -> Gen2 -> Gen3`, aceptado solo si `Gen2 == Gen3`).
+Definiciones de las etapas y el camino con Rust: [Compilar con Stage 1](docs/compilar-con-stage1.md). Comprobado en Windows (unos 32 s):
 
 ```powershell
 python tools/verify_seed_archive.py pe --output .\seed\ele-seed-pe.exe
@@ -140,28 +139,27 @@ Para la metodología completa y los datos brutos, consulta el [Informe de Rendim
 
 Commit `ec41098`, Windows 10 IoT Enterprise LTSC 2021, Intel Core i5-7300U @ 2,60 GHz (2 núcleos, 4 hilos), unos 8 GiB de RAM, sesión interactiva sin otras compilaciones.
 Mediana de 5 ejecuciones medidas tras 1 de calentamiento (rango entre paréntesis). Unidades: B = byte, KiB = 1.024 B, MiB = 2^20 B, ms y s. Arrancar un proceso cuesta unos 24 ms en este PC: es el suelo de cualquier tiempo de ejecución de abajo.
-Stage 1 = el compilador de ELE construido sin Rust (`gen2.exe`); Stage 0 = el compilador en Rust `l build --backend cranelift`.
+Stage 1 = el compilador de ELE construido sin Rust (`gen2.exe`).
 
-| Compilación | Tiempo Stage 1 | Memoria pico Stage 1 | Ejecutable Stage 1 | Tiempo Stage 0 | Ejecutable Stage 0 |
-|---|---|---|---|---|---|
-| `hello.l` | **34,8 ms** (34,2–39,7) | 18,61 MiB | 4.608 B (4,5 KiB) | 138,4 ms (130,8–301,5) | 9.216 B (9,0 KiB) |
-| `fibonacci.l` | **38,6 ms** (37,7–40,0) | 18,65 MiB | 5.632 B (5,5 KiB) | 125,2 ms (124,4–140,0) | 9.728 B (9,5 KiB) |
-| `structs.l` | **65,0 ms** (63,8–68,4) | 18,70 MiB | 9.216 B (9,0 KiB) | 137,2 ms (133,6–201,0) | 11.776 B (11,5 KiB) |
-| `main_driver.l` (el compilador, 28.535 B) | **16,04 s** (15,54–17,51) | **565,63 MiB** | 2.438.656 B (2.381,5 KiB) | 2,72 s (2,48–3,75) | 1.437.696 B (1.404,0 KiB) |
-
-| Ejecución (compilado con Stage 1 / Stage 0) | Stage 1 | Stage 0 | Stage 1 / Stage 0 |
+| Compilación | Tiempo | Memoria pico | Ejecutable |
 |---|---|---|---|
-| `fib.l` (fib 32) | 56,0 ms | 52,7 ms | 1,06x |
-| `collatz.l` | 2.801,2 ms | 540,8 ms | 5,18x |
-| `sum_loop.l` (200 M iteraciones) | 4.313,2 ms | 912,9 ms | 4,72x |
-| `list_index_1m.l` | 119,9 ms | 86,4 ms | 1,39x |
-| `text_build.l` | 4.362,0 ms | 306,5 ms | 14,23x |
-| `list_text_100k.l` (memoria pico) | 424,1 ms (395,16 MiB) | 58,3 ms (9,34 MiB) | 7,27x |
+| `hello.l` | **34,8 ms** (34,2–39,7) | 18,61 MiB | 4.608 B (4,5 KiB) |
+| `fibonacci.l` | **38,6 ms** (37,7–40,0) | 18,65 MiB | 5.632 B (5,5 KiB) |
+| `structs.l` | **65,0 ms** (63,8–68,4) | 18,70 MiB | 9.216 B (9,0 KiB) |
+| `main_driver.l` (el compilador, 28.535 B) | **16,04 s** (15,54–17,51) | **565,63 MiB** | 2.438.656 B (2.381,5 KiB) |
 
-En resumen: Stage 1 compila los programas pequeños entre 2 y 4 veces más rápido que Stage 0 y emite ejecutables más pequeños, pero el código que genera es tan rápido como el de Stage 0 en código con muchas llamadas
-y entre 4,7 y 14 veces más lento en bucles cerrados y en construcción de texto; compilar el propio compilador tarda unas 6 veces más y usa 7,5 veces más memoria que con Stage 0.
-No había compilador de C disponible, así que no se hizo comparación con C. Tablas completas, hardware, método y datos brutos en CSV: [Informe de Rendimiento](docs/performance.md#0-measurements-2026-11-27-stage-1) y
-[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md) (ambos en inglés).
+| Ejecución (compilado con Stage 1) | Tiempo |
+|---|---|
+| `fib.l` (fib 32) | 56,0 ms |
+| `collatz.l` | 2.801,2 ms |
+| `sum_loop.l` (200 M iteraciones) | 4.313,2 ms |
+| `list_index_1m.l` | 119,9 ms |
+| `text_build.l` | 4.362,0 ms |
+| `list_text_100k.l` (memoria pico) | 424,1 ms (395,16 MiB) |
+
+Los bucles aritméticos cerrados y la construcción de texto son los puntos lentos del código generado. La comparación con el compilador de referencia en Rust, las tablas completas, el hardware, el método y los datos brutos en CSV:
+[Compilar con Stage 1](docs/compilar-con-stage1.md), [Informe de Rendimiento](docs/performance.md#0-measurements-2026-11-27-stage-1) y
+[campaign_20261127_stage1](docs/benchmarks/campaign_20261127_stage1/README.md) (en inglés). No había compilador de C disponible, así que no se hizo comparación con C.
 
 ### Mediciones históricas (commit `56f34fb`)
 
