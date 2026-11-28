@@ -58,6 +58,18 @@ param(
     # USB. Con -CorpusEs el disco de prueba pasa a 2 GiB (el estado del hablante
     # son ~570 MB por ranura) y la imagen USB a 128 MiB.
     [string]$CorpusEs = "",
+    # Cuarto corpus (Fase 4, hito 24, enca=entrenar): carpeta de preparar.ps1 con
+    # entrena/valida (.bin, .idx, .tipos). Se copian (NO prueba_sellada) con los
+    # prompts de la evaluación a f4/ del disco de datos de prueba (2 GiB: 231 MB de
+    # corpus y dos ranuras de ~550 MB). No va en la imagen USB (no cabe): para el
+    # portátil se copia por SSH a la partición de datos (ver kernel/docs/bitacora.md).
+    [string]$CorpusF4 = "",
+    # Carpeta de trabajo (kernel.elf, esp, serie.log, datos.img); por defecto
+    # kernel\construccion. Distinta para poder correr dos QEMU a la vez.
+    [string]$Carpeta = "",
+    # Con -Prueba: segundos que se espera, tras ver -Esperado, antes de matar QEMU
+    # (prueba de apagón del hito 24: cortar a mitad de un entrenamiento o de un checkpoint).
+    [double]$MatarDespues = 0,
     # Línea de órdenes del kernel (opciones "clave=valor") para la entrada
     # por defecto del menú, p. ej. -Opciones "enca=nuevo". Sin ella, igual
     # que antes (la entrada del menú sin opciones).
@@ -72,6 +84,7 @@ $kernel = Split-Path -Parent $PSScriptRoot
 $herramientas = $PSScriptRoot
 $ele = Join-Path $kernel "compilador\ele.exe"
 $salida = Join-Path $kernel "construccion"
+if ($Carpeta) { $salida = $Carpeta }
 $fuenteEle = Join-Path (Split-Path -Parent $kernel) "compiler-l\src"
 $esp = Join-Path $salida "esp"
 $elf = Join-Path $salida "kernel.elf"
@@ -155,6 +168,11 @@ if ($DiscoDatos) {
             $extra += @("--es", $CorpusEs)
             $mibDatos = 2048
         }
+        if ($CorpusF4) {
+            if (-not (Test-Path (Join-Path $CorpusF4 "entrena.idx"))) { Fallar "no existe $CorpusF4\entrena.idx" }
+            $extra += @("--f4", $CorpusF4)
+            $mibDatos = 2048
+        }
         python (Join-Path $herramientas "crear_disco_prueba.py") $DiscoDatos $mibDatos @extra
         if ($LASTEXITCODE -ne 0) { Fallar "no se pudo crear el disco de prueba" }
     }
@@ -225,6 +243,7 @@ if ($Captura -and -not $proceso.HasExited) {
         Write-Host "    no se pudo capturar la pantalla: $_"
     }
 }
+if ($visto -and $MatarDespues -gt 0 -and -not $proceso.HasExited) { Start-Sleep -Milliseconds ([int]($MatarDespues * 1000)) }
 if (-not $proceso.HasExited) { Stop-Process -Id $proceso.Id -Force }
 Write-Host "---- salida serie ----"
 Write-Host (Leer-Serie)
