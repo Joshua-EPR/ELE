@@ -192,6 +192,8 @@ flow cargarEle() => Int {
     escribir64(e + 48, bE)
     escribir64(e + 56, bP)
     escribir64(e + 64, idx + 128)
+    escribir64(meta(), crcE)
+    escribir64(meta() + 8, crcP)
     kprint(cadena("corpus ELE verificado: entrena "))
     kprintEntero(nE)
     kprint(cadena(" documentos, "))
@@ -499,80 +501,298 @@ flow parteEle(f: Int, s: Int) => Int {
     give 1
 }
 
-// ---- tabla final -------------------------------------------------------------
-flow imprimirTabla(cuantas: Int) {
-    kprintln(cadena("==== barrido de ranuras: corpus ENCA (pruebas A y B, bits/byte) ===="))
-    kprintln(cadena("S por orden | RAM MiB | A mezcla | A hip | A cor | A top1 | B mezcla | B hip | B cor | B top1 | sobrescr. | ocup. % | entren. B/s | eval. B/s"))
+// ---- registro del resumen (pantalla al final del arranque + RANURAS.LOG) ------
+// Los resultados se guardan en memoria porque en el portátil la pantalla no
+// tiene desplazamiento hacia atrás y la salida del barrido se pierde.
+fixed CAP_RES = 8192
+fixed CAP_REG = 32768
+
+// +0 destino (1 resumen, 2 registro, 4 pantalla), +8 largo del resumen,
+// +16 largo del registro, +24 resumen listo (1).
+flow sumi() => Int { give reservar(32, 8) }
+flow bufRes() => Int { give reservar(CAP_RES, 8) }
+flow bufReg() => Int { give reservar(CAP_REG, 8) }
+// +0 CRC32C entrena, +8 CRC32C prueba, +16 hay corpus ELE, +24 disponible
+// inicial MiB, +32 marcos libres iniciales MiB, +40 no cabe (1), +48 S,
+// +56 necesita MiB, +64 libres MiB, +72 S donde montonReservar dio 0,
+// +80 configuraciones medidas, +88 pedidas, +96 segundos.
+flow meta() => Int { give reservar(104, 8) }
+
+flow lgByte(b: Int) {
+    hold e = sumi()
+    hold d = leer64(e)
+    when (d & 4) != 0 { kprintByte(b) }
+    when (d & 1) != 0 && leer64(e + 8) < CAP_RES {
+        escribir8(bufRes() + leer64(e + 8), b)
+        escribir64(e + 8, leer64(e + 8) + 1)
+    }
+    when (d & 2) != 0 && leer64(e + 16) < CAP_REG {
+        escribir8(bufReg() + leer64(e + 16), b)
+        escribir64(e + 16, leer64(e + 16) + 1)
+    }
+}
+
+flow lgTexto(t: Int) {
+    each i among 0..leer64(t) { lgByte(leer8(t + 8 + i)) }
+}
+
+flow lgLinea(t: Int) {
+    lgTexto(t)
+    lgByte(10)
+}
+
+// Rellena con espacios a la izquierda hasta w y escribe los n bytes de buf.
+flow lgAncho(buf: Int, n: Int, w: Int) {
+    when w > n {
+        each i among 0..w - n { lgByte(32) }
+    }
+    each i among 0..n { lgByte(leer8(buf + i)) }
+}
+
+flow lgEntero(v: Int) {
+    hold b = reservar(32, 8)
+    hold n = fmtEntero(v, b)
+    lgAncho(b, n, 0)
+}
+
+flow lgEnteroA(v: Int, w: Int) {
+    hold b = reservar(32, 8)
+    hold n = fmtEntero(v, b)
+    lgAncho(b, n, w)
+}
+
+flow lgDec(x: Float, dec: Int) {
+    hold b = reservar(48, 8)
+    hold n = fmtDecimal(x, dec, b)
+    lgAncho(b, n, 0)
+}
+
+flow lgDecA(x: Float, dec: Int, w: Int) {
+    hold b = reservar(48, 8)
+    hold n = fmtDecimal(x, dec, b)
+    lgAncho(b, n, w)
+}
+
+// 0x y 8 cifras (CRC32C).
+flow lgHex32(v: Int) {
+    lgByte(48)
+    lgByte(120)
+    each i among 0..8 {
+        hold c = (v >> (28 - 4 * i)) & 0xF
+        when c < 10 { lgByte(48 + c) } otherwise { lgByte(55 + c) }
+    }
+}
+
+flow lgGuion(w: Int) { lgAncho(cadena("-") + 8, 1, w) }
+
+// Resumen compacto (una línea por S, cabe en 1366x768): al resumen y al
+// registro (destino 3).
+flow armarResumen(cuantas: Int) {
+    hold e = sumi()
+    hold m = meta()
+    escribir64(e + 8, 0)
+    escribir64(e + 16, 0)
+    escribir64(e, 3)
+    lgLinea(cadena("---- resumen del barrido de ranuras (enca=ranuras) ----"))
+    lgTexto(cadena("memoria libre inicial: "))
+    lgEntero(leer64(m + 24))
+    lgTexto(cadena(" MiB (marcos "))
+    lgEntero(leer64(m + 32))
+    lgTexto(cadena(" MiB); "))
+    when leer64(m + 16) == 1 {
+        lgTexto(cadena("corpus ELE CRC32C entrena "))
+        lgHex32(leer64(m))
+        lgTexto(cadena(" prueba "))
+        lgHex32(leer64(m + 8))
+    } otherwise {
+        lgTexto(cadena("sin corpus ELE"))
+    }
+    lgByte(10)
+    lgTexto(cadena("medidas "))
+    lgEntero(leer64(m + 80))
+    lgTexto(cadena(" de "))
+    lgEntero(leer64(m + 88))
+    lgTexto(cadena(" en "))
+    lgEntero(leer64(m + 96))
+    lgLinea(cadena(" s"))
+    lgLinea(cadena("S por orden | RAM MiB | ELE ent B/s | ELE eval B/s | bits/byte A | B | C | ELE sobrescr."))
     each i among 0..cuantas {
         hold f = fila(i)
         when leer64(f + 232) == 1 {
-            kprintEntero(leer64(f))
-            kprint(cadena(" | "))
-            kprintEntero(mib(leer64(f + 8)))
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 24), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 32), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 40), 4)
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 48))
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 56), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 64), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 72), 4)
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 80))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 88))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 104) * 100 / (5 * leer64(f)))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 112))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 120))
-            kprintByte(10)
+            lgEnteroA(leer64(f), 9)
+            lgTexto(cadena(" | "))
+            lgEnteroA(mib(leer64(f + 8)), 7)
+            lgTexto(cadena(" | "))
+            when leer64(f + 224) == 1 {
+                lgEnteroA(leer64(f + 200), 11)
+                lgTexto(cadena(" | "))
+                lgEnteroA(leer64(f + 208), 12)
+            } otherwise {
+                lgGuion(11)
+                lgTexto(cadena(" | "))
+                lgGuion(12)
+            }
+            lgTexto(cadena(" | "))
+            lgDecA(lf(f + 24), 4, 6)
+            lgTexto(cadena(" | "))
+            lgDecA(lf(f + 56), 4, 6)
+            lgTexto(cadena(" | "))
+            when leer64(f + 224) == 1 {
+                lgDecA(lf(f + 144), 4, 6)
+                lgTexto(cadena(" | "))
+                lgEnteroA(leer64(f + 176), 8)
+            } otherwise {
+                lgGuion(6)
+                lgTexto(cadena(" | "))
+                lgGuion(8)
+            }
+            lgByte(10)
         }
     }
-    kprintln(cadena("==== barrido de ranuras: corpus ELE (prueba C, bits/byte) ===="))
-    kprintln(cadena("S por orden | RAM MiB | C mezcla | C hip | C cor | C top1 | sobrescr. | desalojos | ocup. % | entren. B/s | eval. B/s | ms ENCA+ELE"))
+    when leer64(m + 40) == 1 {
+        lgTexto(cadena("S="))
+        lgEntero(leer64(m + 48))
+        lgTexto(cadena(" no cabe (necesita "))
+        lgEntero(leer64(m + 56))
+        lgTexto(cadena(" MiB, libres "))
+        lgEntero(leer64(m + 64))
+        lgLinea(cadena(" MiB)"))
+    }
+    when leer64(m + 72) != 0 {
+        lgTexto(cadena("S="))
+        lgEntero(leer64(m + 72))
+        lgLinea(cadena(" falló: montonReservar devolvió 0"))
+    }
+    escribir64(e + 24, 1)
+}
+
+// Escribe el registro en RANURAS.LOG (patrón de ENTRENA.LOG): capacidad fija,
+// sectores de 512 B y, al final, el tamaño real. Sin FAT32 solo lo dice.
+flow guardarRegistro() {
+    hold e = sumi()
+    hold largo = leer64(e + 16)
+    when !discoHayPermitida() || !fatMontar() {
+        kprintln(cadena("RANURAS.LOG: no hay FAT32 montada, los resultados no se guardan"))
+        give
+    }
+    hold buf = montonReservar(512 + 64)
+    when buf == 0 {
+        kprintln(cadena("RANURAS.LOG: sin memoria para el búfer, no se guarda"))
+        give
+    }
+    when !fatCrear(cadena("RANURAS LOG"), cadena("RANURAS.LOG"), CAP_REG) {
+        kprintln(cadena("RANURAS.LOG: no se pudo crear el archivo, no se guarda"))
+        montonLiberar(buf)
+        give
+    }
+    hold reg = bufReg()
+    change bien = true
+    each k among 0..(largo + 511) / 512 {
+        each j among 0..512 {
+            hold idx = k * 512 + j
+            when idx < largo { escribir8(buf + j, leer8(reg + idx)) } otherwise { escribir8(buf + j, 0) }
+        }
+        when !fatEscribir(k * 512, 512, buf) { bien = false }
+    }
+    when !fatCrear(cadena("RANURAS LOG"), cadena("RANURAS.LOG"), largo) { bien = false }
+    when !discoVaciar() { bien = false }
+    montonLiberar(buf)
+    when bien {
+        kprint(cadena("resultados guardados en RANURAS.LOG ("))
+        kprintEntero(largo)
+        kprintln(cadena(" bytes)"))
+    } otherwise {
+        kprintln(cadena("RANURAS.LOG: falló la escritura, resultados no guardados"))
+    }
+}
+
+// Al final del arranque (antes del prompt ENCA>): reimprime el resumen si se
+// ejecutó el barrido.
+expose flow encaRanurasResumen() {
+    when !encaRanurasPedido() { give }
+    hold e = sumi()
+    when leer64(e + 24) != 1 { give }
+    hold b = bufRes()
+    each i among 0..leer64(e + 8) { kprintByte(leer8(b + i)) }
+}
+
+// ---- tabla final -------------------------------------------------------------
+flow imprimirTabla(cuantas: Int) {
+    escribir64(sumi(), 6)
+    lgLinea(cadena("==== barrido de ranuras: corpus ENCA (pruebas A y B, bits/byte) ===="))
+    lgLinea(cadena("S por orden | RAM MiB | A mezcla | A hip | A cor | A top1 | B mezcla | B hip | B cor | B top1 | sobrescr. | ocup. % | entren. B/s | eval. B/s"))
+    each i among 0..cuantas {
+        hold f = fila(i)
+        when leer64(f + 232) == 1 {
+            lgEntero(leer64(f))
+            lgTexto(cadena(" | "))
+            lgEntero(mib(leer64(f + 8)))
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 24), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 32), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 40), 4)
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 48))
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 56), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 64), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 72), 4)
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 80))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 88))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 104) * 100 / (5 * leer64(f)))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 112))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 120))
+            lgByte(10)
+        }
+    }
+    lgLinea(cadena("==== barrido de ranuras: corpus ELE (prueba C, bits/byte) ===="))
+    lgLinea(cadena("S por orden | RAM MiB | C mezcla | C hip | C cor | C top1 | sobrescr. | desalojos | ocup. % | entren. B/s | eval. B/s | ms ENCA+ELE"))
     each i among 0..cuantas {
         hold f = fila(i)
         when leer64(f + 224) == 1 {
-            kprintEntero(leer64(f))
-            kprint(cadena(" | "))
-            kprintEntero(mib(leer64(f + 8)))
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 144), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 152), 4)
-            kprint(cadena(" | "))
-            kprintDecimal(lf(f + 160), 4)
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 168))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 176))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 184))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 192) * 100 / (5 * leer64(f)))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 200))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 208))
-            kprint(cadena(" | "))
-            kprintEntero(leer64(f + 136))
-            kprint(cadena("+"))
-            kprintEntero(leer64(f + 216))
-            kprintByte(10)
+            lgEntero(leer64(f))
+            lgTexto(cadena(" | "))
+            lgEntero(mib(leer64(f + 8)))
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 144), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 152), 4)
+            lgTexto(cadena(" | "))
+            lgDec(lf(f + 160), 4)
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 168))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 176))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 184))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 192) * 100 / (5 * leer64(f)))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 200))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 208))
+            lgTexto(cadena(" | "))
+            lgEntero(leer64(f + 136))
+            lgTexto(cadena("+"))
+            lgEntero(leer64(f + 216))
+            lgByte(10)
         }
     }
 }
 
 // ---- barrido ------------------------------------------------------------------
 expose flow encaRanuras() {
+    each i among 0..13 { escribir64(meta() + i * 8, 0) }
+    each i among 0..4 { escribir64(sumi() + i * 8, 0) }
     kprintln(cadena("ENCA ranuras: barrido del hipocampo en modo rápido (C5 salvo las ranuras por orden)"))
     when !encaCorpusListo() {
         kprintln(cadena("ENCA ranuras: sin corpus ENCA verificado (hito 16), no se mide nada"))
@@ -580,6 +800,7 @@ expose flow encaRanuras() {
         give
     }
     hold hayEle = cargarEle() == 0
+    when hayEle { escribir64(meta() + 16, 1) }
     when !hayEle { kprintln(cadena("ENCA ranuras: sin corpus ELE: solo la parte 1 (corpus ENCA)")) }
     leerLista()
     hold l = lista()
@@ -590,6 +811,8 @@ expose flow encaRanuras() {
     }
     kprintByte(10)
     imprimirMemoria(cadena("memoria al empezar"))
+    escribir64(meta() + 24, mib(disponible()))
+    escribir64(meta() + 32, mib(memFisicaLibres() * MARCO))
     hold cpm = tscCiclosPorMs()
     hold tInicio = rdtsc()
     change hechas = 0
@@ -613,6 +836,10 @@ expose flow encaRanuras() {
             kprint(cadena(" MiB, libres "))
             kprintEntero(mib(libres))
             kprintln(cadena(" MiB; margen de 256 MiB)"))
+            escribir64(meta() + 40, 1)
+            escribir64(meta() + 48, s)
+            escribir64(meta() + 56, mib(need))
+            escribir64(meta() + 64, mib(libres))
             leave
         }
         kprint(cadena("  el modelo necesita "))
@@ -621,7 +848,10 @@ expose flow encaRanuras() {
         imprimirMemoria(cadena("antes"))
         hold usoAntes = montonEnUso()
         hold r1 = parteEnca(f, s)
-        when r1 == 0 { leave }
+        when r1 == 0 {
+            escribir64(meta() + 72, s)
+            leave
+        }
         hechas = i + 1
         imprimirMemoria(cadena("  tras liberar el modelo ENCA"))
         when montonEnUso() != usoAntes {
@@ -635,7 +865,10 @@ expose flow encaRanuras() {
         }
         when hayEle {
             hold r2 = parteEle(f, s)
-            when r2 == 0 { leave }
+            when r2 == 0 {
+                escribir64(meta() + 72, s)
+                leave
+            }
             imprimirMemoria(cadena("  tras liberar el modelo ELE"))
             when montonEnUso() != usoAntes {
                 kprint(cadena("  AVISO: el montón no volvió: en uso "))
@@ -649,7 +882,12 @@ expose flow encaRanuras() {
         }
         when montonVerificar() != 0 { kprintln(cadena("  AVISO: la lista libre del montón está dañada")) }
     }
+    escribir64(meta() + 80, hechas)
+    escribir64(meta() + 88, leer64(l))
+    escribir64(meta() + 96, (rdtsc() - tInicio) / cpm / 1000)
+    armarResumen(hechas)
     imprimirTabla(hechas)
+    escribir64(sumi(), 0)
     kprint(cadena("ENCA ranuras: "))
     kprintEntero(hechas)
     kprint(cadena(" de "))
@@ -657,5 +895,6 @@ expose flow encaRanuras() {
     kprint(cadena(" configuraciones medidas en "))
     kprintEntero((rdtsc() - tInicio) / cpm / 1000)
     kprintln(cadena(" s"))
+    guardarRegistro()
     kprintln(cadena("ENCA ranuras: barrido terminado"))
 }

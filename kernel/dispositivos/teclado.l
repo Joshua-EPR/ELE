@@ -16,14 +16,16 @@ expose fixed TECLA_INTRO = 10
 expose fixed TECLA_BORRAR = 8
 
 // Estado: +0 mayús, +8 altgr, +16 bloq mayús, +24 prefijo E0,
-// +32 tecla muerta pendiente (0, 0xB4 ´ o 0xA8 ¨), +40 lectura, +48 escritura.
-flow estado() => Int { give reservar(56, 8) }
+// +32 tecla muerta pendiente (0, 0xB4 ´ o 0xA8 ¨), +40 lectura, +48 escritura,
+// +56 bytes por interrupción, +64 bytes por sondeo, +72 último estado 0x64 visto,
+// +80 bytes del ratón/touchpad (AUX) descartados por el sondeo.
+flow estado() => Int { give reservar(88, 8) }
 // CAPACIDAD palabras de 8 bytes.
 flow bufer() => Int { give reservar(2048, 8) }
 
 expose flow tecladoIniciar() {
     hold e = estado()
-    each i among 0..7 { escribir64(e + i * 8, 0) }
+    each i among 0..10 { escribir64(e + i * 8, 0) }
     // Vaciar lo que haya en el búfer de salida del controlador.
     during in8(ESTADO) & 1 == 1 {
         hold descartado = in8(DATOS)
@@ -224,7 +226,47 @@ flow pulsar(sc: Int) {
 
 // Atiende la IRQ1: un byte de código de exploración.
 expose flow tecladoInterrupcion() {
-    hold sc = in8(DATOS)
+    hold e = estado()
+    // Sin dato (el sondeo ya lo tomó): no leer, devolvería el byte anterior.
+    when in8(ESTADO) & 1 == 0 { give }
+    escribir64(e + 56, leer64(e + 56) +% 1)
+    tecladoProcesar(in8(DATOS))
+}
+
+// Sondeo de respaldo: si la IRQ1 no llega, lee el 8042 directamente. Con las
+// interrupciones cerradas para no competir con la IRQ por el puerto 0x60.
+// Devuelve true si procesó un byte del teclado.
+expose flow tecladoSondear() => Bool {
+    hold e = estado()
+    when in8(ESTADO) & 1 == 0 { give false }
+    // Hay dato: con interrupciones abiertas se da margen a que la IRQ lo tome.
+    each i among 0..2000 { pause() }
+    cli()
+    hold st = in8(ESTADO)
+    escribir64(e + 72, st)
+    change tomado = false
+    when st & 1 == 1 {
+        hold b = in8(DATOS)
+        // Bit 5 (AUX): dato del ratón, se descarta.
+        when st & 0x20 == 0 {
+            escribir64(e + 64, leer64(e + 64) +% 1)
+            tecladoProcesar(b)
+            tomado = true
+        } otherwise {
+            escribir64(e + 80, leer64(e + 80) +% 1)
+        }
+    }
+    sti()
+    give tomado
+}
+
+expose flow tecladoPorInterrupcion() => Int { give leer64(estado() + 56) }
+expose flow tecladoPorSondeo() => Int { give leer64(estado() + 64) }
+expose flow tecladoUltimoEstado() => Int { give leer64(estado() + 72) }
+expose flow tecladoRatonDescartados() => Int { give leer64(estado() + 80) }
+
+// Traduce un byte de código de exploración (común a IRQ y sondeo).
+flow tecladoProcesar(sc: Int) {
     hold e = estado()
     when sc == 0xE0 {
         escribir64(e + 24, 1)

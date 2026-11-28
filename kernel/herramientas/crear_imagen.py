@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Crea una imagen de disco arrancable por UEFI para grabar en un USB.
 
-    python crear_imagen.py <esp_dir> <salida.img> [MiB]
+    python crear_imagen.py <esp_dir> <salida.img> [MiB]   (64 por defecto; 128 con --es completo)
 
 Disco GPT con una sola partición de sistema EFI (FAT32) que contiene el
 árbol de <esp_dir> (EFI/BOOT/BOOTX64.EFI de Limine, boot/kernel.elf y
@@ -13,6 +13,9 @@ de ENCA bajo enca/<ruta relativa> (los lee el hito 16), verificando tamaño y
 CRC32. `--solo-enca <carpeta ENCA> <esp_dir>` solo hace esa copia.
 Con `--ele <compiler-l/src>` añade el segundo corpus (ele/entrena.bin,
 prueba.bin, indice.bin; ver crear_corpus_ele.py).
+Con `--es <carpeta>` copia el corpus en español (entrena.bin, prueba.bin,
+indice.bin de corpus_es/completo o corpus_es/desarrollo; ver
+crear_corpus_es.py) bajo es/ (opción de arranque enca=hablar).
 
 Para grabarla en un USB (borra todo el USB): Rufus en modo "DD" o, en
 Linux, `dd if=ele.img of=/dev/sdX bs=4M conv=fsync`. En el equipo:
@@ -74,6 +77,25 @@ def copiar_enca(origen, destino):
     print("corpus ENCA: %d archivos copiados a %s" % (len(CORPUS_ENCA), os.path.join(destino, "enca")))
 
 
+def copiar_es(origen, destino):
+    """Copia (bytes idénticos) el corpus en español a <destino>/es/. Comprueba la
+    cabecera del índice y los tamaños (el CRC32C completo lo verifica el kernel)."""
+    import shutil
+    ind = open(os.path.join(origen, "indice.bin"), "rb").read()
+    if len(ind) < 128 or ind[0:8] != b"ELEIDX01":
+        raise SystemExit("corpus en español: indice.bin inválido en " + origen)
+    palabras = struct.unpack("<16Q", ind[:128])
+    for nombre, tam in (("entrena.bin", palabras[4]), ("prueba.bin", palabras[6])):
+        if os.path.getsize(os.path.join(origen, nombre)) != tam:
+            raise SystemExit("corpus en español: %s no mide lo que dice el índice" % nombre)
+    salida = os.path.join(destino, "es")
+    os.makedirs(salida, exist_ok=True)
+    for nombre in ("entrena.bin", "prueba.bin", "indice.bin"):
+        shutil.copyfile(os.path.join(origen, nombre), os.path.join(salida, nombre))
+    print("corpus en español: %s (entrena %d B, prueba %d B) copiado a %s"
+          % (origen, palabras[4], palabras[6], salida))
+
+
 # ---------------------------------------------------------------- FAT32 ----
 
 class Fat32:
@@ -111,8 +133,8 @@ class Fat32:
         self.siguiente += cuantos
         return primero
 
-    def imagen(self, oculto, etiqueta=b"ELE KERNEL "):
-        b = bytearray(self.sectores * SECTOR)
+    def _sectores_fijos(self, oculto, etiqueta):
+        """Sector de arranque y FSInfo."""
         arranque = bytearray(SECTOR)
         arranque[0:3] = b"\xEB\x58\x90"
         arranque[3:11] = b"ELE     "
@@ -128,6 +150,38 @@ class Fat32:
         struct.pack_into("<I", info, 0, 0x41615252)
         struct.pack_into("<III", info, 484, 0x61417272, libres, self.siguiente)
         struct.pack_into("<I", info, 508, 0xAA550000)
+        return arranque, info
+
+    def volcar(self, f, base, oculto, etiqueta=b"ELE KERNEL "):
+        """Escribe la partición en el archivo abierto `f` desde el byte `base`,
+        sin construir la imagen entera en memoria: solo se escriben las zonas
+        usadas (el resto queda como esté, p. ej. archivo disperso a ceros)."""
+        arranque, info = self._sectores_fijos(oculto, etiqueta)
+        for s in (0, 6):
+            f.seek(base + s * SECTOR)
+            f.write(arranque)
+            f.write(info)
+        usadas = self.siguiente
+        tabla = struct.pack("<%dI" % usadas, *self.tabla[:usadas])
+        for k in range(self.fats):
+            f.seek(base + (self.reservados + k * self.fat_sectores) * SECTOR)
+            f.write(tabla)
+        pendiente = sorted(self.contenido.items())
+        i = 0
+        while i < len(pendiente):
+            # Clusters consecutivos de golpe.
+            j = i
+            trozo = [pendiente[i][1].ljust(SECTOR, b"\0")]
+            while j + 1 < len(pendiente) and pendiente[j + 1][0] == pendiente[j][0] + 1:
+                j += 1
+                trozo.append(pendiente[j][1].ljust(SECTOR, b"\0"))
+            f.seek(base + (self.primer_dato + pendiente[i][0] - 2) * SECTOR)
+            f.write(b"".join(trozo))
+            i = j + 1
+
+    def imagen(self, oculto, etiqueta=b"ELE KERNEL "):
+        b = bytearray(self.sectores * SECTOR)
+        arranque, info = self._sectores_fijos(oculto, etiqueta)
         for base in (0, 6):
             b[base * SECTOR:(base + 1) * SECTOR] = arranque
             b[(base + 1) * SECTOR:(base + 2) * SECTOR] = info
@@ -260,6 +314,11 @@ def main():
         i = args.index("--ele")
         ele = args[i + 1]
         del args[i:i + 2]
+    es = None
+    if "--es" in args:
+        i = args.index("--es")
+        es = args[i + 1]
+        del args[i:i + 2]
     origen, destino = args[0], args[1]
     mib = int(args[2]) if len(args) > 2 else 64
     if enca:
@@ -267,6 +326,8 @@ def main():
     if ele:
         from crear_corpus_ele import preparar
         preparar(ele, origen)
+    if es:
+        copiar_es(es, origen)
     total = mib * 1024 * 1024 // SECTOR
     fin = total - 34
     sectores = fin - INICIO_PARTICION + 1

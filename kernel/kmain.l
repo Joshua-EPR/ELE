@@ -21,6 +21,7 @@ take dispositivos.teclado
 take tiempo.reloj
 take tiempo.temporizador
 take cpu.smp
+take cpu.ifdiag
 take bench.sgemm
 take dispositivos.pci
 take dispositivos.ahci
@@ -41,6 +42,8 @@ take enca.hito18
 take enca.aprender
 take enca.hito21
 take enca.ranuras
+take enca.espanol
+take enca.hablar
 take tiempo.reloj
 
 flow kmain() {
@@ -89,22 +92,44 @@ flow kmain() {
     }
 
     hito4()
+    ifPunto(cadena("h4"))
     hito5()
+    ifPunto(cadena("h5"))
     hito6()
+    ifArmar()
+    ifPunto(cadena("h6"))
     hito8()
+    ifPunto(cadena("h8"))
     hito9()
+    ifPunto(cadena("h9"))
     hito12()
+    ifPunto(cadena("h12"))
     hito13()
+    ifPunto(cadena("h13"))
     hito14()
+    ifPunto(cadena("h14"))
     hito15()
+    ifPunto(cadena("h15"))
     hito16()
+    ifPunto(cadena("h16"))
     hito20()
+    ifPunto(cadena("h20"))
     hitoRanuras()
+    ifPunto(cadena("ran"))
     hito17()
+    ifPunto(cadena("h17"))
     hito18()
+    ifPunto(cadena("h18"))
     hito21()
+    ifPunto(cadena("h21"))
     hitoCrc32c()
+    ifPunto(cadena("crc"))
     hitoDiscoCrudo()
+    ifPunto(cadena("disco"))
+    encaRanurasResumen()
+    ifPunto(cadena("resu"))
+    hablanteArranque()
+    ifPunto(cadena("hab"))
     hito7()
 
     during true {
@@ -259,16 +284,27 @@ flow hito6() {
 
 // Hito 7: teclado PS/2 latinoamericano por IOAPIC.
 flow hito7() {
+    ifPunto(cadena("h7"))
+    ifImprimir()
     tecladoIniciar()
     ioapicIniciar()
     ioapicDirigirIrq(1, VECTOR_TECLADO, lapicId())
-    // Con el modelo de ENCA entrenado o cargado (hito 17) el bucle es el modo
-    // interactivo: se completa en pantalla el prefijo tecleado. Sin él, es
-    // el eco de siempre.
-    hold modelo = encaModelo()
-    when modelo != 0 {
+    kprint(cadena("teclado: estado 8042 "))
+    kprintHex(in8(0x64))
+    kprintByte(10)
+    // Con el modelo de ENCA entrenado o cargado (hito 17) o el hablante en
+    // español (enca/hablar.l) el bucle es el modo interactivo: se completa en
+    // pantalla el prefijo tecleado o, con el español, se conversa. Sin ellos,
+    // es el eco de siempre.
+    hold hay = encaModelo() != 0 || encaHablante() != 0
+    when hay {
         mzDefecto()
-        kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro; :ayuda lista los comandos"))
+        charlaIniciar()
+        when encaPerfil() == 1 {
+            kprintln(cadena("hito 7: ENCA habla español: escriba una frase y pulse Intro (:modelo codigo cambia al modelo de código; :ayuda lista los comandos)"))
+        } otherwise {
+            kprintln(cadena("hito 7: ENCA interactiva, escriba un prefijo (p. ej. flow main) y pulse Intro; :ayuda lista los comandos"))
+        }
         kprint(cadena("ENCA> "))
     } otherwise {
         kprintln(cadena("hito 7: escriba una línea y pulse Intro"))
@@ -276,22 +312,49 @@ flow hito7() {
     hold linea = reservar(4096, 8)
     hold bytes = reservar(2304, 8)
     change n = 0
+    change avisado = false
+    // Prueba de diagnóstico (opción teclado=hlt): el bucle antiguo, que
+    // duerme con hlt y no sondea, con la lectura de 0x60 ya comprobada.
+    hold con_hlt = arranqueOpcionEs(cadena("teclado"), cadena("hlt"))
+    when con_hlt {
+        kprintByte(10)
+        kprintln(cadena("teclado: prueba con hlt y sin sondeo (opción teclado=hlt)"))
+        when hay { kprint(cadena("ENCA> ")) }
+    }
     during true {
-        hlt()
+        when con_hlt {
+            hlt()
+        } otherwise {
+            // Sin hlt: si la IRQ1 no llega no hay quien despierte. Se sondea el 8042.
+            when tecladoSondear() && !avisado && tecladoPorInterrupcion() == 0 {
+                avisado = true
+                kprintByte(10)
+                kprintln(cadena("teclado: la interrupción IRQ1 no llega; leo el teclado por sondeo"))
+            }
+            pause()
+        }
         change cp = tecladoLeer()
         during cp >= 0 {
-            when cp == TECLA_INTRO && modelo != 0 && n > 0 && leer64(linea) == 58 {
+            when cp == TECLA_INTRO && hay && n > 0 && leer64(linea) == 58 {
                 // Línea que empieza por ':': comando de configuración.
                 kprintByte(10)
-                when !aprComando(linea, n) { mzComando(linea, n) }
+                when !charlaComando(linea, n) {
+                    when !aprComando(linea, n) { mzComando(linea, n) }
+                }
                 kprint(cadena("ENCA> "))
                 n = 0
-            } otherwise when cp == TECLA_INTRO && modelo != 0 {
+            } otherwise when cp == TECLA_INTRO && hay {
                 // El prefijo pasa a bytes UTF-8, como estaría en un archivo.
                 change nb = 0
                 each i among 0..n { nb += utf8Codificar(leer64(linea + i * 8), bytes + nb) }
-                when aprendiendo() && nb > 0 { aprTeclear(modelo, bytes, nb, linea, n) }
-                encaCompletar(modelo, bytes, nb)
+                hold modelo = encaActivo()
+                when charlaActiva() {
+                    // Conversación: la línea es el turno del usuario.
+                    charlaLinea(modelo, bytes, nb, linea, n)
+                } otherwise {
+                    when aprendiendo() && nb > 0 { aprTeclear(modelo, bytes, nb, linea, n) }
+                    encaCompletar(modelo, bytes, nb)
+                }
                 kprint(cadena("ENCA> "))
                 n = 0
             } otherwise when cp == TECLA_INTRO {

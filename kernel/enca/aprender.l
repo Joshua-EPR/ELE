@@ -23,6 +23,12 @@
 //   +48 mezcla B de referencia (F)  +56 1 si hay ranuras  +64 bytes de la
 //   última pasada  +72 bits de la última pasada (F)  +80 ciclos de la última
 //   pasada  +88 delta B del último :guardar (F)  +96 delta A (F)
+//
+// Hay un bloque por perfil (0 modelo de código, 1 hablante en español; ver
+// encaPerfil en exp009.l): el estado de ranuras, el umbral y las referencias
+// son del perfil activo. El interruptor `:aprender` y la variante (+0 y +104
+// del bloque global, g()) valen para los dos. Para el hablante las pruebas
+// congeladas son las de enca/espanol.l y las ranuras HABLA_A/B.
 
 take nucleo.cpu
 take nucleo.mem
@@ -38,19 +44,41 @@ take enca.estado
 take enca.modelo
 take enca.muestreo
 take enca.exp009
+take enca.espanol
 
 // Umbral por defecto de :guardar (bits/byte de la mezcla en la prueba B).
 fixed UMBRAL_DEFECTO = 0.2
 fixed VARIANTE_DEFECTO = 3
 
-flow est() => Int { give reservar(128, 8) }
+flow estBase() => Int { give reservar(256, 8) }
+// Bloque global (interruptor aprender +0, variante +104) y bloque del perfil activo.
+flow g() => Int { give estBase() }
+flow est() => Int { give estBase() + encaPerfil() * 128 }
+
+// Evaluación congelada del perfil activo (A y B en encaResultado(1)).
+flow evaluarActivo(m: Int) {
+    when encaPerfil() == 1 {
+        espEvaluarSilencioso(m)
+    } otherwise {
+        encaEvaluarSilencioso(m)
+    }
+}
+
+// false (y lo dice) si el perfil es el hablante y no hay es/prueba.bin que evaluar.
+flow hayQueEvaluar() => Bool {
+    when encaPerfil() == 1 && !espHayPrueba() {
+        kprintln(cadena("  no hay es/prueba.bin en la partición de datos: no se puede evaluar el hablante"))
+        give false
+    }
+    give true
+}
 // Línea de trabajo: hasta 4000 bytes más el '\n'.
 flow trabajo() => Int { give reservar(4104, 8) }
 
-expose flow aprFijarVariante(v: Int) { escribir64(est() + 104, v) }
-expose flow aprVariante() => Int { give leer64(est() + 104) }
+expose flow aprFijarVariante(v: Int) { escribir64(g() + 104, v) }
+expose flow aprVariante() => Int { give leer64(g() + 104) }
 expose flow aprFijarUmbral(x: Float) { ef(est() + 8, x) }
-expose flow aprendiendo() => Bool { give leer64(est()) == 0 }
+expose flow aprendiendo() => Bool { give leer64(g()) == 0 }
 expose flow aprSinGuardar() => Int { give leer64(est() + 16) }
 expose flow aprUltimoDeltaB() => Float { give lf(est() + 88) }
 expose flow aprUmbral() => Float { give lf(est() + 8) }
@@ -67,10 +95,11 @@ expose flow aprCiclosUltima() => Int { give leer64(est() + 80) }
 // hacer el hito 17 (cargada de disco o recién entrenada). Devuelve true si
 // hay modelo y ranuras utilizables.
 expose flow aprInicializar() => Bool {
+    encaFijarPerfil(0)
     hold e = est()
-    escribir64(e, 0)
+    escribir64(g(), 0)
     ef(e + 8, UMBRAL_DEFECTO)
-    escribir64(e + 104, VARIANTE_DEFECTO)
+    escribir64(g() + 104, VARIANTE_DEFECTO)
     escribir64(e + 16, 0)
     escribir64(e + 24, -1)
     escribir64(e + 32, 0)
@@ -81,9 +110,9 @@ expose flow aprInicializar() => Bool {
     ef(e + 48, lf(r + 32))
     when !discoHayPermitida() { give false }
     when !fatMontar() { give false }
-    ckptConfigurar(CKPT_ENCA, encaTamEstadoMax())
-    hold pa = ckptPasoRanura(CKPT_ENCA, 0)
-    hold pb = ckptPasoRanura(CKPT_ENCA, 1)
+    ckptConfigurar(encaJuego(), encaTamEstadoMax())
+    hold pa = ckptPasoRanura(encaJuego(), 0)
+    hold pb = ckptPasoRanura(encaJuego(), 1)
     when pa >= 0 || pb >= 0 {
         change ranura = 0
         change paso = pa
@@ -98,6 +127,47 @@ expose flow aprInicializar() => Bool {
     give true
 }
 
+// Igual para el modelo hablante (tras cargarlo o entrenarlo): bloque del perfil
+// 1, con las mezclas A y B de la última evaluación (encaResultado(1)) como
+// referencia. No cambia el perfil activo. true si hay hablante y ranuras.
+expose flow aprInicializarHablante() => Bool {
+    hold previo = encaPerfil()
+    encaFijarPerfil(1)
+    hold e = est()
+    ef(e + 8, UMBRAL_DEFECTO)
+    escribir64(e + 16, 0)
+    escribir64(e + 24, -1)
+    escribir64(e + 32, 0)
+    escribir64(e + 56, 0)
+    when encaHablante() == 0 {
+        encaFijarPerfil(previo)
+        give false
+    }
+    hold r = encaResultado(1)
+    ef(e + 40, lf(r))
+    ef(e + 48, lf(r + 32))
+    when !discoHayPermitida() || !fatMontar() {
+        encaFijarPerfil(previo)
+        give false
+    }
+    ckptConfigurar(encaJuego(), encaTamEstadoMax())
+    hold pa = ckptPasoRanura(encaJuego(), 0)
+    hold pb = ckptPasoRanura(encaJuego(), 1)
+    when pa >= 0 || pb >= 0 {
+        change ranura = 0
+        change paso = pa
+        when pb > pa {
+            ranura = 1
+            paso = pb
+        }
+        escribir64(e + 24, ranura)
+        escribir64(e + 32, paso)
+    }
+    escribir64(e + 56, 1)
+    encaFijarPerfil(previo)
+    give true
+}
+
 // ---- aprender --------------------------------------------------------------
 
 // Una línea (n bytes en `buf`, con sitio para uno más): se le añade '\n' y se
@@ -108,7 +178,7 @@ expose flow aprLineaBytes(m: Int, buf: Int, n: Int) => Int {
     escribir8(buf + n, 10)
     hold len = n + 1
     metricasReiniciar(m)
-    modeloFijarVariante(leer64(e + 104))
+    modeloFijarVariante(leer64(g() + 104))
     hold t0 = rdtsc()
     modeloPrecuencial(m, buf, len)
     hold t1 = rdtsc()
@@ -215,9 +285,10 @@ expose flow aprGuardar(m: Int) => Int {
         kprintln(cadena("  guardar: no hay ranuras de ENCA (sin partición de datos)"))
         give -1
     }
+    when !hayQueEvaluar() { give -1 }
     hold cpm = tscCiclosPorMs()
     hold t0 = rdtsc()
-    encaEvaluarSilencioso(m)
+    evaluarActivo(m)
     hold t1 = rdtsc()
     hold r = encaResultado(1)
     hold bA = lf(r)
@@ -266,15 +337,15 @@ expose flow aprGuardar(m: Int) => Int {
     change destino = 0
     when actual == 0 { destino = 1 }
     when actual < 0 {
-        when !ckptPreparar(CKPT_ENCA, total) {
-            kprintln(cadena("  guardar: no se pudieron crear ENCA_A.BIN y ENCA_B.BIN"))
+        when !ckptPreparar(encaJuego(), total) {
+            kprintln(cadena("  guardar: no se pudieron crear las dos ranuras del estado"))
             montonLiberar(buf)
             give -1
         }
     }
     hold paso = leer64(e + 32) + 1
     hold t2 = rdtsc()
-    hold bien = ckptGuardarEn(CKPT_ENCA, destino, paso, buf, total)
+    hold bien = ckptGuardarEn(encaJuego(), destino, paso, buf, total)
     hold t3 = rdtsc()
     montonLiberar(buf)
     when !bien {
@@ -305,7 +376,7 @@ expose flow aprGuardar(m: Int) => Int {
 // sin guardar nada. También deja el delta en +88 (B) y +96 (A).
 expose flow aprDeltaB(m: Int) => Float {
     hold e = est()
-    encaEvaluarSilencioso(m)
+    evaluarActivo(m)
     hold r = encaResultado(1)
     ef(e + 88, lf(r + 32) - lf(e + 48))
     ef(e + 96, lf(r) - lf(e + 40))
@@ -345,14 +416,14 @@ expose flow aprDeshacer(m: Int) => Int {
             give 0
         }
         hold otra = 1 - actual
-        hold pasoOtra = ckptPasoRanura(CKPT_ENCA, otra)
+        hold pasoOtra = ckptPasoRanura(encaJuego(), otra)
         when pasoOtra < 0 {
             kprint(cadena("  deshacer: no hay a dónde volver (solo la ranura "))
             letra(actual)
             kprintln(cadena(" es válida y no hay cambios sin guardar)"))
             give 0
         }
-        when ckptCrcRanura(CKPT_ENCA, otra) == ckptCrcRanura(CKPT_ENCA, actual) {
+        when ckptCrcRanura(encaJuego(), otra) == ckptCrcRanura(encaJuego(), actual) {
             kprint(cadena("  deshacer: no hay a dónde volver (las dos ranuras guardan el mismo estado: "))
             letra(actual)
             kprint(cadena(" paso "))
@@ -379,7 +450,7 @@ expose flow aprDeshacer(m: Int) => Int {
         give -1
     }
     hold t0 = rdtsc()
-    hold pasoLeido = ckptCargarRanura(CKPT_ENCA, origen, buf)
+    hold pasoLeido = ckptCargarRanura(encaJuego(), origen, buf)
     hold t1 = rdtsc()
     when pasoLeido < 0 {
         kprintln(cadena("  deshacer: no se pudo leer la ranura (cabecera o CRC inválidos)"))
@@ -394,13 +465,17 @@ expose flow aprDeshacer(m: Int) => Int {
     kprint(cadena("  ranura "))
     letra(origen)
     kprint(cadena(" leída y verificada (formato "))
-    kprintEntero(ckptVersionCargada(CKPT_ENCA))
+    kprintEntero(ckptVersionCargada(encaJuego()))
     kprint(cadena(") en "))
     kprintEntero((t1 - t0) / cpm)
     kprintln(cadena(" ms; se comprueba la evaluación contra su cabecera..."))
     // Igual que el hito 17 tras cargar: la evaluación debe ser idéntica.
     hold t2 = rdtsc()
-    encaEvaluarSilencioso(m)
+    when !hayQueEvaluar() {
+        montonLiberar(buf)
+        give -1
+    }
+    evaluarActivo(m)
     hold dif = encaCompararMetricas(buf)
     kprint(cadena("  evaluación "))
     kprintEntero((rdtsc() - t2) / cpm)
@@ -425,7 +500,7 @@ expose flow aprDeshacer(m: Int) => Int {
         // pasa a ser la más reciente (paso + 1, en la ranura de la que se viene).
         hold nuevo = paso + 1
         hold t3 = rdtsc()
-        hold bien = ckptGuardarEn(CKPT_ENCA, actual, nuevo, buf, leer64(buf + 96))
+        hold bien = ckptGuardarEn(encaJuego(), actual, nuevo, buf, leer64(buf + 96))
         hold t4 = rdtsc()
         when !bien {
             kprintln(cadena("  deshacer: FALLÓ la reescritura de la versión restaurada"))
@@ -451,9 +526,9 @@ expose flow aprDeshacer(m: Int) => Int {
 flow imprimirEstado() {
     hold e = est()
     kprint(cadena("  aprender "))
-    when leer64(e) == 0 { kprint(cadena("si")) } otherwise { kprint(cadena("no")) }
+    when leer64(g()) == 0 { kprint(cadena("si")) } otherwise { kprint(cadena("no")) }
     kprint(cadena("  modo "))
-    kprintByte(97 + leer64(e + 104))
+    kprintByte(97 + leer64(g() + 104))
     kprint(cadena("  umbral "))
     kprintDecimal(lf(e + 8), 4)
     kprint(cadena(" bits/byte  sin guardar "))
@@ -479,7 +554,7 @@ flow ayudaAprender() {
 // :guardar, :deshacer, :umbral) o si amplía :ver / :ayuda. false si no.
 expose flow aprComando(linea: Int, n: Int) => Bool {
     hold e = est()
-    hold m = encaModelo()
+    hold m = encaActivo()
     when m == 0 { give false }
     change fin = 1
     during fin < n && leer64(linea + fin * 8) != 32 { fin += 1 }
@@ -502,10 +577,10 @@ expose flow aprComando(linea: Int, n: Int) => Bool {
     }
     when mzEsPalabra(pal, np, cadena("aprender")) {
         when b - a == 2 && mzMinuscula(leer64(linea + a * 8)) == 115 && mzMinuscula(leer64(linea + (a + 1) * 8)) == 105 {
-            escribir64(e, 0)
+            escribir64(g(), 0)
             kprintln(cadena("  aprender = si"))
         } otherwise when b - a == 2 && mzMinuscula(leer64(linea + a * 8)) == 110 && mzMinuscula(leer64(linea + (a + 1) * 8)) == 111 {
-            escribir64(e, 1)
+            escribir64(g(), 1)
             kprintln(cadena("  aprender = no"))
         } otherwise {
             kprintln(cadena("  error: :aprender espera si o no (no cambia nada)"))
@@ -518,7 +593,7 @@ expose flow aprComando(linea: Int, n: Int) => Bool {
         when v < 0 || v > 3 {
             kprintln(cadena("  error: :modoaprender espera a, b, c o d (no cambia nada)"))
         } otherwise {
-            escribir64(e + 104, v)
+            escribir64(g() + 104, v)
             kprint(cadena("  modoaprender = "))
             kprintByte(97 + v)
             kprintByte(10)
